@@ -1,0 +1,88 @@
+version: 2
+
+models:
+  - name: int_team_daily_scores
+    description: >
+      Team-level daily scoring aggregates with hitting/pitching splits.
+      Active players only (bench and IL excluded). Intermediate grain
+      between player-level staging and the weekly mart. One row per
+      team per scoring period.
+    columns:
+      - name: season_year
+        description: "ESPN season year. Required for cross-season grain integrity."
+      - name: scoring_period
+        description: "Daily ESPN scoring period number. Scoring period 1 = opening day of the season."
+      - name: matchup_period
+        description: "The weekly matchup period this scoring period belongs to. Used for rollup to weekly grain."
+      - name: team_name
+        description: "ESPN fantasy team name. Joins to team_id for stable references."
+      - name: team_id
+        description: "ESPN's stable numeric team identifier. Prefer over team_name for joins."
+      - name: total_points
+        description: "Sum of all active player points for this team on this scoring period."
+      - name: hitting_points
+        description: "Points from non-pitcher positions (all positions except SP/RP) on this scoring period."
+      - name: pitching_points
+        description: "Points from SP and RP positions on this scoring period."
+      - name: active_player_count
+        description: "Number of players in active lineup slots for this team on this scoring period. Useful for detecting short weeks or roster issues."
+
+  - name: int_player_daily_scores
+    description: >
+      Player-level daily scores for active lineup slots only (bench and IL excluded).
+      Classifies each player-day as hitting or pitching based on lineup position.
+      Two-way players (e.g. Ohtani) may appear in both categories across different
+      scoring periods, or on the same day if ESPN splits their hitting and pitching
+      into separate lineup slots. One row per player per team per scoring period.
+    columns:
+      - name: season_year
+        description: "ESPN season year."
+      - name: scoring_period
+        description: "Daily ESPN scoring period number."
+      - name: matchup_period
+        description: "The weekly matchup period this scoring period belongs to."
+      - name: team_name
+        description: "ESPN fantasy team name."
+      - name: team_id
+        description: "ESPN's stable numeric team identifier."
+      - name: player_name
+        description: "Player's full name as returned by ESPN. Subject to change; use player_id for stable references."
+      - name: player_id
+        description: "ESPN's stable numeric player identifier. Use this for joins, including to the player_nicknames seed."
+      - name: position
+        description: "Player's MLB position as reported by ESPN for this scoring period (e.g. SP, RP, 1B, DH). Determines player_type classification."
+      - name: lineup_slot
+        description: "The fantasy lineup slot this player occupied on this scoring period. Retained at daily grain for slot-level analysis (e.g. bench productivity). Not surfaced in the weekly mart."
+      - name: pro_team
+        description: "Player's MLB team abbreviation as of this scoring period."
+      - name: points
+        description: "Pre-computed fantasy points for this player on this scoring period, as calculated by ESPN using the league's scoring settings."
+      - name: player_type
+        description: "Derived classification: 'pitching' for SP/RP positions, 'hitting' for all others. Used to split team scores into hitting and pitching components."
+
+  - name: int_weekly_matchups
+    description: >
+      One row per team per matchup period with opponent details and win/loss result.
+      Built by joining weekly team scores against matchup pairings extracted from
+      the raw source. Used by the output script for Tough Luck, Lucky Bastard,
+      and Fair and Just League callouts. Note: querying this model directly is
+      useful for slot-level or matchup-level analysis that the mart doesn't expose.
+    columns:
+      - name: season_year
+        description: "ESPN season year."
+      - name: matchup_period
+        description: "ESPN matchup period number."
+      - name: team_name
+        description: "ESPN fantasy team name for this side of the matchup."
+      - name: team_id
+        description: "ESPN's stable numeric team identifier."
+      - name: opponent_name
+        description: "ESPN fantasy team name of the opponent."
+      - name: opponent_id
+        description: "ESPN's stable numeric team identifier for the opponent."
+      - name: team_points
+        description: "This team's total points for the matchup period."
+      - name: opponent_points
+        description: "The opponent's total points for the matchup period."
+      - name: result
+        description: "W if team_points > opponent_points, L otherwise. Ties not currently handled — ESPN H2H points leagues do not produce ties in practice."

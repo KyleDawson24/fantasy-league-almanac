@@ -20,7 +20,8 @@ matchup_pairs as (
     from {{ source('raw', 'box_scores') }},
         lateral flatten(input => raw_json) m
     qualify row_number() over (
-        partition by matchup_period,
+        partition by season_year,
+            matchup_period,
             m.value:home_team_id::integer,
             m.value:away_team_id::integer
         order by scoring_period
@@ -48,7 +49,8 @@ home_side as (
         and mp.matchup_period = ws.matchup_period
         and mp.home_team_id = ws.team_id
     inner join weekly_scores opp
-        on mp.matchup_period = opp.matchup_period
+        on mp.season_year = opp.season_year
+        and mp.matchup_period = opp.matchup_period
         and mp.away_team_id = opp.team_id
 ),
 
@@ -68,7 +70,8 @@ away_side as (
         and mp.matchup_period = ws.matchup_period
         and mp.away_team_id = ws.team_id
     inner join weekly_scores opp
-        on mp.matchup_period = opp.matchup_period
+        on mp.season_year = opp.season_year
+        and mp.matchup_period = opp.matchup_period
         and mp.home_team_id = opp.team_id
 ),
 

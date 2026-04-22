@@ -18,25 +18,26 @@ team_daily as (
         season_year,
         scoring_period,
         matchup_period,
+        owner_name,
         team_name,
         team_id,
 
         sum(points) as total_points,
 
         sum(case
-            when position in ('SP', 'RP')
+            when lineup_slot in ('SP', 'RP', 'P')
             then points else 0
         end) as pitching_points,
 
         sum(case
-            when position not in ('SP', 'RP')
+            when lineup_slot not in ('SP', 'RP', 'P')
             then points else 0
         end) as hitting_points,
 
         count(*) as active_player_count
 
     from active_players
-    group by 1, 2, 3, 4, 5
+    group by 1, 2, 3, 4, 5, 6
 )
 
 select * from team_daily

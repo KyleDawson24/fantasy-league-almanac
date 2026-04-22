@@ -2,7 +2,7 @@ version: 2
 
 models:
   - name: stg_box_scores
-    description: "One row per player per scoring period, flattened from raw ESPN box score JSON."
+    description: 'One row per player per team per scoring period, flattened from raw ESPN box score JSON.'
     tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
@@ -12,19 +12,39 @@ models:
               - scoring_period
               - team_id
     columns:
-      - name: player_id
-        description: "ESPN's unique player identifier."
+      - name: season_year
+        description: 'Year of MLB season.'
         tests:
           - not_null
       - name: scoring_period
-        description: "Daily ESPN scoring period number."
+        description: 'Daily ESPN scoring period number.'
         tests:
           - not_null
+      - name: matchup_period
+        description: 'The weekly matchup period this scoring period belongs to.'
+      - name: team_name
+        description: 'ESPN fantasy team name.'
       - name: team_id
-        description: "ESPN's unique team identifier."
-        tests:
-          - not_null    
-      - name: season_year
-        description: "Year of MLB season"
+        description: 'ESPN stable numeric team identifier.'
         tests:
           - not_null
+      - name: owner_name
+        description: 'Team owner display name, extracted from ESPN API. For co-managed teams, a slash-delimited list of first names.'
+      - name: home_away
+        description: 'Whether this player was on the home or away side of the matchup.'
+      - name: player_name
+        description: 'Player full name as returned by ESPN.'
+      - name: player_id
+        description: 'ESPN stable numeric player identifier.'
+        tests:
+          - not_null
+      - name: position
+        description: 'Player MLB position as reported by ESPN (e.g. SP, RP, 1B, DH).'
+      - name: lineup_slot
+        description: 'The fantasy lineup slot this player occupied. Active slots are positions; BE = bench, IL = injured list.'
+      - name: pro_team
+        description: 'Player MLB team abbreviation.'
+      - name: points
+        description: 'Pre-computed fantasy points for this player on this scoring period, calculated by ESPN using league scoring settings.'
+      - name: breakdown
+        description: 'Raw stat breakdown dict from ESPN. Keys are stat abbreviations (HR, RBI, K, etc). Used for Phase 3 stat-level records.'

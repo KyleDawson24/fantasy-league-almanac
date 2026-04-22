@@ -15,13 +15,14 @@ active as (
         matchup_period,
         scoring_period,
         team_name,
+        owner_name
         team_id,
         player_name,
         player_id,
         position,
         lineup_slot,
         pro_team,
-        points,
+        points as total_points_typed,
         case
             when lineup_slot in ('SP', 'RP') then 'pitching'
             else 'hitting'

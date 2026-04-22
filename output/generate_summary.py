@@ -45,8 +45,10 @@ def get_weekly_scores(season_year, matchup_period=None):
         matchup_period = result[0]['mp']
 
     scores = query_snowflake("""
-        SELECT season_year, matchup_period, team_name, total_points,
-               hitting_points, pitching_points, days_in_period
+        SELECT season_year, matchup_period, team_name, team_id,
+               total_points, hitting_points, pitching_points,
+               days_in_period, owner_name, opponent_name, 
+               opponent_owner, opponent_points, result
         FROM fct_weekly_team_scores
         WHERE matchup_period = %s
         AND season_year = %s
@@ -55,38 +57,18 @@ def get_weekly_scores(season_year, matchup_period=None):
 
     return matchup_period, scores
 
-
-def get_matchups(season_year, matchup_period):
+def get_player_contributions(season_year, matchup_period):
+    """Fetch weekly player scores for contributor callouts."""
     return query_snowflake("""
-        SELECT team_name, team_points, opponent_name,
-               opponent_points, result
-        FROM int_weekly_matchups
+        SELECT team_name, player_id, display_name,
+               total_points, hitting_points, pitching_points
+        FROM fct_weekly_player_scores
         WHERE matchup_period = %s
         AND season_year = %s
-    """, (matchup_period, season_year))
-
-def get_player_contributions(season_year, matchup_period):
-    return query_snowflake("""
-        SELECT
-            p.team_name,
-            p.player_id,
-            COALESCE(n.nickname, p.player_name) as display_name,
-            p.position,
-            p.player_type,
-            p.total_points
-        FROM fct_weekly_player_scores p
-        LEFT JOIN player_nicknames n ON p.player_id = n.player_id
-        WHERE p.matchup_period = %s
-        AND p.season_year = %s
-        ORDER BY p.total_points DESC
+        ORDER BY total_points DESC
     """, (matchup_period, season_year))
 
 def get_contribution_callouts(scores, players):
-    """
-    Returns top 5 scorers from the best overall team,
-    top 3 hitters from the best hitting team,
-    top 3 pitchers from the best pitching team.
-    """
     best_overall_team  = scores[0]['team_name']
     best_hitting_team  = sorted(scores, key=lambda x: x['hitting_points'], reverse=True)[0]['team_name']
     best_pitching_team = sorted(scores, key=lambda x: x['pitching_points'], reverse=True)[0]['team_name']
@@ -95,17 +77,17 @@ def get_contribution_callouts(scores, players):
         p for p in players if p['team_name'] == best_overall_team
     ][:5]
 
-    top_hitters = [
-        p for p in players
-        if p['team_name'] == best_hitting_team
-        and p['player_type'] == 'hitting'
-    ][:3]
+    top_hitters = sorted(
+        [p for p in players if p['team_name'] == best_hitting_team and p['hitting_points'] > 0],
+        key=lambda x: x['hitting_points'],
+        reverse=True
+    )[:3]
 
-    top_pitchers = [
-        p for p in players
-        if p['team_name'] == best_pitching_team
-        and p['player_type'] == 'pitching'
-    ][:3]
+    top_pitchers = sorted(
+        [p for p in players if p['team_name'] == best_pitching_team and p['pitching_points'] > 0],
+        key=lambda x: x['pitching_points'],
+        reverse=True
+    )[:3]
 
     return {
         'best_overall_team':  best_overall_team,
@@ -116,69 +98,42 @@ def get_contribution_callouts(scores, players):
         'top_pitchers':       top_pitchers,
     }
 
-def find_tough_luck(scores, matchups):
-    """
-    Tough Luck: only triggers if the #2 overall scorer lost.
-    """
+def find_tough_luck(scores):
     ranked = sorted(scores, key=lambda x: x['total_points'], reverse=True)
     second_place = ranked[1]
-
-    matchup = next(
-        (m for m in matchups if m['team_name'] == second_place['team_name']),
-        None
-    )
-    if matchup and matchup['result'] == 'L':
+    if second_place['result'] == 'L':
         return {
             'team': second_place['team_name'],
             'points': second_place['total_points'],
-            'opponent': matchup['opponent_name'],
-            'opponent_points': matchup['opponent_points'],
+            'opponent': second_place['opponent_name'],
+            'opponent_points': second_place['opponent_points'],
         }
     return None
 
 
-def find_lucky_bastard(scores, matchups):
-    """
-    Lucky Bastard: only triggers if the #13-of-14 scorer (second lowest) won.
-    """
+def find_lucky_bastard(scores):
     ranked = sorted(scores, key=lambda x: x['total_points'], reverse=True)
     second_worst = ranked[-2]
-
-    matchup = next(
-        (m for m in matchups if m['team_name'] == second_worst['team_name']),
-        None
-    )
-    if matchup and matchup['result'] == 'W':
+    if second_worst['result'] == 'W':
         return {
             'team': second_worst['team_name'],
             'points': second_worst['total_points'],
-            'opponent': matchup['opponent_name'],
-            'opponent_points': matchup['opponent_points'],
+            'opponent': second_worst['opponent_name'],
+            'opponent_points': second_worst['opponent_points'],
         }
     return None
 
 
-def check_fair_and_just(scores, matchups):
-    """
-    Fair and Just League: did every top-half team (by score) win,
-    and every bottom-half team lose?
-    
-    Uses active matchup count (not team count) as the cutoff,
-    which correctly handles odd-team leagues with a bye week.
-    """
+def check_fair_and_just(scores):
     ranked = sorted(scores, key=lambda x: x['total_points'], reverse=True)
-    num_matchups = len(matchups) // 2  # <-- was: len(ranked) // 2
-
+    # Count active matchups from scores that have an opponent
+    num_matchups = len([s for s in scores if s['opponent_name'] is not None]) // 2
     for i, team in enumerate(ranked):
-        matchup = next(
-            (m for m in matchups if m['team_name'] == team['team_name']),
-            None
-        )
-        if not matchup:
+        if team['result'] is None:
+            return False  # bye week team
+        if i < num_matchups and team['result'] != 'W':
             return False
-        if i < num_matchups and matchup['result'] != 'W':
-            return False
-        if i >= num_matchups and matchup['result'] != 'L':
+        if i >= num_matchups and team['result'] != 'L':
             return False
     return True
 
@@ -194,6 +149,7 @@ def get_records(active_season, season_only=False):
             f.season_year,
             f.matchup_period,
             f.team_name,
+            f.owner_name,
             f.total_points,
             f.hitting_points,
             f.pitching_points
@@ -217,7 +173,7 @@ def format_records(records):
 
     def fmt(row, score_key):
         return (
-            f"{row['team_name']} -- "
+            f"{row['team_name']} ({row['owner_name']}) -- "
             f"{row[score_key]:.1f} pts, "
             f"{row['season_year']} Matchup #{row['matchup_period']}"
         )
@@ -232,7 +188,7 @@ def format_records(records):
     }
 
 
-def generate_summary(matchup_period, scores, matchups, contributions, season_records, alltime_records):
+def generate_summary(matchup_period, scores, contributions, season_records, alltime_records):
     """Build the BBCode-formatted front-page summary."""
 
     best_overall = scores[0]
@@ -246,29 +202,29 @@ def generate_summary(matchup_period, scores, matchups, contributions, season_rec
     best_pitching = by_pitching[0]
     worst_pitching = by_pitching[-1]
 
-    def fmt_players(player_list):
-            return ", ".join(
-                f"{p['display_name']}: {p['total_points']:.1f}"
-                for p in player_list
-            )
+    def fmt_players(player_list, score_key='total_points'):
+        return ", ".join(
+            f"{p['display_name']}: {p[score_key]:.1f}"
+            for p in player_list
+        )
 
     lines = [
-            f"[u][b]Matchup #{matchup_period} Recap[/b][/u]",
-            f"",
-            f"[b]Best Overall[/b]: {best_overall['total_points']:.1f} pts by {best_overall['team_name']}",
-            f"{fmt_players(contributions['top_overall'])}",
-            f"[b]Best Hitting[/b]: {best_hitting['hitting_points']:.1f} pts by {best_hitting['team_name']}",
-            f"{fmt_players(contributions['top_hitters'])}",
-            f"[b]Best Pitching[/b]: {best_pitching['pitching_points']:.1f} pts by {best_pitching['team_name']}",
-            f"{fmt_players(contributions['top_pitchers'])}",
-            f"",
-            f"[b]Worst Overall[/b]: {worst_overall['total_points']:.1f} pts by {worst_overall['team_name']}",
-            f"[b]Worst Hitting[/b]: {worst_hitting['hitting_points']:.1f} pts by {worst_hitting['team_name']}",
-            f"[b]Worst Pitching[/b]: {worst_pitching['pitching_points']:.1f} pts by {worst_pitching['team_name']}",
-        ]
+        f"[u][b]Matchup #{matchup_period} Recap[/b][/u]",
+        f"",
+        f"[b]Best Overall[/b]: {best_overall['total_points']:.1f} pts by {best_overall['team_name']} ({best_overall['owner_name']})",
+        f"{fmt_players(contributions['top_overall'])}",
+        f"[b]Best Hitting[/b]: {best_hitting['hitting_points']:.1f} pts by {best_hitting['team_name']} ({best_hitting['owner_name']})",
+        f"{fmt_players(contributions['top_hitters'], 'hitting_points')}",
+        f"[b]Best Pitching[/b]: {best_pitching['pitching_points']:.1f} pts by {best_pitching['team_name']} ({best_pitching['owner_name']})",
+        f"{fmt_players(contributions['top_pitchers'], 'pitching_points')}",
+        f"",
+        f"[b]Worst Overall[/b]: {worst_overall['total_points']:.1f} pts by {worst_overall['team_name']} ({worst_overall['owner_name']})",
+        f"[b]Worst Hitting[/b]: {worst_hitting['hitting_points']:.1f} pts by {worst_hitting['team_name']} ({worst_hitting['owner_name']})",
+        f"[b]Worst Pitching[/b]: {worst_pitching['pitching_points']:.1f} pts by {worst_pitching['team_name']} ({worst_pitching['owner_name']})",
+    ]
 
     # Tough Luck
-    tough_luck = find_tough_luck(scores, matchups)
+    tough_luck = find_tough_luck(scores)
     if tough_luck:
         lines.extend([
             f"",
@@ -278,9 +234,8 @@ def generate_summary(matchup_period, scores, matchups, contributions, season_rec
         ])
 
     # Lucky Bastard
-    lucky = find_lucky_bastard(scores, matchups)
+    lucky = find_lucky_bastard(scores)
     if lucky:
-        
         lines.extend([
             f"",
             f"[b]Lucky Bastard[/b]: {lucky['team']} scored just {lucky['points']:.1f} pts, "
@@ -289,8 +244,8 @@ def generate_summary(matchup_period, scores, matchups, contributions, season_rec
         ])
 
     # Fair and Just League
-    if check_fair_and_just(scores, matchups):
-        num_matchups = len(matchups) // 2
+    if check_fair_and_just(scores):
+        num_matchups = len([s for s in scores if s['opponent_name'] is not None]) // 2
         lines.extend([
             f"",
             f"[b]A FAIR AND JUST LEAGUE![/b] The top {num_matchups} scoring teams "
@@ -317,9 +272,19 @@ def generate_summary(matchup_period, scores, matchups, contributions, season_rec
         f"[b]Worst Matchup Pitching[/b]: {alltime_records['worst_pitching']}",
         f"",
         f"[i]*All records exclude matchups lasting longer than 7 days.[/i]",
-        f"[i]*Scoring settings changed between 2025 and 2026 — all-time records reflect raw scores under each season's settings." 
+        f"[i]*Scoring settings changed between 2025 and 2026 — all-time records reflect raw scores under each season's settings. "
         f"Future iterations will calculate scores according to current league settings, for now we just have the output as it existed at the time.[/i]",
     ])
+
+    # Write to timestamped log file
+    from datetime import datetime
+    log_dir = os.path.join(os.path.dirname(__file__), "..", "output","logs")
+    os.makedirs(log_dir, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+    log_path = os.path.join(log_dir, f"summary_{matchup_period}_{timestamp}.txt")
+    with open(log_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+    print(f"\nLog saved to: {log_path}")
 
     return "\n".join(lines)
 
@@ -328,15 +293,15 @@ if __name__ == "__main__":
         "SELECT MAX(season_year) as sy FROM fct_weekly_team_scores"
     )[0]['sy']
 
-    matchup_period, scores  = get_weekly_scores(active_season)
-    matchups                = get_matchups(active_season, matchup_period)
-    players                 = get_player_contributions(active_season, matchup_period)
-    contributions           = get_contribution_callouts(scores, players)
+    matchup_period, scores = get_weekly_scores(active_season)
+    # get_matchups call is gone
+    players        = get_player_contributions(active_season, matchup_period)
+    contributions  = get_contribution_callouts(scores, players)
 
     season_raw      = get_records(active_season, season_only=True)
     alltime_raw     = get_records(active_season, season_only=False)
     season_records  = format_records(season_raw)
     alltime_records = format_records(alltime_raw)
 
-    summary = generate_summary(matchup_period, scores, matchups, contributions, season_records, alltime_records)
+    summary = generate_summary(matchup_period, scores, contributions, season_records, alltime_records)
     print(summary)

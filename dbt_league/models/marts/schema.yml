@@ -1,0 +1,68 @@
+version: 2
+
+models:
+  - name: fct_weekly_team_scores
+    description: 'One row per team per matchup period. Combines weekly scoring totals with matchup context (opponent and W/L result). Sources from int_team_daily_scores for scores and raw box scores for matchup pairings.'
+    columns:
+      - name: season_year
+        description: 'ESPN season year.'
+      - name: matchup_period
+        description: 'ESPN matchup period number within the season. Maps to matchup_schedule seed for date ranges.'
+      - name: owner_name
+        description: 'Team owner display name.'
+      - name: team_name
+        description: 'ESPN fantasy team name as set by the owner. Can change between seasons.'
+      - name: team_id
+        description: 'ESPN stable numeric team identifier. Use this for joins, not team_name.'
+      - name: total_points
+        description: 'Sum of all active player points for the matchup period.'
+        tests:
+          - not_null
+      - name: hitting_points
+        description: 'Total points from non-pitcher lineup slots (all slots except SP/RP/P).'
+      - name: pitching_points
+        description: 'Total points from SP, RP, and P lineup slots.'
+      - name: days_in_period
+        description: 'Count of distinct scoring periods in the matchup period. Normal weeks = 7; opening week and All-Star break are higher.'
+      - name: opponent_owner
+        description: 'Owner display name of the opponent.'
+      - name: opponent_name
+        description: 'ESPN fantasy team name of the opponent for this matchup period.'
+      - name: opponent_id
+        description: 'ESPN stable numeric team identifier for the opponent.'
+      - name: opponent_points
+        description: 'The opponent total points for the matchup period.'
+      - name: result
+        description: 'W if team scored more than opponent, L if less, T if tied. Ties are extremely rare in ESPN H2H points leagues.'
+
+  - name: fct_weekly_player_scores
+    description: 'One row per player per team per matchup period. Splits points into hitting and pitching components. Two-way players get a single row with both contributions reflected. Nickname resolution via player_nicknames seed.'
+    columns:
+      - name: season_year
+        description: 'ESPN season year.'
+      - name: matchup_period
+        description: 'ESPN matchup period number within the season.'
+      - name: team_name
+        description: 'ESPN fantasy team name.'
+      - name: team_id
+        description: 'ESPN stable numeric team identifier.'
+      - name: owner_name
+        description: 'Team owner display name.'
+      - name: player_name
+        description: 'Player full name as returned by ESPN.'
+      - name: player_id
+        description: 'ESPN stable numeric player identifier.'
+      - name: position
+        description: 'Player MLB position. Passed through for reference.'
+      - name: hitting_points
+        description: 'Points earned from hitting lineup slots (all slots except SP/RP/P) during this matchup period.'
+      - name: pitching_points
+        description: 'Points earned from pitching lineup slots (SP/RP/P) during this matchup period.'
+      - name: total_points
+        description: 'Sum of hitting_points and pitching_points. For single-role players, equals whichever is nonzero. For two-way players, the combined total.'
+        tests:
+          - not_null
+      - name: days_active
+        description: 'Count of distinct scoring periods this player appeared in an active lineup slot.'
+      - name: display_name
+        description: 'COALESCE of player_nicknames.nickname and player_name. Used by the output script for contributor callouts.'

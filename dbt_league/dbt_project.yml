@@ -53,3 +53,8 @@ seeds:
       +column_types:
         stat_name: varchar
         category: varchar
+    player_nicknames:
+      +column_types:
+        player_id: integer
+        player_name: varchar
+        nickname: varchar

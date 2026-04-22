@@ -111,14 +111,30 @@ def serialize_box_scores(league, scoring_period, matchup_period):
         matchup_period=matchup_period,
         scoring_period=scoring_period,
     )
+
+    def format_owners(owners_list):
+        if not owners_list:
+            return "Unknown"
+        if len(owners_list) == 1:
+            o = owners_list[0]
+            return f"{o['firstName'].title()} {o['lastName'].title()}"
+        return " / ".join(o['firstName'].title() for o in owners_list)
+    
     matchups = []
 
     for matchup in box_scores:
+        # Extract owner name (first and last names for 1 owner teams, list of first names for multi-owner teams)
+
+        home_owners = matchup.home_team.owners
+        away_owners = matchup.away_team.owners
+
         matchup_dict = {
             "home_team": matchup.home_team.team_name,
             "home_team_id": matchup.home_team.team_id,
+            "home_owner": format_owners(home_owners),
             "away_team": matchup.away_team.team_name,
             "away_team_id": matchup.away_team.team_id,
+            "away_owner": format_owners(away_owners),
             "home_score": matchup.home_score,
             "away_score": matchup.away_score,
             "home_lineup": [],

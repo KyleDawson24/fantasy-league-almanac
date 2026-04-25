@@ -1,74 +1,83 @@
-stat_name,stat_category,stat_description
-1B,hitting,Singles
-2B,hitting,Doubles
-3B,hitting,Triples
-AB,hitting,At Bats
-AVG,hitting,Batting Average
-B_BB,hitting,Walks (Batter)
-B_IBB,hitting,Intentional Walks (Batter)
-B_SO,hitting,Strikeouts (Batter)
-CS,hitting,Caught Stealing
-CYC,hitting,Cycles
-GDP,hitting,Grounded Into Double Play
-H,hitting,Hits
-HBP,hitting,Hit By Pitch
-HR,hitting,Home Runs
-OBP,hitting,On Base Percentage
-OPS,hitting,On Base Plus Slugging
-PA,hitting,Plate Appearances
-PPA,hitting,Pitches Per Plate Appearance
-PS,hitting,Pitches Seen
-R,hitting,Runs
-RBI,hitting,Runs Batted In
-RC,hitting,Runs Created
-SAC,hitting,Sacrifice Hits and Flies
-SB,hitting,Stolen Bases
-SB-CS,hitting,Net Stolen Bases
-SF,hitting,Sacrifice Flies
-SH,hitting,Sacrifice Hits
-SLG,hitting,Slugging Percentage
-TB,hitting,Total Bases
-XBH,hitting,Extra Base Hits
-W,pitching,Wins
-L,pitching,Losses
-K,pitching,Strikeouts (Pitcher)
-ERA,pitching,Earned Run Average
-WHIP,pitching,Walks Plus Hits Per Inning
-ER,pitching,Earned Runs
-OUTS,pitching,Outs Recorded
-QS,pitching,Quality Starts
-SV,pitching,Saves
-SVO,pitching,Save Opportunities
-SV%,pitching,Save Percentage
-HLD,pitching,Holds
-SVHD,pitching,Saves Plus Holds
-BLK,pitching,Balks
-BLSV,pitching,Blown Saves
-CG,pitching,Complete Games
-GP,pitching,Games Pitched
-GS,pitching,Games Started
-K/9,pitching,Strikeouts Per 9 Innings
-K/BB,pitching,Strikeout to Walk Ratio
-OBA,pitching,Opponent Batting Average
-OOBP,pitching,Opponent On Base Percentage
-P,pitching,Pitches Thrown
-PG,pitching,Pitches Per Game
-PK,pitching,Pickoffs
-P_BB,pitching,Walks Allowed
-P_H,pitching,Hits Allowed
-P_HR,pitching,Home Runs Allowed
-P_IBB,pitching,Intentional Walks Allowed
-P_R,pitching,Runs Allowed
-TBF,pitching,Total Batters Faced
-WP,pitching,Wild Pitches
-WPCT,pitching,Win Percentage
-A,fielding,Assists
-PO,fielding,Putouts
-E,fielding,Errors
-DP,fielding,Double Plays
-FPCT,fielding,Fielding Percentage
-TC,fielding,Total Chances
-OFA,fielding,Outfield Assists
-G,hitting,Games Played by Batters
-B_G_W,hitting,Batter Games Won
-B_G_L,hitting,Batter Games Lost
+stat_name,stat_category,stat_description,is_counting
+1B,hitting,Singles,true
+2B,hitting,Doubles,true
+3B,hitting,Triples,true
+AB,hitting,At Bats,true
+AVG,hitting,Batting Average,false
+B_BB,hitting,Walks (Batter),true
+B_IBB,hitting,Intentional Walks (Batter),true
+B_SO,hitting,Strikeouts (Batter),true
+CS,hitting,Caught Stealing,true
+CYC,hitting,Cycles,true
+GDP,hitting,Grounded Into Double Play,true
+H,hitting,Hits,true
+HBP,hitting,Hit By Pitch,true
+HR,hitting,Home Runs,true
+OBP,hitting,On Base Percentage,false
+OPS,hitting,On Base Plus Slugging,false
+PA,hitting,Plate Appearances,true
+PPA,hitting,Pitches Per Plate Appearance,false
+PS,hitting,Pitches Seen,true
+R,hitting,Runs,true
+RBI,hitting,Runs Batted In,true
+RC,hitting,Runs Created,true
+SAC,hitting,Sacrifice Hits and Flies,true
+SB,hitting,Stolen Bases,true
+SB-CS,hitting,Net Stolen Bases,true
+SF,hitting,Sacrifice Flies,true
+SH,hitting,Sacrifice Hits,true
+SLG,hitting,Slugging Percentage,false
+TB,hitting,Total Bases,true
+XBH,hitting,Extra Base Hits,true
+W,pitching,Wins,true
+L,pitching,Losses,true
+K,pitching,Strikeouts (Pitcher),true
+ERA,pitching,Earned Run Average,false
+WHIP,pitching,Walks Plus Hits Per Inning,false
+ER,pitching,Earned Runs,true
+OUTS,pitching,Outs Recorded,true
+QS,pitching,Quality Starts,true
+SV,pitching,Saves,true
+SVO,pitching,Save Opportunities,true
+SV%,pitching,Save Percentage,false
+HLD,pitching,Holds,true
+SVHD,pitching,Saves Plus Holds,true
+BLK,pitching,Balks,true
+BLSV,pitching,Blown Saves,true
+CG,pitching,Complete Games,true
+GP,pitching,Games Pitched,true
+GS,pitching,Games Started,true
+K/9,pitching,Strikeouts Per 9 Innings,false
+K/BB,pitching,Strikeout to Walk Ratio,false
+OBA,pitching,Opponent Batting Average,false
+OOBP,pitching,Opponent On Base Percentage,false
+P,pitching,Pitches Thrown,true
+PG,pitching,Pitches Per Game,false
+PK,pitching,Pickoffs,true
+P_BB,pitching,Walks Allowed,true
+P_H,pitching,Hits Allowed,true
+P_HR,pitching,Home Runs Allowed,true
+P_IBB,pitching,Intentional Walks Allowed,true
+P_R,pitching,Runs Allowed,true
+TBF,pitching,Total Batters Faced,true
+WP,pitching,Wild Pitches,true
+WPCT,pitching,Win Percentage,false
+A,fielding,Assists,true
+PO,fielding,Putouts,true
+E,fielding,Errors,true
+DP,fielding,Double Plays,true
+FPCT,fielding,Fielding Percentage,false
+TC,fielding,Total Chances,true
+OFA,fielding,Outfield Assists,true
+G,hitting,Games Played by Batters,true
+B_G_W,hitting,Batter Games Won,true
+B_G_L,hitting,Batter Games Lost,true
+P_G_W,pitching,Pitcher Games Won,true
+P_G_L,pitching,Pitcher Games Lost,true
+22,unknown,ESPN internal stat ID 22 (unresolved),false
+30,unknown,ESPN internal stat ID 30 (unresolved),false
+61,unknown,ESPN internal stat ID 61 (unresolved),false
+64,unknown,ESPN internal stat ID 64 (unresolved),false
+78,unknown,ESPN internal stat ID 78 (unresolved),false
+79,unknown,ESPN internal stat ID 79 (unresolved),false
+80,unknown,ESPN internal stat ID 80 (unresolved),false

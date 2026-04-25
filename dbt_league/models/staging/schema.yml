@@ -48,3 +48,60 @@ models:
         description: 'Pre-computed fantasy points for this player on this scoring period, calculated by ESPN using league scoring settings.'
       - name: breakdown
         description: 'Raw stat breakdown dict from ESPN. Keys are stat abbreviations (HR, RBI, K, etc). Used for Phase 3 stat-level records.'
+
+  - name: stg_player_stat_breakdowns
+    description: >
+      One row per (season, scoring_period, team, player, stat_name) -- the breakdown
+      VARIANT flattened into relational shape. No business filters applied here;
+      staging stays a pure reshape. Business filters (active slots, counting stats)
+      are applied in int_player_weekly_stats. Bench/IL rows are preserved so future
+      models (e.g. wasted-points analysis in Phase 4) can consume the same staging.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - season_year
+              - scoring_period
+              - team_id
+              - player_id
+              - stat_name
+    columns:
+      - name: season_year
+        description: 'Year of MLB season.'
+        tests:
+          - not_null
+      - name: scoring_period
+        description: 'Daily ESPN scoring period number.'
+        tests:
+          - not_null
+      - name: matchup_period
+        description: 'The weekly matchup period this scoring period belongs to.'
+      - name: team_id
+        description: 'ESPN stable numeric team identifier.'
+        tests:
+          - not_null
+      - name: team_name
+        description: 'ESPN fantasy team name.'
+      - name: owner_name
+        description: 'Team owner display name.'
+      - name: player_id
+        description: 'ESPN stable numeric player identifier.'
+        tests:
+          - not_null
+      - name: player_name
+        description: 'Player full name as returned by ESPN.'
+      - name: position
+        description: 'Player MLB position.'
+      - name: lineup_slot
+        description: 'Fantasy lineup slot on this scoring period. Preserved so downstream models can filter active/bench/IL.'
+      - name: stat_name
+        description: 'Stat abbreviation as a key in the breakdown VARIANT (HR, RBI, K, etc).'
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stat_classification')
+              field: stat_name
+      - name: stat_value
+        description: 'Numeric value of the stat for this player on this scoring period.'
+        tests:
+          - not_null

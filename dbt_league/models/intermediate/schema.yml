@@ -63,3 +63,33 @@ models:
         description: 'Pre-computed fantasy points for this player-day. Renamed from points to distinguish from the aggregated total_points in the weekly mart.'
       - name: player_type
         description: 'Derived classification based on lineup_slot: pitching for SP/RP/P slots, hitting for all others. Consumed by the weekly mart CASE WHEN to produce hitting_points and pitching_points columns.'
+
+  - name: int_player_weekly_stats
+    description: >
+      Player-level weekly stat totals with business filters applied:
+      active lineup slots only (bench/IL excluded) and counting stats only
+      (rates excluded via stat_classification.is_counting). Joins
+      stat_classification to carry stat_category through. Grain:
+      one row per (season_year, matchup_period, team_id, player_id, stat_name).
+      Feeds fct_weekly_player_stats.
+    columns:
+      - name: season_year
+        description: 'ESPN season year.'
+      - name: matchup_period
+        description: 'ESPN matchup period number.'
+      - name: team_id
+        description: 'ESPN stable numeric team identifier.'
+      - name: team_name
+        description: 'ESPN fantasy team name.'
+      - name: owner_name
+        description: 'Team owner display name.'
+      - name: player_id
+        description: 'ESPN stable numeric player identifier.'
+      - name: player_name
+        description: 'Player full name.'
+      - name: stat_name
+        description: 'Stat abbreviation, filtered to is_counting=true via stat_classification join.'
+      - name: stat_category
+        description: 'hitting, pitching, or fielding, from stat_classification.'
+      - name: stat_value
+        description: 'Sum of stat_value across active scoring_periods within the matchup_period.'

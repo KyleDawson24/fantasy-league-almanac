@@ -14,11 +14,11 @@ __pycache__/
 .pytest_cache/
 
 #Test Scripts
-test_espn.py
-test_espn_pitchers.py
-test_espn_players.py
 extract/debug_stats_keys.py
 test_*
+
+#Customized League Note
+output/LeagueNote.txt
 
 # dbt
 target/

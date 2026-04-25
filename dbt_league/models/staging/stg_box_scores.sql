@@ -1,6 +1,10 @@
 -- stg_box_scores.sql
 -- Flatten raw JSON into one row per player per team per scoring period.
--- This is the foundational grain for all downstream models.
+-- Foundational grain for both scoring and stats chains.
+--
+-- Phase 3.1: player_nicknames join moved here (from individual marts) so
+-- display_name = COALESCE(nickname, player_name) propagates through every
+-- downstream model.
 
 with raw as (
     select
@@ -59,8 +63,17 @@ away_players as (
         p.value:breakdown               as breakdown
     from matchups,
         lateral flatten(input => matchup:away_lineup) p
+),
+
+all_players as (
+    select * from home_players
+    union all
+    select * from away_players
 )
 
-select * from home_players
-union all
-select * from away_players
+select
+    p.*,
+    coalesce(n.nickname, p.player_name) as display_name
+from all_players p
+left join {{ ref('player_nicknames') }} n
+    on p.player_id = n.player_id

@@ -1,42 +1,8 @@
 version: 2
 
 models:
-  - name: fct_weekly_team_scores
-    description: 'One row per team per matchup period. Combines weekly scoring totals with matchup context (opponent and W/L result). Sources from int_team_daily_scores for scores and raw box scores for matchup pairings.'
-    columns:
-      - name: season_year
-        description: 'ESPN season year.'
-      - name: matchup_period
-        description: 'ESPN matchup period number within the season. Maps to matchup_schedule seed for date ranges.'
-      - name: owner_name
-        description: 'Team owner display name.'
-      - name: team_name
-        description: 'ESPN fantasy team name as set by the owner. Can change between seasons.'
-      - name: team_id
-        description: 'ESPN stable numeric team identifier. Use this for joins, not team_name.'
-      - name: total_points
-        description: 'Sum of all active player points for the matchup period.'
-        tests:
-          - not_null
-      - name: hitting_points
-        description: 'Total points from non-pitcher lineup slots (all slots except SP/RP/P).'
-      - name: pitching_points
-        description: 'Total points from SP, RP, and P lineup slots.'
-      - name: days_in_period
-        description: 'Count of distinct scoring periods in the matchup period. Normal weeks = 7; opening week and All-Star break are higher.'
-      - name: opponent_owner
-        description: 'Owner display name of the opponent.'
-      - name: opponent_name
-        description: 'ESPN fantasy team name of the opponent for this matchup period.'
-      - name: opponent_id
-        description: 'ESPN stable numeric team identifier for the opponent.'
-      - name: opponent_points
-        description: 'The opponent total points for the matchup period.'
-      - name: result
-        description: 'W if team scored more than opponent, L if less, T if tied. Ties are extremely rare in ESPN H2H points leagues.'
-
   - name: fct_weekly_player_scores
-    description: 'One row per player per team per matchup period. Splits points into hitting and pitching components. Two-way players get a single row with both contributions reflected. Nickname resolution via player_nicknames seed.'
+    description: 'One row per player per team per matchup period. Splits points into hitting and pitching components. Two-way players get a single row with both contributions reflected. Nickname resolution via player_nicknames seed (still applied here for backwards compatibility; Phase 3.1 also propagates display_name from stg_box_scores).'
     columns:
       - name: season_year
         description: 'ESPN season year.'
@@ -46,8 +12,6 @@ models:
         description: 'ESPN fantasy team name.'
       - name: team_id
         description: 'ESPN stable numeric team identifier.'
-      - name: owner_name
-        description: 'Team owner display name.'
       - name: player_name
         description: 'Player full name as returned by ESPN.'
       - name: player_id
@@ -69,163 +33,14 @@ models:
 
   - name: fct_weekly_player_stats
     description: >
-      Incremental player-weekly stat fact. Foundation for team-grain rollups
-      (fct_weekly_team_stats) and future player-level records/analysis.
-      Grain: one row per (season_year, matchup_period, team_id, player_id, stat_name).
-      Materialized incrementally with unique_key merge -- re-extracted periods
-      overwrite existing rows. For historical corrections, use --full-refresh.
-    tests:
-      - dbt_utils.unique_combination_of_columns:
-          arguments:
-            combination_of_columns:
-              - season_year
-              - matchup_period
-              - team_id
-              - player_id
-              - stat_name
-    columns:
-      - name: season_year
-        description: 'ESPN season year.'
-        tests:
-          - not_null
-      - name: matchup_period
-        description: 'ESPN matchup period number.'
-        tests:
-          - not_null
-      - name: team_id
-        description: 'ESPN stable numeric team identifier.'
-        tests:
-          - not_null
-      - name: team_name
-        description: 'ESPN fantasy team name.'
-      - name: owner_name
-        description: 'Team owner display name.'
-      - name: player_id
-        description: 'ESPN stable numeric player identifier.'
-        tests:
-          - not_null
-      - name: player_name
-        description: 'Player full name.'
-      - name: stat_name
-        description: 'Stat abbreviation. Counting stats only.'
-        tests:
-          - not_null
-          - relationships:
-              to: ref('stat_classification')
-              field: stat_name
-      - name: stat_category
-        description: 'hitting, pitching, or fielding.'
-        tests:
-          - accepted_values:
-              values: ['hitting', 'pitching', 'fielding']
-      - name: stat_value
-        description: 'Sum of daily stat_value across active scoring_periods within the matchup_period.'
-        tests:
-          - not_null
-
-  - name: fct_weekly_team_stats
-    description: >
-      Incremental team-weekly stat fact. Rolled up from fct_weekly_player_stats
-      so team totals are consistent-by-construction with player contributions
-      (team_total = SUM(players)). Grain: one row per (season_year,
-      matchup_period, team_id, stat_name). This is the dominant consumer grain
-      for league records.
-    tests:
-      - dbt_utils.unique_combination_of_columns:
-          arguments:
-            combination_of_columns:
-              - season_year
-              - matchup_period
-              - team_id
-              - stat_name
-    columns:
-      - name: season_year
-        description: 'ESPN season year.'
-        tests:
-          - not_null
-      - name: matchup_period
-        description: 'ESPN matchup period number.'
-        tests:
-          - not_null
-      - name: team_id
-        description: 'ESPN stable numeric team identifier.'
-        tests:
-          - not_null
-      - name: team_name
-        description: 'ESPN fantasy team name.'
-      - name: owner_name
-        description: 'Team owner display name.'
-      - name: stat_name
-        description: 'Stat abbreviation. Counting stats only.'
-        tests:
-          - not_null
-          - relationships:
-              to: ref('stat_classification')
-              field: stat_name
-      - name: stat_category
-        description: 'hitting, pitching, or fielding.'
-        tests:
-          - accepted_values:
-              values: ['hitting', 'pitching', 'fielding']
-      - name: stat_value
-        description: 'Sum of player stat_value across all players on the team for this matchup_period.'
-        tests:
-          - not_null
-
-  - name: mart_stat_leaderboard
-    description: >
-      Top-10 team-stat leaderboard per scope. Consumer-facing records contract
-      for league-record callouts. Materialized as a view -- always fresh, zero
-      storage, and rankings are retroactively mutable so incremental would be
-      fragile. Excludes abnormal matchup periods (opening week, All-Star break)
-      via matchup_schedule.is_abnormal = false. Playoffs are included.
-      Grain: (stat_name, record_scope, rank) with rank in 1..10.
-    tests:
-      - dbt_utils.unique_combination_of_columns:
-          arguments:
-            combination_of_columns:
-              - stat_name
-              - record_scope
-              - rank
-    columns:
-      - name: stat_name
-        description: 'Stat abbreviation being ranked.'
-        tests:
-          - not_null
-      - name: record_scope
-        description: 'all_time (across all loaded seasons) or current_season (latest season only).'
-        tests:
-          - not_null
-          - accepted_values:
-              values: ['all_time', 'current_season']
-      - name: rank
-        description: 'Rank within (stat_name, record_scope). 1 = best, 10 = tenth best. Ties broken by recency (newer season_year, then newer matchup_period) so the long tail of repeated values surfaces the most recent occurrences first.'
-        tests:
-          - not_null
-      - name: season_year
-        description: 'Season year when the record-holding value was set.'
-      - name: matchup_period
-        description: 'Matchup period when the record-holding value was set.'
-      - name: team_id
-        description: 'ESPN stable numeric team identifier of the record holder.'
-      - name: team_name
-        description: 'ESPN fantasy team name of the record holder.'
-      - name: owner_name
-        description: 'Owner display name of the record holder.'
-      - name: stat_category
-        description: 'hitting, pitching, or fielding.'
-      - name: stat_value
-        description: 'The stat total for this rank.'
-        tests:
-          - not_null
-
-  - name: mart_weekly_player_performance
-    description: >
-      Wide-format consumer mart at player-weekly grain. Pivots the long counting
-      stats from fct_weekly_player_stats into one column per stat and adds derived
-      rate stats (AVG, OBP, SLG, OPS, ERA, WHIP, K/9, K/BB) computed via shared
-      rate macros. View materialization -- always fresh, derived from the long fact.
-      Grain: one row per (season_year, matchup_period, team_id, player_id).
+      Wide-format player-weekly convergence fact. The consumer-facing entity
+      for "what did this player do this week" -- counting stats, rate stats,
+      and platform fantasy points all in one row per player per matchup.
+      Pipeline: read int_player_weekly_stats (slot-preserved counting),
+      filter to active slots, aggregate across slots, compute rates via
+      shared macros, join fct_weekly_player_scores for points.
+      Incremental fact -- merge by unique_key.
+      Grain: (season_year, matchup_period, team_id, player_id).
     tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
@@ -258,7 +73,7 @@ models:
       - name: player_name
         description: 'Player full name as returned by ESPN.'
       - name: display_name
-        description: 'COALESCE of player_nicknames.nickname and player_name. Used by the output script for readable callouts.'
+        description: 'COALESCE(nickname, player_name). Used by the output script for contributor callouts.'
       - name: h
         description: 'Hits.'
       - name: ab
@@ -324,27 +139,38 @@ models:
       - name: avg
         description: 'Batting average (H / AB). NULL when AB = 0.'
       - name: obp
-        description: 'On-base percentage ((H + BB + HBP) / (AB + BB + HBP + SF)). NULL when denominator = 0.'
+        description: 'On-base percentage. NULL when denominator = 0.'
       - name: slg
         description: 'Slugging percentage (TB / AB). NULL when AB = 0.'
       - name: ops
-        description: 'On-base plus slugging (OBP + SLG).'
+        description: 'On-base plus slugging.'
       - name: era
-        description: 'Earned run average (ER * 9 / IP, where IP = OUTS / 3). NULL when OUTS = 0.'
+        description: 'Earned run average. NULL when OUTS = 0.'
       - name: whip
-        description: 'Walks + hits per inning pitched ((BB + H) / IP). NULL when OUTS = 0.'
+        description: 'Walks + hits per inning pitched.'
       - name: k_per_9
-        description: 'Strikeouts per 9 innings (K * 9 / IP). NULL when OUTS = 0.'
+        description: 'Strikeouts per 9 innings.'
       - name: k_per_bb
-        description: 'Strikeout-to-walk ratio (K / BB_allowed). NULL when BB allowed = 0.'
+        description: 'Strikeout-to-walk ratio.'
+      - name: total_points
+        description: 'Platform-computed fantasy total points (from fct_weekly_player_scores). Sum of hitting_points + pitching_points.'
+      - name: hitting_points
+        description: 'Platform-computed fantasy points from hitting lineup slots.'
+      - name: pitching_points
+        description: 'Platform-computed fantasy points from pitching lineup slots.'
 
-  - name: mart_weekly_team_performance
+  - name: fct_weekly_team_stats
     description: >
-      Wide-format consumer mart at team-weekly grain. Same structure as
-      mart_weekly_player_performance but aggregated to team level, derived from
-      fct_weekly_team_stats. Uses the same rate macros, applied to team-level
-      counting sums. View materialization.
-      Grain: one row per (season_year, matchup_period, team_id).
+      Wide-format team-weekly convergence fact. Phase 3.1: absorbs the
+      responsibilities of the deleted fct_weekly_team_scores -- includes
+      counting stats, rate stats, scoring totals, opponent context, W/L,
+      and days_in_period in a single row per team per matchup. Rolls up
+      from fct_weekly_player_stats (consistency-by-construction:
+      team_total = SUM(players)). Recomputes rates via shared macros from
+      team-level counting sums. Adds matchup pairings from raw box scores
+      and joins matchup_schedule for days_in_period metadata.
+      Incremental fact -- merge by unique_key.
+      Grain: (season_year, matchup_period, team_id).
     tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
@@ -432,18 +258,104 @@ models:
       - name: wp
         description: 'Team wild pitches.'
       - name: avg
-        description: 'Team batting average (SUM(H) / SUM(AB)). NULL when AB = 0.'
+        description: 'Team batting average (SUM(H) / SUM(AB)).'
       - name: obp
-        description: 'Team on-base percentage. NULL when denominator = 0.'
+        description: 'Team on-base percentage.'
       - name: slg
-        description: 'Team slugging percentage. NULL when AB = 0.'
+        description: 'Team slugging percentage.'
       - name: ops
         description: 'Team OPS (OBP + SLG).'
       - name: era
-        description: 'Team ERA. NULL when OUTS = 0.'
+        description: 'Team ERA.'
       - name: whip
-        description: 'Team WHIP. NULL when OUTS = 0.'
+        description: 'Team WHIP.'
       - name: k_per_9
-        description: 'Team strikeouts per 9 innings. NULL when OUTS = 0.'
+        description: 'Team strikeouts per 9 innings.'
       - name: k_per_bb
-        description: 'Team strikeout-to-walk ratio. NULL when BB allowed = 0.'
+        description: 'Team strikeout-to-walk ratio.'
+      - name: total_points
+        description: 'Team total fantasy points (sum of player platform_points). Used for W/L determination.'
+        tests:
+          - not_null
+      - name: hitting_points
+        description: 'Team hitting fantasy points (sum of player hitting_points).'
+      - name: pitching_points
+        description: 'Team pitching fantasy points (sum of player pitching_points).'
+      - name: active_player_count
+        description: 'Distinct count of players in active lineup slots for this team this matchup.'
+      - name: opponent_id
+        description: 'ESPN stable numeric team identifier for the opponent.'
+      - name: opponent_name
+        description: 'ESPN fantasy team name of the opponent.'
+      - name: opponent_owner
+        description: 'Owner display name of the opponent.'
+      - name: opponent_points
+        description: 'Opponent total fantasy points for this matchup.'
+      - name: result
+        description: 'W if team scored more than opponent, L if less, T if tied. Determined by platform-computed total_points (the official ESPN arbiter).'
+      - name: days_in_period
+        description: 'Count of days in the matchup period (from matchup_schedule.end_date - start_date + 1). Normal weeks = 7; opening week and All-Star break are higher.'
+
+  - name: mart_stat_leaderboard
+    description: >
+      Top-10 leaderboard across team and player grains, for both stat-level
+      (HR, K, RBI, etc.) and score-level (total_points, hitting_points,
+      pitching_points) columns. Implementation uses Snowflake UNPIVOT to
+      fold wide columns from the convergence facts back into long-format
+      (stat_name, stat_value) rows, then ranks uniformly. Snowflake-specific;
+      portable rewrite would be UNION ALL per stat column. Excludes abnormal
+      matchup periods. Ties broken by recency (newer season, then matchup).
+      View materialization (rankings retroactively mutable; incremental
+      would be fragile).
+      Grain: (entity_grain, stat_name, record_scope, rank), rank 1..10.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - entity_grain
+              - stat_name
+              - record_scope
+              - rank
+    columns:
+      - name: entity_grain
+        description: 'team or player. Determines whether the row is a team-level or player-level record.'
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['team', 'player']
+      - name: stat_name
+        description: 'Column name being ranked. Includes counting stats (H, AB, HR, K, etc.) and score columns (TOTAL_POINTS, HITTING_POINTS, PITCHING_POINTS).'
+        tests:
+          - not_null
+      - name: record_scope
+        description: 'all_time (across every loaded season) or current_season (latest season only).'
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['all_time', 'current_season']
+      - name: rank
+        description: '1 to 10. Ties broken by recency (newer season_year, then newer matchup_period).'
+        tests:
+          - not_null
+      - name: season_year
+        description: 'Season when this rank was set.'
+      - name: matchup_period
+        description: 'Matchup period when this rank was set.'
+      - name: team_id
+        description: 'Team identifier of the rank holder.'
+      - name: team_name
+        description: 'Team name of the rank holder.'
+      - name: owner_name
+        description: 'Owner of the team holding this rank.'
+      - name: player_id
+        description: 'Player identifier (entity_grain = player only; NULL for team rows).'
+      - name: player_name
+        description: 'Player name (entity_grain = player only; NULL for team rows).'
+      - name: display_name
+        description: 'Player display name (entity_grain = player only; NULL for team rows).'
+      - name: stat_value
+        description: 'Numeric value at this rank.'
+        tests:
+          - not_null

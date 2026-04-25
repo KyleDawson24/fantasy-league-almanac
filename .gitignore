@@ -18,6 +18,7 @@ test_espn.py
 test_espn_pitchers.py
 test_espn_players.py
 extract/debug_stats_keys.py
+test_*
 
 # dbt
 target/
@@ -33,6 +34,7 @@ logs/
 # OS
 .DS_Store
 Thumbs.db
+.claude/
 
 # Data
 *.csv

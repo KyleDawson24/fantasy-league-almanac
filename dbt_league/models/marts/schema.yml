@@ -66,3 +66,384 @@ models:
         description: 'Count of distinct scoring periods this player appeared in an active lineup slot.'
       - name: display_name
         description: 'COALESCE of player_nicknames.nickname and player_name. Used by the output script for contributor callouts.'
+
+  - name: fct_weekly_player_stats
+    description: >
+      Incremental player-weekly stat fact. Foundation for team-grain rollups
+      (fct_weekly_team_stats) and future player-level records/analysis.
+      Grain: one row per (season_year, matchup_period, team_id, player_id, stat_name).
+      Materialized incrementally with unique_key merge -- re-extracted periods
+      overwrite existing rows. For historical corrections, use --full-refresh.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - season_year
+              - matchup_period
+              - team_id
+              - player_id
+              - stat_name
+    columns:
+      - name: season_year
+        description: 'ESPN season year.'
+        tests:
+          - not_null
+      - name: matchup_period
+        description: 'ESPN matchup period number.'
+        tests:
+          - not_null
+      - name: team_id
+        description: 'ESPN stable numeric team identifier.'
+        tests:
+          - not_null
+      - name: team_name
+        description: 'ESPN fantasy team name.'
+      - name: owner_name
+        description: 'Team owner display name.'
+      - name: player_id
+        description: 'ESPN stable numeric player identifier.'
+        tests:
+          - not_null
+      - name: player_name
+        description: 'Player full name.'
+      - name: stat_name
+        description: 'Stat abbreviation. Counting stats only.'
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stat_classification')
+              field: stat_name
+      - name: stat_category
+        description: 'hitting, pitching, or fielding.'
+        tests:
+          - accepted_values:
+              values: ['hitting', 'pitching', 'fielding']
+      - name: stat_value
+        description: 'Sum of daily stat_value across active scoring_periods within the matchup_period.'
+        tests:
+          - not_null
+
+  - name: fct_weekly_team_stats
+    description: >
+      Incremental team-weekly stat fact. Rolled up from fct_weekly_player_stats
+      so team totals are consistent-by-construction with player contributions
+      (team_total = SUM(players)). Grain: one row per (season_year,
+      matchup_period, team_id, stat_name). This is the dominant consumer grain
+      for league records.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - season_year
+              - matchup_period
+              - team_id
+              - stat_name
+    columns:
+      - name: season_year
+        description: 'ESPN season year.'
+        tests:
+          - not_null
+      - name: matchup_period
+        description: 'ESPN matchup period number.'
+        tests:
+          - not_null
+      - name: team_id
+        description: 'ESPN stable numeric team identifier.'
+        tests:
+          - not_null
+      - name: team_name
+        description: 'ESPN fantasy team name.'
+      - name: owner_name
+        description: 'Team owner display name.'
+      - name: stat_name
+        description: 'Stat abbreviation. Counting stats only.'
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stat_classification')
+              field: stat_name
+      - name: stat_category
+        description: 'hitting, pitching, or fielding.'
+        tests:
+          - accepted_values:
+              values: ['hitting', 'pitching', 'fielding']
+      - name: stat_value
+        description: 'Sum of player stat_value across all players on the team for this matchup_period.'
+        tests:
+          - not_null
+
+  - name: mart_stat_leaderboard
+    description: >
+      Top-10 team-stat leaderboard per scope. Consumer-facing records contract
+      for league-record callouts. Materialized as a view -- always fresh, zero
+      storage, and rankings are retroactively mutable so incremental would be
+      fragile. Excludes abnormal matchup periods (opening week, All-Star break)
+      via matchup_schedule.is_abnormal = false. Playoffs are included.
+      Grain: (stat_name, record_scope, rank) with rank in 1..10.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - stat_name
+              - record_scope
+              - rank
+    columns:
+      - name: stat_name
+        description: 'Stat abbreviation being ranked.'
+        tests:
+          - not_null
+      - name: record_scope
+        description: 'all_time (across all loaded seasons) or current_season (latest season only).'
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['all_time', 'current_season']
+      - name: rank
+        description: 'Rank within (stat_name, record_scope). 1 = best, 10 = tenth best. Ties broken by recency (newer season_year, then newer matchup_period) so the long tail of repeated values surfaces the most recent occurrences first.'
+        tests:
+          - not_null
+      - name: season_year
+        description: 'Season year when the record-holding value was set.'
+      - name: matchup_period
+        description: 'Matchup period when the record-holding value was set.'
+      - name: team_id
+        description: 'ESPN stable numeric team identifier of the record holder.'
+      - name: team_name
+        description: 'ESPN fantasy team name of the record holder.'
+      - name: owner_name
+        description: 'Owner display name of the record holder.'
+      - name: stat_category
+        description: 'hitting, pitching, or fielding.'
+      - name: stat_value
+        description: 'The stat total for this rank.'
+        tests:
+          - not_null
+
+  - name: mart_weekly_player_performance
+    description: >
+      Wide-format consumer mart at player-weekly grain. Pivots the long counting
+      stats from fct_weekly_player_stats into one column per stat and adds derived
+      rate stats (AVG, OBP, SLG, OPS, ERA, WHIP, K/9, K/BB) computed via shared
+      rate macros. View materialization -- always fresh, derived from the long fact.
+      Grain: one row per (season_year, matchup_period, team_id, player_id).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - season_year
+              - matchup_period
+              - team_id
+              - player_id
+    columns:
+      - name: season_year
+        description: 'ESPN season year.'
+        tests:
+          - not_null
+      - name: matchup_period
+        description: 'ESPN matchup period number.'
+        tests:
+          - not_null
+      - name: team_id
+        description: 'ESPN stable numeric team identifier.'
+        tests:
+          - not_null
+      - name: team_name
+        description: 'ESPN fantasy team name.'
+      - name: owner_name
+        description: 'Team owner display name.'
+      - name: player_id
+        description: 'ESPN stable numeric player identifier.'
+        tests:
+          - not_null
+      - name: player_name
+        description: 'Player full name as returned by ESPN.'
+      - name: display_name
+        description: 'COALESCE of player_nicknames.nickname and player_name. Used by the output script for readable callouts.'
+      - name: h
+        description: 'Hits.'
+      - name: ab
+        description: 'At bats.'
+      - name: b_bb
+        description: 'Batter walks.'
+      - name: b_so
+        description: 'Batter strikeouts.'
+      - name: hbp
+        description: 'Hit by pitch.'
+      - name: sf
+        description: 'Sacrifice flies.'
+      - name: hr
+        description: 'Home runs.'
+      - name: r
+        description: 'Runs.'
+      - name: rbi
+        description: 'Runs batted in.'
+      - name: sb
+        description: 'Stolen bases.'
+      - name: cs
+        description: 'Caught stealing.'
+      - name: tb
+        description: 'Total bases.'
+      - name: singles
+        description: 'Singles (1B in seed). Renamed for SQL compatibility.'
+      - name: doubles
+        description: 'Doubles (2B in seed).'
+      - name: triples
+        description: 'Triples (3B in seed).'
+      - name: xbh
+        description: 'Extra-base hits.'
+      - name: w
+        description: 'Pitcher wins.'
+      - name: l
+        description: 'Pitcher losses.'
+      - name: k
+        description: 'Pitcher strikeouts.'
+      - name: er
+        description: 'Earned runs allowed.'
+      - name: outs
+        description: 'Outs recorded. Innings pitched = outs / 3.'
+      - name: qs
+        description: 'Quality starts.'
+      - name: sv
+        description: 'Saves.'
+      - name: hld
+        description: 'Holds.'
+      - name: p_h
+        description: 'Hits allowed.'
+      - name: p_bb
+        description: 'Walks allowed.'
+      - name: p_hr
+        description: 'Home runs allowed.'
+      - name: p_r
+        description: 'Runs allowed.'
+      - name: cg
+        description: 'Complete games.'
+      - name: blk
+        description: 'Balks.'
+      - name: wp
+        description: 'Wild pitches.'
+      - name: avg
+        description: 'Batting average (H / AB). NULL when AB = 0.'
+      - name: obp
+        description: 'On-base percentage ((H + BB + HBP) / (AB + BB + HBP + SF)). NULL when denominator = 0.'
+      - name: slg
+        description: 'Slugging percentage (TB / AB). NULL when AB = 0.'
+      - name: ops
+        description: 'On-base plus slugging (OBP + SLG).'
+      - name: era
+        description: 'Earned run average (ER * 9 / IP, where IP = OUTS / 3). NULL when OUTS = 0.'
+      - name: whip
+        description: 'Walks + hits per inning pitched ((BB + H) / IP). NULL when OUTS = 0.'
+      - name: k_per_9
+        description: 'Strikeouts per 9 innings (K * 9 / IP). NULL when OUTS = 0.'
+      - name: k_per_bb
+        description: 'Strikeout-to-walk ratio (K / BB_allowed). NULL when BB allowed = 0.'
+
+  - name: mart_weekly_team_performance
+    description: >
+      Wide-format consumer mart at team-weekly grain. Same structure as
+      mart_weekly_player_performance but aggregated to team level, derived from
+      fct_weekly_team_stats. Uses the same rate macros, applied to team-level
+      counting sums. View materialization.
+      Grain: one row per (season_year, matchup_period, team_id).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - season_year
+              - matchup_period
+              - team_id
+    columns:
+      - name: season_year
+        description: 'ESPN season year.'
+        tests:
+          - not_null
+      - name: matchup_period
+        description: 'ESPN matchup period number.'
+        tests:
+          - not_null
+      - name: team_id
+        description: 'ESPN stable numeric team identifier.'
+        tests:
+          - not_null
+      - name: team_name
+        description: 'ESPN fantasy team name.'
+      - name: owner_name
+        description: 'Team owner display name.'
+      - name: h
+        description: 'Team hits.'
+      - name: ab
+        description: 'Team at bats.'
+      - name: b_bb
+        description: 'Team batter walks.'
+      - name: b_so
+        description: 'Team batter strikeouts.'
+      - name: hbp
+        description: 'Team hit by pitch.'
+      - name: sf
+        description: 'Team sacrifice flies.'
+      - name: hr
+        description: 'Team home runs.'
+      - name: r
+        description: 'Team runs.'
+      - name: rbi
+        description: 'Team runs batted in.'
+      - name: sb
+        description: 'Team stolen bases.'
+      - name: cs
+        description: 'Team caught stealing.'
+      - name: tb
+        description: 'Team total bases.'
+      - name: singles
+        description: 'Team singles.'
+      - name: doubles
+        description: 'Team doubles.'
+      - name: triples
+        description: 'Team triples.'
+      - name: xbh
+        description: 'Team extra-base hits.'
+      - name: w
+        description: 'Team pitcher wins.'
+      - name: l
+        description: 'Team pitcher losses.'
+      - name: k
+        description: 'Team pitcher strikeouts.'
+      - name: er
+        description: 'Team earned runs allowed.'
+      - name: outs
+        description: 'Team outs recorded.'
+      - name: qs
+        description: 'Team quality starts.'
+      - name: sv
+        description: 'Team saves.'
+      - name: hld
+        description: 'Team holds.'
+      - name: p_h
+        description: 'Team hits allowed.'
+      - name: p_bb
+        description: 'Team walks allowed.'
+      - name: p_hr
+        description: 'Team home runs allowed.'
+      - name: p_r
+        description: 'Team runs allowed.'
+      - name: cg
+        description: 'Team complete games.'
+      - name: blk
+        description: 'Team balks.'
+      - name: wp
+        description: 'Team wild pitches.'
+      - name: avg
+        description: 'Team batting average (SUM(H) / SUM(AB)). NULL when AB = 0.'
+      - name: obp
+        description: 'Team on-base percentage. NULL when denominator = 0.'
+      - name: slg
+        description: 'Team slugging percentage. NULL when AB = 0.'
+      - name: ops
+        description: 'Team OPS (OBP + SLG).'
+      - name: era
+        description: 'Team ERA. NULL when OUTS = 0.'
+      - name: whip
+        description: 'Team WHIP. NULL when OUTS = 0.'
+      - name: k_per_9
+        description: 'Team strikeouts per 9 innings. NULL when OUTS = 0.'
+      - name: k_per_bb
+        description: 'Team strikeout-to-walk ratio. NULL when BB allowed = 0.'

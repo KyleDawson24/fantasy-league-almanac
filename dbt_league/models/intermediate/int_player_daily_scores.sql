@@ -15,7 +15,7 @@ active as (
         matchup_period,
         scoring_period,
         team_name,
-        owner_name
+        owner_name,
         team_id,
         player_name,
         player_id,

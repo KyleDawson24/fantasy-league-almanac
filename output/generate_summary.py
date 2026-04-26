@@ -1,8 +1,9 @@
 """
 Generate the weekly front-page summary from the mart tables.
 
-Reads fct_weekly_team_scores and int_weekly_matchups to produce
-a BBCode-formatted summary for the ESPN league front page.
+Reads fct_weekly_team_stats and fct_weekly_player_stats (the wide
+convergence facts shipped in Phase 3.1) to produce a BBCode-formatted
+summary for the ESPN league front page.
 """
 
 import os
@@ -39,7 +40,7 @@ def get_weekly_scores(season_year, matchup_period=None):
     if matchup_period is None:
         result = query_snowflake("""
             SELECT MAX(matchup_period) as mp
-            FROM fct_weekly_team_scores
+            FROM fct_weekly_team_stats
             WHERE season_year = %s
         """, (season_year,))
         matchup_period = result[0]['mp']
@@ -47,9 +48,9 @@ def get_weekly_scores(season_year, matchup_period=None):
     scores = query_snowflake("""
         SELECT season_year, matchup_period, team_name, team_id,
                total_points, hitting_points, pitching_points,
-               days_in_period, owner_name, opponent_name, 
+               owner_name, opponent_name,
                opponent_owner, opponent_points, result
-        FROM fct_weekly_team_scores
+        FROM fct_weekly_team_stats
         WHERE matchup_period = %s
         AND season_year = %s
         ORDER BY total_points DESC
@@ -58,11 +59,26 @@ def get_weekly_scores(season_year, matchup_period=None):
     return matchup_period, scores
 
 def get_player_contributions(season_year, matchup_period):
-    """Fetch weekly player scores for contributor callouts."""
+    """Fetch weekly player stats for contributor callouts.
+
+    Sources from fct_weekly_player_stats (the wide convergence fact) for
+    architectural consistency with team queries -- both go through the
+    convergence facts, not the legacy *_scores facts.
+
+    Returns counting + rate columns alongside scoring totals so the Top
+    Hitter / Top Pitcher callouts can render their stat lines without a
+    second query.
+    """
     return query_snowflake("""
-        SELECT team_name, player_id, display_name,
-               total_points, hitting_points, pitching_points
-        FROM fct_weekly_player_scores
+        SELECT team_name, team_id, player_id, display_name,
+               total_points, hitting_points, pitching_points,
+               -- Hitting counting + rates for Top Hitter callout
+               h, ab, hr, rbi, sb,
+               avg, obp, slg,
+               -- Pitching counting + rates for Top Pitcher callout
+               w, sv, k, p_bb, outs,
+               era, whip
+        FROM fct_weekly_player_stats
         WHERE matchup_period = %s
         AND season_year = %s
         ORDER BY total_points DESC
@@ -96,6 +112,9 @@ def get_contribution_callouts(scores, players):
         'top_overall':        top_overall,
         'top_hitters':        top_hitters,
         'top_pitchers':       top_pitchers,
+        # Player-level superlatives across the whole league (not scoped to a team)
+        'top_hitter':         find_top_hitter(players),
+        'top_pitcher':        find_top_pitcher(players),
     }
 
 def find_tough_luck(scores):
@@ -137,6 +156,82 @@ def check_fair_and_just(scores):
             return False
     return True
 
+
+# ---------- Top Hitter / Top Pitcher callouts ----------
+
+def fmt_avg(x):
+    """Baseball-style rate formatting (.350, not 0.350). NULL → .000."""
+    if x is None:
+        return ".000"
+    s = f"{x:.3f}"
+    return s.lstrip("0") if s.startswith("0.") else s
+
+
+def fmt_ip(outs):
+    """Innings pitched in baseball notation: 9.0, 9.1, 9.2 (one out = .1, NOT decimal .333)."""
+    if outs is None or outs == 0:
+        return "0.0"
+    outs = int(outs)
+    return f"{outs // 3}.{outs % 3}"
+
+
+def find_top_hitter(players):
+    """Player with the highest hitting_points (>0). None if no qualifying player."""
+    hitters = [p for p in players if (p['hitting_points'] or 0) > 0]
+    return max(hitters, key=lambda p: p['hitting_points']) if hitters else None
+
+
+def find_top_pitcher(players):
+    """Player with the highest pitching_points (>0). None if no qualifying player."""
+    pitchers = [p for p in players if (p['pitching_points'] or 0) > 0]
+    return max(pitchers, key=lambda p: p['pitching_points']) if pitchers else None
+
+
+def format_hitter_line(player):
+    """Top Hitter callout: pts by Player (Team) -- avg/obp/slg over AB. HR, RBI[, SB]"""
+    rate = f"{fmt_avg(player['avg'])}/{fmt_avg(player['obp'])}/{fmt_avg(player['slg'])}"
+    counting = [
+        f"{int(player['hr'] or 0)} HR",
+        f"{int(player['rbi'] or 0)} RBI",
+    ]
+    if (player['sb'] or 0) > 0:
+        counting.append(f"{int(player['sb'])} SB")
+
+    return (
+        f"{player['hitting_points']:.1f} pts by {player['display_name']} "
+        f"({player['team_name']}) -- "
+        f"{rate} over {int(player['ab'] or 0)} AB. "
+        f"{', '.join(counting)}"
+    )
+
+
+def format_pitcher_line(player):
+    """Top Pitcher callout: pts by Player (Team) -- [Wins, ][Saves, ]ERA, WHIP. K : BB over IP"""
+    leading = []
+    if (player['w'] or 0) > 0:
+        wins = int(player['w'])
+        leading.append(f"{wins} {'Win' if wins == 1 else 'Wins'}")
+    if (player['sv'] or 0) > 0:
+        saves = int(player['sv'])
+        leading.append(f"{saves} {'Save' if saves == 1 else 'Saves'}")
+
+    era = player['era']
+    whip = player['whip']
+    leading.append(f"{era:.2f} ERA" if era is not None else "— ERA")
+    leading.append(f"{whip:.2f} WHIP" if whip is not None else "— WHIP")
+
+    k = int(player['k'] or 0)
+    bb = int(player['p_bb'] or 0)
+    ip = fmt_ip(player['outs'])
+
+    return (
+        f"{player['pitching_points']:.1f} pts by {player['display_name']} "
+        f"({player['team_name']}) -- "
+        f"{', '.join(leading)}. "
+        f"{k} K : {bb} BB over {ip} IP"
+    )
+
+
 def get_records(active_season, season_only=False):
     """
     Fetch all matchup scores for records calculation.
@@ -153,7 +248,7 @@ def get_records(active_season, season_only=False):
             f.total_points,
             f.hitting_points,
             f.pitching_points
-        FROM fct_weekly_team_scores f
+        FROM fct_weekly_team_stats f
         LEFT JOIN MATCHUP_SCHEDULE s
             ON f.season_year = s.season_year
             AND f.matchup_period = s.matchup_period
@@ -211,17 +306,30 @@ def generate_summary(matchup_period, scores, contributions, season_records, allt
     lines = [
         f"[u][b]Matchup #{matchup_period} Recap[/b][/u]",
         f"",
-        f"[b]Best Overall[/b]: {best_overall['total_points']:.1f} pts by {best_overall['team_name']} ({best_overall['owner_name']})",
+        f"[b]Best Overall[/b]: {best_overall['total_points']:.1f} pts by {best_overall['team_name']}",
         f"{fmt_players(contributions['top_overall'])}",
-        f"[b]Best Hitting[/b]: {best_hitting['hitting_points']:.1f} pts by {best_hitting['team_name']} ({best_hitting['owner_name']})",
+        f"[b]Best Hitting[/b]: {best_hitting['hitting_points']:.1f} pts by {best_hitting['team_name']}",
         f"{fmt_players(contributions['top_hitters'], 'hitting_points')}",
-        f"[b]Best Pitching[/b]: {best_pitching['pitching_points']:.1f} pts by {best_pitching['team_name']} ({best_pitching['owner_name']})",
+        f"[b]Best Pitching[/b]: {best_pitching['pitching_points']:.1f} pts by {best_pitching['team_name']}",
         f"{fmt_players(contributions['top_pitchers'], 'pitching_points')}",
         f"",
-        f"[b]Worst Overall[/b]: {worst_overall['total_points']:.1f} pts by {worst_overall['team_name']} ({worst_overall['owner_name']})",
-        f"[b]Worst Hitting[/b]: {worst_hitting['hitting_points']:.1f} pts by {worst_hitting['team_name']} ({worst_hitting['owner_name']})",
-        f"[b]Worst Pitching[/b]: {worst_pitching['pitching_points']:.1f} pts by {worst_pitching['team_name']} ({worst_pitching['owner_name']})",
+        f"[b]Worst Overall[/b]: {worst_overall['total_points']:.1f} pts by {worst_overall['team_name']}",
+        f"[b]Worst Hitting[/b]: {worst_hitting['hitting_points']:.1f} pts by {worst_hitting['team_name']}",
+        f"[b]Worst Pitching[/b]: {worst_pitching['pitching_points']:.1f} pts by {worst_pitching['team_name']}",
     ]
+
+    # Player-level superlatives across the whole league (top hitter / top pitcher
+    # by hitting_points and pitching_points respectively). Stashed in the
+    # contributions dict by get_contribution_callouts.
+    top_hitter = contributions.get('top_hitter')
+    top_pitcher = contributions.get('top_pitcher')
+    if top_hitter:
+        lines.extend([
+            f"",
+            f"[b]Top Hitter[/b]: {format_hitter_line(top_hitter)}",
+        ])
+    if top_pitcher:
+        lines.append(f"[b]Top Pitcher[/b]: {format_pitcher_line(top_pitcher)}")
 
     # Tough Luck
     tough_luck = find_tough_luck(scores)
@@ -270,11 +378,20 @@ def generate_summary(matchup_period, scores, contributions, season_records, allt
         f"[b]Worst Matchup Total[/b]: {alltime_records['worst_total']}",
         f"[b]Worst Matchup Hitting[/b]: {alltime_records['worst_hitting']}",
         f"[b]Worst Matchup Pitching[/b]: {alltime_records['worst_pitching']}",
-        f"",
-        f"[i]*All records exclude matchups lasting longer than 7 days.[/i]",
-        f"[i]*Scoring settings changed between 2025 and 2026 — all-time records reflect raw scores under each season's settings. "
-        f"Future iterations will calculate scores according to current league settings, for now we just have the output as it existed at the time.[/i]",
     ])
+
+    # Optional league note from output/LeagueNote.txt -- print contents verbatim
+    # if the file exists and is non-empty. Lets the commissioner add ad-hoc
+    # commentary, scoring change notes, etc., without code changes.
+    note_path = os.path.join(os.path.dirname(__file__), "LeagueNote.txt")
+    if os.path.exists(note_path):
+        with open(note_path, "r", encoding="utf-8") as f:
+            note_content = f.read().strip()
+        if note_content:
+            lines.extend([
+                f"",
+                note_content,
+            ])
 
     # Write to timestamped log file
     from datetime import datetime
@@ -290,11 +407,10 @@ def generate_summary(matchup_period, scores, contributions, season_records, allt
 
 if __name__ == "__main__":
     active_season = query_snowflake(
-        "SELECT MAX(season_year) as sy FROM fct_weekly_team_scores"
+        "SELECT MAX(season_year) as sy FROM fct_weekly_team_stats"
     )[0]['sy']
 
     matchup_period, scores = get_weekly_scores(active_season)
-    # get_matchups call is gone
     players        = get_player_contributions(active_season, matchup_period)
     contributions  = get_contribution_callouts(scores, players)
 

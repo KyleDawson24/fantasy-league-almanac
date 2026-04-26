@@ -64,14 +64,51 @@ models:
       - name: player_type
         description: 'Derived classification based on lineup_slot: pitching for SP/RP/P slots, hitting for all others. Consumed by the weekly mart CASE WHEN to produce hitting_points and pitching_points columns.'
 
+  - name: int_player_daily_stats
+    description: >
+      Slot-agnostic player-daily stat detail. Joins stat_classification to
+      bring in stat_category and filters to is_counting=true (rates dropped
+      since they cannot be summed; recomputed via macros at the fact layer
+      where slot filter has been applied). Long format. lineup_slot
+      preserved so downstream models can produce active variants
+      (fct_weekly_player_stats) and inactive variants (future
+      mart_wasted_points) from the same intermediate.
+      Grain: (season_year, matchup_period, scoring_period, team_id, player_id, lineup_slot, stat_name).
+    columns:
+      - name: season_year
+        description: 'ESPN season year.'
+      - name: matchup_period
+        description: 'ESPN matchup period number.'
+      - name: scoring_period
+        description: 'Daily ESPN scoring period number.'
+      - name: team_id
+        description: 'ESPN stable numeric team identifier.'
+      - name: team_name
+        description: 'ESPN fantasy team name.'
+      - name: owner_name
+        description: 'Team owner display name.'
+      - name: player_id
+        description: 'ESPN stable numeric player identifier.'
+      - name: player_name
+        description: 'Player full name.'
+      - name: lineup_slot
+        description: 'Fantasy lineup slot occupied on this day. Active slots = positions; BE/IL/FA = inactive. Preserved so downstream filters can split active vs inactive paths.'
+      - name: stat_name
+        description: 'Stat abbreviation, filtered to is_counting=true.'
+      - name: stat_category
+        description: 'hitting, pitching, or fielding, from stat_classification.'
+      - name: stat_value
+        description: 'Numeric stat value for this player on this day.'
+
   - name: int_player_weekly_stats
     description: >
-      Player-level weekly stat totals with business filters applied:
-      active lineup slots only (bench/IL excluded) and counting stats only
-      (rates excluded via stat_classification.is_counting). Joins
-      stat_classification to carry stat_category through. Grain:
-      one row per (season_year, matchup_period, team_id, player_id, stat_name).
-      Feeds fct_weekly_player_stats.
+      Wide pivot of counting stats from int_player_daily_stats. lineup_slot
+      preserved as a grain dimension so the fact layer can filter by slot
+      and aggregate slot dimension away post-filter. A player who occupied
+      multiple slots within a matchup_period produces multiple rows here.
+      Counting columns only at this grain -- rates are computed at the fact
+      layer because meaningful rates require the slot filter applied first.
+      Grain: (season_year, matchup_period, team_id, player_id, lineup_slot).
     columns:
       - name: season_year
         description: 'ESPN season year.'
@@ -87,9 +124,67 @@ models:
         description: 'ESPN stable numeric player identifier.'
       - name: player_name
         description: 'Player full name.'
-      - name: stat_name
-        description: 'Stat abbreviation, filtered to is_counting=true via stat_classification join.'
-      - name: stat_category
-        description: 'hitting, pitching, or fielding, from stat_classification.'
-      - name: stat_value
-        description: 'Sum of stat_value across active scoring_periods within the matchup_period.'
+      - name: lineup_slot
+        description: 'Fantasy lineup slot. Preserved as grain dimension; downstream facts filter and collapse.'
+      - name: h
+        description: 'Hits (sum across scoring periods within this slot).'
+      - name: ab
+        description: 'At bats.'
+      - name: b_bb
+        description: 'Batter walks.'
+      - name: b_so
+        description: 'Batter strikeouts.'
+      - name: hbp
+        description: 'Hit by pitch.'
+      - name: sf
+        description: 'Sacrifice flies.'
+      - name: hr
+        description: 'Home runs.'
+      - name: r
+        description: 'Runs.'
+      - name: rbi
+        description: 'Runs batted in.'
+      - name: sb
+        description: 'Stolen bases.'
+      - name: cs
+        description: 'Caught stealing.'
+      - name: tb
+        description: 'Total bases.'
+      - name: singles
+        description: 'Singles (1B in seed).'
+      - name: doubles
+        description: 'Doubles (2B in seed).'
+      - name: triples
+        description: 'Triples (3B in seed).'
+      - name: xbh
+        description: 'Extra-base hits.'
+      - name: w
+        description: 'Pitcher wins.'
+      - name: l
+        description: 'Pitcher losses.'
+      - name: k
+        description: 'Pitcher strikeouts.'
+      - name: er
+        description: 'Earned runs allowed.'
+      - name: outs
+        description: 'Outs recorded. Innings pitched = outs / 3.'
+      - name: qs
+        description: 'Quality starts.'
+      - name: sv
+        description: 'Saves.'
+      - name: hld
+        description: 'Holds.'
+      - name: p_h
+        description: 'Hits allowed.'
+      - name: p_bb
+        description: 'Walks allowed.'
+      - name: p_hr
+        description: 'Home runs allowed.'
+      - name: p_r
+        description: 'Runs allowed.'
+      - name: cg
+        description: 'Complete games.'
+      - name: blk
+        description: 'Balks.'
+      - name: wp
+        description: 'Wild pitches.'

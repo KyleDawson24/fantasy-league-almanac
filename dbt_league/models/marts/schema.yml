@@ -31,7 +31,7 @@ models:
       - name: display_name
         description: 'COALESCE of player_nicknames.nickname and player_name. Used by the output script for contributor callouts.'
 
-  - name: fct_weekly_player_stats
+  - name: fct_weekly_player_performance
     description: >
       Wide-format player-weekly convergence fact. The consumer-facing entity
       for "what did this player do this week" -- counting stats, rate stats,
@@ -159,7 +159,7 @@ models:
       - name: pitching_points
         description: 'Platform-computed fantasy points from pitching lineup slots.'
 
-  - name: fct_weekly_team_stats
+  - name: fct_weekly_team_performance
     description: >
       Wide-format team-weekly convergence fact. Phase 3.1: absorbs the
       responsibilities of the deleted fct_weekly_team_scores -- includes

@@ -1,7 +1,11 @@
--- fct_weekly_player_stats.sql
+-- fct_weekly_player_performance.sql
 -- Wide-format player-weekly convergence fact. The consumer-facing entity for
 -- "what did this player do this week" -- counting stats, rate stats, and
 -- platform fantasy points all in a single row per player per matchup.
+--
+-- Renamed from fct_weekly_player_stats in Phase 3.1.1 because the table
+-- carries fantasy scoring totals alongside counting and rate stats; the
+-- old "_stats" name was misleading.
 --
 -- Pipeline:
 --   1. Read int_player_weekly_stats (slot-preserved counting columns)

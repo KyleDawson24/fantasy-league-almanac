@@ -14,7 +14,7 @@ Tie handling:
     "N others with 0"
 
 Reads from mart_stat_leaderboard (entity_grain='team', scope='all_time')
-for the records and from fct_weekly_player_stats for the per-team
+for the records and from fct_weekly_player_performance for the per-team
 contributor breakouts. Output is a BBCode-formatted block, printed to
 stdout and written to a timestamped log file under output/logs/.
 """
@@ -138,7 +138,7 @@ def get_team_contributors(season_year, matchup_period, team_id, stat_column):
     """
     return query_snowflake(f"""
         SELECT display_name, {stat_column} AS stat_value
-        FROM fct_weekly_player_stats
+        FROM fct_weekly_player_performance
         WHERE season_year = %s
           AND matchup_period = %s
           AND team_id = %s

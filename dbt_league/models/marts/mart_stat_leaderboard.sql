@@ -4,7 +4,7 @@
 -- pitching_points) columns.
 --
 -- Implementation uses Snowflake UNPIVOT to fold wide columns from
--- fct_weekly_team_stats and fct_weekly_player_stats back into
+-- fct_weekly_team_performance and fct_weekly_player_performance back into
 -- (stat_name, stat_value) long format, then ranks uniformly. UNPIVOT is
 -- Snowflake-specific; if the project ever moves to a different warehouse
 -- (e.g. DuckDB for a local-CLI build), this can be rewritten as an explicit
@@ -33,7 +33,7 @@ with team_source as (
         t.w, t.l, t.k, t.er, t.outs, t.qs, t.sv, t.hld,
         t.p_h, t.p_bb, t.p_hr, t.p_r, t.cg, t.blk, t.wp,
         t.total_points, t.hitting_points, t.pitching_points
-    from {{ ref('fct_weekly_team_stats') }} t
+    from {{ ref('fct_weekly_team_performance') }} t
     inner join {{ ref('matchup_schedule') }} s
         on t.season_year = s.season_year
         and t.matchup_period = s.matchup_period
@@ -78,7 +78,7 @@ player_source as (
         p.w, p.l, p.k, p.er, p.outs, p.qs, p.sv, p.hld,
         p.p_h, p.p_bb, p.p_hr, p.p_r, p.cg, p.blk, p.wp,
         p.total_points, p.hitting_points, p.pitching_points
-    from {{ ref('fct_weekly_player_stats') }} p
+    from {{ ref('fct_weekly_player_performance') }} p
     inner join {{ ref('matchup_schedule') }} s
         on p.season_year = s.season_year
         and p.matchup_period = s.matchup_period

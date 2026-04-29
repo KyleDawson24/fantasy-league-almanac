@@ -1,10 +1,14 @@
--- fct_weekly_team_stats.sql
+-- fct_weekly_team_performance.sql
 -- Wide-format team-weekly convergence fact. Absorbs everything the old
 -- fct_weekly_team_scores carried (scoring totals, opponent context, W/L)
 -- and adds counting + rate stats.
 --
+-- Renamed from fct_weekly_team_stats in Phase 3.1.1 because the table
+-- carries fantasy scoring totals and matchup context alongside counting
+-- and rate stats; the old "_stats" name was misleading.
+--
 -- Pipeline:
---   1. Roll up fct_weekly_player_stats to team grain (SUM counting, SUM scoring)
+--   1. Roll up fct_weekly_player_performance to team grain (SUM counting, SUM scoring)
 --   2. Recompute rate stats via macros from team-level counting sums
 --   3. Extract matchup pairings from raw box scores
 --   4. Self-join for opponent context (home + away halves UNIONed)
@@ -62,7 +66,7 @@ with team_rollup as (
         sum(hitting_points)  as hitting_points,
         sum(pitching_points) as pitching_points,
         count(distinct player_id) as active_player_count
-    from {{ ref('fct_weekly_player_stats') }}
+    from {{ ref('fct_weekly_player_performance') }}
     group by 1, 2, 3, 4, 5
 ),
 

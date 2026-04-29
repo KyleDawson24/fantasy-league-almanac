@@ -1,7 +1,7 @@
 """
 Generate the weekly front-page summary from the mart tables.
 
-Reads fct_weekly_team_stats and fct_weekly_player_stats (the wide
+Reads fct_weekly_team_performance and fct_weekly_player_performance (the wide
 convergence facts shipped in Phase 3.1) to produce a BBCode-formatted
 summary for the ESPN league front page.
 """
@@ -40,7 +40,7 @@ def get_weekly_scores(season_year, matchup_period=None):
     if matchup_period is None:
         result = query_snowflake("""
             SELECT MAX(matchup_period) as mp
-            FROM fct_weekly_team_stats
+            FROM fct_weekly_team_performance
             WHERE season_year = %s
         """, (season_year,))
         matchup_period = result[0]['mp']
@@ -50,7 +50,7 @@ def get_weekly_scores(season_year, matchup_period=None):
                total_points, hitting_points, pitching_points,
                owner_name, opponent_name,
                opponent_owner, opponent_points, result
-        FROM fct_weekly_team_stats
+        FROM fct_weekly_team_performance
         WHERE matchup_period = %s
         AND season_year = %s
         ORDER BY total_points DESC
@@ -61,7 +61,7 @@ def get_weekly_scores(season_year, matchup_period=None):
 def get_player_contributions(season_year, matchup_period):
     """Fetch weekly player stats for contributor callouts.
 
-    Sources from fct_weekly_player_stats (the wide convergence fact) for
+    Sources from fct_weekly_player_performance (the wide convergence fact) for
     architectural consistency with team queries -- both go through the
     convergence facts, not the legacy *_scores facts.
 
@@ -78,7 +78,7 @@ def get_player_contributions(season_year, matchup_period):
                -- Pitching counting + rates for Top Pitcher callout
                w, sv, k, p_bb, outs,
                era, whip
-        FROM fct_weekly_player_stats
+        FROM fct_weekly_player_performance
         WHERE matchup_period = %s
         AND season_year = %s
         ORDER BY total_points DESC
@@ -248,7 +248,7 @@ def get_records(active_season, season_only=False):
             f.total_points,
             f.hitting_points,
             f.pitching_points
-        FROM fct_weekly_team_stats f
+        FROM fct_weekly_team_performance f
         LEFT JOIN MATCHUP_SCHEDULE s
             ON f.season_year = s.season_year
             AND f.matchup_period = s.matchup_period
@@ -407,7 +407,7 @@ def generate_summary(matchup_period, scores, contributions, season_records, allt
 
 if __name__ == "__main__":
     active_season = query_snowflake(
-        "SELECT MAX(season_year) as sy FROM fct_weekly_team_stats"
+        "SELECT MAX(season_year) as sy FROM fct_weekly_team_performance"
     )[0]['sy']
 
     matchup_period, scores = get_weekly_scores(active_season)

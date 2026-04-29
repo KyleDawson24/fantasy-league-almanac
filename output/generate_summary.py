@@ -47,13 +47,13 @@ def get_weekly_scores(season_year, matchup_period=None):
 
     scores = query_snowflake("""
         SELECT season_year, matchup_period, team_name, team_id,
-               total_points, hitting_points, pitching_points,
+               platform_points, platform_hitting_pts, platform_pitching_pts,
                owner_name, opponent_name,
                opponent_owner, opponent_points, result
         FROM fct_weekly_team_performance
         WHERE matchup_period = %s
         AND season_year = %s
-        ORDER BY total_points DESC
+        ORDER BY platform_points DESC
     """, (matchup_period, season_year))
 
     return matchup_period, scores
@@ -71,7 +71,7 @@ def get_player_contributions(season_year, matchup_period):
     """
     return query_snowflake("""
         SELECT team_name, team_id, player_id, display_name,
-               total_points, hitting_points, pitching_points,
+               platform_points, platform_hitting_pts, platform_pitching_pts,
                -- Hitting counting + rates for Top Hitter callout
                h, ab, hr, rbi, sb,
                avg, obp, slg,
@@ -81,27 +81,27 @@ def get_player_contributions(season_year, matchup_period):
         FROM fct_weekly_player_performance
         WHERE matchup_period = %s
         AND season_year = %s
-        ORDER BY total_points DESC
+        ORDER BY platform_points DESC
     """, (matchup_period, season_year))
 
 def get_contribution_callouts(scores, players):
     best_overall_team  = scores[0]['team_name']
-    best_hitting_team  = sorted(scores, key=lambda x: x['hitting_points'], reverse=True)[0]['team_name']
-    best_pitching_team = sorted(scores, key=lambda x: x['pitching_points'], reverse=True)[0]['team_name']
+    best_hitting_team  = sorted(scores, key=lambda x: x['platform_hitting_pts'], reverse=True)[0]['team_name']
+    best_pitching_team = sorted(scores, key=lambda x: x['platform_pitching_pts'], reverse=True)[0]['team_name']
 
     top_overall = [
         p for p in players if p['team_name'] == best_overall_team
     ][:5]
 
     top_hitters = sorted(
-        [p for p in players if p['team_name'] == best_hitting_team and p['hitting_points'] > 0],
-        key=lambda x: x['hitting_points'],
+        [p for p in players if p['team_name'] == best_hitting_team and p['platform_hitting_pts'] > 0],
+        key=lambda x: x['platform_hitting_pts'],
         reverse=True
     )[:3]
 
     top_pitchers = sorted(
-        [p for p in players if p['team_name'] == best_pitching_team and p['pitching_points'] > 0],
-        key=lambda x: x['pitching_points'],
+        [p for p in players if p['team_name'] == best_pitching_team and p['platform_pitching_pts'] > 0],
+        key=lambda x: x['platform_pitching_pts'],
         reverse=True
     )[:3]
 
@@ -118,12 +118,12 @@ def get_contribution_callouts(scores, players):
     }
 
 def find_tough_luck(scores):
-    ranked = sorted(scores, key=lambda x: x['total_points'], reverse=True)
+    ranked = sorted(scores, key=lambda x: x['platform_points'], reverse=True)
     second_place = ranked[1]
     if second_place['result'] == 'L':
         return {
             'team': second_place['team_name'],
-            'points': second_place['total_points'],
+            'points': second_place['platform_points'],
             'opponent': second_place['opponent_name'],
             'opponent_points': second_place['opponent_points'],
         }
@@ -131,12 +131,12 @@ def find_tough_luck(scores):
 
 
 def find_lucky_bastard(scores):
-    ranked = sorted(scores, key=lambda x: x['total_points'], reverse=True)
+    ranked = sorted(scores, key=lambda x: x['platform_points'], reverse=True)
     second_worst = ranked[-2]
     if second_worst['result'] == 'W':
         return {
             'team': second_worst['team_name'],
-            'points': second_worst['total_points'],
+            'points': second_worst['platform_points'],
             'opponent': second_worst['opponent_name'],
             'opponent_points': second_worst['opponent_points'],
         }
@@ -144,7 +144,7 @@ def find_lucky_bastard(scores):
 
 
 def check_fair_and_just(scores):
-    ranked = sorted(scores, key=lambda x: x['total_points'], reverse=True)
+    ranked = sorted(scores, key=lambda x: x['platform_points'], reverse=True)
     # Count active matchups from scores that have an opponent
     num_matchups = len([s for s in scores if s['opponent_name'] is not None]) // 2
     for i, team in enumerate(ranked):
@@ -176,15 +176,15 @@ def fmt_ip(outs):
 
 
 def find_top_hitter(players):
-    """Player with the highest hitting_points (>0). None if no qualifying player."""
-    hitters = [p for p in players if (p['hitting_points'] or 0) > 0]
-    return max(hitters, key=lambda p: p['hitting_points']) if hitters else None
+    """Player with the highest platform_hitting_pts (>0). None if no qualifying player."""
+    hitters = [p for p in players if (p['platform_hitting_pts'] or 0) > 0]
+    return max(hitters, key=lambda p: p['platform_hitting_pts']) if hitters else None
 
 
 def find_top_pitcher(players):
-    """Player with the highest pitching_points (>0). None if no qualifying player."""
-    pitchers = [p for p in players if (p['pitching_points'] or 0) > 0]
-    return max(pitchers, key=lambda p: p['pitching_points']) if pitchers else None
+    """Player with the highest platform_pitching_pts (>0). None if no qualifying player."""
+    pitchers = [p for p in players if (p['platform_pitching_pts'] or 0) > 0]
+    return max(pitchers, key=lambda p: p['platform_pitching_pts']) if pitchers else None
 
 
 def format_hitter_line(player):
@@ -198,7 +198,7 @@ def format_hitter_line(player):
         counting.append(f"{int(player['sb'])} SB")
 
     return (
-        f"{player['hitting_points']:.1f} pts by {player['display_name']} "
+        f"{player['platform_hitting_pts']:.1f} pts by {player['display_name']} "
         f"({player['team_name']}) -- "
         f"{rate} over {int(player['ab'] or 0)} AB. "
         f"{', '.join(counting)}"
@@ -225,7 +225,7 @@ def format_pitcher_line(player):
     ip = fmt_ip(player['outs'])
 
     return (
-        f"{player['pitching_points']:.1f} pts by {player['display_name']} "
+        f"{player['platform_pitching_pts']:.1f} pts by {player['display_name']} "
         f"({player['team_name']}) -- "
         f"{', '.join(leading)}. "
         f"{k} K : {bb} BB over {ip} IP"
@@ -245,9 +245,9 @@ def get_records(active_season, season_only=False):
             f.matchup_period,
             f.team_name,
             f.owner_name,
-            f.total_points,
-            f.hitting_points,
-            f.pitching_points
+            f.platform_points,
+            f.platform_hitting_pts,
+            f.platform_pitching_pts
         FROM fct_weekly_team_performance f
         LEFT JOIN MATCHUP_SCHEDULE s
             ON f.season_year = s.season_year
@@ -258,13 +258,13 @@ def get_records(active_season, season_only=False):
 
 
 def format_records(records):
-    best_total    = max(records, key=lambda x: x['total_points'])
-    best_hitting  = max(records, key=lambda x: x['hitting_points'])
-    best_pitching = max(records, key=lambda x: x['pitching_points'])
+    best_total    = max(records, key=lambda x: x['platform_points'])
+    best_hitting  = max(records, key=lambda x: x['platform_hitting_pts'])
+    best_pitching = max(records, key=lambda x: x['platform_pitching_pts'])
 
-    worst_total    = min(records, key=lambda x: x['total_points'])
-    worst_hitting  = min(records, key=lambda x: x['hitting_points'])
-    worst_pitching = min(records, key=lambda x: x['pitching_points'])
+    worst_total    = min(records, key=lambda x: x['platform_points'])
+    worst_hitting  = min(records, key=lambda x: x['platform_hitting_pts'])
+    worst_pitching = min(records, key=lambda x: x['platform_pitching_pts'])
 
     def fmt(row, score_key):
         return (
@@ -274,12 +274,12 @@ def format_records(records):
         )
 
     return {
-        'best_total':     fmt(best_total,    'total_points'),
-        'best_hitting':   fmt(best_hitting,  'hitting_points'),
-        'best_pitching':  fmt(best_pitching, 'pitching_points'),
-        'worst_total':    fmt(worst_total,   'total_points'),
-        'worst_hitting':  fmt(worst_hitting, 'hitting_points'),
-        'worst_pitching': fmt(worst_pitching,'pitching_points'),
+        'best_total':     fmt(best_total,    'platform_points'),
+        'best_hitting':   fmt(best_hitting,  'platform_hitting_pts'),
+        'best_pitching':  fmt(best_pitching, 'platform_pitching_pts'),
+        'worst_total':    fmt(worst_total,   'platform_points'),
+        'worst_hitting':  fmt(worst_hitting, 'platform_hitting_pts'),
+        'worst_pitching': fmt(worst_pitching,'platform_pitching_pts'),
     }
 
 
@@ -289,15 +289,15 @@ def generate_summary(matchup_period, scores, contributions, season_records, allt
     best_overall = scores[0]
     worst_overall = scores[-1]
 
-    by_hitting = sorted(scores, key=lambda x: x['hitting_points'], reverse=True)
+    by_hitting = sorted(scores, key=lambda x: x['platform_hitting_pts'], reverse=True)
     best_hitting = by_hitting[0]
     worst_hitting = by_hitting[-1]
 
-    by_pitching = sorted(scores, key=lambda x: x['pitching_points'], reverse=True)
+    by_pitching = sorted(scores, key=lambda x: x['platform_pitching_pts'], reverse=True)
     best_pitching = by_pitching[0]
     worst_pitching = by_pitching[-1]
 
-    def fmt_players(player_list, score_key='total_points'):
+    def fmt_players(player_list, score_key='platform_points'):
         return ", ".join(
             f"{p['display_name']}: {p[score_key]:.1f}"
             for p in player_list
@@ -306,20 +306,20 @@ def generate_summary(matchup_period, scores, contributions, season_records, allt
     lines = [
         f"[u][b]Matchup #{matchup_period} Recap[/b][/u]",
         f"",
-        f"[b]Best Overall[/b]: {best_overall['total_points']:.1f} pts by {best_overall['team_name']}",
+        f"[b]Best Overall[/b]: {best_overall['platform_points']:.1f} pts by {best_overall['team_name']}",
         f"{fmt_players(contributions['top_overall'])}",
-        f"[b]Best Hitting[/b]: {best_hitting['hitting_points']:.1f} pts by {best_hitting['team_name']}",
-        f"{fmt_players(contributions['top_hitters'], 'hitting_points')}",
-        f"[b]Best Pitching[/b]: {best_pitching['pitching_points']:.1f} pts by {best_pitching['team_name']}",
-        f"{fmt_players(contributions['top_pitchers'], 'pitching_points')}",
+        f"[b]Best Hitting[/b]: {best_hitting['platform_hitting_pts']:.1f} pts by {best_hitting['team_name']}",
+        f"{fmt_players(contributions['top_hitters'], 'platform_hitting_pts')}",
+        f"[b]Best Pitching[/b]: {best_pitching['platform_pitching_pts']:.1f} pts by {best_pitching['team_name']}",
+        f"{fmt_players(contributions['top_pitchers'], 'platform_pitching_pts')}",
         f"",
-        f"[b]Worst Overall[/b]: {worst_overall['total_points']:.1f} pts by {worst_overall['team_name']}",
-        f"[b]Worst Hitting[/b]: {worst_hitting['hitting_points']:.1f} pts by {worst_hitting['team_name']}",
-        f"[b]Worst Pitching[/b]: {worst_pitching['pitching_points']:.1f} pts by {worst_pitching['team_name']}",
+        f"[b]Worst Overall[/b]: {worst_overall['platform_points']:.1f} pts by {worst_overall['team_name']}",
+        f"[b]Worst Hitting[/b]: {worst_hitting['platform_hitting_pts']:.1f} pts by {worst_hitting['team_name']}",
+        f"[b]Worst Pitching[/b]: {worst_pitching['platform_pitching_pts']:.1f} pts by {worst_pitching['team_name']}",
     ]
 
     # Player-level superlatives across the whole league (top hitter / top pitcher
-    # by hitting_points and pitching_points respectively). Stashed in the
+    # by platform_hitting_pts and platform_pitching_pts respectively). Stashed in the
     # contributions dict by get_contribution_callouts.
     top_hitter = contributions.get('top_hitter')
     top_pitcher = contributions.get('top_pitcher')

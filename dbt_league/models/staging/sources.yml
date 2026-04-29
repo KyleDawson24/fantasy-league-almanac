@@ -7,3 +7,5 @@ sources:
     tables:
       - name: box_scores
         description: "Raw ESPN Fantasy box score JSON, one row per scoring period. Each row contains all matchups for that day with full player lineups and stat breakdowns."
+      - name: scoring_settings
+        description: "Raw ESPN Fantasy scoring settings JSON, append-only. Each row is a snapshot of the league's scoring weights for a season, captured at extraction time. The staging model picks the latest snapshot per season."

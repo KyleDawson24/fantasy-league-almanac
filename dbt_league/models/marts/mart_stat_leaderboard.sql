@@ -1,7 +1,7 @@
 -- mart_stat_leaderboard.sql
 -- Top-10 leaderboard across team AND player grains, for both stat-level
--- (HR, K, RBI, etc.) and score-level (total_points, hitting_points,
--- pitching_points) columns.
+-- (HR, K, RBI, etc.) and score-level (platform_points, platform_hitting_pts,
+-- platform_pitching_pts) columns.
 --
 -- Implementation uses Snowflake UNPIVOT to fold wide columns from
 -- fct_weekly_team_performance and fct_weekly_player_performance back into
@@ -32,7 +32,7 @@ with team_source as (
         t.sb, t.cs, t.tb, t.singles, t.doubles, t.triples, t.xbh,
         t.w, t.l, t.k, t.er, t.outs, t.qs, t.sv, t.hld,
         t.p_h, t.p_bb, t.p_hr, t.p_r, t.cg, t.blk, t.wp,
-        t.total_points, t.hitting_points, t.pitching_points
+        t.platform_points, t.platform_hitting_pts, t.platform_pitching_pts
     from {{ ref('fct_weekly_team_performance') }} t
     inner join {{ ref('matchup_schedule') }} s
         on t.season_year = s.season_year
@@ -59,7 +59,7 @@ team_unpivoted as (
         sb, cs, tb, singles, doubles, triples, xbh,
         w, l, k, er, outs, qs, sv, hld,
         p_h, p_bb, p_hr, p_r, cg, blk, wp,
-        total_points, hitting_points, pitching_points
+        platform_points, platform_hitting_pts, platform_pitching_pts
     ))
 ),
 
@@ -77,7 +77,7 @@ player_source as (
         p.sb, p.cs, p.tb, p.singles, p.doubles, p.triples, p.xbh,
         p.w, p.l, p.k, p.er, p.outs, p.qs, p.sv, p.hld,
         p.p_h, p.p_bb, p.p_hr, p.p_r, p.cg, p.blk, p.wp,
-        p.total_points, p.hitting_points, p.pitching_points
+        p.platform_points, p.platform_hitting_pts, p.platform_pitching_pts
     from {{ ref('fct_weekly_player_performance') }} p
     inner join {{ ref('matchup_schedule') }} s
         on p.season_year = s.season_year
@@ -104,7 +104,7 @@ player_unpivoted as (
         sb, cs, tb, singles, doubles, triples, xbh,
         w, l, k, er, outs, qs, sv, hld,
         p_h, p_bb, p_hr, p_r, cg, blk, wp,
-        total_points, hitting_points, pitching_points
+        platform_points, platform_hitting_pts, platform_pitching_pts
     ))
 ),
 

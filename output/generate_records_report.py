@@ -40,7 +40,7 @@ SNOWFLAKE_CONFIG = {
 # Display labels and ordering for stat names. Anything not in this list still
 # gets reported (with stat_name as the display) but is appended to the end.
 STAT_ORDER = [
-    'TOTAL_POINTS', 'HITTING_POINTS', 'PITCHING_POINTS',
+    'PLATFORM_POINTS', 'PLATFORM_HITTING_PTS', 'PLATFORM_PITCHING_PTS',
     # Hitting
     'HR', 'RBI', 'R', 'H', 'TB', 'XBH',
     'DOUBLES', 'TRIPLES', 'SINGLES',
@@ -52,9 +52,9 @@ STAT_ORDER = [
 ]
 
 STAT_DISPLAY = {
-    'TOTAL_POINTS':    'Total Points',
-    'HITTING_POINTS':  'Hitting Points',
-    'PITCHING_POINTS': 'Pitching Points',
+    'PLATFORM_POINTS':       'Platform Points',
+    'PLATFORM_HITTING_PTS':  'Platform Hitting Points',
+    'PLATFORM_PITCHING_PTS': 'Platform Pitching Points',
     'H':       'Hits',
     'AB':      'At Bats',
     'B_BB':    'Walks (Batter)',

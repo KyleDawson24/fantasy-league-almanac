@@ -3,12 +3,15 @@
 -- fct_weekly_team_scores carried (scoring totals, opponent context, W/L)
 -- and adds counting + rate stats.
 --
--- Renamed from fct_weekly_team_stats in Phase 3.1.1 because the table
--- carries fantasy scoring totals and matchup context alongside counting
--- and rate stats; the old "_stats" name was misleading.
+-- Phase 3.2 additions: rolls up the per-stat *_pts columns and the
+-- calculated_* totals from fct_weekly_player_performance, so team-level
+-- consumers can ask the same "top N stats by point contribution" and
+-- "what would this team have scored under current rules" questions that
+-- the player fact supports.
 --
 -- Pipeline:
---   1. Roll up fct_weekly_player_performance to team grain (SUM counting, SUM scoring)
+--   1. Roll up fct_weekly_player_performance to team grain (SUM counting,
+--      SUM *_pts, SUM scoring totals, SUM calculated_*)
 --   2. Recompute rate stats via macros from team-level counting sums
 --   3. Extract matchup pairings from raw box scores
 --   4. Self-join for opponent context (home + away halves UNIONed)
@@ -16,7 +19,7 @@
 --
 -- Grain: one row per (season_year, matchup_period, team_id).
 --
--- Incremental -- merge by unique_key. For historical corrections use --full-refresh.
+-- Incremental — merge by unique_key. For historical corrections use --full-refresh.
 
 {{ config(
     materialized='incremental',
@@ -31,6 +34,8 @@ with team_rollup as (
         team_id,
         team_name,
         owner_name,
+
+        -- Hitting counting
         sum(h)       as h,
         sum(ab)      as ab,
         sum(b_bb)    as b_bb,
@@ -47,6 +52,26 @@ with team_rollup as (
         sum(doubles) as doubles,
         sum(triples) as triples,
         sum(xbh)     as xbh,
+
+        -- Hitting point contributions
+        sum(h_pts)       as h_pts,
+        sum(ab_pts)      as ab_pts,
+        sum(b_bb_pts)    as b_bb_pts,
+        sum(b_so_pts)    as b_so_pts,
+        sum(hbp_pts)     as hbp_pts,
+        sum(sf_pts)      as sf_pts,
+        sum(hr_pts)      as hr_pts,
+        sum(r_pts)       as r_pts,
+        sum(rbi_pts)     as rbi_pts,
+        sum(sb_pts)      as sb_pts,
+        sum(cs_pts)      as cs_pts,
+        sum(tb_pts)      as tb_pts,
+        sum(singles_pts) as singles_pts,
+        sum(doubles_pts) as doubles_pts,
+        sum(triples_pts) as triples_pts,
+        sum(xbh_pts)     as xbh_pts,
+
+        -- Pitching counting
         sum(w)       as w,
         sum(l)       as l,
         sum(k)       as k,
@@ -62,9 +87,34 @@ with team_rollup as (
         sum(cg)      as cg,
         sum(blk)     as blk,
         sum(wp)      as wp,
-        sum(total_points)    as total_points,
-        sum(hitting_points)  as hitting_points,
-        sum(pitching_points) as pitching_points,
+
+        -- Pitching point contributions
+        sum(w_pts)    as w_pts,
+        sum(l_pts)    as l_pts,
+        sum(k_pts)    as k_pts,
+        sum(er_pts)   as er_pts,
+        sum(outs_pts) as outs_pts,
+        sum(qs_pts)   as qs_pts,
+        sum(sv_pts)   as sv_pts,
+        sum(hld_pts)  as hld_pts,
+        sum(p_h_pts)  as p_h_pts,
+        sum(p_bb_pts) as p_bb_pts,
+        sum(p_hr_pts) as p_hr_pts,
+        sum(p_r_pts)  as p_r_pts,
+        sum(cg_pts)   as cg_pts,
+        sum(blk_pts)  as blk_pts,
+        sum(wp_pts)   as wp_pts,
+
+        -- Platform scoring (ESPN-computed; renamed from total_points etc. in Phase 3.2)
+        sum(platform_points)        as platform_points,
+        sum(platform_hitting_pts)   as platform_hitting_pts,
+        sum(platform_pitching_pts)  as platform_pitching_pts,
+
+        -- Calculated scoring (rules-normalized derivation)
+        sum(calculated_hitting_pts)  as calculated_hitting_pts,
+        sum(calculated_pitching_pts) as calculated_pitching_pts,
+        sum(calculated_points)       as calculated_points,
+
         count(distinct player_id) as active_player_count
     from {{ ref('fct_weekly_player_performance') }}
     group by 1, 2, 3, 4, 5
@@ -95,10 +145,10 @@ with_opponents as (
         opp.team_id      as opponent_id,
         opp.team_name    as opponent_name,
         opp.owner_name   as opponent_owner,
-        opp.total_points as opponent_points,
+        opp.platform_points as opponent_points,
         case
-            when t.total_points > opp.total_points then 'W'
-            when t.total_points < opp.total_points then 'L'
+            when t.platform_points > opp.platform_points then 'W'
+            when t.platform_points < opp.platform_points then 'L'
             else 'T'
         end as result
     from team_rollup t
@@ -119,10 +169,10 @@ with_opponents as (
         opp.team_id      as opponent_id,
         opp.team_name    as opponent_name,
         opp.owner_name   as opponent_owner,
-        opp.total_points as opponent_points,
+        opp.platform_points as opponent_points,
         case
-            when t.total_points > opp.total_points then 'W'
-            when t.total_points < opp.total_points then 'L'
+            when t.platform_points > opp.platform_points then 'W'
+            when t.platform_points < opp.platform_points then 'L'
             else 'T'
         end as result
     from team_rollup t

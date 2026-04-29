@@ -52,9 +52,11 @@ seeds:
     stat_classification:
       +column_types:
         stat_name: varchar
+        espn_stat_id: integer
         stat_category: varchar
         stat_description: varchar
         is_counting: boolean
+        notes: varchar
     player_nicknames:
       +column_types:
         player_id: integer

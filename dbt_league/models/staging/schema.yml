@@ -56,7 +56,7 @@ models:
       One row per (season, scoring_period, team, player, stat_name) -- the breakdown
       VARIANT flattened into relational shape. No business filters applied here;
       staging stays a pure reshape. Business filters (active slots, counting stats)
-      are applied in int_player_weekly_stats. Bench/IL rows are preserved so future
+      are applied in int_player_daily_stats. Bench/IL rows are preserved so future
       models (e.g. wasted-points analysis in Phase 4) can consume the same staging.
     tests:
       - dbt_utils.unique_combination_of_columns:
@@ -107,3 +107,26 @@ models:
         description: 'Numeric value of the stat for this player on this scoring period.'
         tests:
           - not_null
+
+  - name: stg_scoring_settings
+    description: >
+      Reshape raw scoring settings into one row per scored stat. Surfaces only
+      the CURRENT season's weights (max season_year with data); historical
+      settings remain preserved in RAW.SCORING_SETTINGS but are not surfaced
+      here. The current season's weights are applied universally — including
+      to historical stat breakdowns — so cross-season scores are comparable
+      under a common scale. When multiple extractions exist for the same
+      season, picks the most recent via ROW_NUMBER() on extracted_at.
+      Grain: one row per stat_name (no season_year dimension; this is a
+      single-season reference table).
+    columns:
+      - name: settings_season
+        description: 'Season year these weights came from (always the latest loaded). Carried through for traceability.'
+      - name: espn_stat_id
+        description: 'ESPN internal numeric stat ID. Bridges raw API to seed-defined stat names.'
+      - name: stat_name
+        description: 'Human-readable stat abbreviation (HR, RBI, K, etc.) joined from stat_classification on espn_stat_id.'
+      - name: stat_category
+        description: 'hitting, pitching, fielding, or unknown — passed through from stat_classification.'
+      - name: points_per_unit
+        description: 'Fantasy points awarded per unit of this stat under the current season''s scoring rules.'

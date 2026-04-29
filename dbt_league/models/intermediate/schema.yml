@@ -100,14 +100,18 @@ models:
       - name: stat_value
         description: 'Numeric stat value for this player on this day.'
 
-  - name: int_player_weekly_stats
+  - name: int_player_weekly_performance
     description: >
-      Wide pivot of counting stats from int_player_daily_stats. lineup_slot
-      preserved as a grain dimension so the fact layer can filter by slot
-      and aggregate slot dimension away post-filter. A player who occupied
+      Wide pivot of counting stats AND per-stat point contributions from
+      int_player_daily_stats (Phase 3.2: stat_points = stat_value *
+      points_per_unit was added at the daily layer; the weekly pivot now
+      surfaces both stat_value (h, ab, hr, ...) and stat_points (h_pts,
+      ab_pts, hr_pts, ...) for each counting stat). lineup_slot preserved
+      as a grain dimension so the fact layer can filter by slot and
+      aggregate slot dimension away post-filter. A player who occupied
       multiple slots within a matchup_period produces multiple rows here.
-      Counting columns only at this grain -- rates are computed at the fact
-      layer because meaningful rates require the slot filter applied first.
+      Rates are computed at the fact layer because meaningful rates require
+      the slot filter applied first.
       Grain: (season_year, matchup_period, team_id, player_id, lineup_slot).
     columns:
       - name: season_year

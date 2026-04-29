@@ -1,83 +1,86 @@
-stat_name,stat_category,stat_description,is_counting
-1B,hitting,Singles,true
-2B,hitting,Doubles,true
-3B,hitting,Triples,true
-AB,hitting,At Bats,true
-AVG,hitting,Batting Average,false
-B_BB,hitting,Walks (Batter),true
-B_IBB,hitting,Intentional Walks (Batter),true
-B_SO,hitting,Strikeouts (Batter),true
-CS,hitting,Caught Stealing,true
-CYC,hitting,Cycles,true
-GDP,hitting,Grounded Into Double Play,true
-H,hitting,Hits,true
-HBP,hitting,Hit By Pitch,true
-HR,hitting,Home Runs,true
-OBP,hitting,On Base Percentage,false
-OPS,hitting,On Base Plus Slugging,false
-PA,hitting,Plate Appearances,true
-PPA,hitting,Pitches Per Plate Appearance,false
-PS,hitting,Pitches Seen,true
-R,hitting,Runs,true
-RBI,hitting,Runs Batted In,true
-RC,hitting,Runs Created,true
-SAC,hitting,Sacrifice Hits and Flies,true
-SB,hitting,Stolen Bases,true
-SB-CS,hitting,Net Stolen Bases,true
-SF,hitting,Sacrifice Flies,true
-SH,hitting,Sacrifice Hits,true
-SLG,hitting,Slugging Percentage,false
-TB,hitting,Total Bases,true
-XBH,hitting,Extra Base Hits,true
-W,pitching,Wins,true
-L,pitching,Losses,true
-K,pitching,Strikeouts (Pitcher),true
-ERA,pitching,Earned Run Average,false
-WHIP,pitching,Walks Plus Hits Per Inning,false
-ER,pitching,Earned Runs,true
-OUTS,pitching,Outs Recorded,true
-QS,pitching,Quality Starts,true
-SV,pitching,Saves,true
-SVO,pitching,Save Opportunities,true
-SV%,pitching,Save Percentage,false
-HLD,pitching,Holds,true
-SVHD,pitching,Saves Plus Holds,true
-BLK,pitching,Balks,true
-BLSV,pitching,Blown Saves,true
-CG,pitching,Complete Games,true
-GP,pitching,Games Pitched,true
-GS,pitching,Games Started,true
-K/9,pitching,Strikeouts Per 9 Innings,false
-K/BB,pitching,Strikeout to Walk Ratio,false
-OBA,pitching,Opponent Batting Average,false
-OOBP,pitching,Opponent On Base Percentage,false
-P,pitching,Pitches Thrown,true
-PG,pitching,Pitches Per Game,false
-PK,pitching,Pickoffs,true
-P_BB,pitching,Walks Allowed,true
-P_H,pitching,Hits Allowed,true
-P_HR,pitching,Home Runs Allowed,true
-P_IBB,pitching,Intentional Walks Allowed,true
-P_R,pitching,Runs Allowed,true
-TBF,pitching,Total Batters Faced,true
-WP,pitching,Wild Pitches,true
-WPCT,pitching,Win Percentage,false
-A,fielding,Assists,true
-PO,fielding,Putouts,true
-E,fielding,Errors,true
-DP,fielding,Double Plays,true
-FPCT,fielding,Fielding Percentage,false
-TC,fielding,Total Chances,true
-OFA,fielding,Outfield Assists,true
-G,hitting,Games Played by Batters,true
-B_G_W,hitting,Batter Games Won,true
-B_G_L,hitting,Batter Games Lost,true
-P_G_W,pitching,Pitcher Games Won,true
-P_G_L,pitching,Pitcher Games Lost,true
-22,unknown,ESPN internal stat ID 22 (unresolved),false
-30,unknown,ESPN internal stat ID 30 (unresolved),false
-61,unknown,ESPN internal stat ID 61 (unresolved),false
-64,unknown,ESPN internal stat ID 64 (unresolved),false
-78,unknown,ESPN internal stat ID 78 (unresolved),false
-79,unknown,ESPN internal stat ID 79 (unresolved),false
-80,unknown,ESPN internal stat ID 80 (unresolved),false
+stat_name,espn_stat_id,stat_category,stat_description,is_counting,notes
+AB,0,hitting,At Bats,true,
+H,1,hitting,Hits,true,
+AVG,2,hitting,Batting Average,false,
+2B,3,hitting,Doubles,true,
+3B,4,hitting,Triples,true,
+HR,5,hitting,Home Runs,true,
+XBH,6,hitting,Extra Base Hits,true,
+1B,7,hitting,Singles,true,
+TB,8,hitting,Total Bases,true,
+SLG,9,hitting,Slugging Percentage,false,
+B_BB,10,hitting,Walks (Batter),true,
+B_IBB,11,hitting,Intentional Walks (Batter),true,
+HBP,12,hitting,Hit By Pitch,true,
+SF,13,hitting,Sacrifice Flies,true,
+SH,14,hitting,Sacrifice Hits,true,
+SAC,15,hitting,Sacrifice Hits and Flies,true,
+PA,16,hitting,Plate Appearances,true,
+OBP,17,hitting,On Base Percentage,false,
+OPS,18,hitting,On Base Plus Slugging,false,
+RC,19,hitting,Runs Created,true,
+R,20,hitting,Runs,true,
+RBI,21,hitting,Runs Batted In,true,
+22,22,hitting,Games Played (Batter; internal),false,"Stat_name kept as numeric to match raw breakdown VARIANT (espn-api wrapper doesn't translate this ID). Believed to be an internal batter game-played flag; always 1.0 when a batter appears. Functionally duplicates G (stat ID 81). Not scored."
+SB,23,hitting,Stolen Bases,true,
+CS,24,hitting,Caught Stealing,true,
+SB-CS,25,hitting,Net Stolen Bases,true,
+GDP,26,hitting,Grounded Into Double Play,true,
+B_SO,27,hitting,Strikeouts (Batter),true,
+PS,28,hitting,Pitches Seen,true,
+PPA,29,hitting,Pitches Per Plate Appearance,false,
+30,30,unknown,ESPN internal stat ID 30,false,"Stat_name kept as numeric to match raw breakdown. Rarely observed (1 row across 2025-2026). Likely deprecated or reserved."
+CYC,31,hitting,Cycles,true,
+GP,32,pitching,Games Pitched,true,
+GS,33,pitching,Games Started,true,
+OUTS,34,pitching,Outs Recorded,true,
+TBF,35,pitching,Total Batters Faced,true,
+P,36,pitching,Pitches Thrown,true,
+P_H,37,pitching,Hits Allowed,true,
+OBA,38,pitching,Opponent Batting Average,false,
+P_BB,39,pitching,Walks Allowed,true,
+P_IBB,40,pitching,Intentional Walks Allowed,true,
+WHIP,41,pitching,Walks Plus Hits Per Inning,false,
+HBP_P,42,pitching,Hit Batters (Pitcher),true,Shares abbreviation HBP with batter stat (ID 12). Renamed to HBP_P to disambiguate.
+OOBP,43,pitching,Opponent On Base Percentage,false,
+P_R,44,pitching,Runs Allowed,true,
+ER,45,pitching,Earned Runs,true,
+P_HR,46,pitching,Home Runs Allowed,true,
+ERA,47,pitching,Earned Run Average,false,
+K,48,pitching,Strikeouts (Pitcher),true,
+K/9,49,pitching,Strikeouts Per 9 Innings,false,
+WP,50,pitching,Wild Pitches,true,
+BLK,51,pitching,Balks,true,
+PK,52,pitching,Pickoffs,true,
+W,53,pitching,Wins,true,
+L,54,pitching,Losses,true,
+WPCT,55,pitching,Win Percentage,false,
+SVO,56,pitching,Save Opportunities,true,
+SV,57,pitching,Saves,true,
+BLSV,58,pitching,Blown Saves,true,
+SV%,59,pitching,Save Percentage,false,
+HLD,60,pitching,Holds,true,
+61,61,pitching,Games in Relief (internal),false,"Stat_name kept as numeric to match raw breakdown. Always 1.0 for relief pitchers only (never starters). Complement of GS. is_counting=false because it's redundant with GS for our purposes and never appears as a wide-pivot column downstream."
+CG,62,pitching,Complete Games,true,
+QS,63,pitching,Quality Starts,true,
+64,64,pitching,Shutouts (SHO),true,"Stat_name kept as numeric to match raw breakdown VARIANT (espn-api wrapper does not translate). Confirmed via website QA: each shutout scores 5 points in this league. Identified in Phase 3.2 after observing a 5-point Hosstros delta that exactly matched 1 shutout × 5 pts."
+NH,65,pitching,No-Hitter,true,
+PG,66,pitching,Perfect Game,true,Previously misidentified as Pitches Per Game. Confirmed via scoring settings: 250-point bonus.
+TC,67,fielding,Total Chances,true,
+PO,68,fielding,Putouts,true,
+A,69,fielding,Assists,true,
+OFA,70,fielding,Outfield Assists,true,
+FPCT,71,fielding,Fielding Percentage,false,
+E,72,fielding,Errors,true,
+DP,73,fielding,Double Plays,true,
+B_G_W,74,hitting,Batter Games Won,true,
+B_G_L,75,hitting,Batter Games Lost,true,
+P_G_W,76,pitching,Pitcher Games Won,true,
+P_G_L,77,pitching,Pitcher Games Lost,true,
+78,78,pitching,Games Played (Pitcher; internal),false,"Stat_name kept as numeric to match raw breakdown. Always 1.0 for any pitcher who appeared (starters and relievers). Parallel to id 22 for batters. is_counting=false; not used downstream."
+79,79,pitching,ESPN internal stat ID 79,false,"Stat_name kept as numeric to match raw breakdown. Always 1.0 for starters only in limited data. Suspected duplicate of GS. Not scored."
+80,80,unknown,ESPN internal stat ID 80,false,"Stat_name kept as numeric to match raw breakdown. Never observed in data across 2025-2026. Likely deprecated or reserved."
+G,81,hitting,Games Played by Batters,true,
+K/BB,82,pitching,Strikeout to Walk Ratio,false,
+SVHD,83,pitching,Saves Plus Holds,true,
+STARTER,99,pitching,Starter Designation,false,Boolean flag for designated starter. Distinct from GS which tracks actual starts.

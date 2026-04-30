@@ -14,6 +14,7 @@ Usage:
   py extract/extract.py --year 2025                  -> recent box scores, 2025
   py extract/extract.py 5                            -> box scores for matchup period 5
   py extract/extract.py --year 2025 1 2 3            -> box scores for specific periods, 2025
+  py extract/extract.py --year 2026 --all            -> all COMPLETED matchup periods for 2026 (full backfill)
   py extract/extract.py --include-settings           -> recent box scores + scoring settings
   py extract/extract.py --settings-only              -> scoring settings only, no box scores
   py extract/extract.py --settings-only --year 2025  -> scoring settings for 2025 only
@@ -27,8 +28,27 @@ from datetime import date, timedelta
 
 import requests
 from dotenv import load_dotenv
-from espn_api.baseball import League
+from espn_api.baseball import League, constant as espn_baseball_constant
 import snowflake.connector
+
+
+# ---------------------------------------------------------------------------
+# espn-api STATS_MAP discovery (numeric stat ID -> human-readable name)
+# ---------------------------------------------------------------------------
+# The dict's attribute name has varied across espn-api versions (STATS_MAP,
+# STAT_ID_TO_NAME, etc.), so we discover it by scanning for the largest dict
+# on the constant module — the same pattern used in dump_stats_map.py.
+def _discover_stats_map():
+    candidates = [
+        getattr(espn_baseball_constant, attr)
+        for attr in dir(espn_baseball_constant)
+        if not attr.startswith("_")
+    ]
+    dicts = [c for c in candidates if isinstance(c, dict) and len(c) > 30]
+    return max(dicts, key=len) if dicts else {}
+
+
+_STAT_ID_TO_NAME = _discover_stats_map()
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -49,6 +69,7 @@ SNOWFLAKE_CONFIG = {
 }
 
 ESPN_API_BASE = "https://lm-api-reads.fantasy.espn.com/apis/v3/games/flb/seasons"
+MLB_SCOREBOARD_URL = "https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard"
 
 # ---------------------------------------------------------------------------
 # Schedule loading
@@ -91,6 +112,11 @@ def date_to_scoring_period(d, season_opener):
     return (d - season_opener).days + 1
 
 
+def scoring_period_to_date(sp, season_opener):
+    """Convert an ESPN scoring period number back to a calendar date."""
+    return season_opener + timedelta(days=sp - 1)
+
+
 def get_scoring_periods(matchup_period, year):
     """Return the list of scoring periods for a given matchup period."""
     season_opener, matchups = load_schedule(year)
@@ -100,6 +126,147 @@ def get_scoring_periods(matchup_period, year):
             first_sp = date_to_scoring_period(start, season_opener)
             return list(range(first_sp, first_sp + num_days))
     raise ValueError(f"Matchup period {matchup_period} not found in {year} schedule.")
+
+
+# ---------------------------------------------------------------------------
+# Doubleheader handling (Phase 3.3)
+#
+# The espn-api wrapper's box_scores() builds a dict keyed by scoringPeriodId.
+# When ESPN returns multiple stat splits for the same period (one per game on
+# a doubleheader day), the second silently overwrites the first — only one
+# game's stats survive. This costs us roughly 3-5 fpts per affected hitter
+# every time a team plays a DH (~10-15 times per team per season).
+#
+# Fix: detect doubleheader days via ESPN's public MLB scoreboard, then for
+# affected pro_teams pull stats directly from the raw mRoster endpoint
+# (which preserves all per-game splits) and sum them. Non-DH days continue
+# to use the wrapper as before — zero added latency.
+# ---------------------------------------------------------------------------
+def get_doubleheader_pro_teams(d):
+    """
+    Return the set of MLB pro_team abbreviations playing a doubleheader on date d.
+
+    Hits ESPN's public MLB scoreboard. The endpoint returns one event per
+    team-pair even on DH days, but flags doubleheader games via
+    events[].notes[].headline = "Doubleheader - Game N" (also surfaces at
+    events[].competitions[].notes[]). Any team appearing in such an event
+    has a DH that day.
+
+    Returns uppercase abbreviations (e.g., {"MIL", "KC"}). Returns empty set
+    on any failure — caller falls back to wrapper-only extraction.
+    """
+    date_str = d.strftime("%Y%m%d")
+    try:
+        response = requests.get(
+            MLB_SCOREBOARD_URL, params={"dates": date_str}, timeout=10
+        )
+        response.raise_for_status()
+        data = response.json()
+    except (requests.RequestException, ValueError) as e:
+        print(f"    [warn] MLB scoreboard fetch failed for {d}: {e}")
+        return set()
+
+    dh_teams = set()
+    for event in data.get("events", []) or []:
+        # Notes may sit at event level or inside competitions[]; check both.
+        notes = list(event.get("notes", []) or [])
+        for comp in event.get("competitions", []) or []:
+            notes.extend(comp.get("notes", []) or [])
+        is_dh = any(
+            "Doubleheader" in (n.get("headline") or "") for n in notes
+        )
+        if not is_dh:
+            continue
+        for comp in event.get("competitions", []) or []:
+            for team in comp.get("competitors", []) or []:
+                abbrev = (team.get("team") or {}).get("abbreviation")
+                if abbrev:
+                    dh_teams.add(abbrev.upper())
+    return dh_teams
+
+
+def fetch_raw_player_stats(year, scoring_period):
+    """
+    Pull per-player stats for a single scoring period directly from ESPN's
+    mRoster endpoint, bypassing the espn-api wrapper.
+
+    Scope: ROSTERED players only. mRoster returns the 14 fantasy teams'
+    rosters — FAs are absent by definition. When Phase 4 (wasted points)
+    needs unrostered-MLB stats, it will need a separate fetch path
+    (`view=kona_player_info` or wrapping `league.free_agents()`) that
+    almost certainly has the same DH overwrite bug and will need the same
+    sum-across-splits treatment. The DH detection helper above is generic
+    and can be reused as-is.
+
+    Returns dict[player_id] -> {
+        "breakdown":     {stat_name: stat_value, ...}  # summed across DH games
+        "points":        float                          # summed appliedTotal
+        "games_played":  int                            # count of non-empty splits
+    }
+
+    Each rostered player carries a stats[] array with multiple splits; we
+    filter to (statSplitTypeId == 5 AND scoringPeriodId == target) which is
+    the per-period split. On DH days that filter yields 2 entries per player
+    who appeared in both games; we sum the stats and appliedTotals.
+
+    Returns {} on any failure — caller falls back to wrapper data.
+    """
+    url = f"{ESPN_API_BASE}/{year}/segments/0/leagues/{LEAGUE_ID}"
+    try:
+        response = requests.get(
+            url,
+            params={"view": "mRoster", "scoringPeriodId": scoring_period},
+            cookies={"swid": SWID, "espn_s2": ESPN_S2},
+            timeout=15,
+        )
+        response.raise_for_status()
+        data = response.json()
+    except (requests.RequestException, ValueError) as e:
+        print(f"    [warn] mRoster fetch failed for sp={scoring_period}: {e}")
+        return {}
+
+    by_player = {}
+    for team in data.get("teams", []) or []:
+        roster = team.get("roster") or {}
+        for entry in roster.get("entries", []) or []:
+            player = ((entry.get("playerPoolEntry") or {}).get("player")) or {}
+            player_id = player.get("id")
+            if player_id is None:
+                continue
+
+            agg_breakdown = {}
+            agg_points = 0.0
+            games = 0
+            for split in player.get("stats", []) or []:
+                if split.get("statSplitTypeId") != 5:
+                    continue
+                if split.get("scoringPeriodId") != scoring_period:
+                    continue
+                raw_stats = split.get("stats") or {}
+                if not raw_stats:
+                    # Stat-less split (player on roster but didn't play this game).
+                    continue
+                for stat_id_str, val in raw_stats.items():
+                    if val is None:
+                        continue
+                    try:
+                        stat_id = int(stat_id_str)
+                    except (TypeError, ValueError):
+                        continue
+                    name = _STAT_ID_TO_NAME.get(stat_id, str(stat_id))
+                    agg_breakdown[name] = agg_breakdown.get(name, 0) + val
+                applied_total = split.get("appliedTotal")
+                if applied_total is not None:
+                    agg_points += applied_total
+                games += 1
+
+            if games > 0:
+                by_player[player_id] = {
+                    "breakdown": agg_breakdown,
+                    "points": round(agg_points, 4),
+                    "games_played": games,
+                }
+    return by_player
 
 
 # ---------------------------------------------------------------------------
@@ -123,7 +290,7 @@ def connect_espn(year):
     )
 
 
-def serialize_box_scores(league, scoring_period, matchup_period):
+def serialize_box_scores(league, scoring_period, matchup_period, season_opener):
     """
     Pull box scores for a single scoring period and return a list of
     serialized matchup dicts.
@@ -131,11 +298,31 @@ def serialize_box_scores(league, scoring_period, matchup_period):
     Both scoring_period AND matchup_period must be passed to the ESPN API
     to get historical player-level stats. Passing scoring_period alone
     returns today's stats regardless of which period was requested.
+
+    Phase 3.3 — doubleheader handling: before serializing, identify any
+    pro_teams playing a DH on this calendar date. For players on those
+    teams, replace the wrapper-derived breakdown/points with mRoster-derived
+    sums (which include both games' stats). Players on non-DH teams use the
+    wrapper data unchanged. games_played is recorded per-player on every row.
     """
     box_scores = league.box_scores(
         matchup_period=matchup_period,
         scoring_period=scoring_period,
     )
+
+    # --- Doubleheader override prep ---------------------------------------
+    # Resolve scoring period to its calendar date, then ask the public MLB
+    # scoreboard which teams are playing a DH that day. If any, pull raw
+    # mRoster stats once for this period (one API call covering all rosters).
+    # The mRoster response includes every rostered player league-wide, but
+    # we only override players whose proTeam is in dh_pro_teams — log count
+    # tallied below reflects actual overrides applied, not response size.
+    sp_date = scoring_period_to_date(scoring_period, season_opener)
+    dh_pro_teams = get_doubleheader_pro_teams(sp_date)
+    raw_player_stats = (
+        fetch_raw_player_stats(league.year, scoring_period) if dh_pro_teams else {}
+    )
+    override_count = 0
 
     def format_owners(owners_list):
         if not owners_list:
@@ -169,19 +356,43 @@ def serialize_box_scores(league, scoring_period, matchup_period):
             lineup_list = []
             for player in lineup:
                 period_stats = player.stats.get(scoring_period, {})
+                wrapper_breakdown = period_stats.get("breakdown", {}) or {}
+                wrapper_points = period_stats.get("points", 0)
+
+                # Default games_played from wrapper data: 1 if the player
+                # has a non-empty breakdown (they appeared), else 0.
+                breakdown = wrapper_breakdown
+                points = wrapper_points
+                games_played = 1 if wrapper_breakdown else 0
+
+                # Override with raw mRoster sums for DH-affected players.
+                pro_team_norm = (player.proTeam or "").upper()
+                if pro_team_norm in dh_pro_teams:
+                    raw = raw_player_stats.get(player.playerId)
+                    if raw is not None:
+                        breakdown = raw["breakdown"]
+                        points = raw["points"]
+                        games_played = raw["games_played"]
+                        override_count += 1
+
                 player_dict = {
                     "name": player.name,
                     "playerId": player.playerId,
                     "position": player.position,
                     "lineupSlot": player.lineupSlot,
                     "proTeam": player.proTeam,
-                    "points": period_stats.get("points", 0),
-                    "breakdown": period_stats.get("breakdown", {}),
+                    "points": points,
+                    "breakdown": breakdown,
+                    "games_played": games_played,
                 }
                 lineup_list.append(player_dict)
             matchup_dict[f"{side}_lineup"] = lineup_list
 
         matchups.append(matchup_dict)
+
+    if dh_pro_teams:
+        print(f"    Doubleheader on {sp_date} for {sorted(dh_pro_teams)}: "
+              f"applied raw mRoster override to {override_count} players.")
 
     return matchups
 
@@ -238,6 +449,7 @@ def extract_matchup_period(conn, league, matchup_period, year):
     """
     Extract all scoring periods for a matchup period and load to Snowflake.
     """
+    season_opener, _ = load_schedule(year)
     scoring_periods = get_scoring_periods(matchup_period, year)
 
     print(f"  Matchup period {matchup_period} spans {len(scoring_periods)} days "
@@ -246,7 +458,7 @@ def extract_matchup_period(conn, league, matchup_period, year):
     records = []
     for sp in scoring_periods:
         print(f"  Pulling scoring period {sp}...")
-        matchup_data = serialize_box_scores(league, sp, matchup_period)
+        matchup_data = serialize_box_scores(league, sp, matchup_period, season_opener)
         records.append({
             "scoring_period": sp,
             "matchup_period": matchup_period,
@@ -376,6 +588,13 @@ if __name__ == "__main__":
         help="Specific matchup periods to extract (default: auto-detect recent)",
     )
     parser.add_argument(
+        "--all", action="store_true",
+        help="Extract all COMPLETED matchup periods for the year (end_date on or before "
+             "today; full backfill). Overrides positional periods and the recent-only "
+             "default. In-progress and future periods are skipped — the API has no "
+             "stable data for them yet.",
+    )
+    parser.add_argument(
         "--include-settings", action="store_true",
         help="Also extract scoring settings for the season",
     )
@@ -399,7 +618,12 @@ if __name__ == "__main__":
 
         # --- Box scores ---
         if do_box_scores:
-            if args.periods:
+            if args.all:
+                _, all_matchups = load_schedule(year)
+                today = date.today()
+                periods = sorted(mp for mp, _, end in all_matchups if end <= today)
+                print(f"\nExtracting all completed matchup periods for {year}: {periods}")
+            elif args.periods:
                 periods = args.periods
                 print(f"\nExtracting specified matchup periods for {year}: {periods}")
             else:

@@ -48,6 +48,13 @@ models:
         description: 'Pre-computed fantasy points for this player on this scoring period, calculated by ESPN using league scoring settings.'
       - name: breakdown
         description: 'Raw stat breakdown dict from ESPN. Keys are stat abbreviations (HR, RBI, K, etc). Used for Phase 3 stat-level records.'
+      - name: games_played
+        description: 'Number of MLB games this player appeared in on this scoring period. 0 = did not play, 1 = single game, 2 = both halves of a doubleheader. Phase 3.3: extracted from raw mRoster on DH days (sums per-game splits the wrapper would otherwise overwrite). For pre-Phase-3.3 rows, defaults to 1 if breakdown is non-empty else 0.'
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [0, 1, 2]
       - name: display_name
         description: 'COALESCE of player_nicknames.nickname and player_name. Phase 3.1: nickname join moved here from individual marts so display_name propagates through every downstream model.'
 

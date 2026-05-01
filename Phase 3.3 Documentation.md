@@ -1,5 +1,7 @@
 # Phase 3.3 Handoff — ESPN Fantasy Baseball Front Page Generator
 
+> **Update — Phase 3.3.1 (commit `91e49c4`)**: the hybrid architecture below was simplified shortly after this doc landed. The DH-detection scaffolding (`get_doubleheader_pro_teams`, MLB scoreboard endpoint, `scoring_period_to_date`, the conditional override path in `serialize_box_scores`) is gone. mRoster is now the default source for stat values on **every** scoring period, not just DH days — the sum-across-splits aggregation handles single games as N=1 (identity) and doubleheaders as N=2 (sum) under one branch. Wrapper retained for matchup structure and per-player fallback. Architectural details and rationale below remain accurate at the level of "why mRoster, why we kept the wrapper for structure"; the parts about *when* we hit mRoster (DH-only) are superseded by 3.3.1. See `project_conventions.md` and the section comment above `fetch_raw_player_stats` in `extract.py` for the current pattern.
+
 ## What Changed Since Phase 3.2
 
 Phase 3.3 fixes a class of silent data loss in the espn-api wrapper: on doubleheader days, the wrapper's `box_scores()` method silently overwrites the first game's stats with the second game's stats for affected players, costing roughly 3-5 fpts per affected hitter every time a team plays a DH (~10-15 times per team per season).

@@ -69,7 +69,6 @@ SNOWFLAKE_CONFIG = {
 }
 
 ESPN_API_BASE = "https://lm-api-reads.fantasy.espn.com/apis/v3/games/flb/seasons"
-MLB_SCOREBOARD_URL = "https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard"
 
 # ---------------------------------------------------------------------------
 # Schedule loading
@@ -112,11 +111,6 @@ def date_to_scoring_period(d, season_opener):
     return (d - season_opener).days + 1
 
 
-def scoring_period_to_date(sp, season_opener):
-    """Convert an ESPN scoring period number back to a calendar date."""
-    return season_opener + timedelta(days=sp - 1)
-
-
 def get_scoring_periods(matchup_period, year):
     """Return the list of scoring periods for a given matchup period."""
     season_opener, matchups = load_schedule(year)
@@ -129,62 +123,21 @@ def get_scoring_periods(matchup_period, year):
 
 
 # ---------------------------------------------------------------------------
-# Doubleheader handling (Phase 3.3)
+# Stat extraction via raw mRoster (Phase 3.3.1)
 #
-# The espn-api wrapper's box_scores() builds a dict keyed by scoringPeriodId.
-# When ESPN returns multiple stat splits for the same period (one per game on
-# a doubleheader day), the second silently overwrites the first — only one
-# game's stats survive. This costs us roughly 3-5 fpts per affected hitter
-# every time a team plays a DH (~10-15 times per team per season).
+# History: Phase 3.3 introduced this raw-API path as a doubleheader override,
+# triggered only on DH days detected via the MLB scoreboard. Phase 3.3.1
+# made it the default for all scoring periods because the raw path is
+# strictly a superset of the wrapper's behavior — handles the multi-split
+# DH case correctly (sum across splits) and reduces to identity on single-
+# game days. The wrapper bug (`box_scores()` overwriting first-game stats
+# on DH days via dict-key collision) is sidestepped categorically rather
+# than detected and patched.
 #
-# Fix: detect doubleheader days via ESPN's public MLB scoreboard, then for
-# affected pro_teams pull stats directly from the raw mRoster endpoint
-# (which preserves all per-game splits) and sum them. Non-DH days continue
-# to use the wrapper as before — zero added latency.
+# We still call the wrapper for matchup structure (home/away pairing,
+# lineup_slot per scoring_period, owners, team_ids). The wrapper's stats
+# remain available as a per-player fallback if the mRoster fetch fails.
 # ---------------------------------------------------------------------------
-def get_doubleheader_pro_teams(d):
-    """
-    Return the set of MLB pro_team abbreviations playing a doubleheader on date d.
-
-    Hits ESPN's public MLB scoreboard. The endpoint returns one event per
-    team-pair even on DH days, but flags doubleheader games via
-    events[].notes[].headline = "Doubleheader - Game N" (also surfaces at
-    events[].competitions[].notes[]). Any team appearing in such an event
-    has a DH that day.
-
-    Returns uppercase abbreviations (e.g., {"MIL", "KC"}). Returns empty set
-    on any failure — caller falls back to wrapper-only extraction.
-    """
-    date_str = d.strftime("%Y%m%d")
-    try:
-        response = requests.get(
-            MLB_SCOREBOARD_URL, params={"dates": date_str}, timeout=10
-        )
-        response.raise_for_status()
-        data = response.json()
-    except (requests.RequestException, ValueError) as e:
-        print(f"    [warn] MLB scoreboard fetch failed for {d}: {e}")
-        return set()
-
-    dh_teams = set()
-    for event in data.get("events", []) or []:
-        # Notes may sit at event level or inside competitions[]; check both.
-        notes = list(event.get("notes", []) or [])
-        for comp in event.get("competitions", []) or []:
-            notes.extend(comp.get("notes", []) or [])
-        is_dh = any(
-            "Doubleheader" in (n.get("headline") or "") for n in notes
-        )
-        if not is_dh:
-            continue
-        for comp in event.get("competitions", []) or []:
-            for team in comp.get("competitors", []) or []:
-                abbrev = (team.get("team") or {}).get("abbreviation")
-                if abbrev:
-                    dh_teams.add(abbrev.upper())
-    return dh_teams
-
-
 def fetch_raw_player_stats(year, scoring_period):
     """
     Pull per-player stats for a single scoring period directly from ESPN's
@@ -194,22 +147,21 @@ def fetch_raw_player_stats(year, scoring_period):
     rosters — FAs are absent by definition. When Phase 4 (wasted points)
     needs unrostered-MLB stats, it will need a separate fetch path
     (`view=kona_player_info` or wrapping `league.free_agents()`) that
-    almost certainly has the same DH overwrite bug and will need the same
-    sum-across-splits treatment. The DH detection helper above is generic
-    and can be reused as-is.
+    almost certainly has the same dict-collision bug as `box_scores()` on
+    doubleheader days and will need the same sum-across-splits treatment.
 
     Returns dict[player_id] -> {
-        "breakdown":     {stat_name: stat_value, ...}  # summed across DH games
+        "breakdown":     {stat_name: stat_value, ...}  # summed across splits
         "points":        float                          # summed appliedTotal
         "games_played":  int                            # count of non-empty splits
     }
 
     Each rostered player carries a stats[] array with multiple splits; we
     filter to (statSplitTypeId == 5 AND scoringPeriodId == target) which is
-    the per-period split. On DH days that filter yields 2 entries per player
-    who appeared in both games; we sum the stats and appliedTotals.
+    the per-period split. On single-game days the filter yields one entry
+    (sum is identity); on doubleheader days it yields two and we sum.
 
-    Returns {} on any failure — caller falls back to wrapper data.
+    Returns {} on any failure — caller falls back to wrapper data per-player.
     """
     url = f"{ESPN_API_BASE}/{year}/segments/0/leagues/{LEAGUE_ID}"
     try:
@@ -290,39 +242,38 @@ def connect_espn(year):
     )
 
 
-def serialize_box_scores(league, scoring_period, matchup_period, season_opener):
+def serialize_box_scores(league, scoring_period, matchup_period):
     """
     Pull box scores for a single scoring period and return a list of
     serialized matchup dicts.
 
-    Both scoring_period AND matchup_period must be passed to the ESPN API
-    to get historical player-level stats. Passing scoring_period alone
-    returns today's stats regardless of which period was requested.
+    Wrapper provides matchup structure (home/away pairing, lineup_slot per
+    scoring_period, owners, team_ids). Stats come from ESPN's raw mRoster
+    endpoint, which preserves all per-game splits and sums them — handles
+    doubleheaders by default (N=2 splits) and single games (N=1, sum is
+    identity) under the same code path. See section comment above
+    fetch_raw_player_stats for the Phase 3.3 → 3.3.1 history.
 
-    Phase 3.3 — doubleheader handling: before serializing, identify any
-    pro_teams playing a DH on this calendar date. For players on those
-    teams, replace the wrapper-derived breakdown/points with mRoster-derived
-    sums (which include both games' stats). Players on non-DH teams use the
-    wrapper data unchanged. games_played is recorded per-player on every row.
+    Both scoring_period AND matchup_period must be passed to the wrapper to
+    get historical player-level stats. Passing scoring_period alone returns
+    today's stats regardless of which period was requested.
+
+    Wrapper stats remain available as a per-player fallback for the rare
+    case where mRoster doesn't return a player (network failure, or player
+    absent from any roster — possible at trade deadlines / waiver claims).
     """
     box_scores = league.box_scores(
         matchup_period=matchup_period,
         scoring_period=scoring_period,
     )
 
-    # --- Doubleheader override prep ---------------------------------------
-    # Resolve scoring period to its calendar date, then ask the public MLB
-    # scoreboard which teams are playing a DH that day. If any, pull raw
-    # mRoster stats once for this period (one API call covering all rosters).
-    # The mRoster response includes every rostered player league-wide, but
-    # we only override players whose proTeam is in dh_pro_teams — log count
-    # tallied below reflects actual overrides applied, not response size.
-    sp_date = scoring_period_to_date(scoring_period, season_opener)
-    dh_pro_teams = get_doubleheader_pro_teams(sp_date)
-    raw_player_stats = (
-        fetch_raw_player_stats(league.year, scoring_period) if dh_pro_teams else {}
-    )
-    override_count = 0
+    # Pull raw stats for every rostered player in this scoring period.
+    # Single mRoster call covers all 14 fantasy teams; we look up each
+    # wrapper-returned player by playerId and use the raw sum if found.
+    raw_player_stats = fetch_raw_player_stats(league.year, scoring_period)
+    raw_count = 0           # used mRoster data (player played, raw had stats)
+    wrapper_count = 0       # mRoster missed but wrapper had stats — genuine recovery
+    empty_count = 0         # neither source had stats — player didn't play (expected)
 
     def format_owners(owners_list):
         if not owners_list:
@@ -355,25 +306,31 @@ def serialize_box_scores(league, scoring_period, matchup_period, season_opener):
             lineup = getattr(matchup, f"{side}_lineup")
             lineup_list = []
             for player in lineup:
-                period_stats = player.stats.get(scoring_period, {})
-                wrapper_breakdown = period_stats.get("breakdown", {}) or {}
-                wrapper_points = period_stats.get("points", 0)
-
-                # Default games_played from wrapper data: 1 if the player
-                # has a non-empty breakdown (they appeared), else 0.
-                breakdown = wrapper_breakdown
-                points = wrapper_points
-                games_played = 1 if wrapper_breakdown else 0
-
-                # Override with raw mRoster sums for DH-affected players.
-                pro_team_norm = (player.proTeam or "").upper()
-                if pro_team_norm in dh_pro_teams:
-                    raw = raw_player_stats.get(player.playerId)
-                    if raw is not None:
-                        breakdown = raw["breakdown"]
-                        points = raw["points"]
-                        games_played = raw["games_played"]
-                        override_count += 1
+                # Primary path: raw mRoster sums (correct on both single-game
+                # and doubleheader days; the wrapper's box_scores() collapses
+                # DH splits via dict-key collision and silently drops one).
+                # mRoster only returns players who actually appeared in a
+                # game on this scoring_period, so absence != error — the
+                # large majority of fallbacks are legitimate "didn't play"
+                # rows where wrapper also has empty stats.
+                raw = raw_player_stats.get(player.playerId)
+                if raw is not None:
+                    breakdown = raw["breakdown"]
+                    points = raw["points"]
+                    games_played = raw["games_played"]
+                    raw_count += 1
+                else:
+                    period_stats = player.stats.get(scoring_period, {})
+                    breakdown = period_stats.get("breakdown", {}) or {}
+                    points = period_stats.get("points", 0)
+                    games_played = 1 if breakdown else 0
+                    if breakdown:
+                        # Genuine recovery: wrapper had stats, raw missed.
+                        # Possible cause: roster transition / waiver claim.
+                        wrapper_count += 1
+                    else:
+                        # Didn't play. Both sources empty — expected.
+                        empty_count += 1
 
                 player_dict = {
                     "name": player.name,
@@ -390,9 +347,10 @@ def serialize_box_scores(league, scoring_period, matchup_period, season_opener):
 
         matchups.append(matchup_dict)
 
-    if dh_pro_teams:
-        print(f"    Doubleheader on {sp_date} for {sorted(dh_pro_teams)}: "
-              f"applied raw mRoster override to {override_count} players.")
+    total = raw_count + wrapper_count + empty_count
+    fallback_note = f", wrapper-fallback={wrapper_count}" if wrapper_count else ""
+    print(f"    sources: raw={raw_count}{fallback_note}, "
+          f"didn't-play={empty_count}, total={total}")
 
     return matchups
 
@@ -449,7 +407,6 @@ def extract_matchup_period(conn, league, matchup_period, year):
     """
     Extract all scoring periods for a matchup period and load to Snowflake.
     """
-    season_opener, _ = load_schedule(year)
     scoring_periods = get_scoring_periods(matchup_period, year)
 
     print(f"  Matchup period {matchup_period} spans {len(scoring_periods)} days "
@@ -458,7 +415,7 @@ def extract_matchup_period(conn, league, matchup_period, year):
     records = []
     for sp in scoring_periods:
         print(f"  Pulling scoring period {sp}...")
-        matchup_data = serialize_box_scores(league, sp, matchup_period, season_opener)
+        matchup_data = serialize_box_scores(league, sp, matchup_period)
         records.append({
             "scoring_period": sp,
             "matchup_period": matchup_period,

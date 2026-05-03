@@ -33,11 +33,12 @@ import snowflake.connector
 
 
 # ---------------------------------------------------------------------------
-# espn-api STATS_MAP discovery (numeric stat ID -> human-readable name)
+# espn-api constant maps: stat IDs, position IDs, pro team IDs.
 # ---------------------------------------------------------------------------
-# The dict's attribute name has varied across espn-api versions (STATS_MAP,
-# STAT_ID_TO_NAME, etc.), so we discover it by scanning for the largest dict
-# on the constant module — the same pattern used in dump_stats_map.py.
+# STATS_MAP attribute name has varied across espn-api versions (STATS_MAP,
+# STAT_ID_TO_NAME, etc.); discover by scanning for the largest dict on the
+# constant module — same pattern as dump_stats_map.py. POSITION/team maps
+# fall back to known names with defensive getattr.
 def _discover_stats_map():
     candidates = [
         getattr(espn_baseball_constant, attr)
@@ -49,6 +50,50 @@ def _discover_stats_map():
 
 
 _STAT_ID_TO_NAME = _discover_stats_map()
+
+# Override: ESPN's STATS_MAP maps both stat ID 12 (batter HBP, +1) and
+# stat ID 42 (pitcher HBP, -1) to the name "HBP". This silently conflates
+# the two in the breakdown VARIANT — a player who both pitched and batted
+# on the same day (Ohtani) loses sign on one of the two. We rename ID 42
+# to 'HBP_P' at the source, matching the seed's row for that ID.
+# Phase 4: prior to this, int_player_daily_stats had a CASE rewriting
+# stat_name='HBP' → 'HBP_P' when lineup_slot IN ('SP','RP','P'). That
+# patch worked for rostered active pitchers but left two-way days broken
+# (ESPN returns both ID 12 and 42 entries for Ohtani; the wrapper sums
+# them under one name) and broke entirely for FAs (lineup_slot='FA' has
+# no role signal). Fixing at extract decouples the seed from the wrapper's
+# collision and makes the int CASE unnecessary.
+_STAT_ID_TO_NAME[42] = 'HBP_P'
+
+# One-time collision scan: log any stat IDs whose names collide after the
+# override so future espn-api versions don't silently regress this fix.
+def _log_stats_map_collisions():
+    from collections import defaultdict
+    reverse = defaultdict(list)
+    for stat_id, name in _STAT_ID_TO_NAME.items():
+        reverse[name].append(stat_id)
+    collisions = {n: ids for n, ids in reverse.items() if len(ids) > 1}
+    if collisions:
+        print("[warn] STATS_MAP name collisions after overrides:")
+        for name, ids in collisions.items():
+            print(f"    {name}: ids={ids}")
+
+
+_log_stats_map_collisions()
+
+# Position, slot, and pro-team maps for FA row construction. The wrapper
+# gives readable strings for rostered players; the kona payload returns
+# raw numeric IDs that we need to translate ourselves.
+#
+# Two distinct espn-api maps with similar names — easy to confuse:
+#   DEFAULT_POSITION_MAP (11 entries): primary MLB position IDs (1=SP, 2=C,
+#       3=1B, ..., 10=DH). Used for the player's `defaultPositionId` field.
+#   POSITION_MAP (38 entries): the broader lineup-slot space (0=C, 1=1B,
+#       ..., 13=P, 14=SP, 15=RP, 16=BE, 17=IL, etc.). Used for the
+#       `eligibleSlots` array which lists every slot a player is eligible for.
+DEFAULT_POSITION_MAP = getattr(espn_baseball_constant, "DEFAULT_POSITION_MAP", {})
+LINEUP_SLOT_MAP = getattr(espn_baseball_constant, "POSITION_MAP", {})
+PRO_TEAM_MAP = getattr(espn_baseball_constant, "PRO_TEAM_MAP", {})
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -123,101 +168,132 @@ def get_scoring_periods(matchup_period, year):
 
 
 # ---------------------------------------------------------------------------
-# Stat extraction via raw mRoster (Phase 3.3.1)
+# Stat extraction via raw kona_player_info (Phase 4)
 #
-# History: Phase 3.3 introduced this raw-API path as a doubleheader override,
-# triggered only on DH days detected via the MLB scoreboard. Phase 3.3.1
-# made it the default for all scoring periods because the raw path is
-# strictly a superset of the wrapper's behavior — handles the multi-split
-# DH case correctly (sum across splits) and reduces to identity on single-
-# game days. The wrapper bug (`box_scores()` overwriting first-game stats
-# on DH days via dict-key collision) is sidestepped categorically rather
-# than detected and patched.
+# History:
+#   Phase 3.3 introduced raw-API stat extraction as a doubleheader override
+#     gated on MLB-scoreboard DH detection.
+#   Phase 3.3.1 made it the default for all scoring periods (mRoster), since
+#     the sum-across-splits aggregation handles single games as N=1 (identity)
+#     and DHs as N=2 (sum) under one branch. mRoster covers rostered players
+#     only, so FAs were absent.
+#   Phase 4 swaps mRoster → kona_player_info, which returns the *full* MLB
+#     player universe (rostered + FA) with the identical per-game splits
+#     shape. One stat source for everyone, no separate FA pipeline.
 #
-# We still call the wrapper for matchup structure (home/away pairing,
-# lineup_slot per scoring_period, owners, team_ids). The wrapper's stats
-# remain available as a per-player fallback if the mRoster fetch fails.
+# FA determination is an anti-join, not a flag: any player with stats in
+# kona but absent from the wrapper's box_scores lineup for a given
+# scoring_period is, by definition, a free agent on that day. This handles
+# mid-season transactions correctly without trusting kona's `status` field
+# (which reflects current roster status, not historical).
+#
+# The wrapper still provides matchup structure (home/away pairing,
+# lineup_slot per scoring_period, owners, team_ids) for rostered players.
+# Wrapper stats remain a per-player fallback if kona misses someone.
 # ---------------------------------------------------------------------------
-def fetch_raw_player_stats(year, scoring_period):
+def fetch_all_player_stats(year, scoring_period):
     """
-    Pull per-player stats for a single scoring period directly from ESPN's
-    mRoster endpoint, bypassing the espn-api wrapper.
-
-    Scope: ROSTERED players only. mRoster returns the 14 fantasy teams'
-    rosters — FAs are absent by definition. When Phase 4 (wasted points)
-    needs unrostered-MLB stats, it will need a separate fetch path
-    (`view=kona_player_info` or wrapping `league.free_agents()`) that
-    almost certainly has the same dict-collision bug as `box_scores()` on
-    doubleheader days and will need the same sum-across-splits treatment.
+    Pull per-player stats for a single scoring period from ESPN's
+    kona_player_info endpoint. Returns the full MLB universe (rostered +
+    FA) — caller distinguishes via anti-join against the wrapper lineup.
 
     Returns dict[player_id] -> {
         "breakdown":     {stat_name: stat_value, ...}  # summed across splits
         "points":        float                          # summed appliedTotal
         "games_played":  int                            # count of non-empty splits
+        "name":          str                            # for FA row construction
+        "pro_team":      str                            # MLB team abbreviation
+        "default_position_id": int                      # for diagnostics
     }
 
-    Each rostered player carries a stats[] array with multiple splits; we
-    filter to (statSplitTypeId == 5 AND scoringPeriodId == target) which is
-    the per-period split. On single-game days the filter yields one entry
-    (sum is identity); on doubleheader days it yields two and we sum.
+    Each player carries a stats[] array; filter to (statSplitTypeId == 5
+    AND scoringPeriodId == target) for per-period splits. Single games
+    yield N=1 (sum is identity); doubleheaders yield N=2 (sum). Sidesteps
+    the espn-api wrapper's dict-key collision (Player.__init__ keys
+    self.stats by scoringPeriodId, silently overwriting the first DH
+    split with the second).
+
+    Limit 1500 with sortPercOwned reliably covers the ~420 players who
+    actually accumulate fantasy stats on a typical day (Phase 4 handoff).
 
     Returns {} on any failure — caller falls back to wrapper data per-player.
     """
     url = f"{ESPN_API_BASE}/{year}/segments/0/leagues/{LEAGUE_ID}"
+    fantasy_filter = {
+        "players": {
+            "limit": 1500,
+            "sortPercOwned": {"sortPriority": 1, "sortAsc": False},
+        }
+    }
     try:
         response = requests.get(
             url,
-            params={"view": "mRoster", "scoringPeriodId": scoring_period},
+            params={"view": "kona_player_info", "scoringPeriodId": scoring_period},
             cookies={"swid": SWID, "espn_s2": ESPN_S2},
-            timeout=15,
+            headers={"x-fantasy-filter": json.dumps(fantasy_filter)},
+            timeout=30,
         )
         response.raise_for_status()
         data = response.json()
     except (requests.RequestException, ValueError) as e:
-        print(f"    [warn] mRoster fetch failed for sp={scoring_period}: {e}")
+        print(f"    [warn] kona fetch failed for sp={scoring_period}: {e}")
         return {}
 
     by_player = {}
-    for team in data.get("teams", []) or []:
-        roster = team.get("roster") or {}
-        for entry in roster.get("entries", []) or []:
-            player = ((entry.get("playerPoolEntry") or {}).get("player")) or {}
-            player_id = player.get("id")
-            if player_id is None:
+    for entry in data.get("players", []) or []:
+        player = (entry.get("player")) or {}
+        player_id = player.get("id")
+        if player_id is None:
+            continue
+
+        agg_breakdown = {}
+        agg_points = 0.0
+        games = 0
+        for split in player.get("stats", []) or []:
+            if split.get("statSplitTypeId") != 5:
                 continue
+            if split.get("scoringPeriodId") != scoring_period:
+                continue
+            raw_stats = split.get("stats") or {}
+            if not raw_stats:
+                # Stat-less split (player exists on this date but didn't play).
+                continue
+            for stat_id_str, val in raw_stats.items():
+                if val is None:
+                    continue
+                try:
+                    stat_id = int(stat_id_str)
+                except (TypeError, ValueError):
+                    continue
+                name = _STAT_ID_TO_NAME.get(stat_id, str(stat_id))
+                agg_breakdown[name] = agg_breakdown.get(name, 0) + val
+            applied_total = split.get("appliedTotal")
+            if applied_total is not None:
+                agg_points += applied_total
+            games += 1
 
-            agg_breakdown = {}
-            agg_points = 0.0
-            games = 0
-            for split in player.get("stats", []) or []:
-                if split.get("statSplitTypeId") != 5:
-                    continue
-                if split.get("scoringPeriodId") != scoring_period:
-                    continue
-                raw_stats = split.get("stats") or {}
-                if not raw_stats:
-                    # Stat-less split (player on roster but didn't play this game).
-                    continue
-                for stat_id_str, val in raw_stats.items():
-                    if val is None:
-                        continue
-                    try:
-                        stat_id = int(stat_id_str)
-                    except (TypeError, ValueError):
-                        continue
-                    name = _STAT_ID_TO_NAME.get(stat_id, str(stat_id))
-                    agg_breakdown[name] = agg_breakdown.get(name, 0) + val
-                applied_total = split.get("appliedTotal")
-                if applied_total is not None:
-                    agg_points += applied_total
-                games += 1
+        if games > 0:
+            # eligibleSlots is the multi-position eligibility array (numeric
+            # slot ids). Mapped via POSITION_MAP to readable strings, e.g.
+            # [2, 12, 13, 15] -> ['2B', 'UTIL', 'P', 'RP']. Useful for the
+            # "Top Wasted Points" callout once consumers want to show
+            # full eligibility (Sanoja as 2B/RP, Ohtani as SP/DH, etc.).
+            # Phase 4 v1 output uses primary position only; this field is
+            # plumbed through raw for the v2 enhancement.
+            eligible_ids = player.get("eligibleSlots") or []
+            eligible_slots = [
+                LINEUP_SLOT_MAP.get(sid, str(sid)) for sid in eligible_ids
+            ]
 
-            if games > 0:
-                by_player[player_id] = {
-                    "breakdown": agg_breakdown,
-                    "points": round(agg_points, 4),
-                    "games_played": games,
-                }
+            by_player[player_id] = {
+                "breakdown": agg_breakdown,
+                "points": round(agg_points, 4),
+                "games_played": games,
+                "name": player.get("fullName"),
+                "pro_team": PRO_TEAM_MAP.get(player.get("proTeamId"), "FA"),
+                "default_position_id": player.get("defaultPositionId"),
+                "eligible_slots": eligible_slots,
+            }
     return by_player
 
 
@@ -244,36 +320,43 @@ def connect_espn(year):
 
 def serialize_box_scores(league, scoring_period, matchup_period):
     """
-    Pull box scores for a single scoring period and return a list of
-    serialized matchup dicts.
+    Pull box scores for a single scoring period. Returns a dict with two
+    keys: `matchups` (list of fantasy matchup dicts, rostered players only)
+    and `free_agents` (list of FA player dicts emitted via anti-join).
 
     Wrapper provides matchup structure (home/away pairing, lineup_slot per
-    scoring_period, owners, team_ids). Stats come from ESPN's raw mRoster
-    endpoint, which preserves all per-game splits and sums them — handles
-    doubleheaders by default (N=2 splits) and single games (N=1, sum is
-    identity) under the same code path. See section comment above
-    fetch_raw_player_stats for the Phase 3.3 → 3.3.1 history.
+    scoring_period, owners, team_ids). Stats come from kona_player_info,
+    which returns the full MLB universe with all per-game splits — handles
+    doubleheaders by default (N=2 splits summed) and single games (N=1,
+    sum is identity) under one branch. See section comment above
+    fetch_all_player_stats for Phase 3.3 → 3.3.1 → 4 history.
 
     Both scoring_period AND matchup_period must be passed to the wrapper to
     get historical player-level stats. Passing scoring_period alone returns
     today's stats regardless of which period was requested.
 
+    FA determination is anti-join: any player with stats in kona but absent
+    from every wrapper lineup is, by definition, a free agent on that day.
+    Mid-season transactions handled correctly without trusting kona's
+    `status` field (which reflects current roster status, not historical).
+
     Wrapper stats remain available as a per-player fallback for the rare
-    case where mRoster doesn't return a player (network failure, or player
-    absent from any roster — possible at trade deadlines / waiver claims).
+    case where kona misses a rostered player (network blip, edge cases at
+    trade deadlines / waiver claims).
     """
     box_scores = league.box_scores(
         matchup_period=matchup_period,
         scoring_period=scoring_period,
     )
 
-    # Pull raw stats for every rostered player in this scoring period.
-    # Single mRoster call covers all 14 fantasy teams; we look up each
-    # wrapper-returned player by playerId and use the raw sum if found.
-    raw_player_stats = fetch_raw_player_stats(league.year, scoring_period)
-    raw_count = 0           # used mRoster data (player played, raw had stats)
-    wrapper_count = 0       # mRoster missed but wrapper had stats — genuine recovery
-    empty_count = 0         # neither source had stats — player didn't play (expected)
+    # One kona call covers all ~1500 fantasy-relevant players (rostered + FA)
+    # in this scoring period; we look up each wrapper-returned player by
+    # playerId and use the kona sum if found.
+    all_player_stats = fetch_all_player_stats(league.year, scoring_period)
+    rostered_ids = set()    # tracks playerIds that appeared in any wrapper lineup
+    raw_count = 0           # rostered + kona had stats
+    wrapper_count = 0       # rostered + kona missed but wrapper had stats — recovery
+    empty_count = 0         # rostered + neither source had stats (didn't play)
 
     def format_owners(owners_list):
         if not owners_list:
@@ -306,27 +389,31 @@ def serialize_box_scores(league, scoring_period, matchup_period):
             lineup = getattr(matchup, f"{side}_lineup")
             lineup_list = []
             for player in lineup:
-                # Primary path: raw mRoster sums (correct on both single-game
-                # and doubleheader days; the wrapper's box_scores() collapses
+                rostered_ids.add(player.playerId)
+
+                # Primary path: kona sums (correct on both single-game and
+                # doubleheader days; the wrapper's box_scores() collapses
                 # DH splits via dict-key collision and silently drops one).
-                # mRoster only returns players who actually appeared in a
-                # game on this scoring_period, so absence != error — the
-                # large majority of fallbacks are legitimate "didn't play"
+                # Kona absence for a rostered player just means they didn't
+                # play — large majority of fallbacks are legitimate empty
                 # rows where wrapper also has empty stats.
-                raw = raw_player_stats.get(player.playerId)
+                raw = all_player_stats.get(player.playerId)
                 if raw is not None:
                     breakdown = raw["breakdown"]
                     points = raw["points"]
                     games_played = raw["games_played"]
+                    eligible_slots = raw["eligible_slots"]
                     raw_count += 1
                 else:
                     period_stats = player.stats.get(scoring_period, {})
                     breakdown = period_stats.get("breakdown", {}) or {}
                     points = period_stats.get("points", 0)
                     games_played = 1 if breakdown else 0
+                    # No eligibleSlots from wrapper-fallback path (kona was the
+                    # source). Empty list signals "unknown" downstream.
+                    eligible_slots = []
                     if breakdown:
-                        # Genuine recovery: wrapper had stats, raw missed.
-                        # Possible cause: roster transition / waiver claim.
+                        # Genuine recovery: wrapper had stats, kona missed.
                         wrapper_count += 1
                     else:
                         # Didn't play. Both sources empty — expected.
@@ -341,18 +428,47 @@ def serialize_box_scores(league, scoring_period, matchup_period):
                     "points": points,
                     "breakdown": breakdown,
                     "games_played": games_played,
+                    "eligibleSlots": eligible_slots,
                 }
                 lineup_list.append(player_dict)
             matchup_dict[f"{side}_lineup"] = lineup_list
 
         matchups.append(matchup_dict)
 
-    total = raw_count + wrapper_count + empty_count
-    fallback_note = f", wrapper-fallback={wrapper_count}" if wrapper_count else ""
-    print(f"    sources: raw={raw_count}{fallback_note}, "
-          f"didn't-play={empty_count}, total={total}")
+    # Anti-join: every kona player NOT in any wrapper lineup is a FA today.
+    # Lineup slot literal 'FA' (not in espn-api POSITION_MAP) keeps the
+    # downstream slot-bucket logic consistent: BE/IL/FA all flow through
+    # int_player_daily_stats and split at mart_wasted_points.
+    free_agents = []
+    for player_id, raw in all_player_stats.items():
+        if player_id in rostered_ids:
+            continue
+        free_agents.append({
+            "name": raw["name"],
+            "playerId": player_id,
+            "position": DEFAULT_POSITION_MAP.get(raw["default_position_id"], "UNK"),
+            "lineupSlot": "FA",
+            "proTeam": raw["pro_team"],
+            "points": raw["points"],
+            "breakdown": raw["breakdown"],
+            "games_played": raw["games_played"],
+            "eligibleSlots": raw["eligible_slots"],
+        })
 
-    return matchups
+    rostered_played = raw_count + wrapper_count
+    fa_played = len(free_agents)
+    total_played = rostered_played + fa_played
+    # MLB games ≈ distinct proTeams / 2. Off by 1 per DH-pair (DH team
+    # only contributes 1 to the distinct set despite playing 2 games).
+    # Acceptable for context; the games_played column on each player row
+    # carries exact DH info downstream.
+    mlb_games = len({p["pro_team"] for p in all_player_stats.values()}) // 2
+    fallback_note = f" | fallbacks: {wrapper_count}" if wrapper_count else ""
+    print(f"    played in MLB: {total_played} ({rostered_played} rostered, "
+          f"{fa_played} FA) over {mlb_games} games | "
+          f"{raw_count} tracked by kona{fallback_note}")
+
+    return {"matchups": matchups, "free_agents": free_agents}
 
 
 def load_box_scores_to_snowflake(conn, records, matchup_period, year):
@@ -392,7 +508,7 @@ def load_box_scores_to_snowflake(conn, records, matchup_period, year):
                     year,
                     record["scoring_period"],
                     record["matchup_period"],
-                    json.dumps(record["matchups"]),
+                    json.dumps(record["data"]),
                 ),
             )
 
@@ -415,11 +531,11 @@ def extract_matchup_period(conn, league, matchup_period, year):
     records = []
     for sp in scoring_periods:
         print(f"  Pulling scoring period {sp}...")
-        matchup_data = serialize_box_scores(league, sp, matchup_period)
+        sp_data = serialize_box_scores(league, sp, matchup_period)
         records.append({
             "scoring_period": sp,
             "matchup_period": matchup_period,
-            "matchups": matchup_data,
+            "data": sp_data,
         })
 
     load_box_scores_to_snowflake(conn, records, matchup_period, year)

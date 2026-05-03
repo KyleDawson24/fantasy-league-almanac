@@ -232,6 +232,143 @@ def format_pitcher_line(player):
     )
 
 
+def get_wasted_points(season_year, matchup_period, limit=5):
+    """
+    Top N wasted-points performers for a matchup period (Phase 4).
+
+    A player who was both ROSTERED_INACTIVE and FA in the same matchup
+    period (e.g., dropped mid-week) gets their wasted_points summed
+    across both buckets — one row per player. The two source buckets are
+    surfaced separately (fa_wasted_pts, bench_wasted_pts) so the formatter
+    can attribute "X unowned, Y benched" in the parenthetical.
+
+    Joins stg_box_scores for MLB pro_team and primary position metadata,
+    and fct_weekly_player_performance to detect partial-active weeks
+    (player who also had active days during the same matchup period).
+
+    Team-label priority (in COALESCE order):
+      1. Active team (from fct_weekly_player_performance) — captures the
+         FA-then-rostered case ("they have since been picked up")
+      2. Bench team (from mart_wasted_points ROSTERED_INACTIVE row)
+      3. 'Free Agent' fallback when neither active nor bench association
+    """
+    return query_snowflake("""
+        WITH wasted_combined AS (
+            SELECT
+                player_id,
+                MAX(display_name) AS display_name,
+                MAX(CASE WHEN wasted_bucket = 'FA'
+                         THEN wasted_points END) AS fa_wasted_pts,
+                MAX(CASE WHEN wasted_bucket = 'ROSTERED_INACTIVE'
+                         THEN wasted_points END) AS bench_wasted_pts,
+                SUM(wasted_points) AS wasted_points_total,
+                MAX(CASE WHEN wasted_bucket = 'ROSTERED_INACTIVE'
+                         THEN team_name END) AS bench_team_name
+            FROM mart_wasted_points
+            WHERE season_year = %s AND matchup_period = %s
+            GROUP BY player_id
+        ),
+        player_meta AS (
+            -- Most-recent (player, scoring_period) row in this matchup_period
+            -- for pro_team / position. Handles mid-period trades by picking
+            -- the latest snapshot.
+            SELECT player_id, pro_team, position
+            FROM (
+                SELECT player_id, pro_team, position,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY player_id
+                           ORDER BY scoring_period DESC
+                       ) AS rn
+                FROM stg_box_scores
+                WHERE season_year = %s AND matchup_period = %s
+            )
+            WHERE rn = 1
+        ),
+        active_points AS (
+            SELECT player_id,
+                   team_name AS active_team_name,
+                   platform_points
+            FROM fct_weekly_player_performance
+            WHERE season_year = %s AND matchup_period = %s
+        )
+        SELECT
+            w.display_name,
+            m.pro_team,
+            m.position,
+            COALESCE(a.active_team_name, w.bench_team_name, 'Free Agent')
+                AS fantasy_team,
+            w.fa_wasted_pts,
+            w.bench_wasted_pts,
+            w.wasted_points_total AS wasted_points,
+            a.platform_points AS active_points
+        FROM wasted_combined w
+        LEFT JOIN player_meta m ON w.player_id = m.player_id
+        LEFT JOIN active_points a ON w.player_id = a.player_id
+        ORDER BY w.wasted_points_total DESC
+        LIMIT %s
+    """, (season_year, matchup_period, season_year, matchup_period,
+          season_year, matchup_period, limit))
+
+
+def format_wasted_points(wasted):
+    """
+    Top Wasted Performances callout. Combined across FA and ROSTERED_INACTIVE
+    buckets per player; parenthetical attributes points to their source.
+
+    Format per row:
+        N. Player (MLB Team, Pos) -- Fantasy Team -- TOTAL [(BREAKDOWN)]
+
+    TOTAL takes one of two forms:
+      - "X+Y waste pts"    when wasted points came from BOTH FA and bench
+                           (the addition signals the split; sum is X+Y)
+      - "X.X pts"          when wasted points came from a single bucket
+                           (no ambiguity, just the value)
+
+    BREAKDOWN parenthetical lists each non-zero of (unowned, benched,
+    active). It appears when there's something to attribute beyond the
+    main line — i.e., either:
+      - waste came from both buckets (already shown via X+Y above; the
+        parenthetical names them), OR
+      - active points are non-zero (need to show the "and also X active"
+        context). Threshold is != 0 not > 0 so a net-negative active
+        stretch still appears (informative — they were "doubly wasted":
+        held but lost ground when started).
+    Single-source-no-active rows (the common pure-FA case) get no
+    parenthetical since the row already says all there is to say.
+    """
+    if not wasted:
+        return []
+
+    lines = ["", f"[u][b]Top {len(wasted)} Wasted Performances[/b][/u]"]
+    for i, p in enumerate(wasted, 1):
+        fa_pts     = p['fa_wasted_pts']     or 0
+        bench_pts  = p['bench_wasted_pts']  or 0
+        active_pts = p['active_points']     or 0
+
+        # Total format
+        if fa_pts and bench_pts:
+            total_str = f"{fa_pts:.1f}+{bench_pts:.1f} waste pts"
+        else:
+            total_str = f"{p['wasted_points']:.1f} pts"
+
+        # Breakdown parenthetical
+        parts = []
+        if (fa_pts and bench_pts) or active_pts != 0:
+            if fa_pts:
+                parts.append(f"{fa_pts:.1f} unowned")
+            if bench_pts:
+                parts.append(f"{bench_pts:.1f} benched")
+            if active_pts != 0:
+                parts.append(f"{active_pts:.1f} active")
+        paren = f" ({', '.join(parts)})" if parts else ""
+
+        lines.append(
+            f"{i}. {p['display_name']} ({p['pro_team']}, {p['position']}) "
+            f"-- {p['fantasy_team']} -- {total_str}{paren}"
+        )
+    return lines
+
+
 def get_records(active_season, season_only=False):
     """
     Fetch all matchup scores for records calculation.
@@ -283,7 +420,8 @@ def format_records(records):
     }
 
 
-def generate_summary(matchup_period, scores, contributions, season_records, alltime_records):
+def generate_summary(matchup_period, scores, contributions, wasted_points,
+                     season_records, alltime_records):
     """Build the BBCode-formatted front-page summary."""
 
     best_overall = scores[0]
@@ -360,6 +498,9 @@ def generate_summary(matchup_period, scores, contributions, season_records, allt
             f"all won this week, and the bottom {num_matchups} all lost.",
         ])
 
+    # Top Wasted Points (Phase 4) — last item in the weekly recap, before records.
+    lines.extend(format_wasted_points(wasted_points))
+
     # Records
     lines.extend([
         f"",
@@ -413,11 +554,13 @@ if __name__ == "__main__":
     matchup_period, scores = get_weekly_scores(active_season)
     players        = get_player_contributions(active_season, matchup_period)
     contributions  = get_contribution_callouts(scores, players)
+    wasted_points  = get_wasted_points(active_season, matchup_period)
 
     season_raw      = get_records(active_season, season_only=True)
     alltime_raw     = get_records(active_season, season_only=False)
     season_records  = format_records(season_raw)
     alltime_records = format_records(alltime_raw)
 
-    summary = generate_summary(matchup_period, scores, contributions, season_records, alltime_records)
+    summary = generate_summary(matchup_period, scores, contributions,
+                               wasted_points, season_records, alltime_records)
     print(summary)

@@ -69,10 +69,14 @@ models:
       Slot-agnostic player-daily stat detail. Joins stat_classification to
       bring in stat_category and filters to is_counting=true (rates dropped
       since they cannot be summed; recomputed via macros at the fact layer
-      where slot filter has been applied). Long format. lineup_slot
-      preserved so downstream models can produce active variants
-      (fct_weekly_player_stats) and inactive variants (future
-      mart_wasted_points) from the same intermediate.
+      where slot filter has been applied). Phase 4: applies the slot-stat-
+      category compatibility filter (gated by var('strict_slot_validity',
+      true)) so a hitter's hitting stats only count when slotted as a
+      hitter. Inactive rows (BE/IL/FA) bypass the validity filter so
+      mart_wasted_points sees their full stat lines. Long format.
+      lineup_slot preserved so downstream models can produce active
+      variants (fct_weekly_player_performance) and inactive variants
+      (mart_wasted_points) from the same intermediate.
       Grain: (season_year, matchup_period, scoring_period, team_id, player_id, lineup_slot, stat_name).
     columns:
       - name: season_year
@@ -82,23 +86,32 @@ models:
       - name: scoring_period
         description: 'Daily ESPN scoring period number.'
       - name: team_id
-        description: 'ESPN stable numeric team identifier.'
+        description: 'ESPN stable numeric team identifier. NULL for free agent rows (Phase 4).'
       - name: team_name
-        description: 'ESPN fantasy team name.'
+        description: 'ESPN fantasy team name. NULL for free agent rows (Phase 4).'
       - name: owner_name
-        description: 'Team owner display name.'
+        description: 'Team owner display name. NULL for free agent rows (Phase 4).'
       - name: player_id
         description: 'ESPN stable numeric player identifier.'
       - name: player_name
         description: 'Player full name.'
       - name: lineup_slot
         description: 'Fantasy lineup slot occupied on this day. Active slots = positions; BE/IL/FA = inactive. Preserved so downstream filters can split active vs inactive paths.'
+      - name: lineup_slot_category
+        description: >
+          Phase 4: bucket derived from lineup_slot ('pitching' | 'hitting'
+          | 'inactive'). Drives the slot-stat-category compatibility
+          filter applied here.
       - name: stat_name
         description: 'Stat abbreviation, filtered to is_counting=true.'
       - name: stat_category
         description: 'hitting, pitching, or fielding, from stat_classification.'
       - name: stat_value
         description: 'Numeric stat value for this player on this day.'
+      - name: points_per_unit
+        description: 'Phase 3.2: scoring weight per unit of this stat under the current season rules.'
+      - name: stat_points
+        description: 'Phase 3.2: stat_value * points_per_unit. Per-stat point contribution under current weights, used for calculated_points downstream.'
 
   - name: int_player_weekly_performance
     description: >

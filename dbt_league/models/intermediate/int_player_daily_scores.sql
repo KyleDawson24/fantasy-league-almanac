@@ -4,6 +4,10 @@
 ----can change mid game to account for the ohtani edge case
 -- Thin model — primary purpose is filtering and classification
 -- so downstream marts don't repeat that logic.
+--
+-- Phase 4: switched filter from explicit slot enumeration to
+-- lineup_slot_category, which now includes FA in 'inactive' alongside
+-- BE/IL. FAs have NULL team_id and would otherwise inflate team rollups.
 
 with players as (
     select * from {{ ref('stg_box_scores') }}
@@ -28,7 +32,7 @@ active as (
             else 'hitting'
         end as player_type
     from players
-    where lineup_slot not in ('BE', 'IL')
+    where lineup_slot_category != 'inactive'
 )
 
 select * from active

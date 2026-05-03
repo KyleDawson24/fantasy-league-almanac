@@ -242,11 +242,17 @@ models:
       stats, rate stats, scoring totals, opponent context, W/L,
       days_in_period). Phase 3.2 added per-stat *_pts columns and
       calculated_* totals rolled up from fct_weekly_player_performance.
-      Rolls up from fct_weekly_player_performance (consistency-by-construction:
-      team_total = SUM(players)). Recomputes rates via shared macros from
-      team-level counting sums. Adds matchup pairings from raw box scores
-      and joins matchup_schedule for days_in_period metadata.
-      Incremental fact -- merge by unique_key.
+      Phase 4 changed platform_points specifically: it is now sourced
+      directly from the wrapper's per-team home_score/away_score in raw
+      (taken from the LAST scoring_period of each matchup_period since
+      that field is cumulative-through-SP). This is ESPN's authoritative
+      team total — slot-aware AND inclusive of any commissioner manual
+      adjustments — and may NOT equal SUM(player platform_points) when
+      slot-mismatched players exist. The divergence is captured in
+      platform_calculated_delta. All other columns remain player rollups.
+      Recomputes rates via shared macros from team-level counting sums.
+      Adds matchup pairings from raw box scores and joins matchup_schedule
+      for days_in_period metadata. Incremental fact -- merge by unique_key.
       Grain: (season_year, matchup_period, team_id).
     tests:
       - dbt_utils.unique_combination_of_columns:
@@ -351,13 +357,49 @@ models:
       - name: k_per_bb
         description: 'Team strikeout-to-walk ratio.'
       - name: platform_points
-        description: 'Team total fantasy points (sum of player platform_points). Used for W/L determination. Renamed from total_points in Phase 3.2.'
+        description: >
+          Phase 4: team total fantasy points sourced DIRECTLY from the
+          wrapper's home_score/away_score (read at the last scoring_period
+          of each matchup_period). ESPN's authoritative team total —
+          slot-aware AND inclusive of any commissioner manual adjustments.
+          May NOT equal SUM(player platform_points) when slot-mismatched
+          players exist (a hitter slotted at RP contributes to player
+          rollup but not to the wrapper's team total). The arbiter for
+          W/L outcomes.
         tests:
           - not_null
+      - name: player_rollup_platform_points
+        description: >
+          Phase 4: SUM of platform_hitting_pts + platform_pitching_pts
+          across active players (the old definition of platform_points,
+          slot-blind). Surfaced for diagnostic comparison against the
+          authoritative wrapper-direct platform_points; their delta is
+          captured in platform_calculated_delta together with other
+          sources of divergence.
+      - name: platform_calculated_delta
+        description: >
+          Phase 4: platform_points - calculated_points. Captures sources
+          of divergence between ESPN's authoritative team total and the
+          rules-normalized derivation. For current-season weeks, this
+          isolates commissioner manual scoring adjustments. For historical
+          seasons, it also includes any difference between current and
+          historical scoring weights. Future enhancement may split this
+          into commissioner_adjustment + derivation_delta if ESPN exposes
+          an explicit pointsAdjustment field.
       - name: platform_hitting_pts
-        description: 'Team hitting fantasy points (sum of player platform_hitting_pts). Renamed from hitting_points in Phase 3.2.'
+        description: >
+          Team hitting fantasy points (SUM of player platform_hitting_pts).
+          Phase 4: still a player rollup; the wrapper provides only a
+          single team total without hitting/pitching breakdown. This
+          rollup may not sum exactly to platform_points for teams with
+          slot misuse. Used for hitting-leaderboard superlatives.
       - name: platform_pitching_pts
-        description: 'Team pitching fantasy points (sum of player platform_pitching_pts). Renamed from pitching_points in Phase 3.2.'
+        description: >
+          Team pitching fantasy points (SUM of player platform_pitching_pts).
+          Phase 4: still a player rollup; the wrapper provides only a
+          single team total without hitting/pitching breakdown. This
+          rollup may not sum exactly to platform_points for teams with
+          slot misuse. Used for pitching-leaderboard superlatives.
       - name: active_player_count
         description: 'Distinct count of players in active lineup slots for this team this matchup.'
       - name: opponent_id
@@ -444,6 +486,67 @@ models:
         description: 'Team sum of player calculated_pitching_pts. What the team''s pitching line scores under current rules.'
       - name: calculated_points
         description: 'Team sum of player calculated_points. What the team''s full stat line scores under current rules. Use this for cross-season comparisons (e.g., what would 2025 teams have scored under 2026 rules?).'
+
+  - name: mart_wasted_points
+    description: >
+      Phase 4: "what did you leave on the table" — fantasy points produced
+      by players in inactive lineup slots (bench, IL) and by free agents
+      the league did not roster. Reads int_player_daily_stats with the
+      inverse slot filter (lineup_slot_category = 'inactive'), aggregates
+      to weekly grain, and buckets into FA vs ROSTERED_INACTIVE
+      (BE+IL collapsed). View materialization since the dataset is small
+      and bucket assignment is deterministic from inputs.
+      Grain: (season_year, matchup_period, player_id, wasted_bucket).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - season_year
+              - matchup_period
+              - player_id
+              - wasted_bucket
+    columns:
+      - name: season_year
+        description: 'ESPN season year.'
+        tests:
+          - not_null
+      - name: matchup_period
+        description: 'ESPN matchup period number.'
+        tests:
+          - not_null
+      - name: player_id
+        description: 'ESPN stable numeric player identifier.'
+        tests:
+          - not_null
+      - name: player_name
+        description: 'Player full name.'
+      - name: display_name
+        description: 'COALESCE(nickname, player_name). Used for output callouts.'
+      - name: wasted_bucket
+        description: >
+          Bucket: 'FA' for unrostered free-agent days; 'ROSTERED_INACTIVE'
+          for bench (BE) and injured-list (IL) days. BE and IL are
+          substantively equivalent for wasted-points analysis (both are
+          rostered but didn't contribute) and collapsed here.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['FA', 'ROSTERED_INACTIVE']
+      - name: team_id
+        description: 'Team that rostered this player during the inactive days. NULL for FA bucket (no team owns them).'
+      - name: team_name
+        description: 'Fantasy team name. NULL for FA bucket.'
+      - name: owner_name
+        description: 'Owner display name. NULL for FA bucket.'
+      - name: wasted_points
+        description: 'Total fantasy points produced while in this bucket, under current-season scoring weights.'
+      - name: wasted_hitting_pts
+        description: 'Subset of wasted_points from hitting-category stats.'
+      - name: wasted_pitching_pts
+        description: 'Subset of wasted_points from pitching-category stats.'
+      - name: days_in_bucket
+        description: 'Count of distinct scoring_periods this player spent in this bucket within the matchup_period.'
 
   - name: mart_stat_leaderboard
     description: >

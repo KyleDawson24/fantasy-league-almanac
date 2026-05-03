@@ -20,6 +20,7 @@ flattened as (
         player_name,
         position,
         lineup_slot,
+        lineup_slot_category,
         b.key::string   as stat_name,
         b.value::float  as stat_value
     from players,

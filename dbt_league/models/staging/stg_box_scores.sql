@@ -1,6 +1,7 @@
 -- stg_box_scores.sql
--- Flatten raw JSON into one row per player per team per scoring period.
--- Foundational grain for both scoring and stats chains.
+-- Flatten raw JSON into one row per player per scoring period. Includes
+-- both rostered players (with team_id/owner) and free agents (with NULLs).
+-- Foundational grain for scoring, stats, and wasted-points chains.
 --
 -- Phase 3.1: player_nicknames join moved here (from individual marts) so
 -- display_name = COALESCE(nickname, player_name) propagates through every
@@ -11,6 +12,22 @@
 -- Historical raw rows predating Phase 3.3 don't have the field; we COALESCE
 -- to 1 when the player has a non-empty breakdown, 0 otherwise — matching the
 -- semantics the wrapper produced before we knew about the DH overwrite bug.
+--
+-- Phase 4: raw JSON shape changed from a bare matchups array to a dict with
+-- two keys: `matchups` (rostered lineups) and `free_agents` (anti-join rows
+-- for unrostered MLB players who had stats). FA rows carry NULL team fields
+-- and lineup_slot='FA'. Historical pre-Phase-4 rows still have the array
+-- shape and only matchups; the unioned subqueries handle both shapes via
+-- defensive raw_json:matchups extraction (returns NULL on the array shape,
+-- which the lateral flatten then yields zero rows for).
+--
+-- Phase 4: lineup_slot_category derived here as a clean three-value bucket:
+--   'pitching' = SP/RP/P (any pitcher slot)
+--   'hitting'  = any other active slot (1B, 2B, ..., DH, UTIL, etc.)
+--   'inactive' = BE/IL/FA
+-- Used at int_player_daily_stats for the slot-stat-category compatibility
+-- filter (a hitter's hitting stats only count when they're in a hitting
+-- slot, etc.) — toggleable via the strict_slot_validity dbt var.
 
 with raw as (
     select
@@ -21,6 +38,12 @@ with raw as (
     from {{ source('raw', 'box_scores') }}
 ),
 
+-- Phase 4 raw shape: {"matchups": [...], "free_agents": [...]}.
+-- Pre-Phase-4 raw shape: bare array of matchup dicts. The lateral flatten
+-- on raw_json:matchups returns zero rows for the array shape (because
+-- raw_json:matchups is NULL on a JSON array), and the COALESCE-to-array
+-- handles the legacy shape. Both shapes can coexist post-Phase-4 backfill
+-- but in practice we --full-refresh, so this is defense-in-depth.
 matchups as (
     select
         season_year,
@@ -28,7 +51,9 @@ matchups as (
         matchup_period,
         m.value as matchup
     from raw,
-        lateral flatten(input => raw_json) m
+        lateral flatten(
+            input => coalesce(raw_json:matchups, raw_json)
+        ) m
 ),
 
 home_players as (
@@ -79,15 +104,49 @@ away_players as (
         lateral flatten(input => matchup:away_lineup) p
 ),
 
+-- Phase 4 free agents: top-level array on the raw JSON dict, parallel to
+-- matchups[]. NULL team fields by construction (FAs have no fantasy team).
+-- home_away is also NULL — they're not on either side of any matchup.
+free_agents as (
+    select
+        season_year,
+        scoring_period,
+        matchup_period,
+        cast(null as string)            as owner_name,
+        cast(null as string)            as team_name,
+        cast(null as integer)           as team_id,
+        cast(null as string)            as home_away,
+        f.value:name::string            as player_name,
+        f.value:playerId::integer       as player_id,
+        f.value:position::string        as position,
+        f.value:lineupSlot::string      as lineup_slot,
+        f.value:proTeam::string         as pro_team,
+        f.value:points::float           as points,
+        f.value:breakdown               as breakdown,
+        coalesce(
+            f.value:games_played::integer,
+            iff(array_size(object_keys(f.value:breakdown)) > 0, 1, 0)
+        )                               as games_played
+    from raw,
+        lateral flatten(input => raw_json:free_agents) f
+),
+
 all_players as (
     select * from home_players
     union all
     select * from away_players
+    union all
+    select * from free_agents
 )
 
 select
     p.*,
-    coalesce(n.nickname, p.player_name) as display_name
+    coalesce(n.nickname, p.player_name) as display_name,
+    case
+        when p.lineup_slot in ('SP', 'RP', 'P')   then 'pitching'
+        when p.lineup_slot in ('BE', 'IL', 'FA')  then 'inactive'
+        else 'hitting'
+    end as lineup_slot_category
 from all_players p
 left join {{ ref('player_nicknames') }} n
     on p.player_id = n.player_id

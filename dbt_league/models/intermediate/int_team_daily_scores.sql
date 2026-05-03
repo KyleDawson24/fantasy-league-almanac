@@ -1,7 +1,9 @@
 -- int_team_daily_scores.sql
 -- Aggregate player-level data to team-level daily scores.
 -- Splits total points into hitting and pitching categories.
--- Only includes players in active lineup slots (excludes bench and IL).
+-- Only includes players in active lineup slots (excludes bench, IL, and
+-- Phase 4 FA rows — FAs have NULL team_id and would inflate team totals
+-- and produce a phantom NULL-team row).
 
 with players as (
     select * from {{ ref('stg_box_scores') }}
@@ -10,7 +12,7 @@ with players as (
 active_players as (
     select *
     from players
-    where lineup_slot not in ('BE', 'IL')
+    where lineup_slot_category not in ('inactive')
 ),
 
 team_daily as (

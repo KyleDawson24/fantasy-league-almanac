@@ -51,6 +51,7 @@ with team_rollup as (
         matchup_period,
         team_id,
         team_name,
+        team_abbrev,
         owner_name,
 
         -- Hitting counting
@@ -137,7 +138,7 @@ with team_rollup as (
 
         count(distinct player_id) as active_player_count
     from {{ ref('fct_weekly_player_performance') }}
-    group by 1, 2, 3, 4, 5
+    group by 1, 2, 3, 4, 5, 6
 ),
 
 -- Phase 4: team-level platform_points sourced directly from the wrapper's

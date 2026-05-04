@@ -13,6 +13,12 @@ Tie handling:
   - Fewer than 3 non-zero contributors with zero-value teammates: append
     "N others with 0"
 
+Phase 5: score-level records (Total / Hitting / Pitching Points) now use
+the calculated_* columns rather than platform_*. Calculated_* applies
+the current season's scoring weights to historical stat lines, giving
+us an apples-to-apples cross-season comparison. The platform_* columns
+still live in mart_stat_leaderboard for diagnostic lookups.
+
 Reads from mart_stat_leaderboard (entity_grain='team', scope='all_time')
 for the records and from fct_weekly_player_performance for the per-team
 contributor breakouts. Output is a BBCode-formatted block, printed to
@@ -24,6 +30,8 @@ from datetime import datetime
 
 from dotenv import load_dotenv
 import snowflake.connector
+
+from formatters import fmt_value, format_contributors, STAT_DISPLAY
 
 load_dotenv()
 
@@ -39,8 +47,15 @@ SNOWFLAKE_CONFIG = {
 
 # Display labels and ordering for stat names. Anything not in this list still
 # gets reported (with stat_name as the display) but is appended to the end.
+#
+# Phase 5: score-level records flipped from PLATFORM_* to CALCULATED_*.
+# We care about scores under today's settings rather than what a previous
+# season's then-current weights happened to call a total. PLATFORM_* still
+# lives in mart_stat_leaderboard for cross-season comparison and is just
+# omitted from STAT_ORDER (anything not listed gets appended at the end
+# with raw stat_name as its display label, which is fine for diagnostic).
 STAT_ORDER = [
-    'PLATFORM_POINTS', 'PLATFORM_HITTING_PTS', 'PLATFORM_PITCHING_PTS',
+    'CALCULATED_POINTS', 'CALCULATED_HITTING_PTS', 'CALCULATED_PITCHING_PTS',
     # Hitting
     'HR', 'RBI', 'R', 'H', 'TB', 'XBH',
     'DOUBLES', 'TRIPLES', 'SINGLES',
@@ -51,42 +66,8 @@ STAT_ORDER = [
     'BLK', 'WP',
 ]
 
-STAT_DISPLAY = {
-    'PLATFORM_POINTS':       'Platform Points',
-    'PLATFORM_HITTING_PTS':  'Platform Hitting Points',
-    'PLATFORM_PITCHING_PTS': 'Platform Pitching Points',
-    'H':       'Hits',
-    'AB':      'At Bats',
-    'B_BB':    'Walks (Batter)',
-    'B_SO':    'Strikeouts (Batter)',
-    'HBP':     'Hit by Pitch',
-    'SF':      'Sacrifice Flies',
-    'HR':      'Home Runs',
-    'R':       'Runs',
-    'RBI':     'RBIs',
-    'SB':      'Stolen Bases',
-    'CS':      'Caught Stealing',
-    'TB':      'Total Bases',
-    'SINGLES': 'Singles',
-    'DOUBLES': 'Doubles',
-    'TRIPLES': 'Triples',
-    'XBH':     'Extra Base Hits',
-    'W':       'Wins',
-    'L':       'Losses',
-    'K':       'Strikeouts (Pitcher)',
-    'ER':      'Earned Runs',
-    'OUTS':    'Outs Recorded',
-    'QS':      'Quality Starts',
-    'SV':      'Saves',
-    'HLD':     'Holds',
-    'P_H':     'Hits Allowed',
-    'P_BB':    'Walks Allowed',
-    'P_HR':    'Home Runs Allowed',
-    'P_R':     'Runs Allowed',
-    'CG':      'Complete Games',
-    'BLK':     'Balks',
-    'WP':      'Wild Pitches',
-}
+# STAT_DISPLAY moved to output/formatters.py (Phase 5) for shared use
+# with the new-record callouts in generate_summary.py.
 
 
 def query_snowflake(sql, params=None):
@@ -103,11 +84,13 @@ def query_snowflake(sql, params=None):
 
 
 def get_tracked_team_stats():
-    """Distinct stat_name values present in the team-grain all-time leaderboard."""
+    """Distinct stat_name values present in the team-grain all-time best leaderboard."""
     rows = query_snowflake("""
         SELECT DISTINCT stat_name
         FROM mart_stat_leaderboard
-        WHERE entity_grain = 'team' AND record_scope = 'all_time'
+        WHERE entity_grain = 'team'
+          AND record_scope = 'all_time'
+          AND record_direction = 'best'
     """)
     names = [r['stat_name'] for r in rows]
     # Order: STAT_ORDER first (preserving its order), then anything else alphabetically
@@ -117,13 +100,14 @@ def get_tracked_team_stats():
 
 
 def get_record_holders(stat_name):
-    """All leaderboard rows for this stat at team grain, all-time scope, ordered by rank."""
+    """All leaderboard rows for this stat at team grain, all-time best scope, ordered by rank."""
     return query_snowflake("""
         SELECT rank, season_year, matchup_period, team_id, team_name,
                owner_name, stat_value
         FROM mart_stat_leaderboard
         WHERE entity_grain = 'team'
           AND record_scope = 'all_time'
+          AND record_direction = 'best'
           AND stat_name = %s
         ORDER BY rank
     """, (stat_name,))
@@ -147,14 +131,8 @@ def get_team_contributors(season_year, matchup_period, team_id, stat_column):
 
 
 # ---------- formatting helpers ----------
-
-def fmt_value(v):
-    """Integer-style for whole numbers, 1 decimal for floats. None → 0."""
-    if v is None:
-        return "0"
-    if float(v) == int(v):
-        return str(int(v))
-    return f"{v:.1f}"
+# fmt_value and format_contributors moved to output/formatters.py (Phase 5)
+# so the new-record callouts in generate_summary.py can share them.
 
 
 def fmt_team_in_week(row):
@@ -173,48 +151,6 @@ def split_tiers(rows):
         else:
             tiers.append([row])
     return tiers
-
-
-def format_contributors(contributors):
-    """Top-3 contributors with tie-handling and zero-tail.
-
-    Each contributor dict has 'display_name' and 'stat_value'. Returns a
-    comma-separated string, or None if no non-zero contributors exist.
-    """
-    sorted_p = sorted(contributors, key=lambda p: p['stat_value'] or 0, reverse=True)
-    non_zero = [p for p in sorted_p if (p['stat_value'] or 0) > 0]
-    zero_count = len(sorted_p) - len(non_zero)
-
-    if not non_zero:
-        return None
-
-    parts = []
-    used = 0
-    i = 0
-    while i < len(non_zero) and used < 3:
-        val = non_zero[i]['stat_value']
-        # Find end of this tie group
-        j = i
-        while j < len(non_zero) and non_zero[j]['stat_value'] == val:
-            j += 1
-        group = non_zero[i:j]
-        group_size = len(group)
-
-        if used + group_size <= 3:
-            for p in group:
-                parts.append(f"{p['display_name']}: {fmt_value(val)}")
-            used += group_size
-        else:
-            # Tie group would overflow the top 3 -- switch to count format
-            parts.append(f"{group_size} others with {fmt_value(val)}")
-            used = 3
-        i = j
-
-    # Append "N others with 0" if there's room and zero-valued teammates exist
-    if used < 3 and zero_count > 0:
-        parts.append(f"{zero_count} others with 0")
-
-    return ", ".join(parts)
 
 
 def format_record(stat_name, holders):

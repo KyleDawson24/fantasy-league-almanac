@@ -15,6 +15,7 @@ flattened as (
         matchup_period,
         team_id,
         team_name,
+        team_abbrev,
         owner_name,
         player_id,
         player_name,

@@ -30,6 +30,8 @@ models:
         description: 'ESPN fantasy team name. NULL for free agent rows (Phase 4).'
       - name: team_id
         description: 'ESPN stable numeric team identifier. NULL for free agent rows (Phase 4).'
+      - name: team_abbrev
+        description: 'Owner-set short code for the fantasy team (e.g., "SMEL" for Big Smell City Smelly Boys). Phase 5 addition. NULL for free agent rows. Used by output formatters for compact team labels in callouts.'
       - name: owner_name
         description: 'Team owner display name, extracted from ESPN API. For co-managed teams, a slash-delimited list of first names. NULL for free agent rows (Phase 4).'
       - name: home_away
@@ -62,6 +64,16 @@ models:
                 values: ['pitching', 'hitting', 'inactive']
       - name: pro_team
         description: 'Player MLB team abbreviation.'
+      - name: eligible_slots
+        description: >
+          Phase 5: VARIANT array of every fantasy lineup slot the player
+          is eligible to fill (e.g. ['LF', 'OF', 'DH', 'UTIL', 'BE', 'IL']
+          for a corner outfielder). Sourced from the wrapper's Player
+          object — kona returns this empty for rostered players, so the
+          wrapper is the source of truth. May contain flex-slot shapes
+          like '2B/SS' or 'IF' that aren't position eligibilities per se;
+          consumer (output formatters) filters to specific positions for
+          display. Empty array for legacy pre-Phase-5 raw rows.
       - name: points
         description: >
           Direct passthrough of ESPN's per-player platform-computed points

@@ -33,6 +33,7 @@ weekly as (
         matchup_period,
         team_id,
         team_name,
+        team_abbrev,
         owner_name,
         player_id,
         player_name,
@@ -119,7 +120,7 @@ weekly as (
         sum(stat_points)                                                       as total_stat_pts
 
     from daily
-    group by 1, 2, 3, 4, 5, 6, 7, 8
+    group by 1, 2, 3, 4, 5, 6, 7, 8, 9
 )
 
 select * from weekly

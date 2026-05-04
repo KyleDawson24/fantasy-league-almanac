@@ -89,6 +89,8 @@ models:
         description: 'ESPN stable numeric team identifier. NULL for free agent rows (Phase 4).'
       - name: team_name
         description: 'ESPN fantasy team name. NULL for free agent rows (Phase 4).'
+      - name: team_abbrev
+        description: 'Phase 5: owner-set short code for the fantasy team. NULL for free agent rows.'
       - name: owner_name
         description: 'Team owner display name. NULL for free agent rows (Phase 4).'
       - name: player_id
@@ -135,6 +137,8 @@ models:
         description: 'ESPN stable numeric team identifier.'
       - name: team_name
         description: 'ESPN fantasy team name.'
+      - name: team_abbrev
+        description: 'Phase 5: owner-set short code for the fantasy team.'
       - name: owner_name
         description: 'Team owner display name.'
       - name: player_id

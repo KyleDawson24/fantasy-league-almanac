@@ -375,9 +375,11 @@ def serialize_box_scores(league, scoring_period, matchup_period):
         matchup_dict = {
             "home_team": matchup.home_team.team_name,
             "home_team_id": matchup.home_team.team_id,
+            "home_team_abbrev": matchup.home_team.team_abbrev,
             "home_owner": format_owners(home_owners),
             "away_team": matchup.away_team.team_name,
             "away_team_id": matchup.away_team.team_id,
+            "away_team_abbrev": matchup.away_team.team_abbrev,
             "away_owner": format_owners(away_owners),
             "home_score": matchup.home_score,
             "away_score": matchup.away_score,
@@ -402,22 +404,26 @@ def serialize_box_scores(league, scoring_period, matchup_period):
                     breakdown = raw["breakdown"]
                     points = raw["points"]
                     games_played = raw["games_played"]
-                    eligible_slots = raw["eligible_slots"]
                     raw_count += 1
                 else:
                     period_stats = player.stats.get(scoring_period, {})
                     breakdown = period_stats.get("breakdown", {}) or {}
                     points = period_stats.get("points", 0)
                     games_played = 1 if breakdown else 0
-                    # No eligibleSlots from wrapper-fallback path (kona was the
-                    # source). Empty list signals "unknown" downstream.
-                    eligible_slots = []
                     if breakdown:
                         # Genuine recovery: wrapper had stats, kona missed.
                         wrapper_count += 1
                     else:
-                        # Didn't play. Both sources empty — expected.
+                        # Didn't play. Both sources empty -- expected.
                         empty_count += 1
+
+                # Phase 5: pull eligibleSlots from the wrapper Player object.
+                # Kona's view=kona_player_info returns an empty eligibleSlots
+                # array for rostered players (it only populates the field for
+                # FAs). The wrapper has it for everyone, so we read from there
+                # for rostered. FAs continue to source from kona (anti-join
+                # path below) where it IS populated.
+                eligible_slots = getattr(player, 'eligibleSlots', []) or []
 
                 player_dict = {
                     "name": player.name,

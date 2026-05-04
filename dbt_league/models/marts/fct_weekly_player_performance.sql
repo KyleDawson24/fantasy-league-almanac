@@ -43,6 +43,7 @@ with active as (
         matchup_period,
         team_id,
         team_name,
+        team_abbrev,
         owner_name,
         player_id,
         player_name,
@@ -125,7 +126,7 @@ with active as (
 
     from {{ ref('int_player_weekly_performance') }}
     where lineup_slot not in ('BE', 'IL', 'FA')
-    group by 1, 2, 3, 4, 5, 6, 7
+    group by 1, 2, 3, 4, 5, 6, 7, 8
 ),
 
 scores as (
@@ -146,6 +147,7 @@ select
     a.matchup_period,
     a.team_id,
     a.team_name,
+    a.team_abbrev,
     a.owner_name,
     a.player_id,
     a.player_name,

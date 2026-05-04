@@ -60,6 +60,7 @@ filtered as (
         d.scoring_period,
         d.team_id,
         d.team_name,
+        d.team_abbrev,
         d.owner_name,
         d.player_id,
         d.player_name,

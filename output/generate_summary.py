@@ -22,6 +22,7 @@ from formatters import (
     STAT_DISPLAY,
     STAT_ABBREV,
 )
+import records
 import json
 
 load_dotenv()
@@ -396,102 +397,71 @@ def format_wasted_points(wasted):
     return lines
 
 
-def get_records(active_season, season_only=False):
-    """
-    Fetch all matchup scores for records calculation.
-    Excludes abnormal weeks. If season_only=True, filters to active_season.
-
-    Phase 5: ranks on calculated_* (rules-normalized under current weights)
-    rather than platform_* (ESPN's official tally at the time). Records
-    we care about are "what's the best week under today's scoring," so
-    historical seasons get re-evaluated under the current rule set rather
-    than locked to whatever weights were live then.
-    """
-    season_filter = f"AND f.season_year = {active_season}" if season_only else ""
-
-    return query_snowflake(f"""
-        SELECT
-            f.season_year,
-            f.matchup_period,
-            f.team_name,
-            f.owner_name,
-            f.calculated_points,
-            f.calculated_hitting_pts,
-            f.calculated_pitching_pts
-        FROM fct_weekly_team_performance f
-        LEFT JOIN MATCHUP_SCHEDULE s
-            ON f.season_year = s.season_year
-            AND f.matchup_period = s.matchup_period
-        WHERE s.is_abnormal = false
-        {season_filter}
-    """)
+# ---------- Records section formatting ----------
+# Phase 6.2: data access (get_records / get_player_records / get_stat_polarity
+# / find_new_records / count_value_occurrences) moved to output/records.py.
+# This section only does formatting now -- it consumes the leaderboard rows
+# the records module returns. The team-records pattern also migrated from a
+# direct fct_weekly_team_performance query to leaderboard rank-1 reads (the
+# "migrate team records to leaderboard" backlog item folded in here).
 
 
-def format_records(records, season_only):
-    """Format the 6 team records (best/worst total/hitting/pitching).
+def format_records(records_rows, season_only):
+    """Format the 6 team score-level records (best/worst total/hitting/
+    pitching) from leaderboard rows.
+
+    `records_rows` is the output of records.get_all_time_records() or
+    records.get_current_season_records() -- a list of rank-1 rows across
+    all grains/stats/directions. We filter to team-grain score columns and
+    key by (stat_name, direction).
 
     season_only=True drops the year from the week label since it's
     implied (current season). False keeps "YYYY Week N" for all-time.
     """
-    best_total    = max(records, key=lambda x: x['calculated_points'])
-    best_hitting  = max(records, key=lambda x: x['calculated_hitting_pts'])
-    best_pitching = max(records, key=lambda x: x['calculated_pitching_pts'])
+    by_key = {
+        (r['stat_name'], r['record_direction']): r
+        for r in records_rows
+        if r['entity_grain'] == 'team'
+        and r['stat_name'] in records.SCORE_STAT_NAMES
+    }
 
-    worst_total    = min(records, key=lambda x: x['calculated_points'])
-    worst_hitting  = min(records, key=lambda x: x['calculated_hitting_pts'])
-    worst_pitching = min(records, key=lambda x: x['calculated_pitching_pts'])
-
-    def fmt(row, score_key):
+    def fmt(row):
+        if row is None:
+            return None
         if season_only:
             week_str = f"Week {row['matchup_period']}"
         else:
             week_str = f"{row['season_year']} Week {row['matchup_period']}"
         return (
             f"{row['team_name']} ({row['owner_name']}) -- "
-            f"{row[score_key]:.1f} pts, {week_str}"
+            f"{row['stat_value']:.1f} pts, {week_str}"
         )
 
     return {
-        'best_total':     fmt(best_total,    'calculated_points'),
-        'best_hitting':   fmt(best_hitting,  'calculated_hitting_pts'),
-        'best_pitching':  fmt(best_pitching, 'calculated_pitching_pts'),
-        'worst_total':    fmt(worst_total,   'calculated_points'),
-        'worst_hitting':  fmt(worst_hitting, 'calculated_hitting_pts'),
-        'worst_pitching': fmt(worst_pitching,'calculated_pitching_pts'),
+        'best_total':     fmt(by_key.get(('CALCULATED_POINTS',         'best'))),
+        'best_hitting':   fmt(by_key.get(('CALCULATED_HITTING_PTS',    'best'))),
+        'best_pitching':  fmt(by_key.get(('CALCULATED_PITCHING_PTS',   'best'))),
+        'worst_total':    fmt(by_key.get(('CALCULATED_POINTS',         'worst'))),
+        'worst_hitting':  fmt(by_key.get(('CALCULATED_HITTING_PTS',    'worst'))),
+        'worst_pitching': fmt(by_key.get(('CALCULATED_PITCHING_PTS',   'worst'))),
     }
 
 
-def get_player_records():
-    """Fetch rank-1 player records (Top Scorer / Hitter / Pitcher) for both
-    all-time and current-season scopes, in the 'best' direction.
+def format_player_records(records_rows, season_only):
+    """Format the 3 player records (Top Scorer / Hitter / Pitcher) from
+    leaderboard rows. Filter to player grain + best direction + score
+    columns (player records are best-only per the polarity filter).
 
-    Reads from mart_stat_leaderboard which already pre-computes these.
-    Returns a list of up to 6 rows (3 stats x 2 scopes); consumer keys by
-    record_scope + stat_name.
+    Returns a dict with keys 'top_scorer', 'top_hitter', 'top_pitcher';
+    each value is a formatted string or None when no rank-1 row exists.
     """
-    return query_snowflake("""
-        SELECT entity_grain, stat_name, record_scope,
-               team_abbrev, owner_name, display_name,
-               season_year, matchup_period, stat_value
-        FROM mart_stat_leaderboard
-        WHERE entity_grain = 'player'
-          AND stat_name IN ('CALCULATED_POINTS',
-                            'CALCULATED_HITTING_PTS',
-                            'CALCULATED_PITCHING_PTS')
-          AND record_direction = 'best'
-          AND rank = 1
-    """)
-
-
-def format_player_records(player_records, season_only):
-    """Format the 3 player records (Top Scorer / Hitter / Pitcher) for one
-    scope. Returns a dict with keys 'top_scorer', 'top_hitter',
-    'top_pitcher'; each value is a formatted string or None when no rank-1
-    row exists for that (stat, scope) tuple.
-    """
-    scope = 'current_season' if season_only else 'all_time'
-    by_stat = {r['stat_name']: r for r in player_records
-               if r['record_scope'] == scope}
+    by_stat = {
+        r['stat_name']: r
+        for r in records_rows
+        if r['entity_grain'] == 'player'
+        and r['record_direction'] == 'best'
+        and r['stat_name'] in records.SCORE_STAT_NAMES
+    }
 
     def fmt(row):
         if row is None:
@@ -513,185 +483,10 @@ def format_player_records(player_records, season_only):
 
 
 # ---------- New record callouts (Phase 5) ----------
-#
-# Detects records broken in the just-recapped matchup_period by querying
-# mart_stat_leaderboard for rank-1 rows whose (season, MP) matches the
-# current week. Then applies polarity-aware filter rules from the Phase 5
-# design:
-#   - Player grain: only score-level (CALCULATED_*) records, only Most.
-#   - Team grain, score-level (CALCULATED_*): both Most and Least.
-#   - Team grain, individual stat with positive scoring weight: Most + Least.
-#   - Team grain, individual stat with negative scoring weight: Most only
-#     ("most of the bad thing" -- "fewest strikeouts" type records would
-#     just reward empty lineups, so we skip those for now).
-#   - Zero-weighted stats (H, TB, SF, XBH): skipped entirely.
-# Ties surface as "{entity} became the Nth team/player to ..." instead of
-# the full broken-record block. Worst-direction records render without a
-# contributor list (deferred to a future "least of negatives" handling).
+# Detection + filter rules + tie counting moved to output/records.py in
+# Phase 6.2. This section now only formats the records that records.py
+# returns.
 
-SCORE_STAT_NAMES = {
-    'CALCULATED_POINTS', 'CALCULATED_HITTING_PTS', 'CALCULATED_PITCHING_PTS',
-}
-
-# The seed uses '1B' / '2B' / '3B' but the wide fct + leaderboard call those
-# columns 'SINGLES' / 'DOUBLES' / 'TRIPLES'. Translate seed names to
-# leaderboard column names so polarity lookups land correctly.
-_SEED_TO_LEADERBOARD = {
-    '1B': 'SINGLES',
-    '2B': 'DOUBLES',
-    '3B': 'TRIPLES',
-}
-
-
-def get_stat_polarity():
-    """Map of leaderboard-stat_name -> 'positive' | 'negative' | 'neutral'.
-    Derived from sign of points_per_unit in stg_scoring_settings.
-    Stats without a row in the seed are 'neutral'. Seed names like '1B'
-    are translated to their leaderboard equivalents ('SINGLES') so the
-    consumer's stat_name lookup succeeds.
-    """
-    rows = query_snowflake("""
-        SELECT UPPER(stat_name) AS stat_name, points_per_unit
-        FROM stg_scoring_settings
-    """)
-    polarity = {}
-    for r in rows:
-        name = _SEED_TO_LEADERBOARD.get(r['stat_name'], r['stat_name'])
-        ppu = r['points_per_unit'] or 0
-        if ppu > 0:
-            polarity[name] = 'positive'
-        elif ppu < 0:
-            polarity[name] = 'negative'
-        else:
-            polarity[name] = 'neutral'
-    return polarity
-
-
-def should_track_record(grain, stat_name, direction, polarity):
-    """Apply Phase 5 record-eligibility rules."""
-    if grain == 'player':
-        return stat_name in SCORE_STAT_NAMES and direction == 'best'
-    # team grain
-    if stat_name in SCORE_STAT_NAMES:
-        return True
-    pol = polarity.get(stat_name)
-    if pol is None or pol == 'neutral':
-        return False
-    if pol == 'positive':
-        return True
-    return direction == 'best'  # negative-stat: most-of only
-
-
-def find_new_records(season_year, matchup_period):
-    """Records broken or tied in this MP. Returns list of dicts with keys:
-    grain, stat_name, direction, new (leaderboard row), prior (rank-2 row
-    or None), is_tie (bool), tie_count (int, only when is_tie).
-    """
-    polarity = get_stat_polarity()
-
-    # All rank-1 leaderboard rows whose holder is the just-recapped MP --
-    # for every (grain, stat_name, record_direction) combination at once.
-    candidates = query_snowflake("""
-        SELECT *
-        FROM mart_stat_leaderboard
-        WHERE rank = 1
-          AND record_scope = 'all_time'
-          AND season_year = %s
-          AND matchup_period = %s
-    """, (season_year, matchup_period))
-
-    out = []
-    for cand in candidates:
-        grain = cand['entity_grain']
-        stat = cand['stat_name']
-        direction = cand['record_direction']
-        if not should_track_record(grain, stat, direction, polarity):
-            continue
-
-        # Rank 2 = prior holder. With our recency tiebreak, this also tells
-        # us if we tied (rank-2 stat_value equals rank-1 stat_value).
-        prior_rows = query_snowflake("""
-            SELECT *
-            FROM mart_stat_leaderboard
-            WHERE entity_grain = %s
-              AND stat_name = %s
-              AND record_scope = 'all_time'
-              AND record_direction = %s
-              AND rank = 2
-        """, (grain, stat, direction))
-        prior = prior_rows[0] if prior_rows else None
-
-        is_tie = prior is not None and prior['stat_value'] == cand['stat_value']
-
-        # Phase 5 (#3) noise filter: skip tied records at value=0 for
-        # individual stats (CG/HLD/SV/QS/HBP/etc. floor every week and
-        # the "Nth team to record 0 X" phrasing got noisy fast). Strict
-        # breaks at 0 can't happen for these (count can't go negative),
-        # so this filter only affects ties.
-        if (is_tie
-                and stat not in SCORE_STAT_NAMES
-                and cand['stat_value'] == 0):
-            continue
-
-        rec = {
-            'grain': grain,
-            'stat_name': stat,
-            'direction': direction,
-            'new': cand,
-            'prior': prior if not is_tie else None,
-            'is_tie': is_tie,
-        }
-        if is_tie:
-            rec['tie_count'] = count_value_occurrences(grain, stat, cand['stat_value'])
-        out.append(rec)
-
-    return _sort_records(out)
-
-
-def count_value_occurrences(grain, stat_name, value):
-    """How many (entity, MP) tuples in fct_weekly_*_performance have this
-    exact stat_value, excluding abnormal weeks. Used for 'Nth team/player'
-    framing on tied records.
-    """
-    fct = ('fct_weekly_team_performance' if grain == 'team'
-           else 'fct_weekly_player_performance')
-    col = stat_name.lower()
-    rows = query_snowflake(f"""
-        SELECT COUNT(*) AS n
-        FROM {fct} f
-        JOIN matchup_schedule s
-          ON f.season_year = s.season_year
-         AND f.matchup_period = s.matchup_period
-        WHERE s.is_abnormal = false
-          AND {col} = %s
-    """, (value,))
-    return rows[0]['n'] if rows else 0
-
-
-def _sort_records(records):
-    """Stable visual order: player records first, then team score, then
-    team stat. Within each grouping, Best before Worst, score columns in
-    Total->Hitting->Pitching order, individual stats by display order."""
-    score_order = {'CALCULATED_POINTS': 0, 'CALCULATED_HITTING_PTS': 1,
-                   'CALCULATED_PITCHING_PTS': 2}
-    stat_display_order = list(STAT_DISPLAY.keys())
-
-    def sort_key(rec):
-        grain_rank = 0 if rec['grain'] == 'player' else (1 if rec['stat_name'] in SCORE_STAT_NAMES else 2)
-        if rec['stat_name'] in SCORE_STAT_NAMES:
-            stat_rank = score_order.get(rec['stat_name'], 99)
-        else:
-            try:
-                stat_rank = stat_display_order.index(rec['stat_name'])
-            except ValueError:
-                stat_rank = 99
-        direction_rank = 0 if rec['direction'] == 'best' else 1
-        return (grain_rank, stat_rank, direction_rank)
-
-    return sorted(records, key=sort_key)
-
-
-# ---------- Formatting ----------
 
 def ordinal(n):
     """1 -> '1st', 2 -> '2nd', 3 -> '3rd', 11 -> '11th', etc."""
@@ -706,7 +501,7 @@ def fmt_stat_value_with_unit(stat_name, value):
     """Stat value with unit suffix for inline display.
     Score columns: '37.3 pts'. OUTS: '8.0 IP'. Other counting stats: '5 HR'.
     """
-    if stat_name in SCORE_STAT_NAMES:
+    if stat_name in records.SCORE_STAT_NAMES:
         return f"{value:.1f} pts"
     if stat_name == 'OUTS':
         return f"{fmt_ip(value)} IP"
@@ -718,7 +513,7 @@ def make_record_label(grain, stat_name, direction):
       Score columns -> '{Best|Worst} {Player|Team} {Total|Hitting|Pitching} Points'
       Individual stats -> '{Most|Fewest} {Display Name}'
     """
-    if stat_name in SCORE_STAT_NAMES:
+    if stat_name in records.SCORE_STAT_NAMES:
         prefix = 'Best' if direction == 'best' else 'Worst'
         scope = 'Player' if grain == 'player' else 'Team'
         return f"{prefix} {scope} {STAT_DISPLAY[stat_name]}"
@@ -1005,18 +800,19 @@ if __name__ == "__main__":
     players        = get_player_contributions(active_season, matchup_period)
     contributions  = get_contribution_callouts(scores, players)
     wasted_points  = get_wasted_points(active_season, matchup_period)
-    new_records    = find_new_records(active_season, matchup_period)
 
-    season_raw      = get_records(active_season, season_only=True)
-    alltime_raw     = get_records(active_season, season_only=False)
-    season_records  = format_records(season_raw,  season_only=True)
-    alltime_records = format_records(alltime_raw, season_only=False)
+    # Phase 6.2: records data access consolidated in output/records.py.
+    # Each scope is a single leaderboard query returning all rank-1 rows
+    # across grains, stats, and directions; the format_* functions filter
+    # to what each section displays.
+    new_records         = records.get_records_set_this_week(active_season, matchup_period)
+    all_time_rows       = records.get_all_time_records()
+    current_season_rows = records.get_current_season_records()
 
-    # Player records (Phase 5 #6): Top Scorer / Hitter / Pitcher per scope.
-    # One leaderboard query covers both scopes; format_player_records splits.
-    player_record_rows     = get_player_records()
-    season_player_records  = format_player_records(player_record_rows, season_only=True)
-    alltime_player_records = format_player_records(player_record_rows, season_only=False)
+    season_records         = format_records(current_season_rows, season_only=True)
+    alltime_records        = format_records(all_time_rows,       season_only=False)
+    season_player_records  = format_player_records(current_season_rows, season_only=True)
+    alltime_player_records = format_player_records(all_time_rows,       season_only=False)
 
     summary = generate_summary(matchup_period, scores, contributions,
                                wasted_points, season_records, alltime_records,

@@ -19,34 +19,19 @@ the current season's scoring weights to historical stat lines, giving
 us an apples-to-apples cross-season comparison. The platform_* columns
 still live in mart_stat_leaderboard for diagnostic lookups.
 
-Reads from mart_stat_leaderboard (entity_grain='team', scope='all_time')
-for the records and from fct_weekly_player_performance for the per-team
-contributor breakouts. Output is a BBCode-formatted block, printed to
-stdout and written to a timestamped log file under output/logs/.
+Phase 6.2: data access (leaderboard reads, contributor lookups) moved to
+output/records.py. This script keeps formatting and the iteration shape.
 """
 
 import os
 from datetime import datetime
 
-from dotenv import load_dotenv
-import snowflake.connector
-
 from formatters import fmt_value, format_contributors, STAT_DISPLAY
-
-load_dotenv()
-
-SNOWFLAKE_CONFIG = {
-    "account": os.getenv("SNOWFLAKE_ACCOUNT"),
-    "user": os.getenv("SNOWFLAKE_USER"),
-    "password": os.getenv("SNOWFLAKE_PASSWORD"),
-    "database": os.getenv("SNOWFLAKE_DATABASE"),
-    "schema": "ANALYTICS",
-    "warehouse": os.getenv("SNOWFLAKE_WAREHOUSE"),
-}
+import records
 
 
-# Display labels and ordering for stat names. Anything not in this list still
-# gets reported (with stat_name as the display) but is appended to the end.
+# Display ordering for stat names. Anything not in this list still gets
+# reported (with stat_name as the display) but is appended to the end.
 #
 # Phase 5: score-level records flipped from PLATFORM_* to CALCULATED_*.
 # We care about scores under today's settings rather than what a previous
@@ -66,68 +51,14 @@ STAT_ORDER = [
     'BLK', 'WP',
 ]
 
-# STAT_DISPLAY moved to output/formatters.py (Phase 5) for shared use
-# with the new-record callouts in generate_summary.py.
 
-
-def query_snowflake(sql, params=None):
-    """Run a query and return results as a list of dicts (column names lowercased)."""
-    conn = snowflake.connector.connect(**SNOWFLAKE_CONFIG)
-    cursor = conn.cursor()
-    try:
-        cursor.execute(sql, params or ())
-        columns = [desc[0].lower() for desc in cursor.description]
-        return [dict(zip(columns, row)) for row in cursor.fetchall()]
-    finally:
-        cursor.close()
-        conn.close()
-
-
-def get_tracked_team_stats():
-    """Distinct stat_name values present in the team-grain all-time best leaderboard."""
-    rows = query_snowflake("""
-        SELECT DISTINCT stat_name
-        FROM mart_stat_leaderboard
-        WHERE entity_grain = 'team'
-          AND record_scope = 'all_time'
-          AND record_direction = 'best'
-    """)
-    names = [r['stat_name'] for r in rows]
-    # Order: STAT_ORDER first (preserving its order), then anything else alphabetically
-    ordered = [s for s in STAT_ORDER if s in names]
-    leftover = sorted(set(names) - set(STAT_ORDER))
+def order_stats_for_display(stat_names):
+    """STAT_ORDER first (preserving its order), then anything else
+    alphabetically. Phase 6.2: extracted from get_tracked_team_stats so
+    the ordering rule lives in this script (records.py is data-only)."""
+    ordered = [s for s in STAT_ORDER if s in stat_names]
+    leftover = sorted(set(stat_names) - set(STAT_ORDER))
     return ordered + leftover
-
-
-def get_record_holders(stat_name):
-    """All leaderboard rows for this stat at team grain, all-time best scope, ordered by rank."""
-    return query_snowflake("""
-        SELECT rank, season_year, matchup_period, team_id, team_name,
-               owner_name, stat_value
-        FROM mart_stat_leaderboard
-        WHERE entity_grain = 'team'
-          AND record_scope = 'all_time'
-          AND record_direction = 'best'
-          AND stat_name = %s
-        ORDER BY rank
-    """, (stat_name,))
-
-
-def get_team_contributors(season_year, matchup_period, team_id, stat_column):
-    """Player-level contributions to a specific stat for one team in one matchup.
-
-    `stat_column` is interpolated directly into SQL. This is safe ONLY because
-    it comes from our own leaderboard (an enumerated set of column names),
-    NOT user input.
-    """
-    return query_snowflake(f"""
-        SELECT display_name, {stat_column} AS stat_value
-        FROM fct_weekly_player_performance
-        WHERE season_year = %s
-          AND matchup_period = %s
-          AND team_id = %s
-        ORDER BY {stat_column} DESC NULLS LAST
-    """, (season_year, matchup_period, team_id))
 
 
 # ---------- formatting helpers ----------
@@ -172,7 +103,7 @@ def format_record(stat_name, holders):
         lines.append(
             f"[b]{display}[/b]: {record_str} by {fmt_team_in_week(holder)}"
         )
-        contributors = get_team_contributors(
+        contributors = records.get_team_contributors(
             holder['season_year'], holder['matchup_period'],
             holder['team_id'], stat_name,
         )
@@ -196,12 +127,15 @@ def format_record(stat_name, holders):
 
 
 def main():
-    stats = get_tracked_team_stats()
+    tracked = records.get_tracked_team_stats()
+    stats = order_stats_for_display(tracked)
 
     output_lines = ["[u][b]All-Time Team Records[/b][/u]", ""]
 
     for stat_name in stats:
-        holders = get_record_holders(stat_name)
+        holders = records.get_record_top_n(stat_name, grain='team',
+                                           direction='best', scope='all_time',
+                                           limit=10)
         block = format_record(stat_name, holders)
         if block:
             output_lines.append(block)

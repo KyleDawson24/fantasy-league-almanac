@@ -438,12 +438,15 @@ def format_records(records_rows, season_only):
         )
 
     return {
-        'best_total':     fmt(by_key.get(('CALCULATED_POINTS',         'best'))),
-        'best_hitting':   fmt(by_key.get(('CALCULATED_HITTING_PTS',    'best'))),
-        'best_pitching':  fmt(by_key.get(('CALCULATED_PITCHING_PTS',   'best'))),
-        'worst_total':    fmt(by_key.get(('CALCULATED_POINTS',         'worst'))),
-        'worst_hitting':  fmt(by_key.get(('CALCULATED_HITTING_PTS',    'worst'))),
-        'worst_pitching': fmt(by_key.get(('CALCULATED_PITCHING_PTS',   'worst'))),
+        # Phase 6.3.3: mart's record_direction values are 'most' / 'fewest'
+        # (rename from 'best' / 'worst'); the dict keys here keep best/worst
+        # semantics because for score columns 'most' pts == "best" outcome.
+        'best_total':     fmt(by_key.get(('CALCULATED_POINTS',         'most'))),
+        'best_hitting':   fmt(by_key.get(('CALCULATED_HITTING_PTS',    'most'))),
+        'best_pitching':  fmt(by_key.get(('CALCULATED_PITCHING_PTS',   'most'))),
+        'worst_total':    fmt(by_key.get(('CALCULATED_POINTS',         'fewest'))),
+        'worst_hitting':  fmt(by_key.get(('CALCULATED_HITTING_PTS',    'fewest'))),
+        'worst_pitching': fmt(by_key.get(('CALCULATED_PITCHING_PTS',   'fewest'))),
     }
 
 
@@ -459,7 +462,7 @@ def format_player_records(records_rows, season_only):
         r['stat_name']: r
         for r in records_rows
         if r['entity_grain'] == 'player'
-        and r['record_direction'] == 'best'
+        and r['record_direction'] == 'most'
         and r['stat_name'] in records.SCORE_STAT_NAMES
     }
 
@@ -513,11 +516,14 @@ def make_record_label(grain, stat_name, direction):
       Score columns -> '{Best|Worst} {Player|Team} {Total|Hitting|Pitching} Points'
       Individual stats -> '{Most|Fewest} {Display Name}'
     """
+    # Phase 6.3.3: mart direction values are 'most' / 'fewest' now.
+    # 'most' -> "Best" for score columns (more pts = better), "Most" for
+    # individual stats. 'fewest' -> "Worst" / "Fewest" symmetrically.
     if stat_name in records.SCORE_STAT_NAMES:
-        prefix = 'Best' if direction == 'best' else 'Worst'
+        prefix = 'Best' if direction == 'most' else 'Worst'
         scope = 'Player' if grain == 'player' else 'Team'
         return f"{prefix} {scope} {STAT_DISPLAY[stat_name]}"
-    prefix = 'Most' if direction == 'best' else 'Fewest'
+    prefix = 'Most' if direction == 'most' else 'Fewest'
     return f"{prefix} {STAT_DISPLAY.get(stat_name, stat_name)}"
 
 
@@ -566,7 +572,7 @@ def _format_player_score_record(rec, players):
 
 def _format_team_record(rec, players):
     """Team-grain record block. Score column or individual stat both use
-    this shape; contributor list only renders for 'best' direction (per
+    this shape; contributor list only renders for 'most' direction (per
     user spec: worsts don't get contributors yet).
     """
     new = rec['new']
@@ -585,7 +591,7 @@ def _format_team_record(rec, players):
             f"in Week {prior['matchup_period']} of {prior['season_year']})"
         )
 
-    if rec['direction'] == 'best':
+    if rec['direction'] == 'most':
         contribs = _team_contributors(players, new['team_id'], rec['stat_name'].lower())
         contrib_str = format_contributors(contribs, max_n=5)
         if contrib_str:

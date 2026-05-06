@@ -6,13 +6,18 @@
 -- which lens to rank by. Phase 5 surfaces calculated_* in the records
 -- output; platform_* remains available for cross-season comparisons.
 --
--- Phase 5 (#3): added `record_direction` dimension. The mart now emits
--- both 'best' (rank by stat_value DESC -- the original behavior) and
--- 'worst' (rank by stat_value ASC) rankings, top-10 each. Consumers
--- select the direction they want; the new-records detection in
--- generate_summary.py uses both, with consumer-side polarity filtering
--- (negative-weighted stats only surface 'best'/most-of, positive-weighted
--- stats surface both).
+-- Phase 5 (#3): added `record_direction` dimension. The mart emits both
+-- top-N (rank by stat_value DESC) and bottom-N (ASC) rankings.
+-- Phase 6.3.3: renamed direction values 'best'/'worst' -> 'most'/'fewest'
+-- (the mart is direction-agnostic; consumer-side polarity filtering decides
+-- which direction is "best" vs "worst" for any given stat -- e.g., 'most'
+-- is best for HR, worst for ER allowed). Cap held at top-10 per direction
+-- as a buffer for the consumer-side tie-collapse logic: top-5 is the
+-- display target, but the collapse rule needs to see tiers extending past
+-- rank 5 to decide when to render "N teams tied at value" instead of
+-- listing each entry individually. count_value_occurrences() in records.py
+-- backstops collapsed tiers with accurate totals when the leaderboard's
+-- top-10 saturates at one value (e.g., the SV/W zero-floor pattern).
 --
 -- Implementation uses Snowflake UNPIVOT to fold wide columns from
 -- fct_weekly_team_performance and fct_weekly_player_performance back into
@@ -23,7 +28,7 @@
 --
 -- Grain: (entity_grain, stat_name, record_scope, record_direction, rank).
 -- entity_grain in {'team', 'player'}. record_scope in {'all_time',
--- 'current_season'}. record_direction in {'best', 'worst'}. Rank 1..10
+-- 'current_season'}. record_direction in {'most', 'fewest'}. Rank 1..5
 -- per (entity_grain, stat_name, record_scope, record_direction).
 --
 -- Excludes abnormal matchup periods via matchup_schedule.is_abnormal = false.
@@ -139,14 +144,14 @@ current_year as (
     select max(season_year) as y from combined
 ),
 
--- Four rank dimensions: {all_time, current_season} x {best, worst}.
--- Each computes top-10 in its direction; combined output has a
--- record_direction column distinguishing best from worst.
+-- Four rank dimensions: {all_time, current_season} x {most, fewest}.
+-- Each computes top-5 in its direction; combined output has a
+-- record_direction column distinguishing most from fewest.
 
-all_time_best as (
+all_time_most as (
     select
         'all_time'::varchar as record_scope,
-        'best'::varchar     as record_direction,
+        'most'::varchar     as record_direction,
         c.*,
         row_number() over (
             partition by entity_grain, stat_name
@@ -155,10 +160,10 @@ all_time_best as (
     from combined c
 ),
 
-all_time_worst as (
+all_time_fewest as (
     select
         'all_time'::varchar as record_scope,
-        'worst'::varchar    as record_direction,
+        'fewest'::varchar   as record_direction,
         c.*,
         row_number() over (
             partition by entity_grain, stat_name
@@ -167,10 +172,10 @@ all_time_worst as (
     from combined c
 ),
 
-current_season_best as (
+current_season_most as (
     select
         'current_season'::varchar as record_scope,
-        'best'::varchar           as record_direction,
+        'most'::varchar           as record_direction,
         c.*,
         row_number() over (
             partition by entity_grain, stat_name
@@ -180,10 +185,10 @@ current_season_best as (
     where c.season_year = (select y from current_year)
 ),
 
-current_season_worst as (
+current_season_fewest as (
     select
         'current_season'::varchar as record_scope,
-        'worst'::varchar          as record_direction,
+        'fewest'::varchar         as record_direction,
         c.*,
         row_number() over (
             partition by entity_grain, stat_name
@@ -193,10 +198,10 @@ current_season_worst as (
     where c.season_year = (select y from current_year)
 )
 
-select * from all_time_best         where rank <= 10
+select * from all_time_most         where rank <= 10
 union all
-select * from all_time_worst        where rank <= 10
+select * from all_time_fewest       where rank <= 10
 union all
-select * from current_season_best   where rank <= 10
+select * from current_season_most   where rank <= 10
 union all
-select * from current_season_worst  where rank <= 10
+select * from current_season_fewest where rank <= 10

@@ -26,8 +26,12 @@ output/records.py. This script keeps formatting and the iteration shape.
 import os
 from datetime import datetime
 
+from dotenv import load_dotenv
+
 from formatters import fmt_value, format_contributors, STAT_DISPLAY
 import records
+
+load_dotenv()
 
 
 # Display ordering for stat names. Anything not in this list still gets
@@ -134,7 +138,7 @@ def main():
 
     for stat_name in stats:
         holders = records.get_record_top_n(stat_name, grain='team',
-                                           direction='best', scope='all_time',
+                                           direction='most', scope='all_time',
                                            limit=10)
         block = format_record(stat_name, holders)
         if block:
@@ -152,6 +156,21 @@ def main():
     with open(log_path, "w", encoding="utf-8") as f:
         f.write(summary)
     print(f"Log saved to: {log_path}")
+
+    # Phase 6.3: optional Sheets sink. Opt-in via SHEETS_OUTPUT_ID env var.
+    # Skipped silently (with an info log) when not configured. The Sheets
+    # writer is its own module so the import only fires when actually used
+    # -- keeps the dependency footprint of the records report minimal for
+    # users who don't enable Sheets.
+    sheets_id = os.getenv("SHEETS_OUTPUT_ID")
+    if sheets_id:
+        import sheets_writer
+        try:
+            sheets_writer.write_records(sheets_id)
+        except Exception as e:
+            print(f"[sheets] write failed: {e}")
+    else:
+        print("[sheets] SHEETS_OUTPUT_ID not set; skipping Sheets sink")
 
 
 if __name__ == "__main__":

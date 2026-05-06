@@ -86,12 +86,12 @@ def get_all_time_records():
 
     Returns a list of dicts (raw leaderboard rows). Includes both
     entity_grain values (team, player), all stat_names the leaderboard
-    tracks, and both record_directions (best, worst). Consumers key by
+    tracks, and both record_directions (most, fewest). Consumers key by
     (entity_grain, stat_name, record_direction) to extract what they need.
 
     The polarity filter is NOT applied here -- consumers filter for their
-    use case (the records sections want best+worst for team scores but
-    only best for player; the records report wants only 'best' direction).
+    use case (the records sections want most+fewest for team scores but
+    only most for player; the records report wants only 'most' direction).
     """
     return _fetch_rank1_records('all_time')
 
@@ -116,10 +116,15 @@ def _fetch_rank1_records(scope):
 
 # ---------- Records report: top-N for one stat ----------
 
-def get_record_top_n(stat_name, grain='team', direction='best',
-                     scope='all_time', limit=10):
+def get_record_top_n(stat_name, grain='team', direction='most',
+                     scope='all_time', limit=5):
     """Top-N rank rows for one specific stat. Used by generate_records_report
-    to render the multi-rank holders + tie tiers per stat."""
+    to render the multi-rank holders + tie tiers per stat.
+
+    Phase 6.3.3: direction values are 'most' / 'fewest' (renamed from
+    'best' / 'worst' at the mart layer). Default limit dropped to 5 to
+    match the mart's new top-5 cap.
+    """
     return query_snowflake("""
         SELECT rank, season_year, matchup_period, team_id, team_name,
                owner_name, stat_value
@@ -134,14 +139,14 @@ def get_record_top_n(stat_name, grain='team', direction='best',
 
 
 def get_tracked_team_stats():
-    """Distinct stat_names present in the team-grain all-time best leaderboard.
+    """Distinct stat_names present in the team-grain all-time 'most' leaderboard.
     Used by the records report to discover what stats to iterate."""
     rows = query_snowflake("""
         SELECT DISTINCT stat_name
         FROM mart_stat_leaderboard
         WHERE entity_grain = 'team'
           AND record_scope = 'all_time'
-          AND record_direction = 'best'
+          AND record_direction = 'most'
     """)
     return [r['stat_name'] for r in rows]
 
@@ -194,15 +199,16 @@ def get_stat_polarity():
 
 
 def should_track_record(grain, stat_name, direction, polarity):
-    """Phase 5 polarity-aware filter rules:
-      - Player grain: only score-level stats, only 'best' direction
+    """Phase 5 polarity-aware filter rules (direction values per Phase 6.3.3
+    are 'most' / 'fewest'):
+      - Player grain: only score-level stats, only 'most' direction
       - Team grain, score columns: both directions
       - Team grain, positive individual stat: both directions
-      - Team grain, negative individual stat: 'best' (most-of) only
+      - Team grain, negative individual stat: 'most' (most-of-bad) only
       - Zero-weighted (neutral) stats: skipped entirely
     """
     if grain == 'player':
-        return stat_name in SCORE_STAT_NAMES and direction == 'best'
+        return stat_name in SCORE_STAT_NAMES and direction == 'most'
     # team grain
     if stat_name in SCORE_STAT_NAMES:
         return True
@@ -211,7 +217,7 @@ def should_track_record(grain, stat_name, direction, polarity):
         return False
     if pol == 'positive':
         return True
-    return direction == 'best'  # negative-stat: most-of only
+    return direction == 'most'  # negative-stat: most-of only
 
 
 # ---------- New-record detection ----------
@@ -221,7 +227,7 @@ def get_records_set_this_week(season_year, matchup_period):
       {
         'grain': 'team' | 'player',
         'stat_name': uppercase leaderboard name,
-        'direction': 'best' | 'worst',
+        'direction': 'most' | 'fewest',
         'new': leaderboard row holding rank 1,
         'prior': leaderboard row at rank 2 (None if no rank-2 row OR if tied),
         'is_tie': bool (True when rank-2 stat_value equals rank-1),
@@ -347,7 +353,7 @@ def _sort_new_records(records):
             except ValueError:
                 stat_rank = 99
 
-        direction_rank = 0 if rec['direction'] == 'best' else 1
+        direction_rank = 0 if rec['direction'] == 'most' else 1
         return (grain_rank, stat_rank, direction_rank)
 
     return sorted(records, key=sort_key)

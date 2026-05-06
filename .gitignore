@@ -3,6 +3,10 @@
 *.env
 !.env.example
 ESPN Fantasy Baseball Cookies.txt
+# Phase 6.3: cached OAuth token from sheets_writer's first-run user-flow.
+# Stored next to the script as .sheets_oauth_token.json; gitignored to
+# keep per-user credentials out of git.
+output/.sheets_oauth_token.json
 
 # Python
 .venv/

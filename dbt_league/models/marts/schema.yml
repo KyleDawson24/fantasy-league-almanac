@@ -561,9 +561,14 @@ models:
       lens to rank by. Phase 5 surfaces calculated_* in the records
       output; platform_* remains available for cross-season comparison.
       Phase 5 (#3): record_direction dimension added — the mart emits both
-      'best' (DESC) and 'worst' (ASC) rankings, top-10 each. Consumers
-      apply polarity filtering (negative-weighted stats only surface
-      'best'/most-of, positive stats surface both).
+      'most' (DESC) and 'fewest' (ASC) rankings, top-5 each
+      (Phase 6.3.3 reduced from top-10). Consumers apply polarity filtering
+      (negative-weighted stats only surface 'most'/most-of, positive stats
+      surface both directions). Direction values are intentionally
+      direction-agnostic ('most'/'fewest', not 'best'/'worst') because
+      what's "best" depends on the stat -- 'most' is best for HR but worst
+      for ER allowed; the polarity filter at the consumer side resolves
+      that mapping.
       Implementation uses Snowflake UNPIVOT to fold wide columns from the
       convergence facts back into long-format (stat_name, stat_value) rows,
       then ranks uniformly. Snowflake-specific; portable rewrite would be
@@ -571,7 +576,7 @@ models:
       broken by recency (newer season, then matchup) in both directions.
       View materialization (rankings retroactively mutable; incremental
       would be fragile).
-      Grain: (entity_grain, stat_name, record_scope, record_direction, rank), rank 1..10.
+      Grain: (entity_grain, stat_name, record_scope, record_direction, rank), rank 1..5.
     tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
@@ -601,14 +606,18 @@ models:
               arguments:
                 values: ['all_time', 'current_season']
       - name: record_direction
-        description: 'Phase 5: best (rank by stat_value DESC -- most/highest) or worst (rank by stat_value ASC -- least/lowest). Consumer applies polarity-aware filtering when surfacing records.'
+        description: >
+          Phase 5/6.3.3: 'most' (rank by stat_value DESC) or 'fewest' (rank
+          by stat_value ASC). Direction-agnostic by design -- the same value
+          ('most') means "best" for HR but "worst" for ER allowed; consumer
+          applies polarity-aware filtering when surfacing records.
         tests:
           - not_null
           - accepted_values:
               arguments:
-                values: ['best', 'worst']
+                values: ['most', 'fewest']
       - name: rank
-        description: '1 to 10. Ties broken by recency (newer season_year, then newer matchup_period) in both directions.'
+        description: '1 to 5. Ties broken by recency (newer season_year, then newer matchup_period) in both directions.'
         tests:
           - not_null
       - name: team_abbrev

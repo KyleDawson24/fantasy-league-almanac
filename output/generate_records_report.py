@@ -23,6 +23,7 @@ Phase 6.2: data access (leaderboard reads, contributor lookups) moved to
 output/records.py. This script keeps formatting and the iteration shape.
 """
 
+import argparse
 import os
 import sys
 from datetime import datetime
@@ -34,6 +35,15 @@ from formatters import (
     format_contributors, STAT_DISPLAY,
 )
 import records
+
+
+# When the rank-1 tier has more than this many members, collapse the
+# tier display to "X across N team-weeks" rather than enumerating every
+# tied team. Mirrors the floor-noise pattern handled by the records-with-
+# contributors orchestrator on the Sheets side; this is the BBCode-side
+# equivalent. Keep low (3) to match formatters.format_contributors's
+# own inline-collapse threshold so reads consistent across outputs.
+INLINE_TIER_LIMIT = 3
 
 load_dotenv()
 
@@ -157,8 +167,8 @@ def format_record(stat_name, holders, schedule_lookup):
         contrib_str = format_contributors(contributors, value_fmt=contrib_value_fmt)
         if contrib_str:
             lines.append(contrib_str)
-    else:
-        # Multi-team tie at the record -- list all, point to runner-up tier
+    elif len(top_tier) <= INLINE_TIER_LIMIT:
+        # Small tied tier -- list every team, drop contributor breakout.
         team_descs = ", ".join(fmt_team_in_week(t, schedule_lookup) for t in top_tier)
         lines.append(f"[b]{display}[/b]: {record_str} by {team_descs}")
 
@@ -169,11 +179,41 @@ def format_record(stat_name, holders, schedule_lookup):
             lines.append(
                 f"Second place: {fmt_record_value(stat_name, second_value)} held by {second_teams}"
             )
+    else:
+        # Long-tail tie -- typically value=0 stats (NH/PG/SHO/etc. that no
+        # team has ever recorded). Collapse to a count instead of listing
+        # 10+ identical entries. Use league_history_count for the accurate
+        # team-week count; fall back to the visible tier size + suffix when
+        # the stat isn't fct-countable (rate stats / WASTED_POINTS — these
+        # don't reach this report anyway via _REPORT_EXCLUDED_STATS, but
+        # the fallback keeps the renderer total-function).
+        count = records.count_value_occurrences('team', stat_name, record_value)
+        count_str = f"{count}" if count is not None else f"{len(top_tier)}+"
+        lines.append(
+            f"[b]{display}[/b]: {record_str} across {count_str} team-weeks"
+        )
+        # Skip second-place tier when collapsing -- tier 2 at a long-tail
+        # floor is usually also a tied long tail (e.g., 0 in tier 1, 1 in
+        # tier 2 with another 200 ties), and adds noise rather than insight.
 
     return "\n".join(lines)
 
 
 def main():
+    parser = argparse.ArgumentParser(
+        description='Generate the all-time team records BBCode report. '
+                    'Optionally writes to the league Google Sheet when '
+                    'SHEETS_OUTPUT_ID is set in .env (and --no-sheets is not).',
+    )
+    parser.add_argument(
+        '--no-sheets', action='store_true',
+        help='Suppress the Sheets sink even when SHEETS_OUTPUT_ID is set. '
+             'Useful for verification runs that should not touch the live '
+             'sheet. (load_dotenv repopulates env-var-unsetting attempts, '
+             'so this flag is the canonical suppression mechanism.)',
+    )
+    args = parser.parse_args()
+
     tracked = records.get_tracked_team_stats()
     stats = order_stats_for_display(tracked)
     schedule_lookup = records.load_schedule_lookup()
@@ -207,7 +247,12 @@ def main():
     # -- keeps the dependency footprint of the records report minimal for
     # users who don't enable Sheets.
     sheets_id = os.getenv("SHEETS_OUTPUT_ID")
-    if sheets_id:
+    if args.no_sheets:
+        print("[sheets] --no-sheets flag set; suppressing Sheets sink "
+              "(SHEETS_OUTPUT_ID was set, would have written otherwise)"
+              if sheets_id else
+              "[sheets] --no-sheets flag set; SHEETS_OUTPUT_ID also unset")
+    elif sheets_id:
         import sheets_writer
         try:
             sheets_writer.write_records(sheets_id)

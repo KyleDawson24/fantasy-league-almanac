@@ -68,6 +68,7 @@ seeds:
         stat_category: varchar
         stat_description: varchar
         is_counting: boolean
+        is_always_tracked: boolean
         notes: varchar
     player_nicknames:
       +column_types:

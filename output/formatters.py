@@ -97,6 +97,36 @@ STAT_DISPLAY = {
     'CG':      'Complete Games',
     'BLK':     'Balks',
     'WP':      'Wild Pitches',
+    # Phase 6.3.3 chunk 1 -- additional tracked counting stats
+    'GDP':     'GIDP (Batter)',
+    'B_IBB':   'Intentional Walks (Batter)',
+    'HBP_P':   'Hit Batters',
+    'BLSV':    'Blown Saves',
+    'NH':      'No-Hitters',
+    'PG':      'Perfect Games',
+    'PK':      'Pickoffs',
+    'SHO':     'Shutouts',
+    # Phase 6.3.3 chunk 2 -- mart-only derived counting + rate stats +
+    # wasted points. Rates use slash form (HR/9, K/BB) which reads
+    # naturally inline; net stats include the (X-Y) parenthetical so
+    # the math is self-explanatory in a quick glance.
+    'PA':           'Plate Appearances',
+    'SB_CS':        'Net Stolen Bases (SB-CS)',
+    'W_L':          'Net Wins (W-L)',
+    'SV_BLSV':      'Net Saves (SV-BLSV)',
+    'ERA':          'ERA',
+    'WHIP':         'WHIP',
+    'K_PER_9':      'K/9',
+    'K_PER_BB':     'K/BB',
+    'HR_PER_9':     'HR/9',
+    'BB_PER_9':     'BB/9',
+    'WASTED_POINTS': 'Wasted Points',
+    # Platform-* records still surface from the leaderboard mart for
+    # cross-season comparison; Phase 5 swapped the records section to
+    # CALCULATED_* but PLATFORM_* remains visible in the Sheets dump.
+    'PLATFORM_POINTS':        'Platform Total Points',
+    'PLATFORM_HITTING_PTS':   'Platform Hitting Points',
+    'PLATFORM_PITCHING_PTS':  'Platform Pitching Points',
 }
 
 # Short abbreviations for inline value display ("5 HR", "12 K", etc.).
@@ -109,6 +139,15 @@ STAT_ABBREV = {
     'W': 'W', 'L': 'L', 'K': 'K', 'ER': 'ER', 'OUTS': 'IP', 'QS': 'QS',
     'SV': 'SV', 'HLD': 'HLD', 'P_H': 'H', 'P_BB': 'BB',
     'P_HR': 'HR', 'P_R': 'R', 'CG': 'CG', 'BLK': 'BK', 'WP': 'WP',
+    # Phase 6.3.3 chunk 1 additions
+    'GDP': 'GIDP', 'B_IBB': 'IBB', 'HBP_P': 'HBP', 'BLSV': 'BLSV',
+    'NH': 'NH', 'PG': 'PG', 'PK': 'PK', 'SHO': 'SHO',
+    # Phase 6.3.3 chunk 2 additions
+    'PA': 'PA', 'SB_CS': 'SB-CS', 'W_L': 'W-L', 'SV_BLSV': 'SV-BLSV',
+    'ERA': 'ERA', 'WHIP': 'WHIP',
+    'K_PER_9': 'K/9', 'K_PER_BB': 'K/BB',
+    'HR_PER_9': 'HR/9', 'BB_PER_9': 'BB/9',
+    'WASTED_POINTS': 'Wasted',
 }
 
 
@@ -165,7 +204,38 @@ def fmt_value(v):
     return f"{v:.1f}"
 
 
-def format_contributors(contributors, max_n=3):
+# Score-stat keys that fmt_record_value renders with 1-decimal precision
+# regardless of whole-number-ness (e.g., 415.0 -> "415.0", not "415").
+# Hardcoded here rather than imported from records.py to keep formatters
+# free of cross-module deps.
+_SCORE_STAT_KEYS = frozenset({
+    'CALCULATED_POINTS', 'CALCULATED_HITTING_PTS', 'CALCULATED_PITCHING_PTS',
+    'PLATFORM_POINTS', 'PLATFORM_HITTING_PTS', 'PLATFORM_PITCHING_PTS',
+})
+
+
+def fmt_record_value(stat_name, value):
+    """Phase 6.3.3 chunk 6.5: stat-aware value display for record output.
+
+    Returns a string. Three cases:
+      - OUTS:        baseball IP notation via fmt_ip (51 outs -> "17.0")
+      - Score stats: 1-decimal precision (forces "415.0", not "415")
+      - everything else: fmt_value's int-or-1decimal heuristic
+
+    Rate stats (ERA, WHIP, K/9, etc.) fall through to fmt_value which
+    keeps their float precision. The label (STAT_DISPLAY) carries the
+    unit context, so this returns a bare number string without suffix.
+    """
+    if value is None:
+        return ""
+    if stat_name == 'OUTS':
+        return fmt_ip(value)
+    if stat_name in _SCORE_STAT_KEYS:
+        return f"{value:.1f}"
+    return fmt_value(value)
+
+
+def format_contributors(contributors, max_n=3, value_fmt=None):
     """Top-N stat contributors with tie-handling and zero-tail.
 
     Each contributor dict has 'display_name' and 'stat_value'. Returns a
@@ -177,8 +247,14 @@ def format_contributors(contributors, max_n=3):
     Zero-tail: if fewer than max_n positive contributors exist and there
     are zero-valued teammates, append 'N others with 0'.
 
+    Phase 6.3.3 chunk 6.5: `value_fmt` callable lets the caller swap the
+    value formatter (e.g., pass fmt_ip for OUTS so contributor counts
+    display as baseball IP notation rather than raw outs). Defaults to
+    fmt_value to preserve the pre-6.3.3 behavior.
+
     max_n defaults to 3 (records report); new-record callouts pass max_n=5.
     """
+    value_fmt = value_fmt or fmt_value
     sorted_p = sorted(contributors, key=lambda p: p['stat_value'] or 0, reverse=True)
     non_zero = [p for p in sorted_p if (p['stat_value'] or 0) > 0]
     zero_count = len(sorted_p) - len(non_zero)
@@ -200,17 +276,17 @@ def format_contributors(contributors, max_n=3):
 
         if used + group_size <= max_n:
             for p in group:
-                parts.append(f"{p['display_name']}: {fmt_value(val)}")
+                parts.append(f"{p['display_name']}: {value_fmt(val)}")
             used += group_size
         else:
             # Tie group would overflow -- switch to count format
-            parts.append(f"{group_size} others with {fmt_value(val)}")
+            parts.append(f"{group_size} others with {value_fmt(val)}")
             used = max_n
         i = j
 
     # Append 'N others with 0' if there's room and zero-valued teammates exist
     if used < max_n and zero_count > 0:
-        parts.append(f"{zero_count} others with 0")
+        parts.append(f"{zero_count} others with {value_fmt(0)}")
 
     return ", ".join(parts)
 

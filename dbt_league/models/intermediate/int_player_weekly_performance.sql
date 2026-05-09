@@ -56,6 +56,8 @@ weekly as (
         sum(case when stat_name = '2B'    then stat_value else 0 end) as doubles,
         sum(case when stat_name = '3B'    then stat_value else 0 end) as triples,
         sum(case when stat_name = 'XBH'   then stat_value else 0 end) as xbh,
+        sum(case when stat_name = 'GDP'   then stat_value else 0 end) as gdp,
+        sum(case when stat_name = 'B_IBB' then stat_value else 0 end) as b_ibb,
 
         -- Hitting point contributions
         sum(case when stat_name = 'H'     then stat_points else 0 end) as h_pts,
@@ -74,6 +76,8 @@ weekly as (
         sum(case when stat_name = '2B'    then stat_points else 0 end) as doubles_pts,
         sum(case when stat_name = '3B'    then stat_points else 0 end) as triples_pts,
         sum(case when stat_name = 'XBH'   then stat_points else 0 end) as xbh_pts,
+        sum(case when stat_name = 'GDP'   then stat_points else 0 end) as gdp_pts,
+        sum(case when stat_name = 'B_IBB' then stat_points else 0 end) as b_ibb_pts,
 
         -- Pitching counting stats
         sum(case when stat_name = 'W'     then stat_value else 0 end) as w,
@@ -91,6 +95,12 @@ weekly as (
         sum(case when stat_name = 'CG'    then stat_value else 0 end) as cg,
         sum(case when stat_name = 'BLK'   then stat_value else 0 end) as blk,
         sum(case when stat_name = 'WP'    then stat_value else 0 end) as wp,
+        sum(case when stat_name = 'HBP_P' then stat_value else 0 end) as hbp_p,
+        sum(case when stat_name = 'BLSV'  then stat_value else 0 end) as blsv,
+        sum(case when stat_name = 'NH'    then stat_value else 0 end) as nh,
+        sum(case when stat_name = 'PG'    then stat_value else 0 end) as pg,
+        sum(case when stat_name = 'PK'    then stat_value else 0 end) as pk,
+        sum(case when stat_name = '64'    then stat_value else 0 end) as sho,
 
         -- Pitching point contributions
         sum(case when stat_name = 'W'     then stat_points else 0 end) as w_pts,
@@ -108,13 +118,20 @@ weekly as (
         sum(case when stat_name = 'CG'    then stat_points else 0 end) as cg_pts,
         sum(case when stat_name = 'BLK'   then stat_points else 0 end) as blk_pts,
         sum(case when stat_name = 'WP'    then stat_points else 0 end) as wp_pts,
+        sum(case when stat_name = 'HBP_P' then stat_points else 0 end) as hbp_p_pts,
+        sum(case when stat_name = 'BLSV'  then stat_points else 0 end) as blsv_pts,
+        sum(case when stat_name = 'NH'    then stat_points else 0 end) as nh_pts,
+        sum(case when stat_name = 'PG'    then stat_points else 0 end) as pg_pts,
+        sum(case when stat_name = 'PK'    then stat_points else 0 end) as pk_pts,
+        sum(case when stat_name = '64'    then stat_points else 0 end) as sho_pts,
 
-        -- Catch-all totals: sum stat_points across ALL scored stats (including
-        -- ones that don't have a dedicated *_pts column in the wide pivot, e.g.
-        -- GDP, B_IBB, HBP_P, PK, BLSV, NH, PG). The fact layer uses these for
-        -- calculated_points so the value is correct regardless of which stats
-        -- are explicitly pivoted. Per-stat *_pts columns remain available above
-        -- for "top N contributing stats" consumer callouts.
+        -- Catch-all totals: sum stat_points across ALL scored stats. The fact
+        -- layer uses these for calculated_points so the value is correct
+        -- regardless of which stats are explicitly pivoted. Per-stat *_pts
+        -- columns remain available above for "top N contributing stats"
+        -- consumer callouts (Phase 6.3.3 expanded the per-stat pivots to cover
+        -- GDP, B_IBB, HBP_P, BLSV, NH, PG, PK, SHO; the catch-all approach
+        -- keeps calculated_points robust to future seed additions either way).
         sum(case when stat_category = 'hitting'  then stat_points else 0 end) as total_hitting_stat_pts,
         sum(case when stat_category = 'pitching' then stat_points else 0 end) as total_pitching_stat_pts,
         sum(stat_points)                                                       as total_stat_pts

@@ -65,6 +65,8 @@ with active as (
         sum(doubles) as doubles,
         sum(triples) as triples,
         sum(xbh)     as xbh,
+        sum(gdp)     as gdp,
+        sum(b_ibb)   as b_ibb,
 
         -- Hitting point contributions
         sum(h_pts)       as h_pts,
@@ -83,6 +85,8 @@ with active as (
         sum(doubles_pts) as doubles_pts,
         sum(triples_pts) as triples_pts,
         sum(xbh_pts)     as xbh_pts,
+        sum(gdp_pts)     as gdp_pts,
+        sum(b_ibb_pts)   as b_ibb_pts,
 
         -- Pitching counting
         sum(w)       as w,
@@ -100,6 +104,12 @@ with active as (
         sum(cg)      as cg,
         sum(blk)     as blk,
         sum(wp)      as wp,
+        sum(hbp_p)   as hbp_p,
+        sum(blsv)    as blsv,
+        sum(nh)      as nh,
+        sum(pg)      as pg,
+        sum(pk)      as pk,
+        sum(sho)     as sho,
 
         -- Pitching point contributions
         sum(w_pts)    as w_pts,
@@ -117,6 +127,12 @@ with active as (
         sum(cg_pts)   as cg_pts,
         sum(blk_pts)  as blk_pts,
         sum(wp_pts)   as wp_pts,
+        sum(hbp_p_pts) as hbp_p_pts,
+        sum(blsv_pts) as blsv_pts,
+        sum(nh_pts)   as nh_pts,
+        sum(pg_pts)   as pg_pts,
+        sum(pk_pts)   as pk_pts,
+        sum(sho_pts)  as sho_pts,
 
         -- Catch-all totals (sum across ALL scored stats, even ones not
         -- represented in the wide *_pts columns). Used for calculated_points.
@@ -156,20 +172,24 @@ select
     -- Hitting counting
     a.h, a.ab, a.b_bb, a.b_so, a.hbp, a.sf, a.hr, a.r, a.rbi,
     a.sb, a.cs, a.tb, a.singles, a.doubles, a.triples, a.xbh,
+    a.gdp, a.b_ibb,
 
     -- Hitting point contributions
     a.h_pts, a.ab_pts, a.b_bb_pts, a.b_so_pts, a.hbp_pts, a.sf_pts,
     a.hr_pts, a.r_pts, a.rbi_pts, a.sb_pts, a.cs_pts, a.tb_pts,
     a.singles_pts, a.doubles_pts, a.triples_pts, a.xbh_pts,
+    a.gdp_pts, a.b_ibb_pts,
 
     -- Pitching counting
     a.w, a.l, a.k, a.er, a.outs, a.qs, a.sv, a.hld,
     a.p_h, a.p_bb, a.p_hr, a.p_r, a.cg, a.blk, a.wp,
+    a.hbp_p, a.blsv, a.nh, a.pg, a.pk, a.sho,
 
     -- Pitching point contributions
     a.w_pts, a.l_pts, a.k_pts, a.er_pts, a.outs_pts, a.qs_pts,
     a.sv_pts, a.hld_pts, a.p_h_pts, a.p_bb_pts, a.p_hr_pts, a.p_r_pts,
     a.cg_pts, a.blk_pts, a.wp_pts,
+    a.hbp_p_pts, a.blsv_pts, a.nh_pts, a.pg_pts, a.pk_pts, a.sho_pts,
 
     -- Hitting rates
     {{ batting_avg('a.h', 'a.ab') }}                                  as avg,

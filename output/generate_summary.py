@@ -7,8 +7,16 @@ summary for the ESPN league front page.
 """
 
 import os
+import sys
 
 from dotenv import load_dotenv
+
+# Phase 6.3.3 chunk 4.5: force utf-8 stdout (Windows cp1252 default
+# crashes on team names with emoji). Idempotent; safe to repeat.
+try:
+    sys.stdout.reconfigure(encoding='utf-8')
+except (AttributeError, OSError):
+    pass
 import snowflake.connector
 
 from formatters import (
@@ -406,7 +414,7 @@ def format_wasted_points(wasted):
 # "migrate team records to leaderboard" backlog item folded in here).
 
 
-def format_records(records_rows, season_only):
+def format_records(records_rows, season_only, schedule_lookup):
     """Format the 6 team score-level records (best/worst total/hitting/
     pitching) from leaderboard rows.
 
@@ -428,10 +436,12 @@ def format_records(records_rows, season_only):
     def fmt(row):
         if row is None:
             return None
-        if season_only:
-            week_str = f"Week {row['matchup_period']}"
-        else:
-            week_str = f"{row['season_year']} Week {row['matchup_period']}"
+        # Phase 6.3.3 chunk 6: format_week_label substitutes "Round 1" /
+        # "Semi-Finals" / "Finals" for "Week N" on playoff matchup_periods.
+        week_label = records.format_week_label(
+            row['season_year'], row['matchup_period'], schedule_lookup,
+        )
+        week_str = week_label if season_only else f"{row['season_year']} {week_label}"
         return (
             f"{row['team_name']} ({row['owner_name']}) -- "
             f"{row['stat_value']:.1f} pts, {week_str}"
@@ -450,7 +460,7 @@ def format_records(records_rows, season_only):
     }
 
 
-def format_player_records(records_rows, season_only):
+def format_player_records(records_rows, season_only, schedule_lookup):
     """Format the 3 player records (Top Scorer / Hitter / Pitcher) from
     leaderboard rows. Filter to player grain + best direction + score
     columns (player records are best-only per the polarity filter).
@@ -469,10 +479,11 @@ def format_player_records(records_rows, season_only):
     def fmt(row):
         if row is None:
             return None
-        if season_only:
-            week_str = f"Week {row['matchup_period']}"
-        else:
-            week_str = f"{row['season_year']} Week {row['matchup_period']}"
+        # Phase 6.3.3 chunk 6: playoff round names sub for "Week N".
+        week_label = records.format_week_label(
+            row['season_year'], row['matchup_period'], schedule_lookup,
+        )
+        week_str = week_label if season_only else f"{row['season_year']} {week_label}"
         return (
             f"{row['display_name']} ({row['team_abbrev']}, {row['owner_name']}) -- "
             f"{row['stat_value']:.1f} pts, {week_str}"
@@ -491,13 +502,11 @@ def format_player_records(records_rows, season_only):
 # returns.
 
 
-def ordinal(n):
-    """1 -> '1st', 2 -> '2nd', 3 -> '3rd', 11 -> '11th', etc."""
-    if 11 <= n % 100 <= 13:
-        suffix = 'th'
-    else:
-        suffix = {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')
-    return f"{n}{suffix}"
+# Phase 6.3.3 chunk 6.6: ordinal() moved to records.py so league_notes
+# can import it without dragging this script in. Re-exported here under
+# the same name for backward compatibility with anything in this file
+# that still calls ordinal directly.
+from records import ordinal
 
 
 def fmt_stat_value_with_unit(stat_name, value):
@@ -536,7 +545,7 @@ def _team_contributors(players, team_id, stat_col):
     ]
 
 
-def _format_player_score_record(rec, players):
+def _format_player_score_record(rec, players, schedule_lookup):
     """Player-grain record line + prior + inline stat line via #2 formatter."""
     new = rec['new']
     label = make_record_label(rec['grain'], rec['stat_name'], rec['direction'])
@@ -562,15 +571,18 @@ def _format_player_score_record(rec, players):
     lines = [new_line]
     prior = rec['prior']
     if prior:
+        prior_week = records.format_week_label(
+            prior['season_year'], prior['matchup_period'], schedule_lookup,
+        )
         lines.append(
             f"(Prior: {prior['stat_value']:.1f} pts by "
             f"{prior['display_name']} ({prior['team_abbrev']}) "
-            f"in Week {prior['matchup_period']} of {prior['season_year']})"
+            f"in {prior_week} of {prior['season_year']})"
         )
     return lines
 
 
-def _format_team_record(rec, players):
+def _format_team_record(rec, players, schedule_lookup):
     """Team-grain record block. Score column or individual stat both use
     this shape; contributor list only renders for 'most' direction (per
     user spec: worsts don't get contributors yet).
@@ -585,10 +597,13 @@ def _format_team_record(rec, players):
     prior = rec['prior']
     if prior:
         prior_value_str = fmt_stat_value_with_unit(rec['stat_name'], prior['stat_value'])
+        prior_week = records.format_week_label(
+            prior['season_year'], prior['matchup_period'], schedule_lookup,
+        )
         lines.append(
             f"(Prior: {prior_value_str} by "
             f"{prior['owner_name']} ({prior['team_abbrev']}) "
-            f"in Week {prior['matchup_period']} of {prior['season_year']})"
+            f"in {prior_week} of {prior['season_year']})"
         )
 
     if rec['direction'] == 'most':
@@ -623,7 +638,7 @@ def _format_tied_record(rec):
     ]
 
 
-def format_new_records_section(records, players):
+def format_new_records_section(records, players, schedule_lookup):
     """Full New Records section. Returns list of lines, OR an empty list
     when no records were broken/tied (the section is skipped entirely)."""
     if not records:
@@ -635,16 +650,16 @@ def format_new_records_section(records, players):
         if rec['is_tie']:
             lines.extend(_format_tied_record(rec))
         elif rec['grain'] == 'player':
-            lines.extend(_format_player_score_record(rec, players))
+            lines.extend(_format_player_score_record(rec, players, schedule_lookup))
         else:
-            lines.extend(_format_team_record(rec, players))
+            lines.extend(_format_team_record(rec, players, schedule_lookup))
     return lines
 
 
 def generate_summary(matchup_period, scores, contributions, wasted_points,
                      season_records, alltime_records,
                      season_player_records, alltime_player_records,
-                     players, new_records):
+                     players, new_records, schedule_lookup, active_season):
     """Build the BBCode-formatted front-page summary."""
 
     best_overall = scores[0]
@@ -664,8 +679,14 @@ def generate_summary(matchup_period, scores, contributions, wasted_points,
             for p in player_list
         )
 
+    # Phase 6.3.3 chunk 6: active-week heading uses format_week_label so
+    # playoff weeks render as "Round 1 Recap" / "Semi-Finals Recap" /
+    # "Finals Recap" instead of "Week 24 Recap".
+    active_week_label = records.format_week_label(
+        active_season, matchup_period, schedule_lookup,
+    )
     lines = [
-        f"[u][b]Week {matchup_period} Recap[/b][/u]",
+        f"[u][b]{active_week_label} Recap[/b][/u]",
         f"",
         f"[b]Best Overall[/b]: {best_overall['platform_points']:.1f} pts by {best_overall['team_name']}",
         f"{fmt_players(contributions['top_overall'])}",
@@ -701,7 +722,7 @@ def generate_summary(matchup_period, scores, contributions, wasted_points,
     lines.extend(format_wasted_points(wasted_points))
 
     # New Records (Phase 5 #3) -- skipped entirely when no records were broken
-    lines.extend(format_new_records_section(new_records, players))
+    lines.extend(format_new_records_section(new_records, players, schedule_lookup))
 
     # Tough Luck
     tough_luck = find_tough_luck(scores)
@@ -731,6 +752,19 @@ def generate_summary(matchup_period, scores, contributions, wasted_points,
             f"[b]A FAIR AND JUST LEAGUE![/b] The top {num_matchups} scoring teams "
             f"all won this week, and the bottom {num_matchups} all lost.",
         ])
+
+    # Phase 6.3.3 chunk 6.6: League-flavor callouts. Each is a function
+    # in output/league_notes.py that returns 0+ BBCode lines. Section is
+    # skipped entirely when no rules fired (consistent with how Tough
+    # Luck / Fair and Just sections are conditional).
+    import league_notes
+    callout_ctx = league_notes.build_ctx(
+        active_season, matchup_period, schedule_lookup,
+    )
+    callout_lines = league_notes.render_callouts(callout_ctx)
+    if callout_lines:
+        lines.append("")
+        lines.extend(callout_lines)
 
     # Current Season Records (Phase 5 #6: 6 team + 3 player lines).
     # Player record lines render only when a rank-1 player exists for that
@@ -807,6 +841,11 @@ if __name__ == "__main__":
     contributions  = get_contribution_callouts(scores, players)
     wasted_points  = get_wasted_points(active_season, matchup_period)
 
+    # Phase 6.3.3 chunk 6: load matchup_schedule once and pass the
+    # lookup through every formatter that builds week labels. Cheap
+    # alternative to re-querying for each record formatted.
+    schedule_lookup = records.load_schedule_lookup()
+
     # Phase 6.2: records data access consolidated in output/records.py.
     # Each scope is a single leaderboard query returning all rank-1 rows
     # across grains, stats, and directions; the format_* functions filter
@@ -815,13 +854,13 @@ if __name__ == "__main__":
     all_time_rows       = records.get_all_time_records()
     current_season_rows = records.get_current_season_records()
 
-    season_records         = format_records(current_season_rows, season_only=True)
-    alltime_records        = format_records(all_time_rows,       season_only=False)
-    season_player_records  = format_player_records(current_season_rows, season_only=True)
-    alltime_player_records = format_player_records(all_time_rows,       season_only=False)
+    season_records         = format_records(current_season_rows, season_only=True,  schedule_lookup=schedule_lookup)
+    alltime_records        = format_records(all_time_rows,       season_only=False, schedule_lookup=schedule_lookup)
+    season_player_records  = format_player_records(current_season_rows, season_only=True,  schedule_lookup=schedule_lookup)
+    alltime_player_records = format_player_records(all_time_rows,       season_only=False, schedule_lookup=schedule_lookup)
 
     summary = generate_summary(matchup_period, scores, contributions,
                                wasted_points, season_records, alltime_records,
                                season_player_records, alltime_player_records,
-                               players, new_records)
+                               players, new_records, schedule_lookup, active_season)
     print(summary)

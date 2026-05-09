@@ -24,14 +24,28 @@ output/records.py. This script keeps formatting and the iteration shape.
 """
 
 import os
+import sys
 from datetime import datetime
 
 from dotenv import load_dotenv
 
-from formatters import fmt_value, format_contributors, STAT_DISPLAY
+from formatters import (
+    fmt_value, fmt_ip, fmt_record_value,
+    format_contributors, STAT_DISPLAY,
+)
 import records
 
 load_dotenv()
+
+# Phase 6.3.3 chunk 4.5: force utf-8 stdout. Windows defaults to cp1252
+# which crashes on team names with emoji (e.g. "Team Hybrid<emoji>").
+# When the script crashes mid-print, the Sheets sink never fires and
+# the Sheet stays stale -- a silent failure mode that masquerades as
+# "the new stats aren't showing up". Idempotent; safe to repeat.
+try:
+    sys.stdout.reconfigure(encoding='utf-8')
+except (AttributeError, OSError):
+    pass
 
 
 # Display ordering for stat names. Anything not in this list still gets
@@ -49,19 +63,38 @@ STAT_ORDER = [
     'HR', 'RBI', 'R', 'H', 'TB', 'XBH',
     'DOUBLES', 'TRIPLES', 'SINGLES',
     'SB', 'CS', 'B_BB', 'B_SO', 'HBP', 'SF', 'AB',
+    'GDP', 'B_IBB',
     # Pitching
     'W', 'L', 'SV', 'HLD', 'QS', 'CG',
     'K', 'OUTS', 'ER', 'P_H', 'P_BB', 'P_HR', 'P_R',
     'BLK', 'WP',
+    'HBP_P', 'BLSV', 'NH', 'PG', 'PK', 'SHO',
 ]
+
+# Stats this BBCode report doesn't render. Phase 6.3.3 chunk 2 added
+# rate stats / wasted_points / derived counting stats to the mart, but
+# this report's per-stat contributor query (get_team_contributors)
+# interpolates the stat_name as a fct_weekly_player_performance column
+# and assumes a per-player breakdown story exists -- neither holds for
+# rates / wasted / derived. The new Sheets dump (chunks 5-6) handles
+# these via get_records_with_contributors() instead.
+_REPORT_EXCLUDED_STATS = frozenset({
+    'ERA', 'WHIP', 'K_PER_9', 'K_PER_BB', 'HR_PER_9', 'BB_PER_9',
+    'WASTED_POINTS',
+    'PA', 'SB_CS', 'W_L', 'SV_BLSV',
+})
 
 
 def order_stats_for_display(stat_names):
     """STAT_ORDER first (preserving its order), then anything else
     alphabetically. Phase 6.2: extracted from get_tracked_team_stats so
-    the ordering rule lives in this script (records.py is data-only)."""
-    ordered = [s for s in STAT_ORDER if s in stat_names]
-    leftover = sorted(set(stat_names) - set(STAT_ORDER))
+    the ordering rule lives in this script (records.py is data-only).
+    Phase 6.3.3: chunk 2's mart-layer additions (rate stats / wasted /
+    derived) are dropped here since this report can't render them; the
+    Sheets dump pipeline handles those via the new orchestrator."""
+    filtered = [s for s in stat_names if s not in _REPORT_EXCLUDED_STATS]
+    ordered = [s for s in STAT_ORDER if s in filtered]
+    leftover = sorted(set(filtered) - set(STAT_ORDER))
     return ordered + leftover
 
 
@@ -70,9 +103,15 @@ def order_stats_for_display(stat_names):
 # so the new-record callouts in generate_summary.py can share them.
 
 
-def fmt_team_in_week(row):
-    """e.g., 'Island Daddys in Matchup #2 of 2025'."""
-    return f"{row['team_name']} in Matchup #{row['matchup_period']} of {row['season_year']}"
+def fmt_team_in_week(row, schedule_lookup):
+    """e.g., 'Island Daddys in Week 2 of 2025' or 'The Hosston Hosstros
+    in Round 1 of 2025' for playoff weeks. Phase 6.3.3 chunk 6: switched
+    from 'Matchup #N' to format_week_label() output (Week N for regular
+    weeks, playoff round name for playoff weeks)."""
+    week = records.format_week_label(
+        row['season_year'], row['matchup_period'], schedule_lookup,
+    )
+    return f"{row['team_name']} in {week} of {row['season_year']}"
 
 
 def split_tiers(rows):
@@ -88,7 +127,7 @@ def split_tiers(rows):
     return tiers
 
 
-def format_record(stat_name, holders):
+def format_record(stat_name, holders, schedule_lookup):
     """Format the full block (1 or 2 lines) for a single stat record."""
     if not holders:
         return None
@@ -97,7 +136,11 @@ def format_record(stat_name, holders):
     tiers = split_tiers(holders)
     top_tier = tiers[0]
     record_value = top_tier[0]['stat_value']
-    record_str = fmt_value(record_value)
+    # Phase 6.3.3 chunk 6.5: stat-aware value rendering. OUTS records
+    # display as baseball IP (88.1) instead of raw outs (265). Contributor
+    # lists below pass value_fmt=fmt_ip for the same reason.
+    record_str = fmt_record_value(stat_name, record_value)
+    contrib_value_fmt = fmt_ip if stat_name == 'OUTS' else None
 
     lines = []
 
@@ -105,26 +148,26 @@ def format_record(stat_name, holders):
         # Single record holder -- include contributor breakout
         holder = top_tier[0]
         lines.append(
-            f"[b]{display}[/b]: {record_str} by {fmt_team_in_week(holder)}"
+            f"[b]{display}[/b]: {record_str} by {fmt_team_in_week(holder, schedule_lookup)}"
         )
         contributors = records.get_team_contributors(
             holder['season_year'], holder['matchup_period'],
             holder['team_id'], stat_name,
         )
-        contrib_str = format_contributors(contributors)
+        contrib_str = format_contributors(contributors, value_fmt=contrib_value_fmt)
         if contrib_str:
             lines.append(contrib_str)
     else:
         # Multi-team tie at the record -- list all, point to runner-up tier
-        team_descs = ", ".join(fmt_team_in_week(t) for t in top_tier)
+        team_descs = ", ".join(fmt_team_in_week(t, schedule_lookup) for t in top_tier)
         lines.append(f"[b]{display}[/b]: {record_str} by {team_descs}")
 
         if len(tiers) > 1:
             second_tier = tiers[1]
             second_value = second_tier[0]['stat_value']
-            second_teams = ", ".join(fmt_team_in_week(t) for t in second_tier)
+            second_teams = ", ".join(fmt_team_in_week(t, schedule_lookup) for t in second_tier)
             lines.append(
-                f"Second place: {fmt_value(second_value)} held by {second_teams}"
+                f"Second place: {fmt_record_value(stat_name, second_value)} held by {second_teams}"
             )
 
     return "\n".join(lines)
@@ -133,6 +176,7 @@ def format_record(stat_name, holders):
 def main():
     tracked = records.get_tracked_team_stats()
     stats = order_stats_for_display(tracked)
+    schedule_lookup = records.load_schedule_lookup()
 
     output_lines = ["[u][b]All-Time Team Records[/b][/u]", ""]
 
@@ -140,7 +184,7 @@ def main():
         holders = records.get_record_top_n(stat_name, grain='team',
                                            direction='most', scope='all_time',
                                            limit=10)
-        block = format_record(stat_name, holders)
+        block = format_record(stat_name, holders, schedule_lookup)
         if block:
             output_lines.append(block)
             output_lines.append("")  # blank line between records

@@ -71,6 +71,8 @@ with team_rollup as (
         sum(doubles) as doubles,
         sum(triples) as triples,
         sum(xbh)     as xbh,
+        sum(gdp)     as gdp,
+        sum(b_ibb)   as b_ibb,
 
         -- Hitting point contributions
         sum(h_pts)       as h_pts,
@@ -89,6 +91,8 @@ with team_rollup as (
         sum(doubles_pts) as doubles_pts,
         sum(triples_pts) as triples_pts,
         sum(xbh_pts)     as xbh_pts,
+        sum(gdp_pts)     as gdp_pts,
+        sum(b_ibb_pts)   as b_ibb_pts,
 
         -- Pitching counting
         sum(w)       as w,
@@ -106,6 +110,12 @@ with team_rollup as (
         sum(cg)      as cg,
         sum(blk)     as blk,
         sum(wp)      as wp,
+        sum(hbp_p)   as hbp_p,
+        sum(blsv)    as blsv,
+        sum(nh)      as nh,
+        sum(pg)      as pg,
+        sum(pk)      as pk,
+        sum(sho)     as sho,
 
         -- Pitching point contributions
         sum(w_pts)    as w_pts,
@@ -123,6 +133,12 @@ with team_rollup as (
         sum(cg_pts)   as cg_pts,
         sum(blk_pts)  as blk_pts,
         sum(wp_pts)   as wp_pts,
+        sum(hbp_p_pts) as hbp_p_pts,
+        sum(blsv_pts) as blsv_pts,
+        sum(nh_pts)   as nh_pts,
+        sum(pg_pts)   as pg_pts,
+        sum(pk_pts)   as pk_pts,
+        sum(sho_pts)  as sho_pts,
 
         -- Platform scoring splits — still player rollups (wrapper gives no
         -- hitting/pitching breakdown). Sum will not equal team-level

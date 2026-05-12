@@ -39,6 +39,28 @@ weekly as (
         player_name,
         lineup_slot,
 
+        -- Phase 7 D1: additive flag columns derived from lineup_slot. Make
+        -- the active/inactive distinction explicit at the int layer so
+        -- sub-chunk D2's renamed active fact and the future inactive fact
+        -- can both filter cleanly. Row count unchanged — the int already
+        -- carries every slot (no filter at this layer); these columns just
+        -- annotate what's already there.
+        --
+        -- performance_status mirrors the filter today's fct_weekly_player_
+        -- performance applies at its WHERE clause (lineup_slot NOT IN
+        -- ('BE', 'IL', 'FA') -> 'active'). wasted_bucket mirrors the
+        -- semantics in mart_wasted_points: 'FA' for free agents, 'ROSTERED_
+        -- INACTIVE' for BE/IL, NULL for active slots.
+        case
+            when lineup_slot in ('BE', 'IL', 'FA') then 'inactive'
+            else 'active'
+        end as performance_status,
+        case
+            when lineup_slot = 'FA'          then 'FA'
+            when lineup_slot in ('BE', 'IL') then 'ROSTERED_INACTIVE'
+            else null
+        end as wasted_bucket,
+
         -- Hitting counting stats
         sum(case when stat_name = 'H'     then stat_value else 0 end) as h,
         sum(case when stat_name = 'AB'    then stat_value else 0 end) as ab,
@@ -137,7 +159,11 @@ weekly as (
         sum(stat_points)                                                       as total_stat_pts
 
     from daily
-    group by 1, 2, 3, 4, 5, 6, 7, 8, 9
+    -- Group by the 9 identifier columns + 2 derived flag columns (Phase 7 D1).
+    -- The flag columns are deterministic functions of lineup_slot (already in
+    -- the grouping key), so they don't change uniqueness, but Snowflake
+    -- requires non-aggregated SELECT columns to appear in GROUP BY.
+    group by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11
 )
 
 select * from weekly

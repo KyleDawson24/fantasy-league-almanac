@@ -30,6 +30,7 @@ FIXTURE = REPO / "tests" / "fixtures" / "mart_row_counts.json"
 
 # All current intermediate + mart models. Update as the rearchitect adds/drops.
 MODELS = [
+    "int_player_daily",           # Phase 7 C: new wide-daily model (additive)
     "int_player_daily_scores",
     "int_player_daily_stats",
     "int_player_weekly_performance",

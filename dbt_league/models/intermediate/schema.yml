@@ -209,3 +209,58 @@ models:
         description: 'Balks.'
       - name: wp
         description: 'Wild pitches.'
+
+  - name: int_player_daily
+    description: >
+      Phase 7 C: wide daily row per (season, scoring_period, team, player,
+      lineup_slot) consolidating today's int_player_daily_stats (long form,
+      stat-level points) + int_player_daily_scores (per-player ESPN platform
+      total). Additive new model -- old models stay in place to feed
+      int_player_weekly_performance until sub-chunk D rewires the weekly
+      model. View materialization; the table cost lives at the weekly
+      layer one level up.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - season_year
+            - scoring_period
+            - team_id
+            - player_id
+            - lineup_slot
+    columns:
+      - name: season_year
+        description: 'ESPN season year.'
+        tests:
+          - not_null
+      - name: scoring_period
+        description: 'Daily ESPN scoring period number. Scoring period 1 = opening day.'
+        tests:
+          - not_null
+      - name: matchup_period
+        description: 'The weekly matchup period this scoring period belongs to. Functionally determined by (season_year, scoring_period) via matchup_schedule.'
+      - name: team_id
+        description: 'ESPN stable numeric team identifier. NULL for FAs.'
+      - name: player_id
+        description: 'ESPN stable numeric player identifier.'
+        tests:
+          - not_null
+      - name: lineup_slot
+        description: 'Slot the player occupied on this scoring_period (1B/SP/BE/FA/etc.). Part of the grain because a player can appear in multiple slots within a matchup_period.'
+        tests:
+          - not_null
+      - name: lineup_slot_category
+        description: '"hitting" / "pitching" / "inactive". Derived from lineup_slot at stg_box_scores.'
+      - name: is_active_slot
+        description: 'true when lineup_slot_category != "inactive". Convenience flag for downstream active/inactive fact splits.'
+      - name: display_name
+        description: 'Nickname-resolved player name (COALESCE(nickname, player_name)).'
+      - name: platform_points
+        description: 'ESPN platform total for this player on this scoring_period. From stg_box_scores; reflects commissioner adjustments + ESPN W/L authority.'
+      - name: total_stat_pts
+        description: 'Sum of stat_points across ALL scored stats (catch-all rollup; robust to future seed additions). Equivalent to calculated_points at this daily grain.'
+      - name: total_hitting_stat_pts
+        description: 'Sum of stat_points for hitting-category stats.'
+      - name: total_pitching_stat_pts
+        description: 'Sum of stat_points for pitching-category stats.'
+      - name: negative_points
+        description: 'Magnitude (unsigned positive) of net-negative platform_points on this day: GREATEST(0, -platform_points). Per-day platform-level metric. Weekly rollup is SUM(negative_points). For a player with one -5 day and net-positive week: daily row has 5, weekly rollup = 5. Replaces the consumer-side doubly_wasted_pts computation (which was week-level on active_platform_points; this is finer-grained because it attributes each negative day separately).'

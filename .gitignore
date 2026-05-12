@@ -47,4 +47,5 @@ Thumbs.db
 !dbt_league/**/*.json
 !config/*.json
 !archive/*.json
+!tests/fixtures/*.json
 !dbt_league/seeds/*.csv

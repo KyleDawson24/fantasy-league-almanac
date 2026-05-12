@@ -36,20 +36,7 @@ Public API:
 - should_track_record(...)            -- polarity-aware filter rule
 """
 
-import os
-from dotenv import load_dotenv
-import snowflake.connector
-
-load_dotenv()
-
-SNOWFLAKE_CONFIG = {
-    "account": os.getenv("SNOWFLAKE_ACCOUNT"),
-    "user": os.getenv("SNOWFLAKE_USER"),
-    "password": os.getenv("SNOWFLAKE_PASSWORD"),
-    "database": os.getenv("SNOWFLAKE_DATABASE"),
-    "schema": "ANALYTICS",
-    "warehouse": os.getenv("SNOWFLAKE_WAREHOUSE"),
-}
+from db import query_snowflake  # re-exported for league_notes.py et al
 
 
 # Score-level stat_names in the leaderboard (calculated_*). Records section
@@ -78,24 +65,6 @@ _SEED_TO_LEADERBOARD = {
     '3B': 'TRIPLES',
     '64': 'SHO',
 }
-
-
-def query_snowflake(sql, params=None):
-    """Run a query and return results as a list of dicts (cols lowercased).
-
-    Each call opens and closes its own connection. Connection-management
-    consolidation is queued for Phase 7 polish; for now we accept the
-    handshake cost since per-script query counts are modest (~10-20).
-    """
-    conn = snowflake.connector.connect(**SNOWFLAKE_CONFIG)
-    cursor = conn.cursor()
-    try:
-        cursor.execute(sql, params or ())
-        columns = [desc[0].lower() for desc in cursor.description]
-        return [dict(zip(columns, row)) for row in cursor.fetchall()]
-    finally:
-        cursor.close()
-        conn.close()
 
 
 # ---------- Bulk record fetches ----------

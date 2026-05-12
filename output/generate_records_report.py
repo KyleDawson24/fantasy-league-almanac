@@ -25,10 +25,12 @@ output/records.py. This script keeps formatting and the iteration shape.
 
 import argparse
 import os
-import sys
 from datetime import datetime
 
-from dotenv import load_dotenv
+# Phase 7: shared script startup (utf-8 stdout reconfig, load_dotenv,
+# Snowflake config) lives in db.py.
+import db
+db.init()
 
 from formatters import (
     fmt_value, fmt_ip, fmt_record_value,
@@ -44,18 +46,6 @@ import records
 # equivalent. Keep low (3) to match formatters.format_contributors's
 # own inline-collapse threshold so reads consistent across outputs.
 INLINE_TIER_LIMIT = 3
-
-load_dotenv()
-
-# Phase 6.3.3 chunk 4.5: force utf-8 stdout. Windows defaults to cp1252
-# which crashes on team names with emoji (e.g. "Team Hybrid<emoji>").
-# When the script crashes mid-print, the Sheets sink never fires and
-# the Sheet stays stale -- a silent failure mode that masquerades as
-# "the new stats aren't showing up". Idempotent; safe to repeat.
-try:
-    sys.stdout.reconfigure(encoding='utf-8')
-except (AttributeError, OSError):
-    pass
 
 
 # Display ordering for stat names. Anything not in this list still gets

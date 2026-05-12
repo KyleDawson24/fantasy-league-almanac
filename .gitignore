@@ -17,9 +17,10 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 
-#Test Scripts
+#Test Scripts (legacy research scripts at repo root only; the tests/
+# directory is intentionally tracked — pytest discovers it via pytest.ini)
 extract/debug_stats_keys.py
-test_*
+/test_*
 
 #Customized League Note
 output/LeagueNote.txt

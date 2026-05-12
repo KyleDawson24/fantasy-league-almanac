@@ -7,17 +7,13 @@ summary for the ESPN league front page.
 """
 
 import os
-import sys
+import json
 
-from dotenv import load_dotenv
-
-# Phase 6.3.3 chunk 4.5: force utf-8 stdout (Windows cp1252 default
-# crashes on team names with emoji). Idempotent; safe to repeat.
-try:
-    sys.stdout.reconfigure(encoding='utf-8')
-except (AttributeError, OSError):
-    pass
-import snowflake.connector
+# Phase 7: shared script startup (utf-8 stdout reconfig, load_dotenv,
+# Snowflake config) lives in db.py. init() is idempotent.
+import db
+db.init()
+from db import query_snowflake
 
 from formatters import (
     format_hitter_stats_line,
@@ -31,31 +27,6 @@ from formatters import (
     STAT_ABBREV,
 )
 import records
-import json
-
-load_dotenv()
-
-SNOWFLAKE_CONFIG = {
-    "account": os.getenv("SNOWFLAKE_ACCOUNT"),
-    "user": os.getenv("SNOWFLAKE_USER"),
-    "password": os.getenv("SNOWFLAKE_PASSWORD"),
-    "database": os.getenv("SNOWFLAKE_DATABASE"),
-    "schema": "ANALYTICS",
-    "warehouse": os.getenv("SNOWFLAKE_WAREHOUSE"),
-}
-
-
-def query_snowflake(sql, params=None):
-    """Run a query and return results as a list of dicts."""
-    conn = snowflake.connector.connect(**SNOWFLAKE_CONFIG)
-    cursor = conn.cursor()
-    try:
-        cursor.execute(sql, params or ())
-        columns = [desc[0].lower() for desc in cursor.description]
-        return [dict(zip(columns, row)) for row in cursor.fetchall()]
-    finally:
-        cursor.close()
-        conn.close()
 
 
 def get_weekly_scores(season_year, matchup_period=None):
@@ -312,8 +283,10 @@ def get_wasted_points(season_year, matchup_period, limit=5):
             -- doubly wasteful -- benching them would have netted 0
             -- instead of a loss. Add the absolute negative-active
             -- portion to the total wasted, and expose separately so
-            -- the formatter can attribute it as "doubly wasted" in
-            -- the breakdown.
+            -- the formatter can surface it in the breakdown as
+            -- "negative X.X active". Column kept its original name
+            -- for backward compat with row-dict consumers; the
+            -- external label changed in Phase 7.
             GREATEST(0, -COALESCE(a.platform_points, 0)) AS doubly_wasted_pts,
             w.wasted_points_total
                 + GREATEST(0, -COALESCE(a.platform_points, 0)) AS wasted_points,
@@ -343,20 +316,21 @@ def format_wasted_points(wasted):
     is empty (legacy raw rows).
 
     TOTAL takes one of two forms:
-      - "X+Y waste pts" / "X+Y+Z waste pts"   when the waste decomposes
-                                              into 2+ non-zero components
-                                              of (unowned, benched, doubly)
-      - "X.X pts"                             when only one component
-                                              contributed waste
+      - "X.X wasted pts"  total of all waste components, when 2+
+                          non-zero components contributed (unowned,
+                          benched, negative-active). The breakdown
+                          parenthetical attributes the components.
+      - "X.X pts"         single-component case; section header
+                          implicitly carries the "wasted" label.
 
-    BREAKDOWN parenthetical lists non-zero of (unowned, benched, doubly
-    wasted, active). It appears when there's anything to attribute beyond
+    BREAKDOWN parenthetical lists non-zero of (unowned, benched, negative
+    active, active). It appears when there's anything to attribute beyond
     the main line — multiple waste components, or non-zero active context.
-    Phase 5 (#5): negative-active production now adds to the waste total
-    as a "doubly wasted" component (benching the player for 0 pts would
-    have done strictly better than the negative active line). Positive
-    active still appears as context (informative: they did contribute on
-    other days) but is NOT added to the waste total.
+    Phase 5 (#5): negative-active production adds to the waste total
+    (benching the player for 0 pts would have done strictly better than
+    the negative active line). Positive active still appears as context
+    (informative: they did contribute on other days) but is NOT added to
+    the waste total.
     """
     if not wasted:
         return []
@@ -369,10 +343,13 @@ def format_wasted_points(wasted):
         active_pts  = p['active_points']     or 0
         total_pts   = p['wasted_points']
 
-        # Headline: additive shape when multiple waste components fired.
+        # Headline: total wasted pts when multiple components fired (the
+        # breakdown parenthetical attributes the components). Single-
+        # component case stays bare since the section header already
+        # says "Wasted Performances".
         components = [c for c in (fa_pts, bench_pts, doubly_pts) if c > 0]
         if len(components) > 1:
-            total_str = "+".join(f"{c:.1f}" for c in components) + " waste pts"
+            total_str = f"{total_pts:.1f} wasted pts"
         else:
             total_str = f"{total_pts:.1f} pts"
 
@@ -380,7 +357,7 @@ def format_wasted_points(wasted):
         parts = []
         if fa_pts:     parts.append(f"{fa_pts:.1f} unowned")
         if bench_pts:  parts.append(f"{bench_pts:.1f} benched")
-        if doubly_pts: parts.append(f"{doubly_pts:.1f} doubly wasted")
+        if doubly_pts: parts.append(f"negative {doubly_pts:.1f} active")
         if active_pts > 0: parts.append(f"{active_pts:.1f} active")
         # Show the breakdown when it adds info beyond the headline.
         show_paren = len(components) > 1 or active_pts > 0
@@ -646,7 +623,6 @@ def format_new_records_section(records, players, schedule_lookup):
 
     lines = ["", "[u][b]New Records[/b][/u]"]
     for rec in records:
-        lines.append("")
         if rec['is_tie']:
             lines.extend(_format_tied_record(rec))
         elif rec['grain'] == 'player':

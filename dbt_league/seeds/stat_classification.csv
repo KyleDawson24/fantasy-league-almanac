@@ -1,98 +1,98 @@
 stat_name,espn_stat_id,stat_category,espn_stat_label,display_name,abbrev,is_counting,is_derived,derivation_expr,is_always_tracked,is_record_candidate,polarity,notes
-AB,0,hitting,At Bats,At Bats,AB,true,false,,false,true,positive,
-H,1,hitting,Hits,Hits,H,true,false,,true,true,positive,Phase 6.3.3: not in scoring_settings but a universal counting stat -- always surface as records.
-AVG,2,hitting,Batting Average,Batting Average,AVG,false,false,,false,false,neutral,
-2B,3,hitting,Doubles,Doubles,2B,true,false,,false,true,positive,
-3B,4,hitting,Triples,Triples,3B,true,false,,false,true,positive,
-HR,5,hitting,Home Runs,Home Runs,HR,true,false,,false,true,positive,
-XBH,6,hitting,Extra Base Hits,Extra Base Hits,XBH,true,false,,true,true,positive,Phase 6.3.3: not in scoring_settings but a universal counting stat -- always surface as records.
-1B,7,hitting,Singles,Singles,1B,true,false,,false,true,positive,
-TB,8,hitting,Total Bases,Total Bases,TB,true,false,,true,true,positive,Phase 6.3.3: not in scoring_settings but a universal counting stat -- always surface as records.
-SLG,9,hitting,Slugging Percentage,Slugging Percentage,SLG,false,false,,false,false,neutral,
-B_BB,10,hitting,Walks (Batter),Walks (Batter),BB,true,false,,false,true,positive,
-B_IBB,11,hitting,Intentional Walks (Batter),Intentional Walks (Batter),IBB,true,false,,false,true,positive,
-HBP,12,hitting,Hit By Pitch,Hit by Pitch,HBP,true,false,,false,true,positive,
-SF,13,hitting,Sacrifice Flies,Sacrifice Flies,SF,true,false,,true,true,positive,Phase 6.3.3: not in scoring_settings but a universal counting stat -- always surface as records.
-SH,14,hitting,Sacrifice Hits,Sacrifice Hits,SH,true,false,,false,false,neutral,
-SAC,15,hitting,Sacrifice Hits and Flies,Sacrifice Hits and Flies,SAC,true,false,,false,false,neutral,
-PA,16,hitting,Plate Appearances,Plate Appearances,PA,false,true,ab + b_bb + hbp + sf,true,true,positive,Phase 7 B1: ESPN stat ID 16 repurposed. Pipeline re-derives at mart (AB+B_BB+HBP+SF) because ESPN PA value is not aggregatable for us. One catalog row covers both senses.
-OBP,17,hitting,On Base Percentage,On Base Percentage,OBP,false,false,,false,false,neutral,
-OPS,18,hitting,On Base Plus Slugging,On Base Plus Slugging,OPS,false,false,,false,false,neutral,
-RC,19,hitting,Runs Created,Runs Created,RC,true,false,,false,false,neutral,
-R,20,hitting,Runs,Runs,R,true,false,,false,true,positive,
-RBI,21,hitting,Runs Batted In,RBIs,RBI,true,false,,false,true,positive,
-22,22,hitting,Games Played (Batter; internal),Games Played (Batter; internal),22,false,false,,false,false,neutral,Stat_name kept as numeric to match raw breakdown VARIANT (espn-api wrapper doesn't translate this ID). Believed to be an internal batter game-played flag; always 1.0 when a batter appears. Functionally duplicates G (stat ID 81). Not scored.
-SB,23,hitting,Stolen Bases,Stolen Bases,SB,true,false,,false,true,positive,
-CS,24,hitting,Caught Stealing,Caught Stealing,CS,true,false,,false,true,negative,
-SB-CS,25,hitting,Net Stolen Bases,Net Stolen Bases,SB-CS,true,false,,false,false,neutral,
-GDP,26,hitting,Grounded Into Double Play,GIDP (Batter),GIDP,true,false,,false,true,negative,
-B_SO,27,hitting,Strikeouts (Batter),Strikeouts (Batter),K,true,false,,false,true,negative,
-PS,28,hitting,Pitches Seen,Pitches Seen,PS,true,false,,false,false,neutral,
-PPA,29,hitting,Pitches Per Plate Appearance,Pitches Per Plate Appearance,PPA,false,false,,false,false,neutral,
-30,30,unknown,ESPN internal stat ID 30,ESPN internal stat ID 30,30,false,false,,false,true,positive,Stat_name kept as numeric to match raw breakdown. Rarely observed (1 row across 2025-2026). Likely deprecated or reserved.
-CYC,31,hitting,Cycles,Cycles,CYC,true,false,,false,false,neutral,
-GP,32,pitching,Games Pitched,Games Pitched,GP,true,false,,false,false,neutral,
-GS,33,pitching,Games Started,Games Started,GS,true,false,,false,false,neutral,
-OUTS,34,pitching,Outs Recorded,Innings Pitched,IP,true,false,,false,true,positive,
-TBF,35,pitching,Total Batters Faced,Total Batters Faced,TBF,true,false,,false,false,neutral,
-P,36,pitching,Pitches Thrown,Pitches Thrown,P,true,false,,false,false,neutral,
-P_H,37,pitching,Hits Allowed,Hits Allowed,H,true,false,,false,true,negative,
-OBA,38,pitching,Opponent Batting Average,Opponent Batting Average,OBA,false,false,,false,false,neutral,
-P_BB,39,pitching,Walks Allowed,Walks Allowed,BB,true,false,,false,true,negative,
-P_IBB,40,pitching,Intentional Walks Allowed,Intentional Walks Allowed,P_IBB,true,false,,false,false,neutral,
-WHIP,41,pitching,Walks Plus Hits Per Inning,WHIP,WHIP,false,false,,true,true,negative,Phase 7 B1: rate stat. Always-tracked enables both directions in new-records section.
-HBP_P,42,pitching,Hit Batters (Pitcher),Hit Batters,HBP,true,false,,false,true,negative,Shares abbreviation HBP with batter stat (ID 12). Renamed to HBP_P to disambiguate.
-OOBP,43,pitching,Opponent On Base Percentage,Opponent On Base Percentage,OOBP,false,false,,false,false,neutral,
-P_R,44,pitching,Runs Allowed,Runs Allowed,R,true,false,,false,true,negative,
-ER,45,pitching,Earned Runs,Earned Runs,ER,true,false,,true,true,negative,Phase 6.3.3: not in scoring_settings but a universal counting stat -- always surface as records.
-P_HR,46,pitching,Home Runs Allowed,Home Runs Allowed,HR,true,false,,false,true,negative,
-ERA,47,pitching,Earned Run Average,ERA,ERA,false,false,,true,true,negative,Phase 7 B1: rate stat. Always-tracked makes seed match consumer intent; surfaces both directions in new-records section (Best ERA / Worst ERA).
-K,48,pitching,Strikeouts (Pitcher),Strikeouts (Pitcher),K,true,false,,false,true,positive,
-K_PER_9,49,pitching,Strikeouts Per 9 Innings,K/9,K/9,false,false,,true,true,positive,Phase 7 B1: renamed from K/9 to match leaderboard column. Stg filter drops raw K/9 breakdown rows (no downstream consumer; is_counting=false anyway).
-WP,50,pitching,Wild Pitches,Wild Pitches,WP,true,false,,false,true,negative,
-BLK,51,pitching,Balks,Balks,BK,true,false,,false,true,negative,
-PK,52,pitching,Pickoffs,Pickoffs,PK,true,false,,false,true,positive,
-W,53,pitching,Wins,Wins,W,true,false,,false,true,positive,
-L,54,pitching,Losses,Losses,L,true,false,,false,true,negative,
-WPCT,55,pitching,Win Percentage,Win Percentage,WPCT,false,false,,false,false,neutral,
-SVO,56,pitching,Save Opportunities,Save Opportunities,SVO,true,false,,false,false,neutral,
-SV,57,pitching,Saves,Saves,SV,true,false,,false,true,positive,
-BLSV,58,pitching,Blown Saves,Blown Saves,BLSV,true,false,,false,true,negative,
-SV%,59,pitching,Save Percentage,Save Percentage,SV%,false,false,,false,false,neutral,
-HLD,60,pitching,Holds,Holds,HLD,true,false,,false,true,positive,
-61,61,pitching,Games in Relief (internal),Games in Relief (internal),61,false,false,,false,false,neutral,Stat_name kept as numeric to match raw breakdown. Always 1.0 for relief pitchers only (never starters). Complement of GS. is_counting=false because it's redundant with GS for our purposes and never appears as a wide-pivot column downstream.
-CG,62,pitching,Complete Games,Complete Games,CG,true,false,,false,true,positive,
-QS,63,pitching,Quality Starts,Quality Starts,QS,true,false,,false,true,positive,
-64,64,pitching,Shutouts (SHO),Shutouts,SHO,true,false,,false,true,positive,Stat_name kept as numeric to match raw breakdown VARIANT (espn-api wrapper does not translate). Confirmed via website QA: each shutout scores 5 points in this league. Identified in Phase 3.2 after observing a 5-point Hosstros delta that exactly matched 1 shutout × 5 pts.
-NH,65,pitching,No-Hitter,No-Hitters,NH,true,false,,false,true,positive,
-PG,66,pitching,Perfect Game,Perfect Games,PG,true,false,,false,true,positive,Previously misidentified as Pitches Per Game. Confirmed via scoring settings: 250-point bonus.
-TC,67,fielding,Total Chances,Total Chances,TC,true,false,,false,false,neutral,
-PO,68,fielding,Putouts,Putouts,PO,true,false,,false,false,neutral,
-A,69,fielding,Assists,Assists,A,true,false,,false,false,neutral,
-OFA,70,fielding,Outfield Assists,Outfield Assists,OFA,true,false,,false,false,neutral,
-FPCT,71,fielding,Fielding Percentage,Fielding Percentage,FPCT,false,false,,false,false,neutral,
-E,72,fielding,Errors,Errors,E,true,false,,false,false,neutral,
-DP,73,fielding,Double Plays,Double Plays,DP,true,false,,false,false,neutral,
-B_G_W,74,hitting,Batter Games Won,Batter Games Won,B_G_W,true,false,,false,false,neutral,
-B_G_L,75,hitting,Batter Games Lost,Batter Games Lost,B_G_L,true,false,,false,false,neutral,
-P_G_W,76,pitching,Pitcher Games Won,Pitcher Games Won,P_G_W,true,false,,false,false,neutral,
-P_G_L,77,pitching,Pitcher Games Lost,Pitcher Games Lost,P_G_L,true,false,,false,false,neutral,
-78,78,pitching,Games Played (Pitcher; internal),Games Played (Pitcher; internal),78,false,false,,false,false,neutral,Stat_name kept as numeric to match raw breakdown. Always 1.0 for any pitcher who appeared (starters and relievers). Parallel to id 22 for batters. is_counting=false; not used downstream.
-79,79,pitching,ESPN internal stat ID 79,ESPN internal stat ID 79,79,false,false,,false,false,neutral,Stat_name kept as numeric to match raw breakdown. Always 1.0 for starters only in limited data. Suspected duplicate of GS. Not scored.
-80,80,unknown,ESPN internal stat ID 80,ESPN internal stat ID 80,80,false,false,,false,false,neutral,Stat_name kept as numeric to match raw breakdown. Never observed in data across 2025-2026. Likely deprecated or reserved.
-G,81,hitting,Games Played by Batters,Games Played by Batters,G,true,false,,false,false,neutral,
-K_PER_BB,82,pitching,Strikeout to Walk Ratio,K/BB,K/BB,false,false,,true,true,positive,Phase 7 B1: renamed from K/BB to match leaderboard column. Stg filter drops raw K/BB breakdown rows.
-SVHD,83,pitching,Saves Plus Holds,Saves Plus Holds,SVHD,true,false,,false,false,neutral,
-STARTER,99,pitching,Starter Designation,Starter Designation,STARTER,false,false,,false,false,neutral,Boolean flag for designated starter. Distinct from GS which tracks actual starts.
-SB_CS,,hitting,,Net Stolen Bases (SB-CS),SB-CS,true,true,sb - cs,true,true,positive,"Phase 7 B1: derived counting (net stolen bases). ESPN-raw ""SB-CS"" (id 25) catalogs the per-player equivalent separately."
-W_L,,pitching,,Net Wins (W-L),W-L,true,true,w - l,true,true,positive,Phase 7 B1: derived counting (net wins). Not in ESPN seed.
-SV_BLSV,,pitching,,Net Saves (SV-BLSV),SV-BLSV,true,true,sv - blsv,true,true,positive,Phase 7 B1: derived counting (net saves). Not in ESPN seed.
-HR_PER_9,,pitching,,HR/9,HR/9,false,false,,true,true,negative,Phase 7 B1: team-level rate. Not in ESPN seed. Migrating mart-inline -> fct in sub-chunk E.
-BB_PER_9,,pitching,,BB/9,BB/9,false,false,,true,true,negative,Phase 7 B1: team-level rate. Not in ESPN seed. Migrating mart-inline -> fct in sub-chunk E.
-WASTED_POINTS,,total,,Wasted Points,Wasted,false,false,,true,true,negative,Phase 7 B1: mart-only roster-decision metric. Higher = worse. Rolls up from fct_weekly_team_inactive_performance post-rearchitect.
-CALCULATED_POINTS,,total,,Total Points,CALCULATED_POINTS,false,false,,true,true,positive,Phase 7 B1: rules-normalized total under current scoring weights. Surfaced as records since Phase 5.
-CALCULATED_HITTING_PTS,,hitting,,Hitting Points,CALCULATED_HITTING_PTS,false,false,,true,true,positive,Phase 7 B1: calculated hitting points.
-CALCULATED_PITCHING_PTS,,pitching,,Pitching Points,CALCULATED_PITCHING_PTS,false,false,,true,true,positive,Phase 7 B1: calculated pitching points.
-PLATFORM_POINTS,,total,,Platform Total Points,PLATFORM_POINTS,false,false,,true,true,positive,Phase 7 B1: ESPN platform total. Includes commissioner adjustments + ESPN W/L authority.
-PLATFORM_HITTING_PTS,,hitting,,Platform Hitting Points,PLATFORM_HITTING_PTS,false,false,,true,true,positive,Phase 7 B1: ESPN platform hitting points.
-PLATFORM_PITCHING_PTS,,pitching,,Platform Pitching Points,PLATFORM_PITCHING_PTS,false,false,,true,true,positive,Phase 7 B1: ESPN platform pitching points.
+AB,0,hitting,,At Bats,AB,true,false,,false,true,positive,
+H,1,hitting,,Hits,H,true,false,,true,true,positive,Phase 6.3.3: not in scoring_settings but a universal counting stat -- always surface as records.
+AVG,2,hitting,,,AVG,false,false,,false,false,neutral,
+2B,3,hitting,,Doubles,2B,true,false,,false,true,positive,
+3B,4,hitting,,Triples,3B,true,false,,false,true,positive,
+HR,5,hitting,,Home Runs,HR,true,false,,false,true,positive,
+XBH,6,hitting,,Extra Base Hits,XBH,true,false,,true,true,positive,Phase 6.3.3: not in scoring_settings but a universal counting stat -- always surface as records.
+1B,7,hitting,,Singles,1B,true,false,,false,true,positive,
+TB,8,hitting,,Total Bases,TB,true,false,,true,true,positive,Phase 6.3.3: not in scoring_settings but a universal counting stat -- always surface as records.
+SLG,9,hitting,,,SLG,false,false,,false,false,neutral,
+B_BB,10,hitting,,Walks (Batter),BB,true,false,,false,true,positive,
+B_IBB,11,hitting,,Intentional Walks (Batter),IBB,true,false,,false,true,positive,
+HBP,12,hitting,,Hit by Pitch,HBP,true,false,,false,true,positive,
+SF,13,hitting,,Sacrifice Flies,SF,true,false,,true,true,positive,Phase 6.3.3: not in scoring_settings but a universal counting stat -- always surface as records.
+SH,14,hitting,,,SH,true,false,,false,false,neutral,
+SAC,15,hitting,,,SAC,true,false,,false,false,neutral,
+PA,16,hitting,,Plate Appearances,PA,false,true,ab + b_bb + hbp + sf,true,true,positive,Phase 7 B1: ESPN stat ID 16 repurposed. Pipeline re-derives at mart (AB+B_BB+HBP+SF) because ESPN PA value is not aggregatable for us. One catalog row covers both senses.
+OBP,17,hitting,,,OBP,false,false,,false,false,neutral,
+OPS,18,hitting,,,OPS,false,false,,false,false,neutral,
+RC,19,hitting,,,RC,true,false,,false,false,neutral,
+R,20,hitting,,Runs,R,true,false,,false,true,positive,
+RBI,21,hitting,,RBIs,RBI,true,false,,false,true,positive,
+22,22,hitting,,,22,false,false,,false,false,neutral,Stat_name kept as numeric to match raw breakdown VARIANT (espn-api wrapper doesn't translate this ID). Believed to be an internal batter game-played flag; always 1.0 when a batter appears. Functionally duplicates G (stat ID 81). Not scored.
+SB,23,hitting,,Stolen Bases,SB,true,false,,false,true,positive,
+CS,24,hitting,,Caught Stealing,CS,true,false,,false,true,negative,
+SB-CS,25,hitting,,,SB-CS,true,false,,false,false,neutral,
+GDP,26,hitting,,GIDP (Batter),GIDP,true,false,,false,true,negative,
+B_SO,27,hitting,,Strikeouts (Batter),K,true,false,,false,true,negative,
+PS,28,hitting,,,PS,true,false,,false,false,neutral,
+PPA,29,hitting,,,PPA,false,false,,false,false,neutral,
+30,30,unknown,,,30,false,false,,false,true,positive,Stat_name kept as numeric to match raw breakdown. Rarely observed (1 row across 2025-2026). Likely deprecated or reserved.
+CYC,31,hitting,,,CYC,true,false,,false,false,neutral,
+GP,32,pitching,,,GP,true,false,,false,false,neutral,
+GS,33,pitching,,,GS,true,false,,false,false,neutral,
+OUTS,34,pitching,,Innings Pitched,IP,true,false,,false,true,positive,
+TBF,35,pitching,,,TBF,true,false,,false,false,neutral,
+P,36,pitching,,,P,true,false,,false,false,neutral,
+P_H,37,pitching,,Hits Allowed,H,true,false,,false,true,negative,
+OBA,38,pitching,,,OBA,false,false,,false,false,neutral,
+P_BB,39,pitching,,Walks Allowed,BB,true,false,,false,true,negative,
+P_IBB,40,pitching,,,P_IBB,true,false,,false,false,neutral,
+WHIP,41,pitching,,WHIP,WHIP,false,false,,false,true,negative,Phase 7 B1: rate stat. Always-tracked enables both directions in new-records section.
+HBP_P,42,pitching,,Hit Batters,HBP,true,false,,false,true,negative,Shares abbreviation HBP with batter stat (ID 12). Renamed to HBP_P to disambiguate.
+OOBP,43,pitching,,,OOBP,false,false,,false,false,neutral,
+P_R,44,pitching,,Runs Allowed,R,true,false,,false,true,negative,
+ER,45,pitching,,Earned Runs,ER,true,false,,true,true,negative,Phase 6.3.3: not in scoring_settings but a universal counting stat -- always surface as records.
+P_HR,46,pitching,,Home Runs Allowed,HR,true,false,,false,true,negative,
+ERA,47,pitching,,ERA,ERA,false,false,,false,true,negative,Phase 7 B1: rate stat. Always-tracked makes seed match consumer intent; surfaces both directions in new-records section (Best ERA / Worst ERA).
+K,48,pitching,,Strikeouts (Pitcher),K,true,false,,false,true,positive,
+K_PER_9,49,pitching,,K/9,K/9,false,false,,false,true,positive,Phase 7 B1: renamed from K/9 to match leaderboard column. Stg filter drops raw K/9 breakdown rows (no downstream consumer; is_counting=false anyway).
+WP,50,pitching,,Wild Pitches,WP,true,false,,false,true,negative,
+BLK,51,pitching,,Balks,BK,true,false,,false,true,negative,
+PK,52,pitching,,Pickoffs,PK,true,false,,false,true,positive,
+W,53,pitching,,Wins,W,true,false,,false,true,positive,
+L,54,pitching,,Losses,L,true,false,,false,true,negative,
+WPCT,55,pitching,,,WPCT,false,false,,false,false,neutral,
+SVO,56,pitching,,,SVO,true,false,,false,false,neutral,
+SV,57,pitching,,Saves,SV,true,false,,false,true,positive,
+BLSV,58,pitching,,Blown Saves,BLSV,true,false,,false,true,negative,
+SV%,59,pitching,,,SV%,false,false,,false,false,neutral,
+HLD,60,pitching,,Holds,HLD,true,false,,false,true,positive,
+61,61,pitching,,,61,false,false,,false,false,neutral,Stat_name kept as numeric to match raw breakdown. Always 1.0 for relief pitchers only (never starters). Complement of GS. is_counting=false because it's redundant with GS for our purposes and never appears as a wide-pivot column downstream.
+CG,62,pitching,,Complete Games,CG,true,false,,false,true,positive,
+QS,63,pitching,,Quality Starts,QS,true,false,,false,true,positive,
+64,64,pitching,,Shutouts,SHO,true,false,,false,true,positive,Stat_name kept as numeric to match raw breakdown VARIANT (espn-api wrapper does not translate). Confirmed via website QA: each shutout scores 5 points in this league. Identified in Phase 3.2 after observing a 5-point Hosstros delta that exactly matched 1 shutout × 5 pts.
+NH,65,pitching,,No-Hitters,NH,true,false,,false,true,positive,
+PG,66,pitching,,Perfect Games,PG,true,false,,false,true,positive,Previously misidentified as Pitches Per Game. Confirmed via scoring settings: 250-point bonus.
+TC,67,fielding,,,TC,true,false,,false,false,neutral,
+PO,68,fielding,,,PO,true,false,,false,false,neutral,
+A,69,fielding,,,A,true,false,,false,false,neutral,
+OFA,70,fielding,,,OFA,true,false,,false,false,neutral,
+FPCT,71,fielding,,,FPCT,false,false,,false,false,neutral,
+E,72,fielding,,,E,true,false,,false,false,neutral,
+DP,73,fielding,,,DP,true,false,,false,false,neutral,
+B_G_W,74,hitting,,,B_G_W,true,false,,false,false,neutral,
+B_G_L,75,hitting,,,B_G_L,true,false,,false,false,neutral,
+P_G_W,76,pitching,,,P_G_W,true,false,,false,false,neutral,
+P_G_L,77,pitching,,,P_G_L,true,false,,false,false,neutral,
+78,78,pitching,,,78,false,false,,false,false,neutral,Stat_name kept as numeric to match raw breakdown. Always 1.0 for any pitcher who appeared (starters and relievers). Parallel to id 22 for batters. is_counting=false; not used downstream.
+79,79,pitching,,,79,false,false,,false,false,neutral,Stat_name kept as numeric to match raw breakdown. Always 1.0 for starters only in limited data. Suspected duplicate of GS. Not scored.
+80,80,unknown,,,80,false,false,,false,false,neutral,Stat_name kept as numeric to match raw breakdown. Never observed in data across 2025-2026. Likely deprecated or reserved.
+G,81,hitting,,,G,true,false,,false,false,neutral,
+K_PER_BB,82,pitching,,K/BB,K/BB,false,false,,false,true,positive,Phase 7 B1: renamed from K/BB to match leaderboard column. Stg filter drops raw K/BB breakdown rows.
+SVHD,83,pitching,,,SVHD,true,false,,false,false,neutral,
+STARTER,99,pitching,,,STARTER,false,false,,false,false,neutral,Boolean flag for designated starter. Distinct from GS which tracks actual starts.
+SB_CS,,hitting,,Net Stolen Bases (SB-CS),SB-CS,true,true,sb - cs,false,true,positive,"Phase 7 B1: derived counting (net stolen bases). ESPN-raw ""SB-CS"" (id 25) catalogs the per-player equivalent separately."
+W_L,,pitching,,Net Wins (W-L),W-L,true,true,w - l,false,true,positive,Phase 7 B1: derived counting (net wins). Not in ESPN seed.
+SV_BLSV,,pitching,,Net Saves (SV-BLSV),SV-BLSV,true,true,sv - blsv,false,true,positive,Phase 7 B1: derived counting (net saves). Not in ESPN seed.
+HR_PER_9,,pitching,,HR/9,HR/9,false,false,,false,true,negative,Phase 7 B1: team-level rate. Not in ESPN seed. Migrating mart-inline -> fct in sub-chunk E.
+BB_PER_9,,pitching,,BB/9,BB/9,false,false,,false,true,negative,Phase 7 B1: team-level rate. Not in ESPN seed. Migrating mart-inline -> fct in sub-chunk E.
+WASTED_POINTS,,total,,Wasted Points,Wasted,false,false,,false,true,negative,Phase 7 B1: mart-only roster-decision metric. Higher = worse. Rolls up from fct_weekly_team_inactive_performance post-rearchitect.
+CALCULATED_POINTS,,total,,Total Points,CALCULATED_POINTS,false,false,,false,true,positive,Phase 7 B1: rules-normalized total under current scoring weights. Surfaced as records since Phase 5.
+CALCULATED_HITTING_PTS,,hitting,,Hitting Points,CALCULATED_HITTING_PTS,false,false,,false,true,positive,Phase 7 B1: calculated hitting points.
+CALCULATED_PITCHING_PTS,,pitching,,Pitching Points,CALCULATED_PITCHING_PTS,false,false,,false,true,positive,Phase 7 B1: calculated pitching points.
+PLATFORM_POINTS,,total,,Platform Total Points,PLATFORM_POINTS,false,false,,false,true,positive,Phase 7 B1: ESPN platform total. Includes commissioner adjustments + ESPN W/L authority.
+PLATFORM_HITTING_PTS,,hitting,,Platform Hitting Points,PLATFORM_HITTING_PTS,false,false,,false,true,positive,Phase 7 B1: ESPN platform hitting points.
+PLATFORM_PITCHING_PTS,,pitching,,Platform Pitching Points,PLATFORM_PITCHING_PTS,false,false,,false,true,positive,Phase 7 B1: ESPN platform pitching points.

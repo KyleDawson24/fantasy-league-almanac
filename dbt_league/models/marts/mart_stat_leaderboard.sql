@@ -241,6 +241,13 @@ current_year as (
 -- Four rank dimensions: {all_time, current_season} x {most, fewest}.
 -- Each computes top-5 in its direction; combined output has a
 -- record_direction column distinguishing most from fewest.
+--
+-- Phase 7 B1: ORDER BY now ends in (team_id, player_id) for deterministic
+-- ordering within true ties. Without it, Snowflake's view-evaluation order
+-- for tied (stat_value, season_year, matchup_period) tuples is unspecified
+-- and could swap which entity claims rank 1 on identical data across runs --
+-- which makes the golden-output tests flaky. Pulled forward from sub-chunk F
+-- (the mart rewrite) so B1's baseline pin is stable.
 
 all_time_most as (
     select
@@ -249,7 +256,7 @@ all_time_most as (
         c.*,
         row_number() over (
             partition by entity_grain, stat_name
-            order by stat_value desc, season_year desc, matchup_period desc
+            order by stat_value desc, season_year desc, matchup_period desc, team_id, player_id
         ) as rank
     from combined c
 ),
@@ -261,7 +268,7 @@ all_time_fewest as (
         c.*,
         row_number() over (
             partition by entity_grain, stat_name
-            order by stat_value asc, season_year desc, matchup_period desc
+            order by stat_value asc, season_year desc, matchup_period desc, team_id, player_id
         ) as rank
     from combined c
 ),
@@ -273,7 +280,7 @@ current_season_most as (
         c.*,
         row_number() over (
             partition by entity_grain, stat_name
-            order by stat_value desc, season_year desc, matchup_period desc
+            order by stat_value desc, season_year desc, matchup_period desc, team_id, player_id
         ) as rank
     from combined c
     where c.season_year = (select y from current_year)
@@ -286,7 +293,7 @@ current_season_fewest as (
         c.*,
         row_number() over (
             partition by entity_grain, stat_name
-            order by stat_value asc, season_year desc, matchup_period desc
+            order by stat_value asc, season_year desc, matchup_period desc, team_id, player_id
         ) as rank
     from combined c
     where c.season_year = (select y from current_year)

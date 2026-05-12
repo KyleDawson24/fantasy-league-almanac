@@ -129,6 +129,30 @@ SCORE_ROWS = [
      'Phase 7 B1: ESPN platform pitching points.'),
 ]
 
+# Authoritative is_always_tracked set. The script sets is_always_tracked
+# based on membership in this set rather than carrying over the CSV value,
+# so the regen is deterministic from Python truth and re-runs cannot
+# accumulate state from prior runs.
+#
+# Semantic note (TODO for sub-chunk G or v1.x): is_always_tracked currently
+# does double duty in records.py:
+#   (a) "force-surface in recap's new-records section even if polarity rule
+#        wouldn't" — short-circuits should_track_record to True.
+#   (b) "this stat is meaningful and shouldn't be filtered as noise."
+# Many new-in-B1 stats are (b)-tracked (meaningful leaderboard columns) but
+# we don't want (a) for them in v1.0 — they shouldn't auto-surface in the
+# recap's new-records section. Setting is_always_tracked=false correctly
+# disables (a) but loses (b)'s semantic.
+#
+# Open work item: split is_always_tracked into is_record_force_surface +
+# is_tracked so the semantics aren't conflated. Until then, the flag is set
+# based on (a) since that's the active downstream effect; (b) lives in the
+# "stat is in the leaderboard UNPIVOT" implicit knowledge.
+#
+# Current membership matches pre-B1 behavior exactly: only the 6 stats that
+# had is_always_tracked=true in the original seed.
+ALWAYS_TRACKED_STATS = {'H', 'TB', 'XBH', 'SF', 'ER', 'PA'}
+
 
 # In-place repurposes of existing seed rows. Keyed by current stat_name;
 # values are field overrides applied after standard derivation. Avoids
@@ -152,30 +176,26 @@ SCORE_ROWS = [
 EXISTING_ROW_OVERRIDES = {
     'PA': {
         # PA is not aggregatable for us (per-player stat); we re-derive at
-        # mart from AB+B_BB+HBP+SF.
+        # mart from AB+B_BB+HBP+SF. PA stays is_always_tracked=true (was
+        # already true pre-B1 — no behavior change).
         'is_counting': 'false',
         'is_derived': 'true',
         'derivation_expr': 'ab + b_bb + hbp + sf',
         'notes': 'Phase 7 B1: ESPN stat ID 16 repurposed. Pipeline re-derives at mart (AB+B_BB+HBP+SF) because ESPN PA value is not aggregatable for us. One catalog row covers both senses.',
     },
-    'ERA': {
-        'is_always_tracked': 'true',
-        'notes': 'Phase 7 B1: rate stat. Always-tracked makes seed match consumer intent; surfaces both directions in new-records section (Best ERA / Worst ERA).',
-    },
-    'WHIP': {
-        'is_always_tracked': 'true',
-        'notes': 'Phase 7 B1: rate stat. Always-tracked enables both directions in new-records section.',
-    },
+    # ERA / WHIP: NO is_always_tracked override. They stay at the existing
+    # is_always_tracked=false to preserve pre-B1 recap behavior (surface in
+    # direction='most' only via polarity-negative rule). Widening to both
+    # directions is a deliberate consumer-facing change, not a B1 effect.
     'K/9': {
         # RENAME: existing seed stat_name K/9 becomes K_PER_9 (matches the
-        # leaderboard column). Stg filter drops K/9 breakdown rows.
+        # leaderboard column). Stg filter drops K/9 breakdown rows. No
+        # is_always_tracked override — existing false preserved.
         'stat_name': 'K_PER_9',
-        'is_always_tracked': 'true',
         'notes': 'Phase 7 B1: renamed from K/9 to match leaderboard column. Stg filter drops raw K/9 breakdown rows (no downstream consumer; is_counting=false anyway).',
     },
     'K/BB': {
         'stat_name': 'K_PER_BB',
-        'is_always_tracked': 'true',
         'notes': 'Phase 7 B1: renamed from K/BB to match leaderboard column. Stg filter drops raw K/BB breakdown rows.',
     },
 }
@@ -226,22 +246,29 @@ def _existing_row(seed_row, polarity_map, always_tracked):
         'is_counting':         _bool(seed_row.get('is_counting', 'false')),
         'is_derived':          'false',
         'derivation_expr':     '',
-        'is_always_tracked':   _bool(seed_row.get('is_always_tracked', 'false')),
+        # is_always_tracked is sourced from ALWAYS_TRACKED_STATS (not the CSV)
+        # so re-runs don't accumulate state from prior writes. CSV value is
+        # intentionally ignored.
+        'is_always_tracked':   _bool(name in ALWAYS_TRACKED_STATS),
         'is_record_candidate': _bool(track),
         'polarity':            polarity,
         'notes':               seed_row.get('notes', ''),
     }
     out.update(overrides)
-    # If override added is_always_tracked=true, ensure is_record_candidate
-    # follows (always_tracked stats always surface).
-    if overrides.get('is_always_tracked') == 'true':
+    # Always-tracked stats are by definition record candidates (force-surface).
+    if out['is_always_tracked'] == 'true':
         out['is_record_candidate'] = 'true'
     return out
 
 
 def _new_row(stat_name, stat_category, polarity, is_counting, is_derived, derivation_expr, notes):
-    """Build a new (non-ESPN-native) row. is_always_tracked + is_record_candidate
-    are always true for the 17 rows we add -- they all surface as records today."""
+    """Build a new (non-ESPN-native) row. is_always_tracked is sourced from
+    ALWAYS_TRACKED_STATS — currently none of the new rows are in that set,
+    matching pre-B1 behavior for these stats (they were already surfacing
+    via SCORE_STAT_NAMES short-circuit for CALCULATED_*, or not surfacing
+    at all for PLATFORM_* / WASTED_POINTS / rates / derived). is_record_
+    candidate stays 'true' because these stats DO appear on the leaderboard.
+    """
     return {
         'stat_name':           stat_name,
         'espn_stat_id':        '',
@@ -252,7 +279,7 @@ def _new_row(stat_name, stat_category, polarity, is_counting, is_derived, deriva
         'is_counting':         _bool(is_counting),
         'is_derived':          _bool(is_derived),
         'derivation_expr':     derivation_expr,
-        'is_always_tracked':   'true',
+        'is_always_tracked':   _bool(stat_name in ALWAYS_TRACKED_STATS),
         'is_record_candidate': 'true',
         'polarity':            polarity,
         'notes':               notes,
@@ -262,16 +289,33 @@ def _new_row(stat_name, stat_category, polarity, is_counting, is_derived, deriva
 # ---- Build + report ---------------------------------------------------------
 
 def build_rows():
-    """Return list of dicts (SCHEMA order): existing rows + 17 new rows."""
+    """Return list of dicts (SCHEMA order): existing rows + new rows.
+
+    Idempotent: re-running against an already-updated CSV yields the same
+    result rather than duplicating. Any existing row whose stat_name (or
+    post-rename name) collides with a new-row spec is dropped from the
+    existing-rows pass and the new-row spec wins.
+    """
     polarity_map = get_effective_polarity()
     always_tracked = get_always_tracked_stats()
+
+    new_specs = DERIVED_ROWS + RATE_ROWS + WASTED_ROWS + SCORE_ROWS
+    new_names = {spec[0] for spec in new_specs}
 
     rows = []
     with open(SEED, 'r', encoding='utf-8') as f:
         for r in csv.DictReader(f):
+            old_name = r['stat_name']
+            overrides = EXISTING_ROW_OVERRIDES.get(old_name, {})
+            effective_name = overrides.get('stat_name', old_name)
+            if effective_name in new_names:
+                # A prior --write already inserted this as a new row; the
+                # new-row spec below will re-emit it. Skip here to stay
+                # idempotent.
+                continue
             rows.append(_existing_row(r, polarity_map, always_tracked))
 
-    for spec in DERIVED_ROWS + RATE_ROWS + WASTED_ROWS + SCORE_ROWS:
+    for spec in new_specs:
         rows.append(_new_row(*spec))
 
     return rows

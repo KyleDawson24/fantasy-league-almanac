@@ -63,12 +63,25 @@ seeds:
         playoff_round: varchar
     stat_classification:
       +column_types:
+        # Identity
         stat_name: varchar
         espn_stat_id: integer
         stat_category: varchar
-        stat_description: varchar
+        # Display (Phase 7 B1: stat_description renamed to espn_stat_label
+        # for platform neutrality; display_name + abbrev added)
+        espn_stat_label: varchar
+        display_name: varchar
+        abbrev: varchar
+        # Shape (Phase 7 B1: is_derived + derivation_expr added for mart
+        # Jinja loop in sub-chunk F)
         is_counting: boolean
+        is_derived: boolean
+        derivation_expr: varchar
+        # Record-surfacing rules (Phase 7 B1: is_record_candidate + polarity
+        # added; collapse _IMPLICIT_POLARITY / should_track_record into seed)
         is_always_tracked: boolean
+        is_record_candidate: boolean
+        polarity: varchar
         notes: varchar
     player_nicknames:
       +column_types:

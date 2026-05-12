@@ -25,6 +25,8 @@ Logan Gilbert: 29.6, Nathan Eovaldi: 25.6, Rico Garcia: 20.7
 [u][b]New Records[/b][/u]
 [b]Tied Record for Fewest RBIs[/b]: Leno's Manic Mandible at 14 RBI, the 3rd team to do so.
 [b]Tied Record for Fewest Extra Base Hits[/b]: Ghosts of Polo Grounds Past at 9 XBH, the 2nd team to do so.
+[b]New Fewest Platform Hitting Points[/b]: Ghosts of Polo Grounds Past, 86.4 PLATFORM_HITTING_PTS
+(Prior: 88.2 PLATFORM_HITTING_PTS by Avery Norwood (CHIN) in Week 6 of 2026)
 
 [u][b]Current Season Records[/b][/u]
 [b]Best Matchup Total[/b]: Intentional Walk to the Bar (Dorian Zane) -- 354.9 pts, Week 3

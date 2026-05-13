@@ -645,3 +645,56 @@ models:
         description: 'Numeric value at this rank.'
         tests:
           - not_null
+
+  - name: fct_weekly_player_inactive_performance
+    description: >
+      Phase 7 E1: wide-format player-weekly fact for INACTIVE-slot performance
+      (lineup_slot IN BE/IL/FA). Symmetric counterpart to
+      fct_weekly_player_active_performance; together they cover the full
+      universe of player-weeks at int_player_weekly_performance.
+
+      Grain: (season_year, matchup_period, player_id, wasted_bucket).
+      wasted_bucket is part of the grain so a player who appears as
+      ROSTERED_INACTIVE on team A AND as FA in the same matchup_period
+      (rare: drop mid-week) gets two distinct rows.
+
+      Carries counting + per-stat *_pts + calculated_* totals + player rate
+      stats (informational). NO platform_* columns -- inactive contributions
+      don't roll up to a team's ESPN home_score, so the symmetry with the
+      active fact stops there. negative_points deferred until
+      int_player_weekly_performance switches source to int_player_daily.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - season_year
+            - matchup_period
+            - player_id
+            - wasted_bucket
+    columns:
+      - name: season_year
+        description: 'ESPN season year.'
+        tests:
+          - not_null
+      - name: matchup_period
+        description: 'Weekly matchup period.'
+        tests:
+          - not_null
+      - name: team_id
+        description: 'ESPN team identifier. NULL for the FA bucket (free agents have no fantasy team); set for the ROSTERED_INACTIVE bucket.'
+      - name: player_id
+        description: 'ESPN player identifier.'
+        tests:
+          - not_null
+      - name: wasted_bucket
+        description: '"FA" or "ROSTERED_INACTIVE". Grain dim distinguishing free agents from benched/IL players.'
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['FA', 'ROSTERED_INACTIVE']
+      - name: calculated_points
+        description: 'Rules-normalized total points the player would have produced if started. For inactive players, this is the "unrealized point production" / wasted-points concept.'
+      - name: calculated_hitting_pts
+        description: 'Hitting subtotal of calculated_points.'
+      - name: calculated_pitching_pts
+        description: 'Pitching subtotal of calculated_points.'

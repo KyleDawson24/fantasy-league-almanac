@@ -36,6 +36,7 @@ MODELS = [
     "int_player_weekly_performance",
     "int_team_daily_scores",
     "fct_weekly_player_active_performance",  # Phase 7 D2: renamed from fct_weekly_player_performance
+    "fct_weekly_player_inactive_performance",  # Phase 7 E1: new symmetric inactive fact
     "fct_weekly_player_scores",
     "fct_weekly_team_performance",
     "mart_stat_leaderboard",

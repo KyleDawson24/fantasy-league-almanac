@@ -138,7 +138,16 @@ with active as (
         -- represented in the wide *_pts columns). Used for calculated_points.
         sum(total_hitting_stat_pts)  as total_hitting_stat_pts,
         sum(total_pitching_stat_pts) as total_pitching_stat_pts,
-        sum(total_stat_pts)          as total_stat_pts
+        sum(total_stat_pts)          as total_stat_pts,
+
+        -- Phase 7 Hpre: gross-negative-production rollup. Per-day
+        -- magnitude of net-negative platform_points, summed across
+        -- active days. The recap's get_wasted_points calc currently
+        -- uses week-net (GREATEST(0, -platform_points)) -- this column
+        -- is the per-day-summed sibling metric, available for ad-hoc
+        -- analysis. NOT in the leaderboard UNPIVOT for v1.0 (not
+        -- is_record_candidate in the seed); promotion is a v1.x call.
+        sum(negative_points) as negative_points
 
     from {{ ref('int_player_weekly_performance') }}
     -- Phase 7 D3: filter switched from the slot-enumeration form to the
@@ -219,6 +228,10 @@ select
     a.total_hitting_stat_pts  as calculated_hitting_pts,
     a.total_pitching_stat_pts as calculated_pitching_pts,
     a.total_stat_pts          as calculated_points,
+
+    -- Phase 7 Hpre: gross-negative-production rollup (per-day magnitude
+    -- of net-negative platform_points, summed across active days).
+    a.negative_points         as negative_points,
 
     -- Platform scoring (ESPN's pre-computed values, the official arbiter for W/L).
     -- Renamed from total_points/hitting_points/pitching_points in Phase 3.2 to

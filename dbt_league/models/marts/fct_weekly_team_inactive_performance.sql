@@ -157,6 +157,10 @@ team_rollup as (
         sum(calculated_pitching_pts) as calculated_pitching_pts,
         sum(calculated_points)       as calculated_points,
 
+        -- Phase 7 Hpre: gross-negative-production rollup across inactive
+        -- players (FA pool aggregate or per-team ROSTERED_INACTIVE).
+        sum(negative_points)         as negative_points,
+
         count(distinct player_id) as inactive_player_count
 
     from player_inactive

@@ -1,30 +1,30 @@
 -- int_player_weekly_performance.sql
--- Wide pivot of counting stats and per-stat point contributions from
--- int_player_daily_stats. Renamed from int_player_weekly_stats in Phase 3.2
--- because the table now carries scoring-derived point columns alongside
--- counting stats.
+-- Wide-format player-weekly rollup. Source: int_player_daily (C-chunk's
+-- wide-daily model). Aggregates daily counting + per-stat point columns
+-- + negative_points to the (season, matchup, team, player, slot) grain.
 --
--- lineup_slot is preserved as a grain dimension so the fact layer can filter
--- active vs inactive contributions and aggregate the slot dimension away
--- post-filter.
+-- lineup_slot is preserved as a grain dimension so the fact layer can
+-- filter active vs inactive contributions and aggregate the slot
+-- dimension away post-filter. A player who occupied multiple slots
+-- within a matchup_period produces multiple rows here — one per
+-- (player, matchup, slot). The fact layer applies slot filter then
+-- SUMs across surviving slots.
 --
--- A player who occupied multiple slots within a matchup_period produces
--- multiple rows here — one per (player, matchup, slot). The fact layer
--- applies slot filter then SUMs across surviving slots.
---
--- Phase 3.2: each counting stat now has a corresponding *_pts column
--- (stat_value * points_per_unit, pre-computed in int_player_daily_stats).
--- These carry through to the performance fact for per-stat point attribution
--- and calculated_points summation.
+-- Phase 7 Hpre: source switched from int_player_daily_stats (long format,
+-- one row per (player, scoring_period, stat_name) requiring CASE-WHEN
+-- pivots) to int_player_daily (wide format, one row per (player,
+-- scoring_period, slot) with stat columns already pivoted). The SQL
+-- collapses from ~50 CASE-WHEN pivots to ~50 plain SUM(col) -- same
+-- output, simpler shape, plus picks up int_player_daily's negative_points
+-- column. Old int_player_daily_stats becomes a dead model in H.
 --
 -- Grain: one row per (season_year, matchup_period, team_id, player_id, lineup_slot).
--- Counting columns and their point equivalents at this grain. Rates are
--- computed at the fact layer because meaningful rate values require the slot
--- filter to be applied first (rate over all-slots sums mixes active and
--- bench production).
+-- Rates are computed at the fact layer because meaningful rate values
+-- require the slot filter to be applied first (rate over all-slots sums
+-- mixes active and bench production).
 
 with daily as (
-    select * from {{ ref('int_player_daily_stats') }}
+    select * from {{ ref('int_player_daily') }}
 ),
 
 weekly as (
@@ -39,18 +39,17 @@ weekly as (
         player_name,
         lineup_slot,
 
-        -- Phase 7 D1: additive flag columns derived from lineup_slot. Make
-        -- the active/inactive distinction explicit at the int layer so
-        -- sub-chunk D2's renamed active fact and the future inactive fact
-        -- can both filter cleanly. Row count unchanged — the int already
-        -- carries every slot (no filter at this layer); these columns just
-        -- annotate what's already there.
+        -- Phase 7 D1: flag columns derived from lineup_slot. Make the
+        -- active/inactive distinction explicit at the int layer so the
+        -- renamed active fact and the inactive fact can both filter
+        -- cleanly. Row count unchanged -- the int already carries every
+        -- slot (no filter at this layer); these columns just annotate
+        -- what's already there.
         --
-        -- performance_status mirrors the filter today's fct_weekly_player_
-        -- performance applies at its WHERE clause (lineup_slot NOT IN
-        -- ('BE', 'IL', 'FA') -> 'active'). wasted_bucket mirrors the
-        -- semantics in mart_wasted_points: 'FA' for free agents, 'ROSTERED_
-        -- INACTIVE' for BE/IL, NULL for active slots.
+        -- performance_status mirrors the WHERE clause on the active fact
+        -- (lineup_slot NOT IN ('BE', 'IL', 'FA') -> 'active').
+        -- wasted_bucket mirrors mart_wasted_points's grain dim: 'FA' for
+        -- free agents, 'ROSTERED_INACTIVE' for BE/IL, NULL for active.
         case
             when lineup_slot in ('BE', 'IL', 'FA') then 'inactive'
             else 'active'
@@ -62,107 +61,113 @@ weekly as (
         end as wasted_bucket,
 
         -- Hitting counting stats
-        sum(case when stat_name = 'H'     then stat_value else 0 end) as h,
-        sum(case when stat_name = 'AB'    then stat_value else 0 end) as ab,
-        sum(case when stat_name = 'B_BB'  then stat_value else 0 end) as b_bb,
-        sum(case when stat_name = 'B_SO'  then stat_value else 0 end) as b_so,
-        sum(case when stat_name = 'HBP'   then stat_value else 0 end) as hbp,
-        sum(case when stat_name = 'SF'    then stat_value else 0 end) as sf,
-        sum(case when stat_name = 'HR'    then stat_value else 0 end) as hr,
-        sum(case when stat_name = 'R'     then stat_value else 0 end) as r,
-        sum(case when stat_name = 'RBI'   then stat_value else 0 end) as rbi,
-        sum(case when stat_name = 'SB'    then stat_value else 0 end) as sb,
-        sum(case when stat_name = 'CS'    then stat_value else 0 end) as cs,
-        sum(case when stat_name = 'TB'    then stat_value else 0 end) as tb,
-        sum(case when stat_name = '1B'    then stat_value else 0 end) as singles,
-        sum(case when stat_name = '2B'    then stat_value else 0 end) as doubles,
-        sum(case when stat_name = '3B'    then stat_value else 0 end) as triples,
-        sum(case when stat_name = 'XBH'   then stat_value else 0 end) as xbh,
-        sum(case when stat_name = 'GDP'   then stat_value else 0 end) as gdp,
-        sum(case when stat_name = 'B_IBB' then stat_value else 0 end) as b_ibb,
+        sum(h)       as h,
+        sum(ab)      as ab,
+        sum(b_bb)    as b_bb,
+        sum(b_so)    as b_so,
+        sum(hbp)     as hbp,
+        sum(sf)      as sf,
+        sum(hr)      as hr,
+        sum(r)       as r,
+        sum(rbi)     as rbi,
+        sum(sb)      as sb,
+        sum(cs)      as cs,
+        sum(tb)      as tb,
+        sum(singles) as singles,
+        sum(doubles) as doubles,
+        sum(triples) as triples,
+        sum(xbh)     as xbh,
+        sum(gdp)     as gdp,
+        sum(b_ibb)   as b_ibb,
 
         -- Hitting point contributions
-        sum(case when stat_name = 'H'     then stat_points else 0 end) as h_pts,
-        sum(case when stat_name = 'AB'    then stat_points else 0 end) as ab_pts,
-        sum(case when stat_name = 'B_BB'  then stat_points else 0 end) as b_bb_pts,
-        sum(case when stat_name = 'B_SO'  then stat_points else 0 end) as b_so_pts,
-        sum(case when stat_name = 'HBP'   then stat_points else 0 end) as hbp_pts,
-        sum(case when stat_name = 'SF'    then stat_points else 0 end) as sf_pts,
-        sum(case when stat_name = 'HR'    then stat_points else 0 end) as hr_pts,
-        sum(case when stat_name = 'R'     then stat_points else 0 end) as r_pts,
-        sum(case when stat_name = 'RBI'   then stat_points else 0 end) as rbi_pts,
-        sum(case when stat_name = 'SB'    then stat_points else 0 end) as sb_pts,
-        sum(case when stat_name = 'CS'    then stat_points else 0 end) as cs_pts,
-        sum(case when stat_name = 'TB'    then stat_points else 0 end) as tb_pts,
-        sum(case when stat_name = '1B'    then stat_points else 0 end) as singles_pts,
-        sum(case when stat_name = '2B'    then stat_points else 0 end) as doubles_pts,
-        sum(case when stat_name = '3B'    then stat_points else 0 end) as triples_pts,
-        sum(case when stat_name = 'XBH'   then stat_points else 0 end) as xbh_pts,
-        sum(case when stat_name = 'GDP'   then stat_points else 0 end) as gdp_pts,
-        sum(case when stat_name = 'B_IBB' then stat_points else 0 end) as b_ibb_pts,
+        sum(h_pts)       as h_pts,
+        sum(ab_pts)      as ab_pts,
+        sum(b_bb_pts)    as b_bb_pts,
+        sum(b_so_pts)    as b_so_pts,
+        sum(hbp_pts)     as hbp_pts,
+        sum(sf_pts)      as sf_pts,
+        sum(hr_pts)      as hr_pts,
+        sum(r_pts)       as r_pts,
+        sum(rbi_pts)     as rbi_pts,
+        sum(sb_pts)      as sb_pts,
+        sum(cs_pts)      as cs_pts,
+        sum(tb_pts)      as tb_pts,
+        sum(singles_pts) as singles_pts,
+        sum(doubles_pts) as doubles_pts,
+        sum(triples_pts) as triples_pts,
+        sum(xbh_pts)     as xbh_pts,
+        sum(gdp_pts)     as gdp_pts,
+        sum(b_ibb_pts)   as b_ibb_pts,
 
         -- Pitching counting stats
-        sum(case when stat_name = 'W'     then stat_value else 0 end) as w,
-        sum(case when stat_name = 'L'     then stat_value else 0 end) as l,
-        sum(case when stat_name = 'K'     then stat_value else 0 end) as k,
-        sum(case when stat_name = 'ER'    then stat_value else 0 end) as er,
-        sum(case when stat_name = 'OUTS'  then stat_value else 0 end) as outs,
-        sum(case when stat_name = 'QS'    then stat_value else 0 end) as qs,
-        sum(case when stat_name = 'SV'    then stat_value else 0 end) as sv,
-        sum(case when stat_name = 'HLD'   then stat_value else 0 end) as hld,
-        sum(case when stat_name = 'P_H'   then stat_value else 0 end) as p_h,
-        sum(case when stat_name = 'P_BB'  then stat_value else 0 end) as p_bb,
-        sum(case when stat_name = 'P_HR'  then stat_value else 0 end) as p_hr,
-        sum(case when stat_name = 'P_R'   then stat_value else 0 end) as p_r,
-        sum(case when stat_name = 'CG'    then stat_value else 0 end) as cg,
-        sum(case when stat_name = 'BLK'   then stat_value else 0 end) as blk,
-        sum(case when stat_name = 'WP'    then stat_value else 0 end) as wp,
-        sum(case when stat_name = 'HBP_P' then stat_value else 0 end) as hbp_p,
-        sum(case when stat_name = 'BLSV'  then stat_value else 0 end) as blsv,
-        sum(case when stat_name = 'NH'    then stat_value else 0 end) as nh,
-        sum(case when stat_name = 'PG'    then stat_value else 0 end) as pg,
-        sum(case when stat_name = 'PK'    then stat_value else 0 end) as pk,
-        sum(case when stat_name = '64'    then stat_value else 0 end) as sho,
+        sum(w)       as w,
+        sum(l)       as l,
+        sum(k)       as k,
+        sum(er)      as er,
+        sum(outs)    as outs,
+        sum(qs)      as qs,
+        sum(sv)      as sv,
+        sum(hld)     as hld,
+        sum(p_h)     as p_h,
+        sum(p_bb)    as p_bb,
+        sum(p_hr)    as p_hr,
+        sum(p_r)     as p_r,
+        sum(cg)      as cg,
+        sum(blk)     as blk,
+        sum(wp)      as wp,
+        sum(hbp_p)   as hbp_p,
+        sum(blsv)    as blsv,
+        sum(nh)      as nh,
+        sum(pg)      as pg,
+        sum(pk)      as pk,
+        sum(sho)     as sho,
 
         -- Pitching point contributions
-        sum(case when stat_name = 'W'     then stat_points else 0 end) as w_pts,
-        sum(case when stat_name = 'L'     then stat_points else 0 end) as l_pts,
-        sum(case when stat_name = 'K'     then stat_points else 0 end) as k_pts,
-        sum(case when stat_name = 'ER'    then stat_points else 0 end) as er_pts,
-        sum(case when stat_name = 'OUTS'  then stat_points else 0 end) as outs_pts,
-        sum(case when stat_name = 'QS'    then stat_points else 0 end) as qs_pts,
-        sum(case when stat_name = 'SV'    then stat_points else 0 end) as sv_pts,
-        sum(case when stat_name = 'HLD'   then stat_points else 0 end) as hld_pts,
-        sum(case when stat_name = 'P_H'   then stat_points else 0 end) as p_h_pts,
-        sum(case when stat_name = 'P_BB'  then stat_points else 0 end) as p_bb_pts,
-        sum(case when stat_name = 'P_HR'  then stat_points else 0 end) as p_hr_pts,
-        sum(case when stat_name = 'P_R'   then stat_points else 0 end) as p_r_pts,
-        sum(case when stat_name = 'CG'    then stat_points else 0 end) as cg_pts,
-        sum(case when stat_name = 'BLK'   then stat_points else 0 end) as blk_pts,
-        sum(case when stat_name = 'WP'    then stat_points else 0 end) as wp_pts,
-        sum(case when stat_name = 'HBP_P' then stat_points else 0 end) as hbp_p_pts,
-        sum(case when stat_name = 'BLSV'  then stat_points else 0 end) as blsv_pts,
-        sum(case when stat_name = 'NH'    then stat_points else 0 end) as nh_pts,
-        sum(case when stat_name = 'PG'    then stat_points else 0 end) as pg_pts,
-        sum(case when stat_name = 'PK'    then stat_points else 0 end) as pk_pts,
-        sum(case when stat_name = '64'    then stat_points else 0 end) as sho_pts,
+        sum(w_pts)     as w_pts,
+        sum(l_pts)     as l_pts,
+        sum(k_pts)     as k_pts,
+        sum(er_pts)    as er_pts,
+        sum(outs_pts)  as outs_pts,
+        sum(qs_pts)    as qs_pts,
+        sum(sv_pts)    as sv_pts,
+        sum(hld_pts)   as hld_pts,
+        sum(p_h_pts)   as p_h_pts,
+        sum(p_bb_pts)  as p_bb_pts,
+        sum(p_hr_pts)  as p_hr_pts,
+        sum(p_r_pts)   as p_r_pts,
+        sum(cg_pts)    as cg_pts,
+        sum(blk_pts)   as blk_pts,
+        sum(wp_pts)    as wp_pts,
+        sum(hbp_p_pts) as hbp_p_pts,
+        sum(blsv_pts)  as blsv_pts,
+        sum(nh_pts)    as nh_pts,
+        sum(pg_pts)    as pg_pts,
+        sum(pk_pts)    as pk_pts,
+        sum(sho_pts)   as sho_pts,
 
-        -- Catch-all totals: sum stat_points across ALL scored stats. The fact
-        -- layer uses these for calculated_points so the value is correct
-        -- regardless of which stats are explicitly pivoted. Per-stat *_pts
-        -- columns remain available above for "top N contributing stats"
-        -- consumer callouts (Phase 6.3.3 expanded the per-stat pivots to cover
-        -- GDP, B_IBB, HBP_P, BLSV, NH, PG, PK, SHO; the catch-all approach
-        -- keeps calculated_points robust to future seed additions either way).
-        sum(case when stat_category = 'hitting'  then stat_points else 0 end) as total_hitting_stat_pts,
-        sum(case when stat_category = 'pitching' then stat_points else 0 end) as total_pitching_stat_pts,
-        sum(stat_points)                                                       as total_stat_pts
+        -- Catch-all totals (sum across ALL scored stats, even ones not
+        -- represented in the wide *_pts columns). The fact layer uses
+        -- these for calculated_points so the value is correct regardless
+        -- of which stats are explicitly pivoted; per-stat *_pts columns
+        -- remain available for "top N contributing stats" callouts.
+        sum(total_hitting_stat_pts)  as total_hitting_stat_pts,
+        sum(total_pitching_stat_pts) as total_pitching_stat_pts,
+        sum(total_stat_pts)          as total_stat_pts,
+
+        -- Phase 7 Hpre: negative_points rollup. Per-day platform-level
+        -- net-negative magnitude (sum at the daily layer is preserved
+        -- by simple SUM here -- magnitude semantics aggregate cleanly
+        -- across days). Sub-chunk E's facts can now propagate this
+        -- without re-deriving from int_player_daily directly.
+        sum(negative_points) as negative_points
 
     from daily
-    -- Group by the 9 identifier columns + 2 derived flag columns (Phase 7 D1).
-    -- The flag columns are deterministic functions of lineup_slot (already in
-    -- the grouping key), so they don't change uniqueness, but Snowflake
-    -- requires non-aggregated SELECT columns to appear in GROUP BY.
+    -- Group by the 9 identifier columns + 2 derived flag columns.
+    -- The flag columns are deterministic functions of lineup_slot
+    -- (already in the grouping key), so they don't change uniqueness,
+    -- but Snowflake requires non-aggregated SELECT columns to appear
+    -- in GROUP BY.
     group by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11
 )
 

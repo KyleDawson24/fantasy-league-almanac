@@ -158,6 +158,10 @@ with team_rollup as (
         sum(calculated_pitching_pts) as calculated_pitching_pts,
         sum(calculated_points)       as calculated_points,
 
+        -- Phase 7 Hpre: team-level rollup of gross-negative-production
+        -- across active players.
+        sum(negative_points)         as negative_points,
+
         count(distinct player_id) as active_player_count
     from {{ ref('fct_weekly_player_active_performance') }}
     group by 1, 2, 3, 4, 5, 6

@@ -151,7 +151,12 @@ with inactive as (
         -- have contributed if started.
         sum(total_hitting_stat_pts)  as total_hitting_stat_pts,
         sum(total_pitching_stat_pts) as total_pitching_stat_pts,
-        sum(total_stat_pts)          as total_stat_pts
+        sum(total_stat_pts)          as total_stat_pts,
+
+        -- Phase 7 Hpre: gross-negative-production rollup (per-day
+        -- magnitude of net-negative platform_points, summed across
+        -- the player's inactive days in this bucket).
+        sum(negative_points)         as negative_points
 
     from {{ ref('int_player_weekly_performance') }}
     where performance_status = 'inactive'
@@ -210,7 +215,8 @@ select
     -- on the waiver wire).
     total_hitting_stat_pts  as calculated_hitting_pts,
     total_pitching_stat_pts as calculated_pitching_pts,
-    total_stat_pts          as calculated_points
+    total_stat_pts          as calculated_points,
+    negative_points         as negative_points
 
 from inactive
 

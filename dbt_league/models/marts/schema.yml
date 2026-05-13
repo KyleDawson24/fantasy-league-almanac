@@ -715,3 +715,55 @@ models:
 
       Do NOT add new consumers against this name -- they would also need
       to be deleted in H.
+
+  - name: fct_weekly_team_inactive_performance
+    description: >
+      Phase 7 E3: team-grain rollup of inactive (BE/IL/FA) player
+      performance. Symmetric counterpart to fct_weekly_team_active_
+      performance for the inactive half of the player-weekly split.
+
+      Two row flavors per (season_year, matchup_period):
+        - 14 ROSTERED_INACTIVE rows (one per fantasy team; team_id set)
+        - 1 FA row (league-wide; team_id NULL). The FA pool is not
+          attributable to any single team -- mirrors mart_wasted_points's
+          attribution convention.
+
+      Carries counting + per-stat *_pts + calculated_* totals + the
+      wasted_bucket dim + inactive_player_count.
+
+      DOES NOT carry platform_points (no ESPN home_score equivalent for
+      "the team's bench"), platform_hitting_pts / platform_pitching_pts
+      (today's slot-driven hitting/pitching split miscategorizes bench
+      pitchers; a position-driven version is a v1.x candidate), team
+      rates (bench IP isn't pitched -- rate semantics break), or
+      negative_points (deferred until int_player_weekly_performance
+      source-switches).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - season_year
+            - matchup_period
+            - team_id
+            - wasted_bucket
+    columns:
+      - name: season_year
+        description: 'ESPN season year.'
+        tests:
+          - not_null
+      - name: matchup_period
+        description: 'Weekly matchup period.'
+        tests:
+          - not_null
+      - name: team_id
+        description: 'ESPN team identifier. NULL for the FA pool row (league-wide aggregate); set for ROSTERED_INACTIVE rows.'
+      - name: wasted_bucket
+        description: '"FA" or "ROSTERED_INACTIVE". Grain dim distinguishing the league-wide free-agent pool from per-team bench/IL waste.'
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['FA', 'ROSTERED_INACTIVE']
+      - name: calculated_points
+        description: 'Rules-normalized total of unrealized point production by inactive players (ROSTERED_INACTIVE: team-level bench/IL waste; FA: league-wide free-agent production unclaimed by any team).'
+      - name: inactive_player_count
+        description: 'Distinct players contributing to this bucket. Diagnostic for "how thin was this bench."'

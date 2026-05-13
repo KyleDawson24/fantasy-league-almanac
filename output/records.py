@@ -148,13 +148,19 @@ def get_team_contributors(season_year, matchup_period, team_id, stat_column):
     comes from our own leaderboard's stat_name (an enumerated set of
     column names), NOT user input.
     """
+    # Phase 7 D2: display_name added as tiebreak token. Without it, the
+    # row order for tied stat_value entries is whatever Snowflake's scan
+    # returns -- which flips when the fct gets re-materialized (e.g. on
+    # --full-refresh). Same flake mode as the mart's ROW_NUMBER fix in
+    # B1; deterministic by display_name keeps golden output stable AND
+    # reads as "alphabetical within a tie" to a human.
     return query_snowflake(f"""
         SELECT display_name, {stat_column} AS stat_value
-        FROM fct_weekly_player_performance
+        FROM fct_weekly_player_active_performance
         WHERE season_year = %s
           AND matchup_period = %s
           AND team_id = %s
-        ORDER BY {stat_column} DESC NULLS LAST
+        ORDER BY {stat_column} DESC NULLS LAST, display_name
     """, (season_year, matchup_period, team_id))
 
 
@@ -463,7 +469,7 @@ def league_history_count(grain, stat_name, value, op='='):
     if stat_name in _NON_FCT_COUNTABLE:
         return None
     fct = ('fct_weekly_team_performance' if grain == 'team'
-           else 'fct_weekly_player_performance')
+           else 'fct_weekly_player_active_performance')
     col_expr = _DERIVED_STAT_FCT_EXPR.get(stat_name, stat_name.lower())
     rows = query_snowflake(f"""
         SELECT COUNT(*) AS n
@@ -579,7 +585,7 @@ _NO_PLAYER_BREAKDOWN_STATS = frozenset({
 
 # Leaderboard stat_name -> uppercase column-key list whose *_pts is the
 # point contribution for player-grain top-N. Mirrors the wide *_pts
-# columns on fct_weekly_player_performance. Hitter + pitcher pools both
+# columns on fct_weekly_player_active_performance. Hitter + pitcher pools both
 # included since player records are typically score-level (calculated_*)
 # where contributions can come from either side.
 _PLAYER_CONTRIB_STATS = (
@@ -626,7 +632,7 @@ def format_week_label(season_year, matchup_period, schedule_lookup):
 
 def _player_stat_value(row, stat_name):
     """Compute the player's value for a leaderboard stat_name from their
-    fct_weekly_player_performance row. Most stats are direct columns
+    fct_weekly_player_active_performance row. Most stats are direct columns
     (lowercased); derived counting stats are inline expressions. Returns
     None for stats with no per-player contribution story."""
     if stat_name in _NO_PLAYER_BREAKDOWN_STATS:
@@ -646,7 +652,7 @@ def _player_stat_value(row, stat_name):
 def get_team_contributors_bulk(tuples, top_n=3):
     """Top-N player contributors per (season, mp, team_id, stat_name).
 
-    Single batched fetch from fct_weekly_player_performance keyed by the
+    Single batched fetch from fct_weekly_player_active_performance keyed by the
     distinct team-week tuples; ranking happens in Python. Stats with no
     meaningful per-player breakdown (rate stats, WASTED_POINTS) return
     [] for those input tuples.
@@ -664,7 +670,7 @@ def get_team_contributors_bulk(tuples, top_n=3):
     params = [v for tw in team_weeks for v in tw]
     rows = query_snowflake(f"""
         SELECT *
-        FROM fct_weekly_player_performance
+        FROM fct_weekly_player_active_performance
         WHERE (season_year, matchup_period, team_id) IN ({placeholders})
     """, params)
 
@@ -684,7 +690,10 @@ def get_team_contributors_bulk(tuples, top_n=3):
             if v is None or v == 0:
                 continue
             scored.append({'display_name': r['display_name'], 'stat_value': v})
-        scored.sort(key=lambda x: x['stat_value'], reverse=True)
+        # Phase 7 D2: display_name as secondary key keeps tied stat_value
+        # entries in deterministic order (alphabetical), same fix pattern
+        # as the SQL contributor query above.
+        scored.sort(key=lambda x: (-x['stat_value'], x['display_name']))
         out[(s, mp, tid, stat)] = scored[:top_n]
     return out
 
@@ -716,7 +725,7 @@ def get_player_contributors_bulk(tuples, top_n=3, positives_only=True):
     params = [v for t in unique for v in t]
     rows = query_snowflake(f"""
         SELECT *
-        FROM fct_weekly_player_performance
+        FROM fct_weekly_player_active_performance
         WHERE (season_year, matchup_period, player_id) IN ({placeholders})
     """, params)
 
@@ -743,10 +752,12 @@ def get_player_contributors_bulk(tuples, top_n=3, positives_only=True):
                 'count_value': count,
                 'point_value': pts,
             })
+        # Phase 7 D2: stat_name as secondary key keeps tied point_value
+        # entries deterministic (alphabetical).
         if positives_only:
-            candidates.sort(key=lambda c: c['point_value'], reverse=True)
+            candidates.sort(key=lambda c: (-c['point_value'], c['stat_name']))
         else:
-            candidates.sort(key=lambda c: abs(c['point_value']), reverse=True)
+            candidates.sort(key=lambda c: (-abs(c['point_value']), c['stat_name']))
         out[tup] = candidates[:top_n]
     return out
 

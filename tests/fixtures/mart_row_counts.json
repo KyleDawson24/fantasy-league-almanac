@@ -4,7 +4,7 @@
   "int_player_daily_stats": 2733122,
   "int_player_weekly_performance": 29272,
   "int_team_daily_scores": 3778,
-  "fct_weekly_player_performance": 12131,
+  "fct_weekly_player_active_performance": 12131,
   "fct_weekly_player_scores": 12878,
   "fct_weekly_team_performance": 500,
   "mart_stat_leaderboard": 4200,

@@ -64,7 +64,7 @@ Built by build_ctx() and passed into every callout. Keys:
                                 team_name, owner_name, opponent_*, etc.
   ctx['players']         list   One row per active player this week (slot not in
                                 BE/IL/FA). Wide -- every counting and pts column
-                                from fct_weekly_player_performance plus
+                                from fct_weekly_player_active_performance plus
                                 display_name, team_abbrev, etc.
   ctx['schedule_lookup'] dict   Pass to format_week_label if needed.
 """
@@ -199,13 +199,13 @@ def build_ctx(season_year, matchup_period, schedule_lookup):
         WHERE season_year = %s AND matchup_period = %s
     """, (season_year, matchup_period))
 
-    # Active players only (slot != BE/IL/FA). Mirrors fct_weekly_player_performance's
+    # Active players only (slot != BE/IL/FA). Mirrors fct_weekly_player_active_performance's
     # active-only filter applied during the int -> fct rollup, so this
     # query returns the same player set generate_summary already uses for
     # top-N callouts.
     players = records.query_snowflake("""
         SELECT *
-        FROM fct_weekly_player_performance
+        FROM fct_weekly_player_active_performance
         WHERE season_year = %s AND matchup_period = %s
     """, (season_year, matchup_period))
 

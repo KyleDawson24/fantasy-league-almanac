@@ -75,7 +75,7 @@ models:
       hitter. Inactive rows (BE/IL/FA) bypass the validity filter so
       mart_wasted_points sees their full stat lines. Long format.
       lineup_slot preserved so downstream models can produce active
-      variants (fct_weekly_player_performance) and inactive variants
+      variants (fct_weekly_player_active_performance) and inactive variants
       (mart_wasted_points) from the same intermediate.
       Grain: (season_year, matchup_period, scoring_period, team_id, player_id, lineup_slot, stat_name).
     columns:

@@ -74,7 +74,7 @@ STAT_ORDER = [
 # Stats this BBCode report doesn't render. Phase 6.3.3 chunk 2 added
 # rate stats / wasted_points / derived counting stats to the mart, but
 # this report's per-stat contributor query (get_team_contributors)
-# interpolates the stat_name as a fct_weekly_player_performance column
+# interpolates the stat_name as a fct_weekly_player_active_performance column
 # and assumes a per-player breakdown story exists -- neither holds for
 # rates / wasted / derived. The new Sheets dump (chunks 5-6) handles
 # these via get_records_with_contributors() instead.

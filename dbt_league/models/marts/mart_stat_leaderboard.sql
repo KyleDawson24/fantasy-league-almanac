@@ -193,7 +193,7 @@ player_source as (
 
         p.platform_points, p.platform_hitting_pts, p.platform_pitching_pts,
         p.calculated_points, p.calculated_hitting_pts, p.calculated_pitching_pts
-    from {{ ref('fct_weekly_player_performance') }} p
+    from {{ ref('fct_weekly_player_active_performance') }} p
     inner join {{ ref('matchup_schedule') }} s
         on p.season_year = s.season_year
         and p.matchup_period = s.matchup_period

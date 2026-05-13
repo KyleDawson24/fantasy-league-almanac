@@ -1,7 +1,7 @@
 """
 Generate the weekly front-page summary from the mart tables.
 
-Reads fct_weekly_team_performance and fct_weekly_player_performance (the wide
+Reads fct_weekly_team_performance and fct_weekly_player_active_performance (the wide
 convergence facts shipped in Phase 3.1) to produce a BBCode-formatted
 summary for the ESPN league front page.
 """
@@ -54,7 +54,7 @@ def get_weekly_scores(season_year, matchup_period=None):
 def get_player_contributions(season_year, matchup_period):
     """Fetch weekly player stats for contributor callouts.
 
-    Sources from fct_weekly_player_performance (the wide convergence fact) for
+    Sources from fct_weekly_player_active_performance (the wide convergence fact) for
     architectural consistency with team queries -- both go through the
     convergence facts, not the legacy *_scores facts.
 
@@ -66,7 +66,7 @@ def get_player_contributions(season_year, matchup_period):
     """
     return query_snowflake("""
         SELECT *
-        FROM fct_weekly_player_performance
+        FROM fct_weekly_player_active_performance
         WHERE matchup_period = %s
         AND season_year = %s
         ORDER BY platform_points DESC
@@ -218,12 +218,12 @@ def get_wasted_points(season_year, matchup_period, limit=5):
     Joins stg_box_scores for MLB pro_team and eligible-slots metadata
     (Phase 5: position display now uses filtered eligibleSlots so
     multi-position players like Sanoja show as "2B, RP" instead of just
-    a primary position), and fct_weekly_player_performance to detect
+    a primary position), and fct_weekly_player_active_performance to detect
     partial-active weeks (player who also had active days during the
     same matchup period).
 
     Team-label priority (in COALESCE order):
-      1. Active team (from fct_weekly_player_performance) — captures the
+      1. Active team (from fct_weekly_player_active_performance) — captures the
          FA-then-rostered case ("they have since been picked up")
       2. Bench team (from mart_wasted_points ROSTERED_INACTIVE row)
       3. 'Free Agent' fallback when neither active nor bench association
@@ -266,7 +266,7 @@ def get_wasted_points(season_year, matchup_period, limit=5):
             SELECT player_id,
                    team_name AS active_team_name,
                    platform_points
-            FROM fct_weekly_player_performance
+            FROM fct_weekly_player_active_performance
             WHERE season_year = %s AND matchup_period = %s
         )
         SELECT

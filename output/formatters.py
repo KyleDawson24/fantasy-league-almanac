@@ -18,7 +18,7 @@ Excluded from the top-N entirely (regardless of mode):
   Pitcher: W, L, SV (in prefix), OUTS (shown as IP)
 
 The functions take a dict-like player row (keys = lowercased column
-names from fct_weekly_player_performance) and return just the stat
+names from fct_weekly_player_active_performance) and return just the stat
 line; callers compose the surrounding "X.X pts by Player (Team) -- "
 prefix to taste.
 """

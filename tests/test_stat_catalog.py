@@ -4,9 +4,10 @@ Two flavors:
   - Pure-function tests for to_leaderboard_name (no Snowflake; default suite).
   - Warehouse-marked tests that hit Snowflake to verify the helpers return
     the right shape against the post-B1 seed. These check that the helpers
-    are a superset of the Python truth (formatters.STAT_DISPLAY,
-    formatters.STAT_ABBREV, records._IMPLICIT_POLARITY) so sub-chunk G can
-    rewire consumers without losing entries.
+    return the right shape against the post-B1 seed. Phase 7 G removed
+    the formatters.STAT_DISPLAY / STAT_ABBREV / records._IMPLICIT_POLARITY
+    Python dicts; the stat_catalog helpers are now the single source of
+    truth (no Python truth to subset-compare against).
 """
 
 import pytest

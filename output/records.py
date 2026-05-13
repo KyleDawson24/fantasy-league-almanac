@@ -31,40 +31,50 @@ Public API:
 - get_records_with_contributors(...)  -- leaderboard-dump orchestrator
 - load_schedule_lookup()              -- (season, mp) -> playoff metadata
 - format_week_label(s, mp, lookup)    -- "Week N" or playoff round name
-- get_stat_polarity()                 -- stat -> 'positive'|'negative'|'neutral'
+- best_or_worst_label(...)            -- polarity-aware "Best"/"Worst" label
 - count_value_occurrences(...)        -- tie count for "Nth team" framing
 - should_track_record(...)            -- polarity-aware filter rule
+
+Phase 7 G2: polarity + always_tracked maps moved to stat_catalog
+(stat_catalog.get_polarity_map / get_always_tracked); records.py is
+now consumer-side filter + presentation logic only.
 """
 
 from db import query_snowflake  # re-exported for league_notes.py et al
+import stat_catalog
 
 
-# Score-level stat_names in the leaderboard (calculated_*). Records section
-# consumers query these specifically; the polarity filter treats them
-# specially (always tracked at team grain in both directions).
+# Score-level stat_names in the leaderboard. The records-section
+# consumers and the rendering helpers treat these specially:
+#   - should_track_record: short-circuits to True at team grain; at
+#     player grain ONLY these stats surface (other player records like
+#     "Most HR by a player in a week" intentionally don't bubble up to
+#     the records section).
+#   - fmt_stat_value_with_unit + make_record_label: render as "XX.X pts"
+#     with "Best/Worst Team|Player Foo Points" labels rather than the
+#     individual-stat "{value} {abbrev}" + "Most/Fewest {label}" form.
+#
+# Phase 7 G2+G4: PLATFORM_* added. Pre-Phase-7 records.SCORE_STAT_NAMES
+# was narrow (CALCULATED_* only) because today's recap+report only
+# surface CALCULATED_* records (Phase 5 design). But formatters._SCORE_
+# STAT_KEYS already had PLATFORM_* for value-rendering; the misalignment
+# rendered "86.4 PLATFORM_HITTING_PTS" instead of "86.4 pts" when
+# PLATFORM_* records did surface (latent before G2, real after G2's
+# polarity-source change). Unifying here -- PLATFORM_* records will now
+# surface in the recap's new-records section alongside CALCULATED_* and
+# render with proper "Best Team Platform Hitting Points: 86.4 pts" shape.
 SCORE_STAT_NAMES = (
     'CALCULATED_POINTS',
     'CALCULATED_HITTING_PTS',
     'CALCULATED_PITCHING_PTS',
+    'PLATFORM_POINTS',
+    'PLATFORM_HITTING_PTS',
+    'PLATFORM_PITCHING_PTS',
 )
 
-# The seed (stg_scoring_settings, stat_classification) uses '1B' / '2B'
-# / '3B' / '64' but the wide fct + leaderboard call those columns
-# 'SINGLES' / 'DOUBLES' / 'TRIPLES' / 'SHO'. Translation needed so seed-
-# driven lookups (polarity, always-tracked) land on leaderboard
-# stat_names.
-#
-# Phase 6.3.3 chunk 4.5: '64' -> 'SHO' added. The seed kept stat ID 64 as
-# the literal numeric stat_name (espn-api wrapper doesn't translate it),
-# but chunk 1 aliased the leaderboard column to 'SHO'. Without this
-# translation, polarity lookups for SHO returned None even though the
-# league scores shutouts (5 pts).
-_SEED_TO_LEADERBOARD = {
-    '1B': 'SINGLES',
-    '2B': 'DOUBLES',
-    '3B': 'TRIPLES',
-    '64': 'SHO',
-}
+# Phase 7 G2: _SEED_TO_LEADERBOARD moved to stat_catalog.SEED_TO_LEADERBOARD.
+# This module no longer translates seed names directly -- consumers call
+# stat_catalog.to_leaderboard_name() instead.
 
 
 # ---------- Bulk record fetches ----------
@@ -168,93 +178,22 @@ def get_team_contributors(season_year, matchup_period, team_id, stat_column):
 
 
 # ---------- Polarity + filter rule ----------
-
-def get_stat_polarity():
-    """Map of leaderboard stat_name -> 'positive' | 'negative' | 'neutral'.
-
-    Derived from sign of points_per_unit in stg_scoring_settings. Stats
-    without a row in the seed are 'neutral' (zero-weighted).
-
-    Translates seed names ('1B', '2B', '3B', '64') to leaderboard column
-    names ('SINGLES', 'DOUBLES', 'TRIPLES', 'SHO') so consumer lookups
-    land correctly.
-    """
-    rows = query_snowflake("""
-        SELECT UPPER(stat_name) AS stat_name, points_per_unit
-        FROM stg_scoring_settings
-    """)
-    polarity = {}
-    for r in rows:
-        name = _SEED_TO_LEADERBOARD.get(r['stat_name'], r['stat_name'])
-        ppu = r['points_per_unit'] or 0
-        if ppu > 0:
-            polarity[name] = 'positive'
-        elif ppu < 0:
-            polarity[name] = 'negative'
-        else:
-            polarity[name] = 'neutral'
-    return polarity
-
-
-# Phase 6.3.3 chunk 6.5: implicit polarity for stats not present in
-# stg_scoring_settings (the league doesn't directly score them) but that
-# still surface as records via always_tracked, non-seed (rate stats /
-# wasted_points), or derived (PA / SB-CS / W-L / SV-BLSV) paths. Used by
-# get_effective_polarity() to fill in the gaps left by get_stat_polarity()
-# so direction labels (Best/Worst) can be polarity-aware everywhere.
 #
-# The existing always_tracked seed flag covers WHICH stats surface as
-# records; this map covers HOW their direction maps to good/bad outcome.
-# Hitting "always_tracked" stats (H/TB/XBH/SF) are positive (more = good).
-# Pitching "always_tracked" stats need more nuance: ER is the lone clear
-# negative (more ER allowed = worse pitching). Rate stats split by
-# convention: ERA/WHIP/HR-BB-allowed-per-9 negative; K/9, K/BB positive.
-# WASTED_POINTS: more = worse roster decisions. Score stats: positive.
-_IMPLICIT_POLARITY = {
-    # Always-tracked counting stats not in scoring_settings (per is_always_tracked seed flag).
-    'H':       'positive',
-    'TB':      'positive',
-    'XBH':     'positive',
-    'SF':      'positive',
-    'ER':      'negative',
-    # Phase 6.3.3 chunk 2: rate stats (team-grain only)
-    'ERA':      'negative',
-    'WHIP':     'negative',
-    'HR_PER_9': 'negative',
-    'BB_PER_9': 'negative',
-    'K_PER_9':  'positive',
-    'K_PER_BB': 'positive',
-    # Phase 6.3.3 chunk 2: derived counting stats
-    'PA':       'positive',
-    'SB_CS':    'positive',
-    'W_L':      'positive',
-    'SV_BLSV':  'positive',
-    # Phase 6.3.3 chunk 2: roster waste (more = worse)
-    'WASTED_POINTS': 'negative',
-    # Score stats (also positive); explicit so neutral-from-seed doesn't bite
-    'CALCULATED_POINTS':       'positive',
-    'CALCULATED_HITTING_PTS':  'positive',
-    'CALCULATED_PITCHING_PTS': 'positive',
-    'PLATFORM_POINTS':         'positive',
-    'PLATFORM_HITTING_PTS':    'positive',
-    'PLATFORM_PITCHING_PTS':   'positive',
-}
-
-
-def get_effective_polarity():
-    """Phase 6.3.3 chunk 6.5: stat -> 'positive' | 'negative' map that
-    fills the gaps in get_stat_polarity() with _IMPLICIT_POLARITY.
-
-    Stats present in stg_scoring_settings keep their seed-derived polarity
-    (sign of points_per_unit). Stats marked 'neutral' or absent get
-    overwritten from _IMPLICIT_POLARITY. Stats unknown to both default to
-    'positive' (more = better) -- the more common case.
-    """
-    polarity = get_stat_polarity()
-    for stat, pol in _IMPLICIT_POLARITY.items():
-        if polarity.get(stat) in (None, 'neutral'):
-            polarity[stat] = pol
-    return polarity
+# Phase 7 G2: the polarity merge logic that lived here (get_stat_polarity
+# reading stg_scoring_settings; _IMPLICIT_POLARITY hardcoding rates /
+# wasted / derived / score stats; get_effective_polarity combining them)
+# moved to the seed at B1. The merged values are now stored directly in
+# stat_classification.polarity and read via stat_catalog.get_polarity_map().
+# Likewise get_always_tracked_stats moved to stat_catalog.get_always_tracked().
+#
+# What stays in this module:
+#   - best_or_worst_label    -- pure presentation helper (takes injected
+#                               polarity dict, returns Best/Worst string)
+#   - should_track_record    -- consumer-side filter (grain x direction
+#                               matrix using injected polarity + always-
+#                               tracked sets). Caller injects the dicts;
+#                               keeps the signature testable without
+#                               monkeypatching.
 
 
 def best_or_worst_label(stat_name, direction, effective_polarity):
@@ -280,30 +219,7 @@ def best_or_worst_label(stat_name, direction, effective_polarity):
     return 'Best' if direction == 'most' else 'Worst'
 
 
-def get_always_tracked_stats():
-    """Phase 6.3.3 chunk 4.5: stats flagged is_always_tracked=true in the
-    stat_classification seed. These bypass the polarity filter at team
-    grain (both directions surface as records) regardless of whether
-    the league actually scores them.
-
-    Use case: stats like H / TB / XBH / SF / ER that aren't scored
-    directly but are universal counting events where 'Most X in a week'
-    is a real, interesting record.
-
-    Returns a frozenset of leaderboard stat_names (after seed -> leaderboard
-    name translation). The seed is the source of truth -- adjust the
-    flag in stat_classification.csv and reseed to add/remove members
-    without code changes.
-    """
-    rows = query_snowflake("""
-        SELECT UPPER(stat_name) AS stat_name
-        FROM stat_classification
-        WHERE is_always_tracked = TRUE
-    """)
-    return frozenset(
-        _SEED_TO_LEADERBOARD.get(r['stat_name'], r['stat_name'])
-        for r in rows
-    )
+# Phase 7 G2: get_always_tracked_stats moved to stat_catalog.get_always_tracked.
 
 
 def should_track_record(grain, stat_name, direction, polarity, always_tracked=None):
@@ -355,8 +271,8 @@ def get_records_set_this_week(season_year, matchup_period):
     for individual stats (HBP, QS, SV, HLD, CG, etc. perfect-zero ties)
     are skipped.
     """
-    polarity = get_stat_polarity()
-    always_tracked = get_always_tracked_stats()
+    polarity = stat_catalog.get_polarity_map()
+    always_tracked = stat_catalog.get_always_tracked()
 
     candidates = query_snowflake("""
         SELECT *
@@ -809,8 +725,8 @@ def get_records_with_contributors(scope, top_n=5):
     Synthetic collapsed rows carry 'is_collapsed': True with cleared
     identity fields and an empty contributors list.
     """
-    polarity = get_stat_polarity()
-    always_tracked = get_always_tracked_stats()
+    polarity = stat_catalog.get_polarity_map()
+    always_tracked = stat_catalog.get_always_tracked()
 
     rows = query_snowflake("""
         SELECT entity_grain, stat_name, record_direction, rank,

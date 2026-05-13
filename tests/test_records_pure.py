@@ -413,50 +413,9 @@ class TestCollapseTies:
         assert len(result) == 2
 
 
-# ---------- get_effective_polarity (with patched seed fetch) ----------
-
-class TestGetEffectivePolarity:
-    """get_stat_polarity hits Snowflake; patch it and verify the merge
-    logic."""
-
-    def test_seed_polarity_kept_when_explicit(self, monkeypatch):
-        # Seed says HR is positive — implicit map should NOT overwrite.
-        monkeypatch.setattr(
-            records, 'get_stat_polarity',
-            lambda: {'HR': 'positive', 'ER': 'negative'},
-        )
-        result = records.get_effective_polarity()
-        assert result['HR'] == 'positive'
-        assert result['ER'] == 'negative'
-
-    def test_implicit_fills_missing_stats(self, monkeypatch):
-        # Stats not in seed get implicit polarity (e.g. ERA).
-        monkeypatch.setattr(records, 'get_stat_polarity', lambda: {})
-        result = records.get_effective_polarity()
-        assert result['ERA'] == 'negative'
-        assert result['WHIP'] == 'negative'
-        assert result['K_PER_9'] == 'positive'
-        assert result['WASTED_POINTS'] == 'negative'
-        assert result['CALCULATED_POINTS'] == 'positive'
-
-    def test_implicit_overwrites_neutral(self, monkeypatch):
-        # When seed marks a stat 'neutral' (zero ppu), implicit takes over.
-        monkeypatch.setattr(
-            records, 'get_stat_polarity',
-            lambda: {'WASTED_POINTS': 'neutral'},
-        )
-        result = records.get_effective_polarity()
-        assert result['WASTED_POINTS'] == 'negative'
-
-    def test_derived_counting_stats_positive(self, monkeypatch):
-        monkeypatch.setattr(records, 'get_stat_polarity', lambda: {})
-        result = records.get_effective_polarity()
-        for stat in ('PA', 'SB_CS', 'W_L', 'SV_BLSV'):
-            assert result[stat] == 'positive', f"{stat} expected positive"
-
-    def test_always_tracked_hitting_stats_positive(self, monkeypatch):
-        # H, TB, XBH, SF are positive (more = better).
-        monkeypatch.setattr(records, 'get_stat_polarity', lambda: {})
-        result = records.get_effective_polarity()
-        for stat in ('H', 'TB', 'XBH', 'SF'):
-            assert result[stat] == 'positive', f"{stat} expected positive"
+# Phase 7 G2: TestGetEffectivePolarity (5 tests) deleted along with the
+# get_stat_polarity / _IMPLICIT_POLARITY / get_effective_polarity functions
+# they tested. The polarity merge moved to the seed at B1 (regen-time);
+# the runtime accessor is stat_catalog.get_polarity_map(). Polarity values
+# are anchored at the seed level by tests/test_stat_catalog.py::
+# TestPolarityMap::test_known_polarities (warehouse-marked).

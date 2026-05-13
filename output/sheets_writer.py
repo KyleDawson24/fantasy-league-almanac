@@ -92,9 +92,10 @@ def write_records(sheet_id):
     spreadsheet = client.open_by_key(sheet_id)
     schedule_lookup = records_module.load_schedule_lookup()
     # Phase 6.3.3 chunk 6.5: polarity-aware Best/Worst labels everywhere.
-    # Effective polarity = scoring-settings polarity + implicit overrides
-    # for stats not in the seed (rates / wasted / derived / always-tracked).
-    effective_polarity = records_module.get_effective_polarity()
+    # Phase 7 G2: polarity now comes from stat_catalog (seed-driven; the
+    # B1 regen baked the scoring-settings + implicit overrides merge into
+    # stat_classification.polarity).
+    effective_polarity = stat_catalog.get_polarity_map()
 
     # Tabs 1 & 2: rank-1 holder per (stat, direction). top_n=1 in the
     # orchestrator means the tie-collapse algorithm doesn't have an

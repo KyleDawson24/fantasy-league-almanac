@@ -94,14 +94,11 @@ class TestDisplayMap:
         assert m['CALCULATED_POINTS'] == 'Total Points'
         assert m['PLATFORM_HITTING_PTS'] == 'Platform Hitting Points'
 
-    def test_python_truth_is_subset(self):
-        # Sub-chunk G's rewire requires the seed helper to cover everything
-        # formatters.STAT_DISPLAY does. Subset assertion catches drift if
-        # someone adds a Python entry without seeding it.
-        import formatters
-        helper = get_display_map()
-        missing = {k: v for k, v in formatters.STAT_DISPLAY.items() if helper.get(k) != v}
-        assert not missing, f"STAT_DISPLAY entries not matched by helper: {missing}"
+    # Phase 7 G1: deleted test_python_truth_is_subset. The subset assertion
+    # was a safety net for G's rewire (proving the helper covered everything
+    # formatters.STAT_DISPLAY did). With STAT_DISPLAY itself deleted in G1,
+    # the helper IS the source of truth -- the test_known_stats_present
+    # tests above pin the canonical entries.
 
 
 @pytest.mark.warehouse
@@ -113,11 +110,8 @@ class TestAbbrevMap:
         assert m['HBP_P'] == 'HBP'     # pitcher hit-batters (collides with batter HBP intentionally)
         assert m['OUTS'] == 'IP'
 
-    def test_python_truth_is_subset(self):
-        import formatters
-        helper = get_abbrev_map()
-        missing = {k: v for k, v in formatters.STAT_ABBREV.items() if helper.get(k) != v}
-        assert not missing, f"STAT_ABBREV entries not matched: {missing}"
+    # Phase 7 G1: deleted test_python_truth_is_subset for STAT_ABBREV
+    # (same rationale as the STAT_DISPLAY subset test above).
 
 
 @pytest.mark.warehouse

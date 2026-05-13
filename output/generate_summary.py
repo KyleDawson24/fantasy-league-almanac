@@ -23,10 +23,9 @@ from formatters import (
     filter_eligible_slots,
     fmt_ip,
     fmt_value,
-    STAT_DISPLAY,
-    STAT_ABBREV,
 )
 import records
+import stat_catalog
 
 
 def get_weekly_scores(season_year, matchup_period=None):
@@ -494,7 +493,7 @@ def fmt_stat_value_with_unit(stat_name, value):
         return f"{value:.1f} pts"
     if stat_name == 'OUTS':
         return f"{fmt_ip(value)} IP"
-    return f"{fmt_value(value)} {STAT_ABBREV.get(stat_name, stat_name)}"
+    return f"{fmt_value(value)} {stat_catalog.get_abbrev_map().get(stat_name, stat_name)}"
 
 
 def make_record_label(grain, stat_name, direction):
@@ -508,9 +507,9 @@ def make_record_label(grain, stat_name, direction):
     if stat_name in records.SCORE_STAT_NAMES:
         prefix = 'Best' if direction == 'most' else 'Worst'
         scope = 'Player' if grain == 'player' else 'Team'
-        return f"{prefix} {scope} {STAT_DISPLAY[stat_name]}"
+        return f"{prefix} {scope} {stat_catalog.get_display_map()[stat_name]}"
     prefix = 'Most' if direction == 'most' else 'Fewest'
-    return f"{prefix} {STAT_DISPLAY.get(stat_name, stat_name)}"
+    return f"{prefix} {stat_catalog.get_display_map().get(stat_name, stat_name)}"
 
 
 def _team_contributors(players, team_id, stat_col):

@@ -28,6 +28,7 @@ this module entirely when it's unset. write_records() raises if invoked
 without the OAuth client config in place.
 """
 
+import functools
 import os
 from pathlib import Path
 
@@ -37,7 +38,8 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 
 import records as records_module
-from formatters import STAT_DISPLAY, fmt_ip
+import stat_catalog
+from formatters import fmt_ip
 
 
 # Sheets scope is sufficient for opening a Sheet by ID and writing to its
@@ -65,14 +67,17 @@ _TAB_TITLES = {
     'leaderboard_dump': 'Leaderboard Dump',
 }
 
-# Score-stat ordering for the sort key. Defined here so _row_sort_key can
-# resolve display-label -> rank in O(1).
-_SCORE_LABEL_ORDER = {
-    STAT_DISPLAY['CALCULATED_POINTS']:        0,
-    STAT_DISPLAY['CALCULATED_HITTING_PTS']:   1,
-    STAT_DISPLAY['CALCULATED_PITCHING_PTS']:  2,
-}
-_SCORE_LABEL_SET = set(_SCORE_LABEL_ORDER.keys())
+# Score-stat label set used by _row_sort_key to partition score rows
+# ahead of stat rows. Phase 7 G1: built lazily from the seed-driven
+# stat_catalog (cached at first access).
+@functools.lru_cache(maxsize=1)
+def _score_label_set():
+    display = stat_catalog.get_display_map()
+    return frozenset({
+        display['CALCULATED_POINTS'],
+        display['CALCULATED_HITTING_PTS'],
+        display['CALCULATED_PITCHING_PTS'],
+    })
 
 
 def write_records(sheet_id):
@@ -152,7 +157,7 @@ def _format_row(record, scope_label, schedule_lookup, effective_polarity):
     grain = record['entity_grain']
     stat_name = record['stat_name']
     direction = record['record_direction']
-    stat_label = STAT_DISPLAY.get(stat_name, stat_name)
+    stat_label = stat_catalog.get_display_map().get(stat_name, stat_name)
     direction_label = records_module.best_or_worst_label(
         stat_name, direction, effective_polarity,
     )
@@ -258,7 +263,7 @@ def _contributor_cells(grain, leaderboard_stat, contributors):
                 # Player-grain: surface stat NAME (uppercase column key)
                 # and count -- not pts. Per locked decision #4.
                 stat_key = c.get('stat_name', '')
-                cells.append(STAT_DISPLAY.get(stat_key, stat_key))
+                cells.append(stat_catalog.get_display_map().get(stat_key, stat_key))
                 raw = c.get('count_value')
                 cells.append(fmt_ip(raw) if stat_key == 'OUTS' else raw)
         else:
@@ -292,7 +297,7 @@ def _row_sort_key(row):
     rank_cell    = row[4]
 
     direction_rank = 0 if direction == 'Best' else 1
-    score_rank     = 0 if stat_label in _SCORE_LABEL_SET else 1
+    score_rank     = 0 if stat_label in _score_label_set() else 1
     scope_rank     = 0 if scope_label == 'All-Time' else 1
     grain_rank     = 0 if grain_label == 'Player' else 1
     rank_int       = rank_cell if isinstance(rank_cell, int) else 999

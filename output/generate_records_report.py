@@ -34,9 +34,10 @@ db.init()
 
 from formatters import (
     fmt_value, fmt_ip, fmt_record_value,
-    format_contributors, STAT_DISPLAY,
+    format_contributors,
 )
 import records
+import stat_catalog
 
 
 # When the rank-1 tier has more than this many members, collapse the
@@ -132,7 +133,7 @@ def format_record(stat_name, holders, schedule_lookup):
     if not holders:
         return None
 
-    display = STAT_DISPLAY.get(stat_name, stat_name)
+    display = stat_catalog.get_display_map().get(stat_name, stat_name)
     tiers = split_tiers(holders)
     top_tier = tiers[0]
     record_value = top_tier[0]['stat_value']

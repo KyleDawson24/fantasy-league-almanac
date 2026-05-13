@@ -57,98 +57,13 @@ TOP_SCORER_STAT_DISPLAY = {
 }
 
 
-# Display labels for record-callout headings. Phase 5: moved here from
-# generate_records_report.py so generate_summary's new-record callouts can
-# share. Use full descriptive names (e.g., "Strikeouts (Pitcher)") rather
-# than short abbreviations because these appear in user-facing record
-# section headers like "[b]New Most Strikeouts (Pitcher)[/b]".
-STAT_DISPLAY = {
-    'CALCULATED_POINTS':       'Total Points',
-    'CALCULATED_HITTING_PTS':  'Hitting Points',
-    'CALCULATED_PITCHING_PTS': 'Pitching Points',
-    'H':       'Hits',
-    'AB':      'At Bats',
-    'B_BB':    'Walks (Batter)',
-    'B_SO':    'Strikeouts (Batter)',
-    'HBP':     'Hit by Pitch',
-    'SF':      'Sacrifice Flies',
-    'HR':      'Home Runs',
-    'R':       'Runs',
-    'RBI':     'RBIs',
-    'SB':      'Stolen Bases',
-    'CS':      'Caught Stealing',
-    'TB':      'Total Bases',
-    'SINGLES': 'Singles',
-    'DOUBLES': 'Doubles',
-    'TRIPLES': 'Triples',
-    'XBH':     'Extra Base Hits',
-    'W':       'Wins',
-    'L':       'Losses',
-    'K':       'Strikeouts (Pitcher)',
-    'ER':      'Earned Runs',
-    'OUTS':    'Innings Pitched',
-    'QS':      'Quality Starts',
-    'SV':      'Saves',
-    'HLD':     'Holds',
-    'P_H':     'Hits Allowed',
-    'P_BB':    'Walks Allowed',
-    'P_HR':    'Home Runs Allowed',
-    'P_R':     'Runs Allowed',
-    'CG':      'Complete Games',
-    'BLK':     'Balks',
-    'WP':      'Wild Pitches',
-    # Phase 6.3.3 chunk 1 -- additional tracked counting stats
-    'GDP':     'GIDP (Batter)',
-    'B_IBB':   'Intentional Walks (Batter)',
-    'HBP_P':   'Hit Batters',
-    'BLSV':    'Blown Saves',
-    'NH':      'No-Hitters',
-    'PG':      'Perfect Games',
-    'PK':      'Pickoffs',
-    'SHO':     'Shutouts',
-    # Phase 6.3.3 chunk 2 -- mart-only derived counting + rate stats +
-    # wasted points. Rates use slash form (HR/9, K/BB) which reads
-    # naturally inline; net stats include the (X-Y) parenthetical so
-    # the math is self-explanatory in a quick glance.
-    'PA':           'Plate Appearances',
-    'SB_CS':        'Net Stolen Bases (SB-CS)',
-    'W_L':          'Net Wins (W-L)',
-    'SV_BLSV':      'Net Saves (SV-BLSV)',
-    'ERA':          'ERA',
-    'WHIP':         'WHIP',
-    'K_PER_9':      'K/9',
-    'K_PER_BB':     'K/BB',
-    'HR_PER_9':     'HR/9',
-    'BB_PER_9':     'BB/9',
-    'WASTED_POINTS': 'Wasted Points',
-    # Platform-* records still surface from the leaderboard mart for
-    # cross-season comparison; Phase 5 swapped the records section to
-    # CALCULATED_* but PLATFORM_* remains visible in the Sheets dump.
-    'PLATFORM_POINTS':        'Platform Total Points',
-    'PLATFORM_HITTING_PTS':   'Platform Hitting Points',
-    'PLATFORM_PITCHING_PTS':  'Platform Pitching Points',
-}
-
-# Short abbreviations for inline value display ("5 HR", "12 K", etc.).
-# Disambiguation across hitter/pitcher H/BB/HR/R is implicit from the
-# enclosing record's section header.
-STAT_ABBREV = {
-    'H': 'H', 'AB': 'AB', 'B_BB': 'BB', 'B_SO': 'K', 'HBP': 'HBP', 'SF': 'SF',
-    'HR': 'HR', 'R': 'R', 'RBI': 'RBI', 'SB': 'SB', 'CS': 'CS',
-    'TB': 'TB', 'SINGLES': '1B', 'DOUBLES': '2B', 'TRIPLES': '3B', 'XBH': 'XBH',
-    'W': 'W', 'L': 'L', 'K': 'K', 'ER': 'ER', 'OUTS': 'IP', 'QS': 'QS',
-    'SV': 'SV', 'HLD': 'HLD', 'P_H': 'H', 'P_BB': 'BB',
-    'P_HR': 'HR', 'P_R': 'R', 'CG': 'CG', 'BLK': 'BK', 'WP': 'WP',
-    # Phase 6.3.3 chunk 1 additions
-    'GDP': 'GIDP', 'B_IBB': 'IBB', 'HBP_P': 'HBP', 'BLSV': 'BLSV',
-    'NH': 'NH', 'PG': 'PG', 'PK': 'PK', 'SHO': 'SHO',
-    # Phase 6.3.3 chunk 2 additions
-    'PA': 'PA', 'SB_CS': 'SB-CS', 'W_L': 'W-L', 'SV_BLSV': 'SV-BLSV',
-    'ERA': 'ERA', 'WHIP': 'WHIP',
-    'K_PER_9': 'K/9', 'K_PER_BB': 'K/BB',
-    'HR_PER_9': 'HR/9', 'BB_PER_9': 'BB/9',
-    'WASTED_POINTS': 'Wasted',
-}
+# Phase 7 G1: STAT_DISPLAY + STAT_ABBREV moved to the seed-driven
+# stat_catalog helpers. Callers that used to import these constants from
+# formatters now call stat_catalog.get_display_map() / get_abbrev_map()
+# directly. Same dict shape (leaderboard_name -> label), same per-stat
+# values; the source of truth shifted from a hardcoded Python dict to
+# the stat_classification seed table. New tracked stats are now added
+# in ONE place (the seed) instead of five.
 
 
 # Phase 5 (#4): specific position slots we surface in eligibility displays.
@@ -223,8 +138,9 @@ def fmt_record_value(stat_name, value):
       - everything else: fmt_value's int-or-1decimal heuristic
 
     Rate stats (ERA, WHIP, K/9, etc.) fall through to fmt_value which
-    keeps their float precision. The label (STAT_DISPLAY) carries the
-    unit context, so this returns a bare number string without suffix.
+    keeps their float precision. The label (stat_catalog.get_display_map())
+    carries the unit context, so this returns a bare number string without
+    suffix.
     """
     if value is None:
         return ""

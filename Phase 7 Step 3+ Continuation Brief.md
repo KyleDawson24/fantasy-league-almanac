@@ -22,9 +22,10 @@ Spend 20-30 minutes here before touching code:
 
 ## 2. What's shipped in Phase 7 to date
 
-21 commits, ending at `4d66f75`. Step 2 complete.
+22 commits, ending at `4859146`. Steps 2 + 3 complete.
 
 ```
+4859146 Phase 7 Step 3: split records.py into data + logic + thin orchestrator
 4d66f75 Phase 7 Step H: drop dead/holdover models + rewire active fact off scores chain
 08b2736 Phase 7 Hpre: int_player_weekly_performance from int_player_daily + negative_points rollup
 dd74daf Phase 7 Step G5: rewire get_wasted_points to fct_weekly_player_inactive_performance
@@ -110,63 +111,41 @@ Discovered during F-prep (15-pt scoring weight; 2 real cycle candidates over 2 s
 
 ---
 
-## 4. Step 3: records.py split
+## 4. Step 3: records.py split — SHIPPED (commit `4859146`)
 
-`output/records.py` is currently **930 lines, 22 functions**. After Step 2's cleanup (polarity logic moved to stat_catalog; consumer queries simplified; consumer-side filters preserved), the natural seam is data-access vs everything-else.
+`output/records.py` was 930 lines / 22 functions before this step. After Step 2's cleanup (polarity logic moved to stat_catalog; consumer queries simplified; consumer-side filters preserved), the natural seam was data-access vs everything-else.
 
-### Recommended shape: 3 flat modules
+### What landed
 
-**`output/records_data.py`** (~250 lines)
-- All Snowflake queries (10 functions).
-- Imports: `from db import query_snowflake`.
-- No business logic.
+- **`output/records_data.py`** (377 lines) — 10 Snowflake-querying functions + their config constants. Imports only `from db import query_snowflake`. Also holds `_player_stat_value` and `_NO_PLAYER_BREAKDOWN_STATS` (see deviation 1 below).
+- **`output/records_logic.py`** (382 lines) — pure consumer-side filter rules (`should_track_record`, `_orchestrator_filter`), presentation helpers (`best_or_worst_label`, `format_week_label`, `ordinal`, `_sort_new_records`), and tie-collapse (`collapse_ties`, `_collapse_one_group`, `INLINE_COLLAPSE_THRESHOLD`). One explicit `from records_data import count_value_occurrences` for the saturated-tier backfill (see deviation 2 below).
+- **`output/records.py`** (238 lines) — the two workflow orchestrators (`get_records_set_this_week`, `get_records_with_contributors`) plus explicit named re-exports so consumers and tests keep working unchanged.
 
-**`output/records_logic.py`** (~350 lines)
-- Pure-function consumer-side code: filter rules, presentation helpers, tie-collapse, derived-stat helpers, sort helpers.
-- Imports: `import stat_catalog` (for SCORE_STAT_NAMES neighborhood).
-- 0 Snowflake queries.
-- This is the half currently covered by `tests/test_records_pure.py`.
+Re-exports cover:
+- `records.foo()` (4 consumer scripts: generate_summary, generate_records_report, sheets_writer, league_notes)
+- `from records import ordinal` (generate_summary.py:505)
+- `records.query_snowflake` (league_notes.py:196)
+- `records._player_stat_value` / `_collapse_one_group` / `_orchestrator_filter` / `_sort_new_records` (tests/test_records_pure.py reaches into these)
 
-**`output/records.py`** (~150 lines, becomes thin orchestrator)
-- The two big workflow functions: `get_records_set_this_week`, `get_records_with_contributors`.
-- Backward-compat re-exports at top: `from records_data import *; from records_logic import *` so existing `from records import X` patterns in `generate_summary.py` / `generate_records_report.py` / `sheets_writer.py` / `league_notes.py` keep working without consumer churn.
+Used explicit named imports rather than `from records_data import *` etc. — `*` skips underscored helpers, which the test file relies on.
 
-### Function inventory for the split
+### Two deviations from the original §4 inventory
 
-`records.py:82 → records_data.py`:
-- `get_all_time_records`, `get_current_season_records`, `_fetch_rank1_records`
-- `get_record_top_n`
-- `get_tracked_team_stats`
-- `get_team_contributors`, `get_team_contributors_bulk`, `get_player_contributors_bulk`
-- `count_value_occurrences`, `league_history_count`
-- `load_schedule_lookup`
+The plan written above this section before execution put two symbols in different modules than where they actually landed:
 
-`records.py:199 → records_logic.py`:
-- `SCORE_STAT_NAMES`, `_DERIVED_STAT_FCT_EXPR` (constants)
-- `should_track_record`, `_orchestrator_filter`
-- `best_or_worst_label`, `format_week_label`, `ordinal`
-- `_player_stat_value`
-- `collapse_ties`, `_collapse_one_group`
-- `_sort_new_records`
+1. **`_player_stat_value` (+ `_NO_PLAYER_BREAKDOWN_STATS`)** ended up in `records_data.py`, not `records_logic.py`. It's pure, but its only caller is `get_team_contributors_bulk` in records_data — cohesion over the "pure-fn home" rule. Pure tests resolve through re-export and pass unchanged.
 
-`records.py` keepers:
-- `get_records_set_this_week`
-- `get_records_with_contributors`
-- Re-exports at top.
+2. **`collapse_ties` / `_collapse_one_group`** stayed in records_logic but introduced an explicit `from records_data import count_value_occurrences`. The brief promised "0 Snowflake queries" in logic, which is true non-transitively but not at the import-graph level — `_collapse_one_group` needs the fct count to backfill saturated tiers (where the visible tier hits the mart's top-10 cap). Honest one-way edge; no cycle (records_data does not import from records_logic).
 
-### Verification approach
+### Open question for v1.x
 
-1. `pytest tests/` — 112 expected (no behavior change). Pure tests will need import-path updates if they reach into private helpers (`_sort_new_records`, `_player_stat_value`, etc.) — should be mechanical. The `from records import ...` patterns should keep working via the re-exports.
-2. `pytest tests/ -m warehouse` — 15 expected, BBCode unchanged.
-3. Spot-check a recap run end-to-end with `--no-sheets`.
+The logic→data import in deviation 2 could be replaced with dependency injection: `collapse_ties(records, max_n=5, count_fn=None)`, with the orchestrator passing `count_value_occurrences` in. That would keep records_logic truly pure and enable pure-test coverage of the saturated-tier branch (currently `tests/test_records_pure.py::TestCollapseOneGroupNonSaturated` covers the non-saturated path only; the saturated path is exercised solely via the warehouse-marked golden BBCode test). The injection signature change wouldn't actually break existing tests — `count_fn` would default to `None` with a fallback to visible `tier_size`, so all current call sites stay valid. Deferred because the current edge is explicit and cycle-free, and the saturated path is well-covered by the BBCode regression.
 
-### Alternatives if user wants different shape
+### Verification at exit
 
-- **B: smaller** — extract only `records_data.py`. Leave logic + orchestrators in records.py. Smaller diff.
-- **C: 4-module** — also extract orchestrators to `records_orchestrators.py`. Cleaner SRP but more files for small benefit at this size.
-- **D: no split** — Step 2's cleanup arguably leaves records.py healthy enough to skip Step 3 entirely. Defensible portfolio-wise but loses the "I refactored a god module" story.
-
-User input expected before execution. Default recommendation is the 3-module shape above.
+- `pytest tests/`: 112 passed, 15 deselected.
+- `pytest tests/ -m warehouse`: 15 passed (both golden BBCode tests unchanged byte-for-byte).
+- No `--no-sheets` spot-check run: `test_golden_output` subprocess-runs both scripts end-to-end and diffs against pinned baselines, which is strictly stronger.
 
 ---
 
@@ -240,7 +219,7 @@ For background commands (dbt build, pytest -m warehouse): use `run_in_background
 
 Current `git worktree list`:
 - `C:/Users/kyled/projects/espn-league-manager` — main branch (untouched throughout Phase 7).
-- `.claude/worktrees/optimistic-euclid-8ec80e/` — **active for Phase 7** (where all 21 commits landed).
+- `.claude/worktrees/optimistic-euclid-8ec80e/` — **active for Phase 7** (where all 22 commits landed).
 - `.claude/worktrees/phase-3.2/` — long-lived per HANDOFF §8; leave alone.
 - Possibly stale: `distracted-swirles-7aee21`, `happy-elion-8a788e`, `wizardly-wozniak-683b30`, `phase-7-v1.0` — Step 4 cleanup candidates.
 
@@ -258,10 +237,10 @@ Current `git worktree list`:
 
 ## 11. TL;DR for the new chat
 
-- Step 2 done (21 commits on `claude/optimistic-euclid-8ec80e`; ending at `4d66f75`).
-- Architecture: 17 dbt models → 7. Seed-driven catalog. Symmetric active/inactive facts.
-- Steps 3 (records.py split), 4 (repo hygiene), 5 (public docs) remain.
-- Step 3 plan is in §4 above. **Confirm shape before executing.** 3-module flat split recommended.
+- Steps 2 + 3 done (22 commits on `claude/optimistic-euclid-8ec80e`; ending at `4859146`).
+- Architecture: 17 dbt models → 7. Seed-driven catalog. Symmetric active/inactive facts. records.py split 3 ways with backward-compat re-exports.
+- Steps 4 (repo hygiene, ~2 hr) and 5 (public docs, ~5-7 hr) remain.
+- Step 3 retro in §4 above includes a deferred v1.x question (inject `count_fn` into `collapse_ties` vs. the current cross-module import).
 - Don't push. Don't commit without showing diff first. Don't poll background tasks (see memory).
 
 Welcome.

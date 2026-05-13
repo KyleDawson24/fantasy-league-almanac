@@ -67,7 +67,11 @@ espn-league-manager/
 │   ├── chunk{3,4,5}_smoke.py            # Phase 6.3.3 smoke tests; useful for re-verification
 │   ├── diag_sheet_filter.py             # "Why isn't stat X in the sheet?" diagnostic
 │   ├── phase_6.3.3_chunk{1,2}_build.log # dbt build artifacts
-│   └── *.json                           # Older debug payloads
+│   ├── *.json                           # Older debug payloads
+│   └── research/                        # gitignored local-only research scripts
+│                                        #   (test_espn.py, test_kona_returns.py,
+│                                        #   etc. — relocated from repo root in
+│                                        #   Phase 7 Step 4)
 ├── Phase 1.0 .. Phase 6.3.3 Documentation.md   # One per phase; source of truth for
 │                                                 #   architectural decisions
 ├── HANDOFF.md                           # This file

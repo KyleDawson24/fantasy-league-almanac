@@ -206,7 +206,7 @@ def format_pitcher_line(player):
 
 def get_wasted_points(season_year, matchup_period, limit=5):
     """
-    Top N wasted-points performers for a matchup period (Phase 4).
+    Top N wasted-points performers for a matchup period.
 
     A player who was both ROSTERED_INACTIVE and FA in the same matchup
     period (e.g., dropped mid-week) gets their wasted_points summed
@@ -221,25 +221,33 @@ def get_wasted_points(season_year, matchup_period, limit=5):
     partial-active weeks (player who also had active days during the
     same matchup period).
 
+    Phase 7 G5: source switched from mart_wasted_points (the Phase 4
+    view computed from int_player_daily_stats with an inactive filter)
+    to fct_weekly_player_inactive_performance (the E1 fact). Values are
+    identical for matched (player, bucket) rows (spot-checked Heliot
+    Ramos Week 6 2026: FA=3.4, ROSTERED_INACTIVE=20.3 on both sources);
+    the rename is just calculated_points instead of wasted_points.
+    mart_wasted_points becomes a dead model in H.
+
     Team-label priority (in COALESCE order):
       1. Active team (from fct_weekly_player_active_performance) — captures the
          FA-then-rostered case ("they have since been picked up")
-      2. Bench team (from mart_wasted_points ROSTERED_INACTIVE row)
+      2. Bench team (from fct_weekly_player_inactive_performance ROSTERED_INACTIVE row)
       3. 'Free Agent' fallback when neither active nor bench association
     """
     return query_snowflake("""
         WITH wasted_combined AS (
             SELECT
                 player_id,
-                MAX(display_name) AS display_name,
+                MAX(player_name) AS display_name,
                 MAX(CASE WHEN wasted_bucket = 'FA'
-                         THEN wasted_points END) AS fa_wasted_pts,
+                         THEN calculated_points END) AS fa_wasted_pts,
                 MAX(CASE WHEN wasted_bucket = 'ROSTERED_INACTIVE'
-                         THEN wasted_points END) AS bench_wasted_pts,
-                SUM(wasted_points) AS wasted_points_total,
+                         THEN calculated_points END) AS bench_wasted_pts,
+                SUM(calculated_points) AS wasted_points_total,
                 MAX(CASE WHEN wasted_bucket = 'ROSTERED_INACTIVE'
                          THEN team_name END) AS bench_team_name
-            FROM mart_wasted_points
+            FROM fct_weekly_player_inactive_performance
             WHERE season_year = %s AND matchup_period = %s
             GROUP BY player_id
         ),
@@ -249,9 +257,15 @@ def get_wasted_points(season_year, matchup_period, limit=5):
             -- trades by picking the latest snapshot. eligible_slots is
             -- VARIANT-typed; comes back as a JSON string the formatter
             -- parses with json.loads().
-            SELECT player_id, pro_team, position, eligible_slots
+            --
+            -- Phase 7 G5: display_name pulled from here too. mart_wasted_
+            -- points used to expose display_name (nickname-resolved via
+            -- stg_box_scores's join); fct_weekly_player_inactive_performance
+            -- doesn't carry display_name (no scores-fact join in E1). Lift
+            -- it through this CTE which already touches stg_box_scores.
+            SELECT player_id, display_name, pro_team, position, eligible_slots
             FROM (
-                SELECT player_id, pro_team, position, eligible_slots,
+                SELECT player_id, display_name, pro_team, position, eligible_slots,
                        ROW_NUMBER() OVER (
                            PARTITION BY player_id
                            ORDER BY scoring_period DESC
@@ -269,7 +283,13 @@ def get_wasted_points(season_year, matchup_period, limit=5):
             WHERE season_year = %s AND matchup_period = %s
         )
         SELECT
-            w.display_name,
+            -- Phase 7 G5: display_name source switched from wasted_combined
+            -- (which used to pull from mart_wasted_points) to player_meta
+            -- (which pulls from stg_box_scores via nickname-resolved
+            -- display_name). Fallback to wasted_combined's player_name
+            -- handles the rare case where a player has stats but no
+            -- box_scores row (shouldn't happen in practice).
+            COALESCE(m.display_name, w.display_name) AS display_name,
             m.pro_team,
             m.position,
             m.eligible_slots,

@@ -141,7 +141,14 @@ with active as (
         sum(total_stat_pts)          as total_stat_pts
 
     from {{ ref('int_player_weekly_performance') }}
-    where lineup_slot not in ('BE', 'IL', 'FA')
+    -- Phase 7 D3: filter switched from the slot-enumeration form to the
+    -- seed-aligned performance_status flag (D1 added it). team_id IS NOT
+    -- NULL is implied by performance_status = 'active' in current data
+    -- (every active slot has a team_id; FAs are inactive by definition)
+    -- but pinned explicitly as a defensive guardrail and to match the
+    -- brief's locked spec for the active fact.
+    where performance_status = 'active'
+      and team_id is not null
     group by 1, 2, 3, 4, 5, 6, 7, 8
 ),
 

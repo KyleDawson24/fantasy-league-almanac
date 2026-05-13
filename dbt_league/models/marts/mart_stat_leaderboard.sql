@@ -20,7 +20,7 @@
 -- top-10 saturates at one value (e.g., the SV/W zero-floor pattern).
 --
 -- Implementation uses Snowflake UNPIVOT to fold wide columns from
--- fct_weekly_team_performance and fct_weekly_player_performance back into
+-- fct_weekly_team_active_performance and fct_weekly_player_active_performance back into
 -- (stat_name, stat_value) long format, then ranks uniformly. UNPIVOT is
 -- Snowflake-specific; if the project ever moves to a different warehouse
 -- (e.g. DuckDB for a local-CLI build), this can be rewritten as an explicit
@@ -90,7 +90,7 @@ team_source as (
         t.sv - t.blsv                as sv_blsv,
 
         -- Existing rate stats from the fact, surfaced into the leaderboard.
-        -- ERA / WHIP / K/9 / K/BB live on fct_weekly_team_performance via
+        -- ERA / WHIP / K/9 / K/BB live on fct_weekly_team_active_performance via
         -- the rate-stat macros; the mart just needed to pull and unpivot.
         t.era, t.whip, t.k_per_9, t.k_per_bb,
 
@@ -112,7 +112,7 @@ team_source as (
 
         t.platform_points, t.platform_hitting_pts, t.platform_pitching_pts,
         t.calculated_points, t.calculated_hitting_pts, t.calculated_pitching_pts
-    from {{ ref('fct_weekly_team_performance') }} t
+    from {{ ref('fct_weekly_team_active_performance') }} t
     inner join {{ ref('matchup_schedule') }} s
         on t.season_year = s.season_year
         and t.matchup_period = s.matchup_period

@@ -240,8 +240,13 @@ models:
       - name: calculated_points
         description: 'Sum of all *_pts columns. What this player''s full stat line scores under current rules. For the current season this should closely match total_points; for historical seasons it normalizes to a common scale.'
 
-  - name: fct_weekly_team_performance
+  - name: fct_weekly_team_active_performance
     description: >
+      Phase 7 E2: renamed from fct_weekly_team_performance to make the
+      active/inactive symmetry explicit. A thin compatibility view at the
+      old name (see fct_weekly_team_performance below) is kept temporarily
+      so Python consumers don't break between E2 and G's rewire.
+
       Wide-format team-weekly convergence fact. Phase 3.1 absorbed the
       responsibilities of the deleted fct_weekly_team_scores (counting
       stats, rate stats, scoring totals, opponent context, W/L,
@@ -698,3 +703,15 @@ models:
         description: 'Hitting subtotal of calculated_points.'
       - name: calculated_pitching_pts
         description: 'Pitching subtotal of calculated_points.'
+
+  - name: fct_weekly_team_performance
+    description: >
+      Phase 7 E2 transitional compatibility view. Identical to
+      fct_weekly_team_active_performance; exists so Python consumers
+      (generate_summary.py, records.py, league_notes.py) continue to
+      resolve their existing FROM clauses against the old name without
+      per-commit churn. Sub-chunk G updates the consumers to query the
+      canonical model directly; sub-chunk H drops this view.
+
+      Do NOT add new consumers against this name -- they would also need
+      to be deleted in H.

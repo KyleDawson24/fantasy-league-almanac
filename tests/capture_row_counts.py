@@ -29,20 +29,17 @@ from db import query_snowflake  # noqa: E402
 FIXTURE = REPO / "tests" / "fixtures" / "mart_row_counts.json"
 
 # All current intermediate + mart models. Update as the rearchitect adds/drops.
+# Phase 7 H dropped: int_team_daily_scores, int_player_daily_scores,
+# int_player_daily_stats, fct_weekly_player_scores, mart_wasted_points,
+# and the transitional fct_weekly_team_performance compat view.
 MODELS = [
-    "int_player_daily",           # Phase 7 C: new wide-daily model (additive)
-    "int_player_daily_scores",
-    "int_player_daily_stats",
+    "int_player_daily",
     "int_player_weekly_performance",
-    "int_team_daily_scores",
-    "fct_weekly_player_active_performance",  # Phase 7 D2: renamed from fct_weekly_player_performance
-    "fct_weekly_player_inactive_performance",  # Phase 7 E1: new symmetric inactive fact
-    "fct_weekly_player_scores",
-    "fct_weekly_team_active_performance",  # Phase 7 E2: renamed from fct_weekly_team_performance
-    "fct_weekly_team_inactive_performance",  # Phase 7 E3: new symmetric inactive team fact
-    "fct_weekly_team_performance",  # Phase 7 E2 compat view (transitional; dropped in H)
+    "fct_weekly_player_active_performance",
+    "fct_weekly_player_inactive_performance",
+    "fct_weekly_team_active_performance",
+    "fct_weekly_team_inactive_performance",
     "mart_stat_leaderboard",
-    "mart_wasted_points",
 ]
 
 

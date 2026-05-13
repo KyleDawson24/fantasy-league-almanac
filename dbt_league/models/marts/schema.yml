@@ -1,36 +1,6 @@
 version: 2
 
 models:
-  - name: fct_weekly_player_scores
-    description: 'One row per player per team per matchup period. Splits points into hitting and pitching components. Two-way players get a single row with both contributions reflected. Nickname resolution via player_nicknames seed (still applied here for backwards compatibility; Phase 3.1 also propagates display_name from stg_box_scores).'
-    columns:
-      - name: season_year
-        description: 'ESPN season year.'
-      - name: matchup_period
-        description: 'ESPN matchup period number within the season.'
-      - name: team_name
-        description: 'ESPN fantasy team name.'
-      - name: team_id
-        description: 'ESPN stable numeric team identifier.'
-      - name: player_name
-        description: 'Player full name as returned by ESPN.'
-      - name: player_id
-        description: 'ESPN stable numeric player identifier.'
-      - name: position
-        description: 'Player MLB position. Passed through for reference.'
-      - name: hitting_points
-        description: 'Points earned from hitting lineup slots (all slots except SP/RP/P) during this matchup period.'
-      - name: pitching_points
-        description: 'Points earned from pitching lineup slots (SP/RP/P) during this matchup period.'
-      - name: total_points
-        description: 'Sum of hitting_points and pitching_points. For single-role players, equals whichever is nonzero. For two-way players, the combined total.'
-        tests:
-          - not_null
-      - name: days_active
-        description: 'Count of distinct scoring periods this player appeared in an active lineup slot.'
-      - name: display_name
-        description: 'COALESCE of player_nicknames.nickname and player_name. Used by the output script for contributor callouts.'
-
   - name: fct_weekly_player_active_performance
     description: >
       Wide-format player-weekly convergence fact for ACTIVE-slot performance
@@ -499,67 +469,6 @@ models:
       - name: calculated_points
         description: 'Team sum of player calculated_points. What the team''s full stat line scores under current rules. Use this for cross-season comparisons (e.g., what would 2025 teams have scored under 2026 rules?).'
 
-  - name: mart_wasted_points
-    description: >
-      Phase 4: "what did you leave on the table" — fantasy points produced
-      by players in inactive lineup slots (bench, IL) and by free agents
-      the league did not roster. Reads int_player_daily_stats with the
-      inverse slot filter (lineup_slot_category = 'inactive'), aggregates
-      to weekly grain, and buckets into FA vs ROSTERED_INACTIVE
-      (BE+IL collapsed). View materialization since the dataset is small
-      and bucket assignment is deterministic from inputs.
-      Grain: (season_year, matchup_period, player_id, wasted_bucket).
-    tests:
-      - dbt_utils.unique_combination_of_columns:
-          arguments:
-            combination_of_columns:
-              - season_year
-              - matchup_period
-              - player_id
-              - wasted_bucket
-    columns:
-      - name: season_year
-        description: 'ESPN season year.'
-        tests:
-          - not_null
-      - name: matchup_period
-        description: 'ESPN matchup period number.'
-        tests:
-          - not_null
-      - name: player_id
-        description: 'ESPN stable numeric player identifier.'
-        tests:
-          - not_null
-      - name: player_name
-        description: 'Player full name.'
-      - name: display_name
-        description: 'COALESCE(nickname, player_name). Used for output callouts.'
-      - name: wasted_bucket
-        description: >
-          Bucket: 'FA' for unrostered free-agent days; 'ROSTERED_INACTIVE'
-          for bench (BE) and injured-list (IL) days. BE and IL are
-          substantively equivalent for wasted-points analysis (both are
-          rostered but didn't contribute) and collapsed here.
-        tests:
-          - not_null
-          - accepted_values:
-              arguments:
-                values: ['FA', 'ROSTERED_INACTIVE']
-      - name: team_id
-        description: 'Team that rostered this player during the inactive days. NULL for FA bucket (no team owns them).'
-      - name: team_name
-        description: 'Fantasy team name. NULL for FA bucket.'
-      - name: owner_name
-        description: 'Owner display name. NULL for FA bucket.'
-      - name: wasted_points
-        description: 'Total fantasy points produced while in this bucket, under current-season scoring weights.'
-      - name: wasted_hitting_pts
-        description: 'Subset of wasted_points from hitting-category stats.'
-      - name: wasted_pitching_pts
-        description: 'Subset of wasted_points from pitching-category stats.'
-      - name: days_in_bucket
-        description: 'Count of distinct scoring_periods this player spent in this bucket within the matchup_period.'
-
   - name: mart_stat_leaderboard
     description: >
       Top-10 leaderboard across team and player grains, for both stat-level
@@ -723,18 +632,6 @@ models:
         description: 'Hitting subtotal of calculated_points.'
       - name: calculated_pitching_pts
         description: 'Pitching subtotal of calculated_points.'
-
-  - name: fct_weekly_team_performance
-    description: >
-      Phase 7 E2 transitional compatibility view. Identical to
-      fct_weekly_team_active_performance; exists so Python consumers
-      (generate_summary.py, records.py, league_notes.py) continue to
-      resolve their existing FROM clauses against the old name without
-      per-commit churn. Sub-chunk G updates the consumers to query the
-      canonical model directly; sub-chunk H drops this view.
-
-      Do NOT add new consumers against this name -- they would also need
-      to be deleted in H.
 
   - name: fct_weekly_team_inactive_performance
     description: >

@@ -160,7 +160,22 @@ weekly as (
         -- by simple SUM here -- magnitude semantics aggregate cleanly
         -- across days). Sub-chunk E's facts can now propagate this
         -- without re-deriving from int_player_daily directly.
-        sum(negative_points) as negative_points
+        sum(negative_points) as negative_points,
+
+        -- Phase 7 H: platform_points + slot-based hitting/pitching split
+        -- pulled through from int_player_daily so the active fact can
+        -- read them here instead of joining fct_weekly_player_scores.
+        -- This is the last piece of the legacy scores chain; with it in
+        -- place, fct_weekly_player_scores + int_player_daily_scores
+        -- become dead models and get dropped in H.
+        sum(platform_points)       as platform_points,
+        sum(platform_hitting_pts)  as platform_hitting_pts,
+        sum(platform_pitching_pts) as platform_pitching_pts,
+
+        -- display_name is stable per player_id (nickname-resolved at
+        -- stg_box_scores). MAX is just to satisfy the GROUP BY; same
+        -- value in every row of a (player_id) partition.
+        max(display_name) as display_name
 
     from daily
     -- Group by the 9 identifier columns + 2 derived flag columns.

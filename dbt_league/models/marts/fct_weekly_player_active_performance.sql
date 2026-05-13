@@ -147,7 +147,24 @@ with active as (
         -- is the per-day-summed sibling metric, available for ad-hoc
         -- analysis. NOT in the leaderboard UNPIVOT for v1.0 (not
         -- is_record_candidate in the seed); promotion is a v1.x call.
-        sum(negative_points) as negative_points
+        sum(negative_points) as negative_points,
+
+        -- Phase 7 H: platform scoring sourced from int_player_weekly_
+        -- performance instead of the legacy fct_weekly_player_scores
+        -- join. The int now carries SUM(platform_points) plus the
+        -- slot-based hitting/pitching split (computed from
+        -- int_player_daily); this fact just rolls those up across the
+        -- player's active slots in the matchup. With this in place,
+        -- fct_weekly_player_scores + int_player_daily_scores become
+        -- dead models (dropped in H).
+        sum(platform_points)       as platform_points,
+        sum(platform_hitting_pts)  as platform_hitting_pts,
+        sum(platform_pitching_pts) as platform_pitching_pts,
+
+        -- display_name flows through from int_player_daily (nickname-
+        -- resolved at stg_box_scores). MAX since it's stable per
+        -- player_id (same value across the player's active slots).
+        max(display_name)          as display_name
 
     from {{ ref('int_player_weekly_performance') }}
     -- Phase 7 D3: filter switched from the slot-enumeration form to the
@@ -159,19 +176,6 @@ with active as (
     where performance_status = 'active'
       and team_id is not null
     group by 1, 2, 3, 4, 5, 6, 7, 8
-),
-
-scores as (
-    select
-        season_year,
-        matchup_period,
-        team_id,
-        player_id,
-        display_name,
-        total_points,
-        hitting_points,
-        pitching_points
-    from {{ ref('fct_weekly_player_scores') }}
 )
 
 select
@@ -183,7 +187,7 @@ select
     a.owner_name,
     a.player_id,
     a.player_name,
-    coalesce(s.display_name, a.player_name) as display_name,
+    a.display_name,
 
     -- Hitting counting
     a.h, a.ab, a.b_bb, a.b_so, a.hbp, a.sf, a.hr, a.r, a.rbi,
@@ -234,18 +238,13 @@ select
     a.negative_points         as negative_points,
 
     -- Platform scoring (ESPN's pre-computed values, the official arbiter for W/L).
-    -- Renamed from total_points/hitting_points/pitching_points in Phase 3.2 to
-    -- explicitly distinguish from calculated_* (the rules-normalized derivation).
-    s.total_points      as platform_points,
-    s.hitting_points    as platform_hitting_pts,
-    s.pitching_points   as platform_pitching_pts
+    -- Phase 7 H: now sourced from int_player_weekly_performance via the active
+    -- CTE above (no more fct_weekly_player_scores join).
+    a.platform_points,
+    a.platform_hitting_pts,
+    a.platform_pitching_pts
 
 from active a
-left join scores s
-    on a.season_year = s.season_year
-    and a.matchup_period = s.matchup_period
-    and a.team_id = s.team_id
-    and a.player_id = s.player_id
 
 {% if is_incremental() %}
 where (a.season_year * 100 + a.matchup_period) >= (

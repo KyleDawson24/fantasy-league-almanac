@@ -34,7 +34,7 @@ Logan Gilbert: 29.6, Nathan Eovaldi: 25.6, Rico Garcia: 20.7
 [b]Best Matchup Total[/b]: Intentional Walk to the Bar (Dorian Zane) -- 354.9 pts, Week 3
 [b]Best Matchup Hitting[/b]: Big Smell City Smelly Boys (John Mcginley) -- 248.5 pts, Week 4
 [b]Best Matchup Pitching[/b]: Intentional Walk to the Bar (Dorian Zane) -- 195.5 pts, Week 3
-[b]Worst Matchup Total[/b]: Atomic Alpacas Assuming Position (Adrian Bishop) -- 126.9 pts, Week 5
+[b]Worst Matchup Total[/b]: Atomic Alpacas Assuming Position (Adrian Bishop) -- 127.0 pts, Week 5
 [b]Worst Matchup Hitting[/b]: Ghosts of Polo Grounds Past (Blake Landry) -- 86.4 pts, Week 6
 [b]Worst Matchup Pitching[/b]: Atomic Alpacas Assuming Position (Adrian Bishop) -- 31.8 pts, Week 5
 [b]Top Scorer[/b]: Jose Soriano (LAW, Kyle Dawson) -- 54.7 pts, Week 2
@@ -45,7 +45,7 @@ Logan Gilbert: 29.6, Nathan Eovaldi: 25.6, Rico Garcia: 20.7
 [b]Best Matchup Total[/b]: Island Daddys (Lance Barrett) -- 415.0 pts, 2025 Week 12
 [b]Best Matchup Hitting[/b]: Somerville Baseball Team (Daniel Berez) -- 273.1 pts, 2025 Week 23
 [b]Best Matchup Pitching[/b]: Island Daddys (Lance Barrett) -- 221.4 pts, 2025 Week 12
-[b]Worst Matchup Total[/b]: Atomic Alpacas Assuming Position (Adrian Bishop) -- 126.9 pts, 2026 Week 5
+[b]Worst Matchup Total[/b]: Atomic Alpacas Assuming Position (Adrian Bishop) -- 127.0 pts, 2026 Week 5
 [b]Worst Matchup Hitting[/b]: Leno's Manic Mandible (Avery Norwood) -- 60.5 pts, 2025 Week 3
 [b]Worst Matchup Pitching[/b]: The Hosston Hosstros (Silas Everett) -- 13.7 pts, 2025 Week 23
 [b]Top Scorer[/b]: Zack Wheeler (FNA, Lance Barrett) -- 66.7 pts, 2025 Week 15

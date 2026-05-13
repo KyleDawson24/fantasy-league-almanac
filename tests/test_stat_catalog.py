@@ -164,11 +164,14 @@ class TestAlwaysTracked:
 
 @pytest.mark.warehouse
 class TestRecordCandidates:
-    def test_size_matches_b1_expectation(self):
-        # Per B1's gap report: 57 record candidates (the regen script's
-        # totals line). Anchored here so future seed edits surface as
-        # explicit count changes.
-        assert len(get_record_candidates()) == 57
+    def test_size_matches_expectation(self):
+        # 56 = exactly the leaderboard UNPIVOT list (39 counting + 4 derived
+        # + 6 rate + 1 wasted + 6 score). Initial B1 derivation produced 57
+        # because the polarity rule promoted stat '30' (Hit for the Cycle,
+        # discovered via 15-pt scoring weight); F-prep override flipped it
+        # to is_record_candidate=false since no fact has a wide '30' column
+        # yet. v1.x candidate: promote cycles to a tracked stat.
+        assert len(get_record_candidates()) == 56
 
     def test_known_record_stats(self):
         rc = get_record_candidates()

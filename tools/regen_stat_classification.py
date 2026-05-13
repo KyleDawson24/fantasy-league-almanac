@@ -198,6 +198,21 @@ EXISTING_ROW_OVERRIDES = {
         'stat_name': 'K_PER_BB',
         'notes': 'Phase 7 B1: renamed from K/BB to match leaderboard column. Stg filter drops raw K/BB breakdown rows.',
     },
+    '30': {
+        # Stat 30 = Hit for the Cycle (15 pts/unit; 2 observed rows across
+        # 2 seasons in production data, both rare-but-believable cycle
+        # candidates -- same archaeological pattern as PG/SHO per HANDOFF
+        # §7). The polarity-driven derivation marks it is_record_candidate=
+        # true (since it has a positive scoring weight in stg_scoring_
+        # settings), but no fact has a wide '30' column for F's seed-driven
+        # UNPIVOT loop to reference. Excluding from is_record_candidate
+        # keeps F's loop matching the existing team UNPIVOT exactly.
+        # v1.x follow-up: promote cycles to a tracked stat -- add wide
+        # column on the daily/weekly/fact layers, fix the mislabeled 'CYC'
+        # row at stat_id 31 (148 non-zero rows over 2 seasons, no scoring
+        # weight, clearly some other ESPN daily-achievement flag).
+        'is_record_candidate': 'false',
+    },
 }
 
 

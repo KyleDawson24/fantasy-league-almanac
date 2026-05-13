@@ -29,7 +29,7 @@ GDP,26,hitting,,GIDP (Batter),GIDP,true,false,,false,true,negative,
 B_SO,27,hitting,,Strikeouts (Batter),K,true,false,,false,true,negative,
 PS,28,hitting,,,PS,true,false,,false,false,neutral,
 PPA,29,hitting,,,PPA,false,false,,false,false,neutral,
-30,30,unknown,,,30,false,false,,false,true,positive,Stat_name kept as numeric to match raw breakdown. Rarely observed (1 row across 2025-2026). Likely deprecated or reserved.
+30,30,unknown,,,30,false,false,,false,false,positive,Stat_name kept as numeric to match raw breakdown. Rarely observed (1 row across 2025-2026). Likely deprecated or reserved.
 CYC,31,hitting,,,CYC,true,false,,false,false,neutral,
 GP,32,pitching,,,GP,true,false,,false,false,neutral,
 GS,33,pitching,,,GS,true,false,,false,false,neutral,

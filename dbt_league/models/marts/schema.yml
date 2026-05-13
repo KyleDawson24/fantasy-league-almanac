@@ -584,12 +584,23 @@ models:
       broken by recency (newer season, then matchup) in both directions.
       View materialization (rankings retroactively mutable; incremental
       would be fragile).
-      Grain: (entity_grain, stat_name, record_scope, record_direction, rank), rank 1..5.
+      Phase 7 F: rewritten as a seed-driven Jinja UNPIVOT loop over four
+      source CTEs (team_active, team_inactive, player_active, player_inactive)
+      union-all'd into one combined CTE. New `performance_status` partition
+      column ('active' | 'inactive') segregates the rankings -- consumers
+      default-filter to active for v1.0; inactive rankings exist for ad-hoc
+      analysis. `wasted_bucket` carried as a column on inactive rows but
+      NOT in the partition (v1.0 doesn't surface inactive records; a v1.x
+      bucket-specific view can filter then re-rank).
+
+      Grain: (entity_grain, performance_status, stat_name, record_scope,
+      record_direction, rank), rank 1..10.
     tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns:
               - entity_grain
+              - performance_status
               - stat_name
               - record_scope
               - record_direction
@@ -602,6 +613,15 @@ models:
           - accepted_values:
               arguments:
                 values: ['team', 'player']
+      - name: performance_status
+        description: 'active or inactive. Phase 7 F: rankings are partitioned by this so active-slot records and bench/IL/FA-slot records don''t mingle. Consumers default-filter performance_status = ''active'' for v1.0.'
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['active', 'inactive']
+      - name: wasted_bucket
+        description: 'NULL for active rows; ''FA'' or ''ROSTERED_INACTIVE'' for inactive rows. Carried as a column on inactive rows for ad-hoc analysis. NOT part of the ranking partition in v1.0.'
       - name: stat_name
         description: 'Column name being ranked. Includes counting stats (H, AB, HR, K, etc.) and score columns (PLATFORM_POINTS, PLATFORM_HITTING_PTS, PLATFORM_PITCHING_PTS, CALCULATED_POINTS, CALCULATED_HITTING_PTS, CALCULATED_PITCHING_PTS). Phase 5: calculated_* added so the records output can rank under current-season weights; platform_* retained for cross-season comparison.'
         tests:

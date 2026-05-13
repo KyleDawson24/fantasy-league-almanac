@@ -99,6 +99,7 @@ def _fetch_rank1_records(scope):
         FROM mart_stat_leaderboard
         WHERE record_scope = %s
           AND rank = 1
+          AND performance_status = 'active'
     """, (scope,))
 
 
@@ -122,6 +123,7 @@ def get_record_top_n(stat_name, grain='team', direction='most',
           AND record_direction = %s
           AND stat_name = %s
           AND rank <= %s
+          AND performance_status = 'active'
         ORDER BY rank
     """, (grain, scope, direction, stat_name, limit))
 
@@ -135,6 +137,7 @@ def get_tracked_team_stats():
         WHERE entity_grain = 'team'
           AND record_scope = 'all_time'
           AND record_direction = 'most'
+          AND performance_status = 'active'
     """)
     return [r['stat_name'] for r in rows]
 
@@ -362,6 +365,7 @@ def get_records_set_this_week(season_year, matchup_period):
           AND record_scope = 'all_time'
           AND season_year = %s
           AND matchup_period = %s
+          AND performance_status = 'active'
     """, (season_year, matchup_period))
 
     out = []
@@ -382,6 +386,7 @@ def get_records_set_this_week(season_year, matchup_period):
               AND record_scope = 'all_time'
               AND record_direction = %s
               AND rank = 2
+              AND performance_status = 'active'
         """, (grain, stat, direction))
         prior = prior_rows[0] if prior_rows else None
 
@@ -815,6 +820,7 @@ def get_records_with_contributors(scope, top_n=5):
         FROM mart_stat_leaderboard
         WHERE record_scope = %s
           AND rank <= %s
+          AND performance_status = 'active'
         ORDER BY entity_grain, stat_name, record_direction, rank
     """, (scope, _MART_TOP_N_BUFFER))
 

@@ -1,7 +1,7 @@
 """
 Generate the weekly front-page summary from the mart tables.
 
-Reads fct_weekly_team_performance and fct_weekly_player_active_performance (the wide
+Reads fct_weekly_team_active_performance and fct_weekly_player_active_performance (the wide
 convergence facts shipped in Phase 3.1) to produce a BBCode-formatted
 summary for the ESPN league front page.
 """
@@ -32,7 +32,7 @@ def get_weekly_scores(season_year, matchup_period=None):
     if matchup_period is None:
         result = query_snowflake("""
             SELECT MAX(matchup_period) as mp
-            FROM fct_weekly_team_performance
+            FROM fct_weekly_team_active_performance
             WHERE season_year = %s
         """, (season_year,))
         matchup_period = result[0]['mp']
@@ -42,7 +42,7 @@ def get_weekly_scores(season_year, matchup_period=None):
                platform_points, platform_hitting_pts, platform_pitching_pts,
                owner_name, opponent_name,
                opponent_owner, opponent_points, result
-        FROM fct_weekly_team_performance
+        FROM fct_weekly_team_active_performance
         WHERE matchup_period = %s
         AND season_year = %s
         ORDER BY platform_points DESC
@@ -386,7 +386,7 @@ def format_wasted_points(wasted):
 # / find_new_records / count_value_occurrences) moved to output/records.py.
 # This section only does formatting now -- it consumes the leaderboard rows
 # the records module returns. The team-records pattern also migrated from a
-# direct fct_weekly_team_performance query to leaderboard rank-1 reads (the
+# direct fct_weekly_team_active_performance query to leaderboard rank-1 reads (the
 # "migrate team records to leaderboard" backlog item folded in here).
 
 
@@ -808,7 +808,7 @@ def generate_summary(matchup_period, scores, contributions, wasted_points,
 
 if __name__ == "__main__":
     active_season = query_snowflake(
-        "SELECT MAX(season_year) as sy FROM fct_weekly_team_performance"
+        "SELECT MAX(season_year) as sy FROM fct_weekly_team_active_performance"
     )[0]['sy']
 
     matchup_period, scores = get_weekly_scores(active_season)

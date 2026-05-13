@@ -9,7 +9,7 @@ No formatting or display decisions in this module — those stay with the
 consumers.
 
 Phase 6.2 extraction: previously this code lived split across the two
-consumer scripts. Team records used a direct fct_weekly_team_performance
+consumer scripts. Team records used a direct fct_weekly_team_active_performance
 query with Python max/min; player records used the leaderboard. New-record
 detection had its own leaderboard reads + filter logic. This module
 unifies all data access on mart_stat_leaderboard as the single source of
@@ -389,7 +389,7 @@ def league_history_count(grain, stat_name, value, op='='):
         raise ValueError(f"op must be one of {_VALID_HISTORY_OPS}, got {op!r}")
     if stat_name in _NON_FCT_COUNTABLE:
         return None
-    fct = ('fct_weekly_team_performance' if grain == 'team'
+    fct = ('fct_weekly_team_active_performance' if grain == 'team'
            else 'fct_weekly_player_active_performance')
     col_expr = _DERIVED_STAT_FCT_EXPR.get(stat_name, stat_name.lower())
     rows = query_snowflake(f"""

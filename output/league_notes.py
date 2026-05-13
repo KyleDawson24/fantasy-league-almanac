@@ -60,7 +60,7 @@ Built by build_ctx() and passed into every callout. Keys:
   ctx['scope_label']     str    "Week 5" or "Round 1" (already format_week_label-d)
   ctx['scores']          list   One row per team this week. Wide -- has every
                                 counting and pts column from
-                                fct_weekly_team_performance, plus team_abbrev,
+                                fct_weekly_team_active_performance, plus team_abbrev,
                                 team_name, owner_name, opponent_*, etc.
   ctx['players']         list   One row per active player this week (slot not in
                                 BE/IL/FA). Wide -- every counting and pts column
@@ -195,7 +195,7 @@ def build_ctx(season_year, matchup_period, schedule_lookup):
     call per grain (team-week + active-player-week wide rows)."""
     scores = records.query_snowflake("""
         SELECT *
-        FROM fct_weekly_team_performance
+        FROM fct_weekly_team_active_performance
         WHERE season_year = %s AND matchup_period = %s
     """, (season_year, matchup_period))
 

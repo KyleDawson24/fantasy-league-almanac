@@ -3,9 +3,12 @@
 Frozen artifacts kept for posterity — historical reference only, not consumed
 by any active code path.
 
-Naming convention: `phase_<X.Y>_<topic>__<descriptor>.<ext>`. The phase prefix
-ties each file back to the work that produced it; cross-reference the
-matching `Phase X.Y Documentation.md` in the repo root for context.
+Naming convention for individual artifacts: `phase_<X.Y>_<topic>__<descriptor>.<ext>`.
+The phase prefix ties each file back to the work that produced it;
+cross-reference the matching `Phase X.Y Documentation.md` in the repo root
+for context. Working-doc bundles (e.g., `phase_7_working/`) live in their
+own subdirectories and preserve the doc-style filenames they had at repo
+root.
 
 Files here are safe to delete if no longer interesting; they are NOT
 maintained as the codebase evolves.
@@ -19,3 +22,11 @@ maintained as the codebase evolves.
   one game when ESPN returns multiple splits for the same period). Captured
   while diagnosing why Hosstros MP1 2026 totals were off by ~3.6 pts. See
   Phase 3.3 Documentation for the full investigation.
+
+- **`phase_7_working/`** — internal scaffolding from the Phase 7 rearchitect:
+  cross-session continuation briefs, the architecture review that kicked
+  off the phase, and the Phase 7 kickoff handoff. These were coordination
+  artifacts between Claude Code sessions, not canonical project record —
+  the canonical Phase 7 story lives in `Phase 7 Documentation.md` at repo
+  root. Useful for "how did we get here" archaeology if anyone needs to
+  retrace a decision.

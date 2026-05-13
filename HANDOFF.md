@@ -68,6 +68,11 @@ espn-league-manager/
 │   ├── diag_sheet_filter.py             # "Why isn't stat X in the sheet?" diagnostic
 │   ├── phase_6.3.3_chunk{1,2}_build.log # dbt build artifacts
 │   ├── *.json                           # Older debug payloads
+│   ├── phase_7_working/                 # Phase 7 cross-session scaffolding —
+│   │                                    #   architecture review, continuation
+│   │                                    #   briefs, kickoff handoff (not the
+│   │                                    #   canonical record; see Phase 7
+│   │                                    #   Documentation.md at repo root)
 │   └── research/                        # gitignored local-only research scripts
 │                                        #   (test_espn.py, test_kona_returns.py,
 │                                        #   etc. — relocated from repo root in

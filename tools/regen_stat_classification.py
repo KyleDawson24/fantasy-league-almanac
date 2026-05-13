@@ -251,12 +251,20 @@ def _existing_row(seed_row, polarity_map, always_tracked):
     polarity = polarity_map.get(lb_name, 'neutral')
     track = should_track_record('team', lb_name, 'most', polarity_map, always_tracked)
 
+    # Read espn_stat_label first (current column name post-B1); fall back to
+    # stat_description (pre-B1 name) for forward-compat when running against
+    # an unmigrated CSV. The B1 rename + subsequent regen runs accidentally
+    # nuked espn_stat_label values for several commits because this lookup
+    # was only checking stat_description; the post-F cleanup commit restored
+    # the values via a one-shot script and fixed the read here.
+    espn_label = seed_row.get('espn_stat_label') or seed_row.get('stat_description', '')
+
     out = {
         'stat_name':           name,
         'espn_stat_id':        seed_row.get('espn_stat_id', ''),
         'stat_category':       seed_row.get('stat_category', ''),
-        'espn_stat_label':     seed_row.get('stat_description', ''),
-        'display_name':        formatters.STAT_DISPLAY.get(lb_name, seed_row.get('stat_description', '')),
+        'espn_stat_label':     espn_label,
+        'display_name':        formatters.STAT_DISPLAY.get(lb_name, espn_label),
         'abbrev':              formatters.STAT_ABBREV.get(lb_name, name),
         'is_counting':         _bool(seed_row.get('is_counting', 'false')),
         'is_derived':          'false',

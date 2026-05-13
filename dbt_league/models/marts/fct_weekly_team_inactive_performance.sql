@@ -34,13 +34,14 @@
 --   - negative_points: deferred (matches the player-inactive fact's
 --     deferral pending int_player_weekly_performance source switch).
 --
--- Materialization: incremental. Re-extracting a matchup_period replaces
--- both ROSTERED_INACTIVE and FA rows for that period.
+-- Materialization: table (not incremental). The unique_key includes
+-- team_id which is NULL for FA rows; dbt's incremental MERGE treats
+-- NULL != NULL, so re-running on the latest matchup_period would
+-- INSERT a second FA row instead of UPDATEing the existing one. At
+-- 500-ish rows the full-rebuild cost is trivial.
 
 {{ config(
-    materialized='incremental',
-    unique_key=['season_year', 'matchup_period', 'team_id', 'wasted_bucket'],
-    on_schema_change='fail'
+    materialized='table'
 ) }}
 
 with player_inactive as (
@@ -163,9 +164,3 @@ team_rollup as (
 )
 
 select * from team_rollup
-
-{% if is_incremental() %}
-where (season_year * 100 + matchup_period) >= (
-    select coalesce(max(season_year * 100 + matchup_period), 0) from {{ this }}
-)
-{% endif %}

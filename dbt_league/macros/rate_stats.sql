@@ -48,3 +48,17 @@
 {% macro k_per_bb(k='k', p_bb='p_bb') %}
     {{ k }} * 1.0 / nullif({{ p_bb }}, 0)
 {% endmacro %}
+
+-- Phase 7 E4: HR/9 and BB/9 migrated from inline-at-mart to fct columns.
+-- F's seed-driven Jinja-loop UNPIVOT needs every rate column to live on
+-- the fct so it can be selected by name in the loop. Algebraically
+-- identical to the previous mart-inline form: p_hr * 27 / outs is the
+-- same value as p_hr * 9 / (outs / 3); macros use the latter to match
+-- the era/whip/k_per_9 convention. NULL when outs=0 via NULLIF.
+{% macro hr_per_9(p_hr='p_hr', outs='outs') %}
+    {{ p_hr }} * 9.0 / nullif({{ outs }} / 3.0, 0)
+{% endmacro %}
+
+{% macro bb_per_9(p_bb='p_bb', outs='outs') %}
+    {{ p_bb }} * 9.0 / nullif({{ outs }} / 3.0, 0)
+{% endmacro %}

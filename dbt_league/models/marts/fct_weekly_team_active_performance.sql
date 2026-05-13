@@ -300,7 +300,13 @@ with_rates as (
         {{ era() }}           as era,
         {{ whip() }}          as whip,
         {{ k_per_9() }}       as k_per_9,
-        {{ k_per_bb() }}      as k_per_bb
+        {{ k_per_bb() }}      as k_per_bb,
+        -- Phase 7 E4: promoted from mart-inline to fct columns. The
+        -- mart's seed-driven Jinja-loop UNPIVOT in F needs every rate
+        -- column addressable by name on the source CTE; matches the
+        -- ERA/WHIP/K_PER_9/K_PER_BB pattern.
+        {{ hr_per_9() }}      as hr_per_9,
+        {{ bb_per_9() }}      as bb_per_9
     from with_opponents wo
 )
 

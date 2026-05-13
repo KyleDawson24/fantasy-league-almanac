@@ -90,17 +90,13 @@ team_source as (
         t.sv - t.blsv                as sv_blsv,
 
         -- Existing rate stats from the fact, surfaced into the leaderboard.
-        -- ERA / WHIP / K/9 / K/BB live on fct_weekly_team_active_performance via
-        -- the rate-stat macros; the mart just needed to pull and unpivot.
-        t.era, t.whip, t.k_per_9, t.k_per_bb,
-
-        -- HR/9 and BB/9 don't have macros yet; computed inline here. 27.0
-        -- factor = 9 innings * 3 outs/inning. Outs guard prevents div/0
-        -- on weeks where a team had no innings pitched -- NULL is dropped
-        -- by Snowflake UNPIVOT's default EXCLUDE NULLS, so those rows
-        -- naturally don't appear in the leaderboard for these stats.
-        case when t.outs > 0 then t.p_hr * 27.0 / t.outs else null end as hr_per_9,
-        case when t.outs > 0 then t.p_bb * 27.0 / t.outs else null end as bb_per_9,
+        -- All rate stats now live on fct_weekly_team_active_performance via
+        -- the rate-stat macros. Phase 7 E4 promoted HR_PER_9/BB_PER_9 from
+        -- the mart-inline CASE-WHEN form they used to live in; algebraically
+        -- identical (p_hr * 27 / outs == p_hr * 9 / (outs / 3)). NULL on
+        -- outs=0 via the macros' NULLIF; UNPIVOT's default EXCLUDE NULLS
+        -- drops those leaderboard rows.
+        t.era, t.whip, t.k_per_9, t.k_per_bb, t.hr_per_9, t.bb_per_9,
 
         -- Wasted points (team grain only -- no wasted_points column on
         -- the player source CTE). LEFT JOIN: a team-week with zero

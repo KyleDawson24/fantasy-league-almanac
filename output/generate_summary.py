@@ -258,19 +258,22 @@ def get_wasted_points(season_year, matchup_period, limit=5):
             -- VARIANT-typed; comes back as a JSON string the formatter
             -- parses with json.loads().
             --
-            -- Phase 7 G5: display_name pulled from here too. mart_wasted_
-            -- points used to expose display_name (nickname-resolved via
-            -- stg_box_scores's join); fct_weekly_player_inactive_performance
-            -- doesn't carry display_name (no scores-fact join in E1). Lift
-            -- it through this CTE which already touches stg_box_scores.
-            SELECT player_id, display_name, pro_team, position, eligible_slots
+            -- Sourced from int_player_daily (one layer up from staging) so
+            -- this consumer doesn't reach directly into stg_box_scores.
+            -- int_player_daily carries the same per-day metadata at the
+            -- same grain. DISTINCT in the outer projection because
+            -- int_player_daily's grain includes lineup_slot; a player in
+            -- multiple slots on the same scoring_period produces duplicate
+            -- rows here, but the player-level columns (pro_team, position,
+            -- eligible_slots, display_name) are identical across them.
+            SELECT DISTINCT player_id, display_name, pro_team, position, eligible_slots
             FROM (
                 SELECT player_id, display_name, pro_team, position, eligible_slots,
                        ROW_NUMBER() OVER (
                            PARTITION BY player_id
                            ORDER BY scoring_period DESC
                        ) AS rn
-                FROM stg_box_scores
+                FROM int_player_daily
                 WHERE season_year = %s AND matchup_period = %s
             )
             WHERE rn = 1

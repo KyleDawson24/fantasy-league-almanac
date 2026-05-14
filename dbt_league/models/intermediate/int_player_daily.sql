@@ -219,6 +219,7 @@ final as (
         coalesce(b.display_name, w.player_name) as display_name,
         b.position,
         b.pro_team,
+        b.eligible_slots,
         w.lineup_slot,
         w.lineup_slot_category,
         case when w.lineup_slot_category != 'inactive' then true else false end as is_active_slot,

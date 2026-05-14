@@ -80,6 +80,19 @@ a single afternoon.
 
 ### New analytics surfaces (data already exists)
 
+- **Player-entity foundation: `dim_player` + `fct_player_career`
+  (v1.x flagship).** Build the player-as-entity layer the project
+  hasn't had yet. `dim_player` (slowly-changing player dimension:
+  current `pro_team` / `position` / `eligible_slots` / bio data) absorbs
+  the per-day display metadata that consumer scripts currently look up
+  ad-hoc. `fct_player_career` (career-aggregate facts: total fantasy
+  teams played for, career stats rollups, transaction history derivable
+  from box scores) unlocks "career milestone" callouts in the recap.
+  Most data is already in the pipeline; bio/draft additions to the
+  extract layer are a follow-on (see "Draft position integration"
+  in Next). Framed as a v1.x "proof of progress" — even partial
+  scaffolding ships value (consumer simplification, lineage clarity)
+  and lays foundation for full player-profile analytics post-v1.0.
 - **League-level performance benchmarking.** Records today are per-team;
   ungrouping to track league-wide weekly aggregates ("this week we
   averaged 250 points, 70th percentile in league history") unlocks
@@ -87,8 +100,9 @@ a single afternoon.
   existing facts.
 - **`fct_team_career_stats` mart.** Career-aggregate equivalent of
   `fct_weekly_team_active_performance` — "who has the most points scored
-  for their team in league history," etc. Especially fun for keeper-league
-  framing. Data's already there; this is a new aggregation layer.
+  for their team in league history," etc. Team-side counterpart to
+  `fct_player_career` above. Especially fun for keeper-league framing.
+  Data's already there; this is a new aggregation layer.
 
 ## Next (v2.0 — substantive features)
 

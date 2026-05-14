@@ -132,8 +132,8 @@ models:
       - name: negative_points
         description: >
           Magnitude (unsigned positive) of net-negative platform_points contributed across the matchup_period.
-          Captures lineup-decision waste: a player scoring -7 on a day costs the fantasy team 7 points vs. the alternative of leaving the lineup slot empty (an empty slot scores 0, beating any negative).
-          Per-day platform-level metric -- each negative scoring period counts separately, even if the week-level total is net positive.
+          Per-day platform-level rollup -- each negative scoring period counts separately, so a player with one bad day plus several positive ones still carries the bad day's magnitude here even if the week-level total is net positive.
+          Available as a data-layer artifact for gross-negative analysis; the recap surface uses a different (week-net) calculation.
 
       # Per-stat point contributions
       - name: h_pts
@@ -355,9 +355,7 @@ models:
           May not sum exactly to platform_points for teams with slot misuse.
           Used for pitching-leaderboard superlatives.
       - name: negative_points
-        description: >
-          Team rollup of player negative_points across the matchup_period.
-          Total magnitude of lineup-decision waste -- points the team could have captured by sitting these players instead of starting them.
+        description: 'Team rollup of player negative_points across the matchup_period.'
       - name: active_player_count
         description: 'Distinct count of players in active lineup slots for this team this matchup.'
       - name: opponent_id

@@ -132,6 +132,12 @@ models:
         description: 'true when lineup_slot_category != "inactive". Convenience flag for downstream active/inactive fact splits.'
       - name: display_name
         description: 'Nickname-resolved player name (COALESCE(nickname, player_name)).'
+      - name: position
+        description: 'Player MLB position as reported by ESPN.'
+      - name: pro_team
+        description: 'Player MLB team abbreviation as reported by ESPN.'
+      - name: eligible_slots
+        description: 'VARIANT array of fantasy lineup slots the player is eligible to fill. Carried from stg_box_scores so per-day consumer queries can pull this without reaching into staging.'
       - name: platform_points
         description: 'ESPN platform total for this player on this scoring_period. From stg_box_scores; reflects commissioner adjustments and ESPN W/L authority.'
       - name: total_stat_pts

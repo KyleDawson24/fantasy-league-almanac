@@ -226,15 +226,14 @@ final as (
         b.games_played,
         b.points as platform_points,
 
-        -- Phase 7 H: per-day hitting/pitching split of platform_points,
-        -- slot-based (mirrors today's int_player_daily_scores player_type
-        -- derivation). Lets the active fact compute weekly platform_
-        -- hitting_pts / platform_pitching_pts directly from this layer
-        -- instead of joining fct_weekly_player_scores -- enables dropping
-        -- the legacy scores chain (fct_weekly_player_scores +
-        -- int_player_daily_scores) in H.
-        case when w.lineup_slot in ('SP', 'RP') then 0 else b.points end as platform_hitting_pts,
-        case when w.lineup_slot in ('SP', 'RP') then b.points else 0 end as platform_pitching_pts,
+        -- Slot-based split of platform_points so the active fact can
+        -- compute weekly platform_hitting_pts / platform_pitching_pts
+        -- directly from this layer. Pitcher slots: SP, RP, and generic P.
+        -- Slot list MUST match stg_box_scores's lineup_slot_category
+        -- derivation -- divergence here silently misclassifies pitcher
+        -- platform points as hitting points.
+        case when w.lineup_slot in ('SP', 'RP', 'P') then 0 else b.points end as platform_hitting_pts,
+        case when w.lineup_slot in ('SP', 'RP', 'P') then b.points else 0 end as platform_pitching_pts,
 
         -- Wide stats (passthrough)
         w.h, w.ab, w.b_bb, w.b_so, w.hbp, w.sf, w.hr, w.r, w.rbi,

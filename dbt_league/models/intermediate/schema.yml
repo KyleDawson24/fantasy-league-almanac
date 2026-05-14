@@ -3,16 +3,12 @@ version: 2
 models:
   - name: int_player_weekly_performance
     description: >
-      Wide pivot of counting stats AND per-stat point contributions from
-      int_player_daily_stats (Phase 3.2: stat_points = stat_value *
-      points_per_unit was added at the daily layer; the weekly pivot now
-      surfaces both stat_value (h, ab, hr, ...) and stat_points (h_pts,
-      ab_pts, hr_pts, ...) for each counting stat). lineup_slot preserved
-      as a grain dimension so the fact layer can filter by slot and
-      aggregate slot dimension away post-filter. A player who occupied
-      multiple slots within a matchup_period produces multiple rows here.
-      Rates are computed at the fact layer because meaningful rates require
-      the slot filter applied first.
+      Wide pivot of counting stats AND per-stat point contributions from int_player_daily.
+      Surfaces both stat_value (h, ab, hr, ...) and stat_points (h_pts, ab_pts, hr_pts, ...) for each counting stat.
+      Also rolls up per-day platform totals and negative_points to the matchup_period grain.
+      lineup_slot preserved as a grain dimension so the fact layer can filter by slot and aggregate slot dimension away post-filter.
+      A player who occupied multiple slots within a matchup_period produces multiple rows here.
+      Rates are computed at the fact layer because meaningful rates require the slot filter applied first.
       Grain: (season_year, matchup_period, team_id, player_id, lineup_slot).
     columns:
       - name: season_year
@@ -24,13 +20,13 @@ models:
       - name: team_name
         description: 'ESPN fantasy team name.'
       - name: team_abbrev
-        description: 'Phase 5: owner-set short code for the fantasy team.'
+        description: 'Owner-set short code for the fantasy team.'
       - name: owner_name
         description: 'Team owner display name.'
       - name: player_id
         description: 'ESPN stable numeric player identifier.'
       - name: player_name
-        description: 'Player full name.'
+        description: 'Player full name as reported by ESPN.'
       - name: lineup_slot
         description: 'Fantasy lineup slot. Preserved as grain dimension; downstream facts filter and collapse.'
       - name: h
@@ -98,13 +94,9 @@ models:
 
   - name: int_player_daily
     description: >
-      Phase 7 C: wide daily row per (season, scoring_period, team, player,
-      lineup_slot) consolidating today's int_player_daily_stats (long form,
-      stat-level points) + int_player_daily_scores (per-player ESPN platform
-      total). Additive new model -- old models stay in place to feed
-      int_player_weekly_performance until sub-chunk D rewires the weekly
-      model. View materialization; the table cost lives at the weekly
-      layer one level up.
+      Wide daily row per (season, scoring_period, team, player, lineup_slot).
+      Combines per-stat point contributions (one column per scored stat) with per-player ESPN platform totals.
+      View materialization; the table cost lives at the weekly layer one level up.
     tests:
       - dbt_utils.unique_combination_of_columns:
           combination_of_columns:
@@ -119,13 +111,13 @@ models:
         tests:
           - not_null
       - name: scoring_period
-        description: 'Daily ESPN scoring period number. Scoring period 1 = opening day.'
+        description: 'Daily ESPN scoring period number. Starts at 1 on league opening day.'
         tests:
           - not_null
       - name: matchup_period
         description: 'The weekly matchup period this scoring period belongs to. Functionally determined by (season_year, scoring_period) via matchup_schedule.'
       - name: team_id
-        description: 'ESPN stable numeric team identifier. NULL for FAs.'
+        description: 'ESPN stable numeric team identifier. NULL for free agents.'
       - name: player_id
         description: 'ESPN stable numeric player identifier.'
         tests:
@@ -141,7 +133,7 @@ models:
       - name: display_name
         description: 'Nickname-resolved player name (COALESCE(nickname, player_name)).'
       - name: platform_points
-        description: 'ESPN platform total for this player on this scoring_period. From stg_box_scores; reflects commissioner adjustments + ESPN W/L authority.'
+        description: 'ESPN platform total for this player on this scoring_period. From stg_box_scores; reflects commissioner adjustments and ESPN W/L authority.'
       - name: total_stat_pts
         description: 'Sum of stat_points across ALL scored stats (catch-all rollup; robust to future seed additions). Equivalent to calculated_points at this daily grain.'
       - name: total_hitting_stat_pts
@@ -149,4 +141,7 @@ models:
       - name: total_pitching_stat_pts
         description: 'Sum of stat_points for pitching-category stats.'
       - name: negative_points
-        description: 'Magnitude (unsigned positive) of net-negative platform_points on this day: GREATEST(0, -platform_points). Per-day platform-level metric. Weekly rollup is SUM(negative_points). For a player with one -5 day and net-positive week: daily row has 5, weekly rollup = 5. Replaces the consumer-side doubly_wasted_pts computation (which was week-level on active_platform_points; this is finer-grained because it attributes each negative day separately).'
+        description: >
+          Magnitude (unsigned positive) of net-negative platform_points on this day: GREATEST(0, -platform_points).
+          Per-day platform-level metric -- each negative day counts separately, even if the week-level platform total is net positive.
+          Weekly rollup is SUM(negative_points). For a player with one -5 day and net-positive week: daily row has 5, weekly rollup = 5.

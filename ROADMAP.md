@@ -173,6 +173,19 @@ Ideas worth exploring if the project evolves in their direction.
 - **Slot productivity mart.** Per-slot points-per-week tracking ("how
   much productivity comes out of the SP1 slot, league-wide"). Interesting
   league-color content; unclear consumer.
+- **Inactive-fact column symmetry decision.** The
+  `fct_weekly_*_inactive_performance` models currently surface only
+  `calculated_*` totals plus grain dims, not the full counting and
+  per-stat `*_pts` columns their active counterparts expose. Two paths:
+  (a) full mirror — extend inactive facts to match the active schema and
+  document accordingly; (b) intentional asymmetry — keep inactive terse,
+  formally document the omissions. Worth deciding before adding a real
+  consumer that needs inactive-grain stat detail.
+- **Bucket-specific inactive leaderboard view.** `wasted_bucket` is
+  carried as a column on inactive `mart_stat_leaderboard` rows but
+  isn't part of the ranking partition. A bucket-specific downstream view
+  could filter then re-rank to power "top FA-pool calculated_points by
+  week"-style records. Not built today because no consumer needs it yet.
 - **ESPN `pointsAdjustment` field investigation.** Would split
   `platform_calculated_delta` cleanly into commissioner adjustments vs
   derivation drift.

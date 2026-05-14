@@ -3,11 +3,10 @@ version: 2
 models:
   - name: stg_box_scores
     description: >
-      One row per player per scoring period. Includes rostered players
-      (with team_id and owner_name) and Phase 4 free agents (with NULL
-      team fields, lineup_slot='FA'). A player_id is unique within a
-      given (season_year, scoring_period) — a player cannot simultaneously
-      be on two fantasy rosters or be both rostered and FA.
+      One row per player per scoring period.
+      Includes rostered players (with team_id and owner_name)
+      and free agents (NULL team fields, lineup_slot='FA').
+      A player_id is unique within a given (season_year, scoring_period) -- a player cannot simultaneously be on two fantasy rosters or be both rostered and FA.
     tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
@@ -17,88 +16,78 @@ models:
               - scoring_period
     columns:
       - name: season_year
-        description: 'Year of MLB season.'
+        description: 'Year of MLB season opener.'
         tests:
           - not_null
       - name: scoring_period
-        description: 'Daily ESPN scoring period number.'
+        description: 'Daily ESPN scoring period number. Starts at 1 on league opening day.'
         tests:
           - not_null
       - name: matchup_period
         description: 'The weekly matchup period this scoring period belongs to.'
       - name: team_name
-        description: 'ESPN fantasy team name. NULL for free agent rows (Phase 4).'
+        description: 'ESPN fantasy team name. NULL for free agent rows.'
       - name: team_id
-        description: 'ESPN stable numeric team identifier. NULL for free agent rows (Phase 4).'
+        description: 'ESPN stable numeric team identifier. NULL for free agent rows.'
       - name: team_abbrev
-        description: 'Owner-set short code for the fantasy team (e.g., "SMEL" for Big Smell City Smelly Boys). Phase 5 addition. NULL for free agent rows. Used by output formatters for compact team labels in callouts.'
+        description: 'Owner-set short code for the fantasy team. NULL for free agent rows. Used by output formatters for compact team labels in callouts.'
       - name: owner_name
-        description: 'Team owner display name, extracted from ESPN API. For co-managed teams, a slash-delimited list of first names. NULL for free agent rows (Phase 4).'
+        description: 'Team owner display name, extracted from the ESPN API. For co-managed teams, a slash-delimited list of first names. NULL for free agent rows.'
       - name: home_away
-        description: 'Whether this player was on the home or away side of the matchup. NULL for free agent rows (Phase 4) — FAs are not part of any matchup.'
+        description: 'Whether this player was on the home or away side of the fantasy matchup. NULL for free agent rows (FAs are not part of any matchup).'
       - name: player_name
-        description: 'Player full name as returned by ESPN.'
+        description: 'Player full name as reported by ESPN.'
       - name: player_id
         description: 'ESPN stable numeric player identifier.'
         tests:
           - not_null
       - name: position
-        description: 'Player MLB position as reported by ESPN (e.g. SP, RP, 1B, DH).'
+        description: 'Player MLB position as reported by ESPN (e.g. SP, RP, 1B, DH). Typically 1 position; of little mechanical consequence.'
       - name: lineup_slot
         description: >
-          The fantasy lineup slot this player occupied. Active slots are
-          positions (1B, 2B, SS, OF, DH, UTIL, etc., plus SP/RP/P);
-          BE = bench, IL = injured list, FA = free agent (Phase 4).
+          The fantasy lineup slot this player occupied.
+          Active slots are positions (1B, 2B, SS, OF, DH, UTIL, etc., plus SP/RP/P);
+          BE = bench, IL = injured list, FA = free agent.
       - name: lineup_slot_category
         description: >
-          Phase 4: three-value bucket derived from lineup_slot.
-          'pitching' = SP/RP/P, 'hitting' = any other active slot,
-          'inactive' = BE/IL/FA. Used at int_player_daily_stats for the
-          slot-stat-category compatibility filter (a hitter's hitting stats
-          only count when slotted as a hitter, etc.). The filter is
-          toggleable via the strict_slot_validity dbt var.
+          Three-value bucket derived from lineup_slot.
+          'pitching' = SP/RP/P, 'hitting' = any other active slot, 'inactive' = BE/IL/FA.
+          Used downstream for the slot-stat-category compatibility filter (a hitter's hitting stats only count when slotted as a hitter, etc.). The filter is toggleable via the strict_slot_validity dbt var.
         tests:
           - not_null
           - accepted_values:
               arguments:
                 values: ['pitching', 'hitting', 'inactive']
       - name: pro_team
-        description: 'Player MLB team abbreviation.'
+        description: 'Player MLB team abbreviation as reported by ESPN.'
       - name: eligible_slots
         description: >
-          Phase 5: VARIANT array of every fantasy lineup slot the player
-          is eligible to fill (e.g. ['LF', 'OF', 'DH', 'UTIL', 'BE', 'IL']
-          for a corner outfielder). Sourced from the wrapper's Player
-          object — kona returns this empty for rostered players, so the
-          wrapper is the source of truth. May contain flex-slot shapes
-          like '2B/SS' or 'IF' that aren't position eligibilities per se;
-          consumer (output formatters) filters to specific positions for
-          display. Empty array for legacy pre-Phase-5 raw rows.
+          VARIANT array of every fantasy lineup slot the player is eligible to fill (e.g. ['LF', 'OF', 'DH', 'UTIL', 'BE', 'IL'] for a corner outfielder).
+          Sourced from the wrapper's Player object. kona returns this empty for rostered players.
+          May contain flex-slot shapes like '2B/SS' or 'IF' that aren't position eligibilities per se; consumer (output formatters) filters to real-world positions for display.
       - name: points
         description: >
-          Direct passthrough of ESPN's per-player platform-computed points
-          for this scoring period (kona's appliedTotal). Slot-blind — does
-          not reflect slot-validity adjustments that ESPN's team-total
-          scoring applies. Used as platform_points downstream.
+          Direct passthrough of ESPN's per-player platform-computed points for this scoring period (kona's appliedTotal).
+          Slot-blind -- does not reflect slot-validity adjustments that ESPN's team-total scoring applies.
+          Used as platform_points downstream.
       - name: breakdown
-        description: 'Raw stat breakdown dict from ESPN. Keys are stat abbreviations (HR, RBI, K, etc). Used for Phase 3 stat-level records.'
+        description: 'Raw stat breakdown dict from ESPN. Keys are stat abbreviations (HR, RBI, K, etc). Used for stat-level league records.'
       - name: games_played
-        description: 'Number of MLB games this player appeared in on this scoring period. 0 = did not play, 1 = single game, 2 = both halves of a doubleheader. Phase 3.3: extracted from raw mRoster on DH days (sums per-game splits the wrapper would otherwise overwrite). Phase 4: same logic via kona endpoint. For pre-Phase-3.3 rows, defaults to 1 if breakdown is non-empty else 0.'
+        description: 'Number of MLB games this player appeared in on this scoring period. 0 = did not play, 1 = single game, 2 = both legs of a doubleheader. Extracted from raw mRoster on doubleheader days (sums per-game splits the wrapper would otherwise overwrite).'
         tests:
           - not_null
           - accepted_values:
               arguments:
                 values: [0, 1, 2]
       - name: display_name
-        description: 'COALESCE of player_nicknames.nickname and player_name. Phase 3.1: nickname join moved here from individual marts so display_name propagates through every downstream model.'
+        description: 'COALESCE of player_nicknames.nickname and player_name. Joined here so display_name propagates through every downstream model.'
 
   - name: stg_player_stat_breakdowns
     description: >
-      One row per (season, scoring_period, team, player, stat_name) -- the breakdown
-      VARIANT flattened into relational shape. No business filters applied here;
-      staging stays a pure reshape. Business filters (active slots, counting stats)
-      are applied in int_player_daily_stats. Bench/IL rows are preserved so future
-      models (e.g. wasted-points analysis in Phase 4) can consume the same staging.
+      One row per (season, scoring_period, team, player, stat_name) -- the breakdown VARIANT flattened into relational shape.
+      No business filters applied here; staging stays a pure reshape.
+      Business filters (active slots, counting stats) are applied at int_player_daily.
+      Bench/IL rows are preserved so the inactive-performance facts can consume the same staging.
     tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
@@ -109,7 +98,7 @@ models:
               - stat_name
     columns:
       - name: season_year
-        description: 'Year of MLB season.'
+        description: 'Year of MLB season opener.'
         tests:
           - not_null
       - name: scoring_period
@@ -119,26 +108,25 @@ models:
       - name: matchup_period
         description: 'The weekly matchup period this scoring period belongs to.'
       - name: team_id
-        description: 'ESPN stable numeric team identifier. NULL for free agent rows (Phase 4); not_null is enforced at int_player_daily_scores / int_team_daily_scores after the FA filter.'
+        description: 'ESPN stable numeric team identifier. NULL for free agent rows; downstream models enforce not_null after the FA filter.'
       - name: team_name
-        description: 'ESPN fantasy team name. NULL for free agent rows (Phase 4).'
+        description: 'ESPN fantasy team name. NULL for free agent rows.'
       - name: owner_name
-        description: 'Team owner display name. NULL for free agent rows (Phase 4).'
+        description: 'Team owner display name. NULL for free agent rows.'
       - name: player_id
         description: 'ESPN stable numeric player identifier.'
         tests:
           - not_null
       - name: player_name
-        description: 'Player full name as returned by ESPN.'
+        description: 'Player full name as reported by ESPN.'
       - name: position
-        description: 'Player MLB position.'
+        description: 'Player MLB position as reported by ESPN.'
       - name: lineup_slot
         description: 'Fantasy lineup slot on this scoring period. Preserved so downstream models can filter active/bench/IL/FA.'
       - name: lineup_slot_category
         description: >
-          Phase 4: bucket derived from lineup_slot in stg_box_scores
-          ('pitching' | 'hitting' | 'inactive'). Carried through here so
-          int_player_daily_stats can filter slot-stat-category mismatches.
+          Bucket derived from lineup_slot in stg_box_scores ('pitching' | 'hitting' | 'inactive').
+          Carried through here so int_player_daily can filter slot-stat-category mismatches.
       - name: stat_name
         description: 'Stat abbreviation as a key in the breakdown VARIANT (HR, RBI, K, etc).'
         tests:
@@ -154,15 +142,11 @@ models:
 
   - name: stg_scoring_settings
     description: >
-      Reshape raw scoring settings into one row per scored stat. Surfaces only
-      the CURRENT season's weights (max season_year with data); historical
-      settings remain preserved in RAW.SCORING_SETTINGS but are not surfaced
-      here. The current season's weights are applied universally — including
-      to historical stat breakdowns — so cross-season scores are comparable
-      under a common scale. When multiple extractions exist for the same
-      season, picks the most recent via ROW_NUMBER() on extracted_at.
-      Grain: one row per stat_name (no season_year dimension; this is a
-      single-season reference table).
+      Reshape raw scoring settings into one row per scored stat.
+      Surfaces only the CURRENT season's weights (max season_year with data); historical settings remain preserved in RAW.SCORING_SETTINGS but are not surfaced here.
+      The current season's weights are applied universally -- including to historical stat breakdowns -- so cross-season scores are comparable under a common scale.
+      When multiple extractions exist for the same season, picks the most recent via ROW_NUMBER() on extracted_at.
+      Grain: one row per stat_name (no season_year dimension; this is a single-season reference table).
     columns:
       - name: settings_season
         description: 'Season year these weights came from (always the latest loaded). Carried through for traceability.'
@@ -171,6 +155,6 @@ models:
       - name: stat_name
         description: 'Human-readable stat abbreviation (HR, RBI, K, etc.) joined from stat_classification on espn_stat_id.'
       - name: stat_category
-        description: 'hitting, pitching, fielding, or unknown — passed through from stat_classification.'
+        description: 'hitting, pitching, fielding, or unknown -- passed through from stat_classification.'
       - name: points_per_unit
         description: 'Fantasy points awarded per unit of this stat under the current season''s scoring rules.'

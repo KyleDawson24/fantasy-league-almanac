@@ -1,6 +1,6 @@
 {% docs __overview__ %}
 
-# fantasy-baseball-reporting-pipeline
+# Fantasy Beat Reporter
 
 ELT pipeline for an ESPN Fantasy Baseball head-to-head points league.
 Extracts box-score data from ESPN's API, transforms it through staging /

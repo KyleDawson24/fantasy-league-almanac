@@ -2,7 +2,7 @@
 
 **Audience:** A developer taking over day-to-day development. The original maintainer (the user) continues to operate this weekly for their own 14-team H2H league, so behavior changes that break the weekly post will surface immediately. Read top-to-bottom once; thereafter, jump to the section you need.
 
-**Status as of handoff:** Phase 6.3.3 shipped to local main at commit `8fa40bf`. Local main is 5 commits ahead of `origin/main` — the user opted not to push yet. Last operational verification: 2026 Week 5 BBCode + Sheets output, both clean.
+**Status as of handoff:** Phase 7 shipped (the v1.0 polish + rearchitect phase). The full retrospective is in `Phase 7 Documentation.md`; the highlights are 9 → 7 active business-logic dbt models with symmetric active/inactive split, seed-driven Jinja UNPIVOT in `mart_stat_leaderboard`, a 3-way split of the former monolithic `records.py`, MIT LICENSE, and a full public documentation surface (CHANGELOG / ROADMAP / README / SETUP / dbt docs catalog). Last operational verification: 2026 Week 6 golden BBCode regression, byte-identical pre/post-rearchitect.
 
 ---
 
@@ -156,27 +156,56 @@ Backfill duration: ~30 min currently (Phase 4.x bookmark targets ~3-5 min via pa
 - ✅ `SHEETS_OUTPUT_ID=DRY_RUN python output/generate_records_report.py` — works; the env var is set (to a fake value), `load_dotenv` won't override an existing env var, the Sheets call fails with an invalid sheet ID, the script's try/except prints `[sheets] write failed: ...` and BBCode output is unaffected.
 - ✅ Direct helper imports: `python -c "from generate_records_report import format_record, ..."` and skip `main()` entirely.
 
-This has burned us twice (once in PowerShell, once in bash). The fix is documented in memory at `feedback_test_running_side_effects.md`. **A `--no-sheets` CLI flag is on the roadmap** (high priority — see §10) precisely to make this less error-prone.
+The fix is documented in memory at `feedback_test_running_side_effects.md`. As of v1.0 there's a `--no-sheets` CLI flag on `generate_records_report.py` for explicit suppression -- the preferred idiom. The DRY_RUN env-var workaround above is kept as a fallback for direct-helper-import paths that bypass the CLI.
 
 ---
 
 ## 6. Code map — the modules you'll touch most
 
-### `output/records.py` (~1030 lines; the busiest file)
+### `output/records.py` + `records_data.py` + `records_logic.py` (Phase 7 3-way split)
 
-The data-access surface. Three logical sections:
+The data-access surface. Pre-Phase-7 this was one 930-line module; the
+split landed in Phase 7 Step 3. Current shape:
 
-1. **Public records API** — `get_all_time_records()`, `get_current_season_records()`, `get_records_set_this_week(season, mp)`, `get_record_top_n(stat, ...)`. Used by both BBCode consumers.
-2. **Polarity + filter rules** — `get_stat_polarity()`, `get_effective_polarity()` (the latter augments the former with hardcoded `_IMPLICIT_POLARITY` for stats not in the scoring-settings seed: rates, wasted_points, derived stats, score columns), `should_track_record()`, `get_always_tracked_stats()` (reads `is_always_tracked` from the seed).
-3. **Orchestrator + helpers** — `get_records_with_contributors(scope, top_n)` is the high-level entry point (filter → tie-collapse → bulk contributor stitch). Used by Sheets writer. Plus `get_team_contributors_bulk()`, `get_player_contributors_bulk()`, `load_schedule_lookup()`, `format_week_label()`, `count_value_occurrences()`, `league_history_count()`, `ordinal()`.
+- **`output/records.py`** (~238 lines): two workflow orchestrators
+  (`get_records_set_this_week`, `get_records_with_contributors`) plus
+  explicit named re-exports so the four consumer scripts keep working
+  unchanged.
+- **`output/records_data.py`** (~377 lines): the SQL access surface --
+  rank-1 record fetches, top-N-per-stat, contributor lookups, bulk
+  contributor batches, `league_history_count` and its
+  `count_value_occurrences` shortcut, schedule lookup. Imports
+  `from db import query_snowflake`.
+- **`output/records_logic.py`** (~382 lines): pure consumer-side rules
+  -- `should_track_record`, `best_or_worst_label`, `format_week_label`,
+  `ordinal`, tie-collapse (`collapse_ties`, `_collapse_one_group`),
+  `_sort_new_records`. One explicit `from records_data import
+  count_value_occurrences` for the saturated-tier backfill (honest
+  one-way edge; no cycle).
 
-Key concepts encoded here:
-- **Seed-to-leaderboard name translation** (`_SEED_TO_LEADERBOARD`): seed has `'1B'`/`'2B'`/`'3B'`/`'64'` (raw stat IDs); leaderboard has `'SINGLES'`/`'DOUBLES'`/`'TRIPLES'`/`'SHO'` (column names). Every seed-keyed lookup goes through this map.
-- **`_TEAM_NON_SEED_STATS`** — rate stats / WASTED_POINTS / derived counts. These don't have polarity in the scoring seed; the orchestrator filter allows them at team grain in both directions anyway.
-- **`_NON_FCT_COUNTABLE`** — stats that `league_history_count()` can't accurately count via the fcts (rate stats; wasted_points lives in a separate mart). Returns `None`; callers must degrade gracefully.
-- **`INLINE_COLLAPSE_THRESHOLD = 3`** — small overflow tiers render comma-joined identities; tiers > 3 fall back to count-only synthetic rows.
+Polarity and always-tracked sets are NOT in this code anymore -- those
+moved to the `stat_classification` seed at Phase 7 B1 and surface via
+`stat_catalog.get_polarity_map()` / `get_always_tracked()`.
 
-This file is the natural place to look first when "the records section is doing something weird." It's also a refactor candidate — see §11.
+Key concepts:
+- **Seed-to-leaderboard name translation** lives in
+  `output/stat_catalog.py` (`SEED_TO_LEADERBOARD`). The seed has
+  `'1B'`/`'2B'`/`'3B'`/`'64'` (raw stat IDs); the leaderboard has
+  `'SINGLES'`/`'DOUBLES'`/`'TRIPLES'`/`'SHO'` (column names). The dbt
+  mart applies the equivalent rename via Jinja seed-loop aliases.
+- **`_TEAM_NON_SEED_STATS`** (in `records_logic.py`) -- rate stats /
+  WASTED_POINTS / derived counts. These don't have polarity in the
+  scoring seed; the orchestrator filter allows them at team grain in
+  both directions anyway.
+- **`_NON_FCT_COUNTABLE`** (in `records_data.py`) -- stats that
+  `league_history_count()` can't accurately count via the fcts (rate
+  stats; WASTED_POINTS derives from the inactive facts). Returns
+  `None`; callers must degrade gracefully.
+- **`INLINE_COLLAPSE_THRESHOLD = 3`** (in `records_logic.py`) -- small
+  overflow tiers render comma-joined identities; tiers > 3 fall back
+  to count-only synthetic rows.
+
+Start here when "the records section is doing something weird."
 
 ### `output/formatters.py`
 
@@ -378,62 +407,32 @@ Verified end-to-end as of Phase 6.3.3 ship (2026 Week 5):
 
 ---
 
-## 10. Roadmap, prioritized
+## 10. Roadmap
 
-The user wants this section explicit, in priority order. **Top-of-list items have direct impact on the user's weekly use; lower-priority items are quality / portfolio polish.**
+Forward-looking work is tracked in `ROADMAP.md` at repo root. That doc
+has the public Now / Next / Later / Decided Against buckets and stays
+authoritative as items ship.
 
-### NOW — high-impact, ship before anything else
+Highlights as of v1.0:
+- **Now (v1.x flagship)**: `dim_player` + `fct_player_career` -- the
+  player-entity foundation the project hasn't had. Absorbs the
+  `get_wasted_points` staging-reach concern and unlocks career-milestone
+  callouts.
+- **Now (v1.x small)**: stat-catalog refinements (split `is_always_tracked`
+  into two flags, surface NEGATIVE_POINTS as a record candidate, promote
+  stat 30 = Hit for the Cycle), output polish, Sheets formatting
+  preservation, dependency-inject `count_value_occurrences` into
+  `collapse_ties`.
+- **Next (v2.0, likely-exclusive)**: cross-platform Yahoo/Sleeper extract
+  OR DuckDB target. MetricFlow as a deliberate learning exercise.
+- **Decided Against**: frequency-table tab (tie-collapse covers it),
+  player-grain rate stats at mart layer (Phase 6.3.3 Path A choice).
 
-1. **`--no-sheets` / `--dry-run` CLI flag on `generate_records_report.py`** (small, ~15 min). Has burned us twice. The current "set `SHEETS_OUTPUT_ID=DRY_RUN` to suppress" idiom works but is non-obvious. A flag makes it explicit. Pair with: log `[sheets] dry-run; would have written N rows` so the verifier sees the intent.
-2. **Sheets formatting preservation** (already spawned as a follow-up task; chip pending in user's queue). `_replace_tab` does `worksheet.clear()` + `update()` — likely wipes user-applied formatting. Switch to in-place `update()` that overwrites cells without clearing, plus targeted `batch_clear` for trailing rows when the new dataset is smaller. Verify by hand-formatting a tab, running the script, and confirming colors / frozen rows / column widths survive.
-3. **"No-Hitters: 0 by N teams" rendering** (small, ~10 min). When rank-1 stat_value=0 for stats with `is_always_tracked=false`, the section is misleading (implies a record exists). Either skip the section entirely or render as `Nobody has thrown a no-hitter yet`. Affects NH, PG, SHO most visibly post-Phase-6.3.3 because they're newly surfaced.
-
-### NEXT — Phase 7 (v1.0 portfolio prep)
-
-The user has flagged Phase 7 + refactoring as their next session. Don't start without coordination. Scope (per `Phase 6.3.3 Documentation.md` and `project_phase_plan.md`):
-
-4. **`CHANGELOG.md`** in keepachangelog format. Map phases retroactively to semver: 0.1.0 = Phase 1 → 1.0.0 = this release.
-5. **`README.md` rewrite** as the entry point: 30-second pitch, sample output screenshot, Mermaid architecture diagram, "notable engineering decisions" linking to phase docs, "what this demonstrates" recruiter-facing section, separate `SETUP.md` for the bring-your-own-credentials path.
-6. **`ROADMAP.md`** with Now / Next / Later / Won't Do buckets (this section is already a draft of that — promote and curate).
-7. **dbt docs**: fill in description fields across all `schema.yml` files, add `exposures` for the output scripts, `dbt docs generate` + push `target/` to `gh-pages` for hosted lineage.
-8. **Repo hygiene**: pinned `requirements.txt`, MIT or Apache 2.0 LICENSE, comprehensive `.gitignore`.
-9. **Tag `v1.0.0`**, GitHub Release with changelog as release notes.
-10. *(Optional post-release)*: r/dbt, r/dataengineering, LinkedIn share.
-
-### REFACTORING — opportunities the user has flagged
-
-The user mentioned wanting to address some refactoring during their separate Phase 7 session. Candidates:
-
-11. **Connection-management consolidation** (medium, ~2 hours). Single Snowflake connection per script run; pass `conn` into query functions. Replaces `query_snowflake`'s open-and-close-per-call pattern. ~10-20 round-trip handshakes saved per script run. Bundle with the Phase 4.x extract optimizations if going hard on perf.
-12. **Split `output/records.py`** (medium, ~3 hours). At 1030 lines it's the largest module. Natural splits: `records/data.py` (raw queries), `records/polarity.py` (polarity + filter rules), `records/orchestrator.py` (`get_records_with_contributors`, bulk contributors), `records/collapse.py` (tie-collapse), `records/schedule.py` (`load_schedule_lookup`, `format_week_label`, `ordinal`, `league_history_count`). Backward compat: keep `output/records.py` as a thin re-export shim during transition.
-13. **Factor shared output-script boilerplate** (small, ~30 min). Both `generate_summary.py` and `generate_records_report.py` have identical utf-8 stdout reconfig + dotenv loading + (now) schedule_lookup loading. Factor into `output/_setup.py` or similar.
-14. **Conditional 3rd "Top Scorer" line** (small, ~30 min). Long-standing backlog item from Phase 5. Top Scorer/Hitter/Pitcher render together; Top Scorer often duplicates one of the others when no two-way Ohtani week occurred. Show only when overall winner had BOTH non-zero hitting AND non-zero pitching contributions. Affects both recap and records sections.
-
-### LATER — substantive features, not blocking
-
-15. **Dynamic rate-stat thresholds from lineup-slot config**. Currently `HITTER_AB_THRESHOLD = 225` and `PITCHER_IP_THRESHOLD = 50` are placeholder constants in `records.py` with v2-vision comments. Activates if/when team-grain rate stats need a threshold (currently moot since Path A dropped player-grain rates at mart).
-16. **Tracked-stats config seed/YAML for cross-league portability** (v2). The Phase 6.3.3 chunk-1 stat list is hardcoded into mart UNPIVOT lists; cross-league portability would want a config-driven version.
-17. **"Non-playoff teams during playoff weeks" edge case** (v1.x). 8 teams play; 6 teams have `is_playoff=true` `matchup_period` rows but are eliminated and contribute zero stats — currently they show as "fewest of everything" records. Not blocking but slightly misleading.
-18. **Wire `owner_nicknames` seed into models**. Currently the seed exists but isn't joined; output scripts read it ad-hoc.
-19. **`fct_team_career_stats` mart**. Career-aggregate equivalent of `fct_weekly_team_active_performance`.
-20. **Investigate explicit `pointsAdjustment` field** in ESPN API to split `platform_calculated_delta` into clean `commissioner_adjustment` + `derivation_delta`.
-21. **Verify stat ID 30** (15 pts per, only 1 observed row) — is this a real scored stat we're missing?
-22. **GitHub Actions CI on PRs**: `dbt test` + Python compile checks.
-23. **Python tests for output formatters**. Currently no test coverage on the rendering layer; a few golden-output tests would catch a lot.
-24. **Multi-sink output abstraction**. Defer until a 2nd non-Sheets sink emerges (Discord webhook, email, etc.).
-
-### EXTRACT PERFORMANCE — Phase 4.x parallel track
-
-25. **Multi-view single HTTP call** (`?view=mMatchupScore&view=kona_player_info`).
-26. **Batched kona via `filterStatsForScoringPeriodIds`**.
-27. **Parallel-fire of wrapper calls**.
-   - All three combined: backfill drops from ~30 min to ~3-5 min. The user wants this but it's not blocking weekly cadence (incremental extracts are already fast; this matters when re-extracting full seasons for any reason).
-
-### WON'T DO — explicit deferrals
-
-- **Path B (DuckDB retarget) and Path C (hosted multi-tenant)**: post-1.0 considerations only.
-- **Frequency-table / "Notable Frequencies" tab** (rejected during Phase 6.3.3): tie-collapse handles this naturally; no separate output needed.
-- **AB-SO contact-rate proxy** (deferred per Phase 6.3.3 spec discussion).
+For the open architectural questions surfaced during Phase 7 review
+that didn't ship in v1.0 -- `is_always_tracked` semantic conflation,
+inactive-fact grain edge case, PLATFORM_* in SCORE_STAT_NAMES product
+call -- see `Phase 7 Documentation.md` § "Open Investigations Carried
+Forward".
 
 ---
 
@@ -456,7 +455,7 @@ If you change a public-facing behavior, surface it before merging. The user is t
 ### What the user does NOT do
 
 - They don't run dbt against prod. There's no prod environment — `dev` target IS the operational target. The "test" lives in the verification you run before shipping.
-- They don't read the dbt docs catalog (yet — that's Phase 7). For now, model documentation lives in inline comments + `schema.yml` + the phase docs.
+- They primarily consume the recap output, not the dbt docs catalog. Model documentation lives in `schema.yml` files (with descriptions on every model and most columns post-Phase 7) and the phase docs; the dbt catalog is the formal browsable surface but the user rarely opens it.
 - They don't review every diff line-by-line. They trust the verification (`dbt build` clean + smoke tests + spot-check of one BBCode output) more than the diff. Don't skip verification.
 
 ---
@@ -507,12 +506,12 @@ Pointer reading:
 
 ## TL;DR for the new dev
 
-- **Read** `Phase 6.3.3 Documentation.md` (most recent), `Phase 5.0 Documentation.md` (best-shaped phase doc), and the memory files. ~2 hours.
-- **Set up** the venv + `.env` + dbt profile. ~30 min.
-- **Run** the weekly workflow against the user's existing data: `dbt build` + `python output/generate_summary.py | head -50`. Confirm output renders. ~10 min.
-- **Pick** one item from the NOW list (§10) and ship it. The `--no-sheets` flag is the easiest first PR.
-- **Don't** touch section ordering, header conventions, schema columns, or push to origin without coordination.
+- **Read** `Phase 7 Documentation.md` (the v1.0 retrospective; most recent and most relevant), then `Phase 5.0 Documentation.md` (well-shaped doc covering the recap structure), then `Phase 4.0 Documentation.md` (for the wasted-points concept). ~2 hours.
+- **Set up** the venv + `.env` + dbt profile per `SETUP.md`. ~30-45 minutes.
+- **Run** the weekly workflow against existing data: `dbt build` + `python output/generate_summary.py | head -50`. Confirm output renders. ~10 minutes.
+- **Pick** one item from `ROADMAP.md` Now (v1.x). The `dim_player` + `fct_player_career` flagship is the highest-leverage starting point.
+- **Don't** touch section ordering, header conventions, the 17-column Sheets schema, or push to origin without coordination.
 
-The project is in a healthy place. Phase 6.3.3 just shipped a substantial expansion (8 new tracked stats, derived stats, mart-side wasted_points, polarity-aware labels, playoff round naming, league_notes registry, 17-col Sheets schema) and the verification was clean. Next moves are polish (Phase 7) and the small NOW-list items.
+The project is in a healthy place. Phase 7 shipped a major rearchitect (active/inactive symmetric facts, seed-driven catalog, 3-way records split) plus the v1.0 public documentation surface, verified clean against golden BBCode baselines. v1.x work is incremental polish on this foundation.
 
 Welcome.

@@ -1,0 +1,379 @@
+# Setup
+
+End-to-end setup for running the pipeline against your own ESPN
+Fantasy Baseball league. Covers prerequisites, credentials, dbt
+profile, and the first run.
+
+If you just want to read about what this project does, see
+[README.md](README.md). If you're forking to run against your league,
+keep reading.
+
+Expect ~30-45 minutes for first-time setup, mostly waiting for
+Snowflake free-tier provisioning.
+
+---
+
+## 1. Prerequisites
+
+- **Python 3.13+**. The codebase pins to 3.13; earlier 3.x versions
+  haven't been tested.
+- **Git**.
+- **An ESPN Fantasy Baseball league**. Private leagues are supported
+  (requires cookies — see step 3). Public leagues should work without
+  cookies but haven't been tested for v1.0.
+- **A Snowflake account**. Free-tier (Standard, 30-day trial → $0 storage
+  for small datasets after) is plenty. Sign up at
+  https://signup.snowflake.com. Pick any region.
+- *(Optional)* **A Google Cloud project** if you want the Google Sheets
+  sink. Free; skippable.
+
+---
+
+## 2. Clone the repo and create a Python environment
+
+```bash
+git clone https://github.com/KyleDawson24/fantasy-league-front-page.git
+cd fantasy-league-front-page
+
+# Python 3.13 venv
+python -m venv .venv
+
+# Activate (PowerShell)
+.venv\Scripts\Activate.ps1
+# Or (bash)
+source .venv/bin/activate
+
+pip install -r requirements.txt
+```
+
+`requirements.txt` is a real pinned freeze; `pip install` should
+complete in 30-60 seconds with no resolution drama. If you hit any
+"can't find package" errors, double-check you're on Python 3.13.
+
+---
+
+## 3. ESPN credentials
+
+The pipeline reads from ESPN's private fantasy API. For private
+leagues you need two cookies from a logged-in browser session, plus
+your league ID.
+
+### Find your league ID
+
+Log in to ESPN Fantasy and navigate to your league's home page. The URL
+will look like:
+
+```
+https://fantasy.espn.com/baseball/league?leagueId=123456&seasonId=2026
+```
+
+Your league ID is the number after `leagueId=`.
+
+### Find your cookies
+
+Open your browser's dev tools while logged in to ESPN Fantasy:
+
+- **Chrome / Edge**: F12 → Application tab → Cookies → `https://fantasy.espn.com`
+- **Firefox**: F12 → Storage tab → Cookies → `https://fantasy.espn.com`
+
+Find two cookies:
+
+- `espn_s2` — long opaque string, ~300 chars
+- `SWID` — UUID wrapped in curly braces, like `{AB12CD34-...}`
+
+Copy both values verbatim (including the `{}` braces on SWID).
+
+> **Note:** ESPN cookies expire periodically. If extraction starts
+> failing with 401s, refresh both cookies from a fresh login.
+
+---
+
+## 4. Snowflake setup
+
+### Create the database and warehouse
+
+After your Snowflake trial is provisioned, log into the Snowsight UI
+and run these bootstrap commands to create the resources the pipeline
+expects:
+
+```sql
+-- One-time bootstrap. Run as ACCOUNTADMIN.
+-- These create the warehouse, database, and schemas; pick any names
+-- you like, but keep them consistent with the .env values you set in
+-- step 6 and the dbt profile you write in step 5.
+CREATE WAREHOUSE COMPUTE_WH WITH WAREHOUSE_SIZE = 'XSMALL'
+    AUTO_SUSPEND = 60 AUTO_RESUME = TRUE;
+CREATE DATABASE ESPN_FANTASY;
+USE DATABASE ESPN_FANTASY;
+CREATE SCHEMA RAW;
+CREATE SCHEMA ANALYTICS;
+```
+
+The names above (`COMPUTE_WH`, `ESPN_FANTASY`, `RAW`, `ANALYTICS`)
+match the defaults in this guide. Customize freely; the pipeline
+expects:
+
+- `RAW` schema for the append-only JSON landed by the Python extractor
+- `ANALYTICS` schema (or whatever your dbt target is) for the dbt models
+
+### Capture your connection details
+
+You'll need these for both `.env` and the dbt profile:
+
+- **Account identifier**: shown in the Snowsight URL as `<account>.snowflakecomputing.com`. Use the full identifier including region (e.g., `abc12345.us-east-1`).
+- **Username + password**: your Snowflake login.
+- **Role**: `ACCOUNTADMIN` for setup; you can rotate to a more restricted role later.
+- **Database**: `ESPN_FANTASY` (or whatever you created above).
+- **Warehouse**: `COMPUTE_WH`.
+
+---
+
+## 5. dbt profile
+
+dbt looks for connection profiles at `~/.dbt/profiles.yml` (Linux/Mac)
+or `C:\Users\<you>\.dbt\profiles.yml` (Windows).
+
+Create the file with:
+
+```yaml
+dbt_league:
+  target: dev
+  outputs:
+    dev:
+      type: snowflake
+      account: <account.region>
+      user: <username>
+      password: <password>
+      role: ACCOUNTADMIN
+      database: ESPN_FANTASY
+      schema: ANALYTICS
+      warehouse: COMPUTE_WH
+      threads: 4
+      client_session_keep_alive: false
+```
+
+Verify the connection:
+
+```bash
+cd dbt_league
+dbt debug
+```
+
+You should see `All checks passed!`. If not, work through whatever
+dbt reports red.
+
+---
+
+## 6. Configure `.env`
+
+Copy the template and fill in real values:
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` with the values from steps 3 + 4:
+
+```bash
+# ESPN
+ESPN_S2=<paste full espn_s2 value here>
+SWID={...}
+LEAGUE_ID=<your league ID>
+
+# Snowflake
+SNOWFLAKE_ACCOUNT=<account.region>
+SNOWFLAKE_USER=<username>
+SNOWFLAKE_PASSWORD=<password>
+SNOWFLAKE_DATABASE=ESPN_FANTASY
+SNOWFLAKE_SCHEMA=RAW
+SNOWFLAKE_WAREHOUSE=COMPUTE_WH
+```
+
+Skip the Google Sheets vars for now (see section 9 if you want that
+sink later).
+
+> `.env` is gitignored. Never commit credentials. The .env.example
+> template stays tracked for new-user onboarding.
+
+---
+
+## 7. First run
+
+You now have everything to run the full pipeline end-to-end.
+
+```bash
+# From repo root
+python extract/extract.py            # Extract recent matchup periods
+                                      # (or: python extract/extract.py 1 2 3
+                                      # for specific weeks)
+
+cd dbt_league
+dbt seed                              # Load the four seed CSVs
+dbt build                             # Build models + run all tests
+
+cd ..
+python output/generate_summary.py     # Weekly recap BBCode
+python output/generate_records_report.py --no-sheets
+                                      # All-time records report;
+                                      # --no-sheets skips the Sheets sink
+                                      # (use any time you don't want
+                                      # to write Sheets)
+```
+
+Each output script prints BBCode to stdout AND writes a timestamped
+file to `output/logs/`. Copy from either into your ESPN league's front
+page editor.
+
+You should see something like:
+
+```
+[u][b]Week 6 Recap[/b][/u]
+[b]Best Overall[/b]: 354.9 pts by ...
+```
+
+If you see errors during extract: refresh ESPN cookies, check
+`LEAGUE_ID`. If you see errors during dbt build: re-check `dbt debug`.
+See section 10 for common gotchas.
+
+---
+
+## 8. Verify the test suite
+
+Once the pipeline runs end-to-end, validate the test surface:
+
+```bash
+# Pure pytest (no warehouse round-trips; fast)
+pytest tests/
+
+# Warehouse tests (golden BBCode regression + seed integrity;
+# subprocess-runs the output scripts against your warehouse)
+pytest tests/ -m warehouse
+```
+
+Expected on a fresh setup:
+
+- `pytest tests/`: 112 passed, 15 deselected (the warehouse-marked tests
+  are excluded by default).
+- `pytest tests/ -m warehouse`: 15 passed. The two BBCode regression
+  tests will compare against `tests/fixtures/baseline_*.txt` which were
+  generated against the maintainer's league data — these will fail
+  against your league. Regenerate baselines with:
+
+  ```bash
+  REGENERATE_BASELINES=1 pytest tests/ -m warehouse
+  ```
+
+  After regenerating, future runs lock to your league's expected
+  output, catching regressions on rebuilds.
+
+---
+
+## 9. Optional: Google Sheets sink
+
+The records report can also write to a Google Sheet (17-column / 3-tab
+layout for offline analysis). Skip if you only want the BBCode output.
+
+### Create a GCP project + OAuth client
+
+1. Go to https://console.cloud.google.com and create (or pick) a
+   project. Any name; the project is just an OAuth container.
+2. Enable the Google Sheets API and Google Drive API for the project.
+3. Configure the OAuth consent screen — pick **External** user type;
+   leave most fields default. Add yourself as a test user. Don't worry
+   about app verification; this is a personal-use OAuth client.
+4. Credentials → Create credentials → OAuth client ID → **Desktop app**.
+   Download the resulting JSON file; save somewhere safe outside the
+   repo (e.g., `~/credentials/oauth-client.json`).
+
+### Create the target Sheet
+
+Create a new Google Sheet in your account. Grab its ID from the URL:
+
+```
+https://docs.google.com/spreadsheets/d/<this_part_is_the_id>/edit
+```
+
+The script auto-creates the three tabs (`Rank 1 Records`, `Top 5 with
+Contributors`, `Full Leaderboard Dump`) on first write.
+
+### Add the env vars
+
+Append to `.env`:
+
+```bash
+GOOGLE_OAUTH_CLIENT_PATH=/absolute/path/to/oauth-client.json
+SHEETS_OUTPUT_ID=<your sheet ID>
+```
+
+### First-run flow
+
+Run the records report:
+
+```bash
+python output/generate_records_report.py
+```
+
+On the first invocation, the script opens a browser for OAuth consent.
+Approve, and the script caches the resulting token at
+`output/.sheets_oauth_token.json` (gitignored) so future runs are
+silent.
+
+Subsequent runs write to your Sheet without prompting.
+
+---
+
+## 10. Common gotchas
+
+**`401 Unauthorized` during extract.** ESPN cookies expired. Refresh
+both `espn_s2` and `SWID` from a fresh browser session.
+
+**`dbt debug` fails with auth error.** Wrong account identifier format.
+Use the full `<account>.<region>` (e.g., `abc12345.us-east-1`), not
+just `abc12345`.
+
+**`dbt seed` succeeds but `dbt run` complains about missing seed
+columns.** Re-run with `--full-refresh`:
+
+```bash
+dbt seed --full-refresh
+```
+
+dbt's incremental seed loader can skip on schema mismatches; full
+refresh forces a clean recreate.
+
+**`pytest tests/ -m warehouse` fails on the golden BBCode tests.** The
+pinned baselines were generated against the maintainer's league. After
+your first successful end-to-end run, regenerate:
+
+```bash
+REGENERATE_BASELINES=1 pytest tests/ -m warehouse
+```
+
+**Tempted to enrich the output BBCode?** Don't. ESPN's front-page
+renderer supports only `[b]bold[/b]`, `[u]underline[/u]`, and
+`[i]italics[/i]` — hyperlinks, images, embeds, color tags, and most
+other standard BBCode get stripped or rendered literally. The output
+formatters in `output/formatters.py` are tuned to that constraint; if
+you want fancier output, target the Sheets sink instead.
+
+**Snowflake bills you anyway.** The free tier covers most usage but
+the warehouse will auto-resume on every dbt run. If you forget about
+it for months you can rack up small charges. Set up a billing alert
+in Snowsight to be safe.
+
+---
+
+## What you have after setup
+
+Running the pipeline weekly:
+
+```bash
+python extract/extract.py        # ~30 seconds for current week
+cd dbt_league && dbt build       # ~60 seconds for full build
+cd .. && python output/generate_summary.py
+```
+
+The full output is in `output/logs/<timestamp>.txt`. Paste into your
+league's front-page editor and ship it.
+
+See [ROADMAP.md](ROADMAP.md) for what's coming next.

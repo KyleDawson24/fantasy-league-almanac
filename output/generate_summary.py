@@ -214,23 +214,20 @@ def get_wasted_points(season_year, matchup_period, limit=5):
     surfaced separately (fa_wasted_pts, bench_wasted_pts) so the formatter
     can attribute "X unowned, Y benched" in the parenthetical.
 
-    Joins stg_box_scores for MLB pro_team and eligible-slots metadata
-    (Phase 5: position display now uses filtered eligibleSlots so
-    multi-position players like Sanoja show as "2B, RP" instead of just
-    a primary position), and fct_weekly_player_active_performance to detect
+    Joins int_player_daily for MLB pro_team and eligible-slots metadata
+    (position display uses filtered eligibleSlots so multi-position
+    players like Sanoja show as "2B, RP" instead of just a primary
+    position), and fct_weekly_player_active_performance to detect
     partial-active weeks (player who also had active days during the
     same matchup period).
 
-    Phase 7 G5: source switched from mart_wasted_points (the Phase 4
-    view computed from int_player_daily_stats with an inactive filter)
-    to fct_weekly_player_inactive_performance (the E1 fact). Values are
-    identical for matched (player, bucket) rows (spot-checked Heliot
-    Ramos Week 6 2026: FA=3.4, ROSTERED_INACTIVE=20.3 on both sources);
-    the rename is just calculated_points instead of wasted_points.
-    mart_wasted_points becomes a dead model in H.
+    Wasted-performance source: fct_weekly_player_inactive_performance,
+    summed across the player's inactive buckets (FA + ROSTERED_INACTIVE)
+    within the matchup_period. Values use calculated_points (rules-
+    normalized under current-season weights).
 
     Team-label priority (in COALESCE order):
-      1. Active team (from fct_weekly_player_active_performance) — captures the
+      1. Active team (from fct_weekly_player_active_performance) -- captures the
          FA-then-rostered case ("they have since been picked up")
       2. Bench team (from fct_weekly_player_inactive_performance ROSTERED_INACTIVE row)
       3. 'Free Agent' fallback when neither active nor bench association
@@ -286,12 +283,10 @@ def get_wasted_points(season_year, matchup_period, limit=5):
             WHERE season_year = %s AND matchup_period = %s
         )
         SELECT
-            -- Phase 7 G5: display_name source switched from wasted_combined
-            -- (which used to pull from mart_wasted_points) to player_meta
-            -- (which pulls from stg_box_scores via nickname-resolved
-            -- display_name). Fallback to wasted_combined's player_name
-            -- handles the rare case where a player has stats but no
-            -- box_scores row (shouldn't happen in practice).
+            -- display_name sourced from player_meta (int_player_daily's
+            -- nickname-resolved value). Fallback to wasted_combined's
+            -- player_name handles the rare case where a player has stats
+            -- but no box_scores row (shouldn't happen in practice).
             COALESCE(m.display_name, w.display_name) AS display_name,
             m.pro_team,
             m.position,

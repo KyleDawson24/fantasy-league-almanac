@@ -1,34 +1,33 @@
--- fct_weekly_player_performance.sql
--- Wide-format player-weekly convergence fact. The consumer-facing entity for
--- "what did this player do this week" — counting stats, rate stats,
--- per-stat point contributions, and fantasy scoring totals all in a single
--- row per player per matchup.
+-- fct_weekly_player_active_performance.sql
+-- Wide-format player-weekly convergence fact for ACTIVE-slot performance.
+-- The consumer-facing entity for "what did this player do this week" --
+-- counting stats, rate stats, per-stat point contributions, and fantasy
+-- scoring totals all in a single row per player per matchup.
 --
--- Phase 3.2 additions:
+-- Carries:
 --   - Per-stat *_pts columns (e.g., hr_pts, k_pts) showing how many fantasy
---     points each counting stat generated under the current season's scoring
---     rules. These enable "top N stats by point contribution" callouts.
---   - calculated_points: SUM of all *_pts columns. Represents what this
---     player's stat line would score under current rules. For the current
---     season this should closely match total_points; for historical
---     seasons it normalizes to a common scale for cross-season comparison.
+--     points each counting stat generated under current-season scoring rules.
+--     Enables "top N stats by point contribution" callouts.
+--   - calculated_points: SUM of all *_pts columns. What this player's stat
+--     line would score under current rules. For the current season closely
+--     matches platform_points; for historical seasons normalizes to a common
+--     scale for cross-season comparison.
 --   - calculated_hitting_pts / calculated_pitching_pts: category subtotals.
---
--- total_points / hitting_points / pitching_points retain their original
--- names (the platform-computed scores). They remain the official arbiters
--- for W/L. calculated_* sit alongside as the rules-normalized derivation.
+--   - platform_points / platform_hitting_pts / platform_pitching_pts: the
+--     ESPN-computed scores. Official arbiters for W/L. calculated_* sit
+--     alongside as the rules-normalized derivation.
 --
 -- Pipeline:
---   1. Read int_player_weekly_performance (slot-preserved counting + pts columns)
+--   1. Read int_player_weekly_performance (slot-preserved counting + pts +
+--      platform totals)
 --   2. Filter to active slots (lineup_slot NOT IN ('BE', 'IL', 'FA'))
---   3. Aggregate counting and pts columns across slots (collapse slot dimension)
+--   3. Aggregate counting and pts columns across slots (collapse slot dim)
 --   4. Compute rate stats via macros from the aggregated counting columns
 --   5. Sum *_pts columns into calculated_points / hitting / pitching subtotals
---   6. Join fct_weekly_player_scores for platform total_points / hitting / pitching
 --
 -- Grain: one row per (season_year, matchup_period, team_id, player_id).
 --
--- Incremental fact — merge by unique_key. Re-extracted matchup periods
+-- Incremental fact -- merge by unique_key. Re-extracted matchup periods
 -- overwrite existing rows. For historical corrections, use --full-refresh.
 
 {{ config(
@@ -149,14 +148,11 @@ with active as (
         -- is_record_candidate in the seed); promotion is a v1.x call.
         sum(negative_points) as negative_points,
 
-        -- Phase 7 H: platform scoring sourced from int_player_weekly_
-        -- performance instead of the legacy fct_weekly_player_scores
-        -- join. The int now carries SUM(platform_points) plus the
-        -- slot-based hitting/pitching split (computed from
-        -- int_player_daily); this fact just rolls those up across the
-        -- player's active slots in the matchup. With this in place,
-        -- fct_weekly_player_scores + int_player_daily_scores become
-        -- dead models (dropped in H).
+        -- Platform scoring rolled up across the player's active slots
+        -- in the matchup. int_player_weekly_performance carries
+        -- SUM(platform_points) plus the slot-based hitting/pitching
+        -- split (computed at int_player_daily); this fact aggregates
+        -- those across surviving slots after the active filter.
         sum(platform_points)       as platform_points,
         sum(platform_hitting_pts)  as platform_hitting_pts,
         sum(platform_pitching_pts) as platform_pitching_pts,
@@ -233,13 +229,12 @@ select
     a.total_pitching_stat_pts as calculated_pitching_pts,
     a.total_stat_pts          as calculated_points,
 
-    -- Phase 7 Hpre: gross-negative-production rollup (per-day magnitude
-    -- of net-negative platform_points, summed across active days).
+    -- Gross-negative-production rollup (per-day magnitude of net-negative
+    -- platform_points, summed across active days).
     a.negative_points         as negative_points,
 
     -- Platform scoring (ESPN's pre-computed values, the official arbiter for W/L).
-    -- Phase 7 H: now sourced from int_player_weekly_performance via the active
-    -- CTE above (no more fct_weekly_player_scores join).
+    -- Sourced from int_player_weekly_performance via the active CTE above.
     a.platform_points,
     a.platform_hitting_pts,
     a.platform_pitching_pts

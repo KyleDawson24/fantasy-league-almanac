@@ -1,27 +1,18 @@
 -- int_player_weekly_performance.sql
--- Wide-format player-weekly rollup. Source: int_player_daily (C-chunk's
--- wide-daily model). Aggregates daily counting + per-stat point columns
--- + negative_points to the (season, matchup, team, player, slot) grain.
+-- Wide-format player-weekly rollup. Source: int_player_daily (the wide-daily
+-- model). Aggregates daily counting + per-stat point columns + negative_points
+-- to the (season, matchup, team, player, slot) grain.
 --
--- lineup_slot is preserved as a grain dimension so the fact layer can
--- filter active vs inactive contributions and aggregate the slot
--- dimension away post-filter. A player who occupied multiple slots
--- within a matchup_period produces multiple rows here — one per
--- (player, matchup, slot). The fact layer applies slot filter then
--- SUMs across surviving slots.
---
--- Phase 7 Hpre: source switched from int_player_daily_stats (long format,
--- one row per (player, scoring_period, stat_name) requiring CASE-WHEN
--- pivots) to int_player_daily (wide format, one row per (player,
--- scoring_period, slot) with stat columns already pivoted). The SQL
--- collapses from ~50 CASE-WHEN pivots to ~50 plain SUM(col) -- same
--- output, simpler shape, plus picks up int_player_daily's negative_points
--- column. Old int_player_daily_stats becomes a dead model in H.
+-- lineup_slot is preserved as a grain dimension so the fact layer can filter
+-- active vs inactive contributions and aggregate the slot dimension away
+-- post-filter. A player who occupied multiple slots within a matchup_period
+-- produces multiple rows here -- one per (player, matchup, slot). The fact
+-- layer applies the slot filter then SUMs across surviving slots.
 --
 -- Grain: one row per (season_year, matchup_period, team_id, player_id, lineup_slot).
--- Rates are computed at the fact layer because meaningful rate values
--- require the slot filter to be applied first (rate over all-slots sums
--- mixes active and bench production).
+-- Rates are computed at the fact layer because meaningful rate values require
+-- the slot filter to be applied first (rate over all-slots sums mixes active
+-- and bench production).
 
 with daily as (
     select * from {{ ref('int_player_daily') }}
@@ -39,17 +30,16 @@ weekly as (
         player_name,
         lineup_slot,
 
-        -- Phase 7 D1: flag columns derived from lineup_slot. Make the
-        -- active/inactive distinction explicit at the int layer so the
-        -- renamed active fact and the inactive fact can both filter
-        -- cleanly. Row count unchanged -- the int already carries every
-        -- slot (no filter at this layer); these columns just annotate
-        -- what's already there.
+        -- Flag columns derived from lineup_slot. Make the active/inactive
+        -- distinction explicit at the int layer so the active and inactive
+        -- facts can both filter cleanly. Row count unchanged -- the int
+        -- already carries every slot (no filter at this layer); these
+        -- columns just annotate what's already there.
         --
         -- performance_status mirrors the WHERE clause on the active fact
         -- (lineup_slot NOT IN ('BE', 'IL', 'FA') -> 'active').
-        -- wasted_bucket mirrors mart_wasted_points's grain dim: 'FA' for
-        -- free agents, 'ROSTERED_INACTIVE' for BE/IL, NULL for active.
+        -- wasted_bucket distinguishes the two flavors of inactive:
+        -- 'FA' for free agents, 'ROSTERED_INACTIVE' for BE/IL, NULL for active.
         case
             when lineup_slot in ('BE', 'IL', 'FA') then 'inactive'
             else 'active'
@@ -162,12 +152,9 @@ weekly as (
         -- without re-deriving from int_player_daily directly.
         sum(negative_points) as negative_points,
 
-        -- Phase 7 H: platform_points + slot-based hitting/pitching split
-        -- pulled through from int_player_daily so the active fact can
-        -- read them here instead of joining fct_weekly_player_scores.
-        -- This is the last piece of the legacy scores chain; with it in
-        -- place, fct_weekly_player_scores + int_player_daily_scores
-        -- become dead models and get dropped in H.
+        -- platform_points + slot-based hitting/pitching split pulled
+        -- through from int_player_daily so the active fact can read them
+        -- here without needing a separate scores-fact join.
         sum(platform_points)       as platform_points,
         sum(platform_hitting_pts)  as platform_hitting_pts,
         sum(platform_pitching_pts) as platform_pitching_pts,

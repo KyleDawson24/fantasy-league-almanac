@@ -130,7 +130,7 @@ def should_track_record(grain, stat_name, direction, polarity, always_tracked=No
 # Stats that don't sit in the scoring-settings seed but are meaningful
 # at team grain. Includes:
 #  - rate stats: ERA / WHIP / K/9 / K/BB / HR/9 / BB/9
-#  - WASTED_POINTS (from mart_wasted_points; team-only by construction)
+#  - WASTED_POINTS (derived from the inactive facts; team-only by construction)
 #  - derived counting stats: PA / SB-CS / W-L / SV-BLSV
 # These have no points_per_unit row in stg_scoring_settings, so
 # stat_catalog.get_polarity_map() doesn't carry an entry for them and

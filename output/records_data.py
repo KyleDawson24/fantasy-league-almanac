@@ -303,7 +303,7 @@ _DERIVED_STAT_FCT_EXPR = {
 # isn't reliable). count_value_occurrences returns None for these and
 # callers fall back to whatever visible-row count they have.
 _NON_FCT_COUNTABLE = frozenset({
-    'WASTED_POINTS',                      # lives in mart_wasted_points
+    'WASTED_POINTS',                      # derived from inactive facts, no direct fct col
     'ERA', 'WHIP', 'K_PER_9', 'K_PER_BB', # floats: exact-equality
     'HR_PER_9', 'BB_PER_9',               # tie counts unreliable
 })

@@ -1,41 +1,40 @@
 -- fct_weekly_player_inactive_performance.sql
--- Phase 7 E1: wide-format player-weekly fact for INACTIVE-slot performance
--- (lineup_slot IN ('BE', 'IL', 'FA')). Mirror of fct_weekly_player_active_
--- performance for the inactive half of the split; together they cover the
--- universe of player-weeks captured at int_player_weekly_performance.
+-- Wide-format player-weekly fact for INACTIVE-slot performance
+-- (lineup_slot IN ('BE', 'IL', 'FA')). Mirror of
+-- fct_weekly_player_active_performance for the inactive half of the split;
+-- together they cover the full universe of player-weeks captured at
+-- int_player_weekly_performance.
 --
 -- Grain: one row per (season_year, matchup_period, player_id, wasted_bucket).
 -- wasted_bucket is in the grain so a player who appeared as both BE/IL on a
 -- team AND as FA in the same matchup_period (rare: drop mid-week) produces
--- two rows instead of being collapsed. Mirrors mart_wasted_points's grain.
+-- two rows instead of being collapsed.
 --
--- team_id is NULLABLE: NULL for the 'FA' bucket (no fantasy team owns
--- free agents). For 'ROSTERED_INACTIVE', team_id is set to the team that
--- benched the player; MAX() aggregation handles the edge case of a player
--- traded mid-matchup-period within the inactive bucket.
+-- team_id is NULLABLE: NULL for the 'FA' bucket (no fantasy team owns free
+-- agents). For 'ROSTERED_INACTIVE', team_id is set to the team that benched
+-- the player; MAX() aggregation handles the edge case of a player traded
+-- mid-matchup-period within the same inactive bucket.
 --
 -- What's carried:
 --   - Wide counting + per-stat *_pts (same as the active fact)
---   - Catch-all totals: calculated_*. For inactive players, these
---     represent the unrealized point production -- what the player WOULD
---     have scored if started.
+--   - Catch-all totals: calculated_*. For inactive players, these represent
+--     the unrealized point production -- what the player WOULD have scored
+--     if started.
 --   - Player rate stats (era/whip/k_per_9/k_per_bb): present for symmetry
 --     with the active fact and for ad-hoc analysis. NOT surfaced at the
 --     mart leaderboard (the mart's player-grain UNPIVOT excludes them per
 --     the same noise-floor rationale as the active fact).
 --   - wasted_bucket dim
+--   - negative_points: per-day magnitude rollup, symmetric with the
+--     active fact.
 --
 -- What's omitted (vs the active fact):
---   - platform_* columns: per the brief, inactive players don't roll up to
---     a team's platform score (ESPN's home_score includes only active-slot
---     contributions). Individual per-day platform_points exists on
---     stg_box_scores / int_player_daily for inactive players, but
---     surfacing it at the weekly fact would suggest a team-rollup
---     equivalence that doesn't hold. Skipped for v1.0; if a consumer
+--   - platform_* columns: inactive players don't roll up to a team's
+--     platform score (ESPN's home_score includes only active-slot
+--     contributions). Per-day platform_points exists on int_player_daily
+--     for inactive players, but surfacing it at the weekly fact would
+--     suggest a team-rollup equivalence that doesn't hold. If a consumer
 --     needs it, derive from int_player_daily directly.
---   - negative_points: deferred. Will land when int_player_weekly_
---     performance switches source to int_player_daily (which carries the
---     per-day column). Symmetric add to both facts at that point.
 
 {{ config(
     materialized='incremental',
@@ -53,8 +52,8 @@ with inactive as (
 
         -- Carry-through identifiers. MAX picks one value when a player
         -- traded teams within a matchup_period while staying in the same
-        -- wasted_bucket (rare but possible; mirrors mart_wasted_points
-        -- convention). For FA bucket, all these are NULL by definition.
+        -- wasted_bucket (rare but possible). For the FA bucket, all these
+        -- are NULL by definition.
         max(team_id)         as team_id,
         max(team_name)       as team_name,
         max(team_abbrev)     as team_abbrev,

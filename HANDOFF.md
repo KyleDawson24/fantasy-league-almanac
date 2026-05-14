@@ -240,14 +240,15 @@ else:
 - `stg_box_scores` (view): 1:1 reshape of `RAW.BOX_SCORES` per `(season_year, scoring_period, team_id, player_id, lineup_slot)`. Adds `team_abbrev`, `eligible_slots`, `lineup_slot_category` (pitching/hitting/inactive), `games_played` (0/1/2 — DH support).
 - `stg_player_stat_breakdowns` (view): per-stat rows from RAW; joins `stat_classification` for `stat_category`.
 - `stg_scoring_settings` (view): latest snapshot from append-only RAW; per-stat `points_per_unit`.
-- `int_player_daily_stats` (view): slot-stat-category-validity-filtered (gated on `var('strict_slot_validity', true)`). Slot-blind kona stats credited only when `stat_category` matches `lineup_slot_category`.
-- `int_player_weekly_performance` (view): weekly rollup with wide pivots (count + `_pts` per stat) and catch-all totals (`total_hitting_stat_pts`, `total_pitching_stat_pts`, `total_stat_pts`) used for `calculated_*`.
-- `fct_weekly_player_performance` (incremental table): active-only (BE/IL/FA filtered out at this layer). Wide convergence row per `(season_year, matchup_period, player_id)`.
-- `fct_weekly_team_performance` (incremental table): SUM rollup of player fct (the team_total = SUM(players) invariant — with one documented exception: `platform_points` is sourced from wrapper `home_score` to honor commissioner adjustments).
-- `mart_wasted_points` (view): bench/IL/FA contributions per player-week, bucketed `'FA' | 'ROSTERED_INACTIVE'`.
-- `mart_stat_leaderboard` (view): UNPIVOT of fct columns into long format, ranked top-10 per `(grain, stat_name, scope, direction)`. Four ranked CTEs union'd: `most`/`fewest` × `all_time`/`current_season`. Phase 6.3.3 added derived stats (PA, SB-CS, W-L, SV-BLSV) inline at mart, rate stats from fct surfaced into team-grain UNPIVOT, and a `mart_wasted_points` LEFT JOIN.
+- `int_player_daily` (view): wide daily row per `(season, scoring_period, team, player, lineup_slot)`. Combines per-stat point contributions with per-player ESPN platform totals and player display metadata. Slot-stat-category-validity filtered (gated on `var('strict_slot_validity', true)`); slot-blind kona stats credited only when `stat_category` matches `lineup_slot_category`.
+- `int_player_weekly_performance` (view): weekly rollup of `int_player_daily` with wide counting + per-stat `_pts` + catch-all totals (`total_hitting_stat_pts`, `total_pitching_stat_pts`, `total_stat_pts`) + `negative_points` + platform totals. `lineup_slot` preserved as a grain dimension so the fact layer can filter active/inactive cleanly.
+- `fct_weekly_player_active_performance` (incremental table): active-only filter (lineup_slot NOT IN BE/IL/FA). Wide convergence row per `(season_year, matchup_period, team_id, player_id)`.
+- `fct_weekly_player_inactive_performance` (incremental table): symmetric counterpart for inactive slots, with `wasted_bucket` ('FA' or 'ROSTERED_INACTIVE') in the grain.
+- `fct_weekly_team_active_performance` (incremental table): team-grain rollup of the player active fact. The team_total = SUM(players) invariant holds for all columns except `platform_points` (sourced directly from the wrapper's `home_score` to honor commissioner adjustments; divergence captured in `platform_calculated_delta`).
+- `fct_weekly_team_inactive_performance` (incremental table): team-grain rollup of the player inactive fact, plus a single FA pool row per matchup (team_id NULL).
+- `mart_stat_leaderboard` (view): seed-driven Jinja UNPIVOT over all four facts (team_active, team_inactive, player_active, player_inactive) union'd into one combined CTE. Ranked top-10 per `(entity_grain, performance_status, stat_name, record_scope, record_direction)`. `performance_status` partition segregates active/inactive rankings; consumers default-filter to active.
 
-The mart is direction-agnostic (`most`/`fewest`); polarity-aware Best/Worst label belongs at consumer side via `records.best_or_worst_label`.
+The mart is direction-agnostic (`most`/`fewest`); polarity-aware Best/Worst label belongs at consumer side via `records_logic.best_or_worst_label`.
 
 ---
 
@@ -264,31 +265,31 @@ The hard-won stuff. If you need to debug something weird, check here first.
 5. **Stat IDs 22, 61, 78, 79, 80**: ESPN internal flags. Documented in seed `notes` column. Don't pivot.
 6. **Stat ID 66 (PG)** was previously misidentified as "Pitches Per Game"; Phase 3.2 confirmed via scoring settings (250-pt bonus) it's Perfect Games.
 7. **Stat ID 30 = Hit for the Cycle (CYC)** (Phase 7 archaeology): same scoring-weight pattern as PG/SHO. 15 pts/unit (rare-event tier with NH no-hitters), 2 observed rows across 2 seasons matching real cycle candidates. Seed labels it correctly post-Phase-7. `is_record_candidate=false` for now (no wide column on any fact); v1.x candidate for promotion to a tracked stat with a league_notes.py "First cycle of the season!" callout.
-8. **Stat ID 31 (seed name `CYC`)** is NOT cycles — labeled as such since seed import but disproven by Phase 7: 148 non-zero rows across 113 players over 2 seasons (impossible for cycles; real MLB has ~5-10 per year league-wide) and no scoring weight. Some other ESPN daily-achievement flag (multi-hit game? extra-base-hit-game?). Seed updated to flag the mislabel; `is_counting=false` so it drops at int_player_daily_stats.
+8. **Stat ID 31 (seed name `CYC`)** is NOT cycles — labeled as such since seed import but disproven by Phase 7: 148 non-zero rows across 113 players over 2 seasons (impossible for cycles; real MLB has ~5-10 per year league-wide) and no scoring weight. Some other ESPN daily-achievement flag (multi-hit game? extra-base-hit-game?). Seed updated to flag the mislabel; `is_counting=false` so it drops at int_player_daily.
 
 ### Scoring-settings + leaderboard naming
 
 - The `stat_classification` seed uses ESPN's raw stat IDs/names: `'1B'`, `'2B'`, `'3B'`, `'64'`, `'B_IBB'`, `'HBP_P'`, etc.
 - The leaderboard mart uses spelled-out column names: `'SINGLES'`, `'DOUBLES'`, `'TRIPLES'`, `'SHO'`, etc.
-- `_SEED_TO_LEADERBOARD` in `records.py` translates between them. Add to this dict whenever a new seed→column rename happens.
+- `SEED_TO_LEADERBOARD` in `output/stat_catalog.py` translates between them (Python side). The dbt mart applies the equivalent rename via Jinja seed-loop aliases. Add to both whenever a new seed→column rename happens.
 
 ### Polarity conventions
 
-- `get_stat_polarity()` derives from `sign(points_per_unit)` in `stg_scoring_settings`. Stats without a row are `'neutral'` and don't surface as records.
-- `get_effective_polarity()` augments with `_IMPLICIT_POLARITY` for stats not in scoring settings: rates (ERA/WHIP/BB9/HR9 → negative; K9/KBB → positive), WASTED_POINTS → negative, derived stats (PA/SB-CS/W-L/SV-BLSV → positive), score columns → positive.
-- `is_always_tracked` seed flag (Phase 6.3.3): bypasses the polarity rule at team grain. Currently flagged: H, TB, XBH, SF, ER, PA. Edit the seed to add/remove members; reseed (`dbt seed --full-refresh -s stat_classification`).
+- Polarity is stored as a column in `stat_classification` (`positive` | `negative` | `neutral`) and read at runtime via `stat_catalog.get_polarity_map()`. The seed value pre-merges what used to be runtime logic: `sign(points_per_unit)` from scoring settings for scored stats, plus hardcoded values for stats not in scoring settings (rates ERA/WHIP/BB9/HR9 → negative; K9/KBB → positive; WASTED_POINTS → negative; derived stats PA/SB-CS/W-L/SV-BLSV → positive; score columns → positive). To change polarity, edit the seed CSV directly and reseed.
+- Stats with `polarity = 'neutral'` (or absent from the seed entirely) don't surface as records.
+- `is_always_tracked` seed flag: bypasses the polarity rule at team grain. Currently flagged: H, TB, XBH, SF, ER, PA. Edit the seed to add/remove members; reseed (`dbt seed --full-refresh -s stat_classification`).
 
 ### `platform_*` vs `calculated_*`
 
 This distinction is load-bearing — get it wrong and analytics will lie:
 - **`platform_*`**: direct API passthrough, zero math. Player-level is slot-blind (kona's `appliedTotal`); team-level is wrapper's `home_score`/`away_score` (slot-aware AND inclusive of commissioner adjustments).
-- **`calculated_*`**: our derivation under current-season scoring settings, with full slot-validity filter applied at `int_player_daily_stats`.
+- **`calculated_*`**: our derivation under current-season scoring settings, with full slot-validity filter applied at `int_player_daily`.
 - **The team_total = SUM(players) invariant has a documented exception**: for `platform_points` specifically, team-level is the wrapper's authoritative number, NOT the player rollup. The divergence (when slot misuse exists) is meaningful, not drift, and is exposed via `platform_calculated_delta`. All other counting/scoring columns hold the invariant.
 - **Records flipped to `calculated_*` in Phase 5**: cross-season comparison is meaningful only under current weights. The recap section's best/worst team callouts and Top Hitter/Pitcher still source from `platform_*` because the recap is about what happened (W/L outcomes are platform-determined).
 
 ### Slot validity filter
 
-`int_player_daily_stats` filters `stat_category = lineup_slot_category` (or `'fielding'` or `'inactive'`), gated on `var('strict_slot_validity', true)`. Set the var to false to disable in case ESPN's behavior changes cross-platform. Inactive (BE/IL/FA) rows bypass the filter so wasted-points sees the full stat lines.
+`int_player_daily` filters `stat_category = lineup_slot_category` (or `'fielding'` or `'inactive'`), gated on `var('strict_slot_validity', true)`. Set the var to false to disable in case ESPN's behavior changes cross-platform. Inactive (BE/IL/FA) rows bypass the filter so wasted-points sees the full stat lines.
 
 ### `is_abnormal` matchup periods
 
@@ -298,9 +299,9 @@ This distinction is load-bearing — get it wrong and analytics will lie:
 
 `matchup_schedule.is_playoff` and `matchup_schedule.playoff_round` (currently `'Round 1'` / `'Semi-Finals'` / `'Finals'`) drive `format_week_label()` substitution. As of handoff: 2025 MP24-26 are tagged playoff. 2026 playoffs not yet played.
 
-### Connection management (current state)
+### Connection management
 
-`output/records.py::query_snowflake` opens and closes a connection per call. Cost is modest (~10-20 calls per script run). Consolidating to a single connection is on the roadmap (see §10). When you fix this, watch for: cursor cleanup, error-handling around connection failure, and don't let one user-facing crash leak the connection.
+`output/db.py::query_snowflake` is the shared Snowflake connection wrapper used by every output script. `db.init()` opens a single connection per script run; subsequent `query_snowflake()` calls reuse it. Cursor cleanup + error handling are encapsulated in the wrapper.
 
 ### Worktree convention
 
@@ -315,9 +316,9 @@ These are calls already made; lead with the established pattern rather than re-d
 ### dbt patterns
 
 - **Wide convergence facts at consumer grain**. Counting + rate + `_pts` + scoring totals all in one wide row per (player|team)-week.
-- **`fct_weekly_team_performance` reads from `fct_weekly_player_performance`**. Team totals are *defined* as `SUM(players)`, eliminating drift (with the `platform_points` exception noted above).
+- **`fct_weekly_team_active_performance` reads from `fct_weekly_player_active_performance`**. Team totals are *defined* as `SUM(players)`, eliminating drift (with the `platform_points` exception noted above).
 - **Macros for grain-agnostic formulas** (`macros/rate_stats.sql`).
-- **Slot-agnostic intermediate, filter at fact**. `int_player_daily_stats` keeps `lineup_slot`. Active filter (`NOT IN ('BE', 'IL', 'FA')`) at the fact.
+- **Slot-agnostic intermediate, filter at fact**. `int_player_daily` and `int_player_weekly_performance` keep `lineup_slot` in the grain. Active filter (`NOT IN ('BE', 'IL', 'FA')`) at the active fact; inverse filter at the inactive fact.
 - **Disambiguation at intermediate, not staging** (Phase 3.2): when a name collision needs context to resolve (e.g., HBP batter vs HBP pitcher pre-Phase-4), do it at int. Staging stays a pure reshape. **Phase 4 superseded this pattern for HBP** by overriding at extract via `_STAT_ID_TO_NAME` — better still.
 - **Catch-all totals beat per-stat enumeration for `calculated_points`**. Sum `stat_points` across all categories regardless of whether the stat has a wide pivot column. Robust to seed updates.
 - **Per-stat `*_pts` columns retained alongside catch-all**. Catch-all is for `calculated_*`; per-stat columns serve consumer-side rankings.
@@ -414,7 +415,7 @@ The user mentioned wanting to address some refactoring during their separate Pha
 16. **Tracked-stats config seed/YAML for cross-league portability** (v2). The Phase 6.3.3 chunk-1 stat list is hardcoded into mart UNPIVOT lists; cross-league portability would want a config-driven version.
 17. **"Non-playoff teams during playoff weeks" edge case** (v1.x). 8 teams play; 6 teams have `is_playoff=true` `matchup_period` rows but are eliminated and contribute zero stats — currently they show as "fewest of everything" records. Not blocking but slightly misleading.
 18. **Wire `owner_nicknames` seed into models**. Currently the seed exists but isn't joined; output scripts read it ad-hoc.
-19. **`fct_team_career_stats` mart**. Career-aggregate equivalent of `fct_weekly_team_performance`.
+19. **`fct_team_career_stats` mart**. Career-aggregate equivalent of `fct_weekly_team_active_performance`.
 20. **Investigate explicit `pointsAdjustment` field** in ESPN API to split `platform_calculated_delta` into clean `commissioner_adjustment` + `derivation_delta`.
 21. **Verify stat ID 30** (15 pts per, only 1 observed row) — is this a real scored stat we're missing?
 22. **GitHub Actions CI on PRs**: `dbt test` + Python compile checks.

@@ -1,38 +1,36 @@
 -- fct_weekly_team_inactive_performance.sql
--- Phase 7 E3: team-grain rollup of inactive (BE/IL/FA) player performance.
+-- Team-grain rollup of inactive (BE/IL/FA) player performance.
 -- Symmetric counterpart to fct_weekly_team_active_performance for the
 -- inactive half of the player-weekly split.
 --
 -- Grain: one row per (season_year, matchup_period, team_id, wasted_bucket).
 -- Two row flavors per matchup:
---   - 14 ROSTERED_INACTIVE rows (one per team; team_id set)
+--   - N ROSTERED_INACTIVE rows (one per fantasy team; team_id set)
 --   - 1 FA row (league-wide aggregate; team_id NULL). The FA pool is not
---     attributable to a specific team -- mart_wasted_points's convention.
+--     attributable to a specific team.
 --
--- team_id NULLABLE: the FA bucket carries no team. GROUP BY team_id
--- handles NULL as a single group, so all FA player-weeks roll up into
--- ONE row per (season_year, matchup_period, 'FA') by construction.
+-- team_id NULLABLE: the FA bucket carries no team. GROUP BY team_id handles
+-- NULL as a single group, so all FA player-weeks roll up into ONE row per
+-- (season_year, matchup_period, 'FA') by construction.
 --
 -- What's carried:
---   - Counting + per-stat *_pts (SUM rollups of the player-level inactive
---     fact)
+--   - Counting + per-stat *_pts (SUM rollups of the player-level inactive fact)
 --   - Catch-all calculated_* totals (unrealized point production at the
 --     team / FA-pool level)
 --   - wasted_bucket dim
+--   - negative_points rollup (symmetric with the active team fact)
 --
 -- What's omitted (asymmetries vs the active team fact -- intentional):
 --   - platform_points: no wrapper home_score equivalent for "the team's
 --     bench." Inactive contributions don't roll up to an ESPN team total.
 --   - platform_hitting_pts / platform_pitching_pts: today's player-level
---     hitting/pitching split derives from lineup_slot
---     (SP/RP -> pitching, else -> hitting), which gives bogus results for
---     bench players (a bench pitcher in BE slot would categorize as
---     'hitting' under that rule). A position-driven split would be the
---     right fix and lives in v1.x. v1.0 just skips these columns.
+--     hitting/pitching split derives from lineup_slot (SP/RP/P -> pitching,
+--     else -> hitting), which gives bogus results for bench players (a
+--     bench pitcher in BE slot would categorize as 'hitting' under that
+--     rule). A position-driven split would be the right fix and lives in
+--     v1.x. v1.0 just skips these columns.
 --   - Team rates (era, whip, etc.): bench rate stats aren't meaningfully
 --     interpretable (sum of bench IP that didn't get pitched). Skipped.
---   - negative_points: deferred (matches the player-inactive fact's
---     deferral pending int_player_weekly_performance source switch).
 --
 -- Materialization: table (not incremental). The unique_key includes
 -- team_id which is NULL for FA rows; dbt's incremental MERGE treats

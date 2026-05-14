@@ -21,13 +21,13 @@
 -- defensive raw_json:matchups extraction (returns NULL on the array shape,
 -- which the lateral flatten then yields zero rows for).
 --
--- Phase 4: lineup_slot_category derived here as a clean three-value bucket:
+-- lineup_slot_category derived here as a clean three-value bucket:
 --   'pitching' = SP/RP/P (any pitcher slot)
 --   'hitting'  = any other active slot (1B, 2B, ..., DH, UTIL, etc.)
 --   'inactive' = BE/IL/FA
--- Used at int_player_daily_stats for the slot-stat-category compatibility
--- filter (a hitter's hitting stats only count when they're in a hitting
--- slot, etc.) — toggleable via the strict_slot_validity dbt var.
+-- Used downstream at int_player_daily for the slot-stat-category
+-- compatibility filter (a hitter's hitting stats only count when they're in
+-- a hitting slot, etc.) -- toggleable via the strict_slot_validity dbt var.
 
 with raw as (
     select

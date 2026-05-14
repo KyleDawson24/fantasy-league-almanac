@@ -38,16 +38,16 @@ models:
     marts:
       +materialized: table
 
-# Phase 4: project-level vars
+# Project-level vars
 vars:
-  # When true (default), int_player_daily_stats filters out stat rows whose
-  # stat_category does not match the player's lineup_slot_category — i.e.
+  # When true (default), int_player_daily filters out stat rows whose
+  # stat_category does not match the player's lineup_slot_category -- i.e.
   # a hitter's hitting stats only count when they're in a hitting slot, a
   # pitcher's pitching stats only count from a pitching slot. This matches
   # ESPN's team-scoring behavior. Set to false to credit cross-slot stats
   # (e.g., a hitter slotted at RP gets full credit for their hitting line).
-  # Inactive rows (BE/IL/FA) bypass the filter regardless so wasted-points
-  # captures all stat lines.
+  # Inactive rows (BE/IL/FA) bypass the filter regardless so the inactive
+  # facts capture full stat lines.
   strict_slot_validity: true
 
 seeds:

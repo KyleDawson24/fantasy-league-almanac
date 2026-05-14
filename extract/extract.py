@@ -444,7 +444,7 @@ def serialize_box_scores(league, scoring_period, matchup_period):
     # Anti-join: every kona player NOT in any wrapper lineup is a FA today.
     # Lineup slot literal 'FA' (not in espn-api POSITION_MAP) keeps the
     # downstream slot-bucket logic consistent: BE/IL/FA all flow through
-    # int_player_daily_stats and split at mart_wasted_points.
+    # int_player_daily and split at the inactive facts via wasted_bucket.
     free_agents = []
     for player_id, raw in all_player_stats.items():
         if player_id in rostered_ids:

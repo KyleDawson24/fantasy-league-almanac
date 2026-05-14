@@ -1,13 +1,7 @@
 -- int_player_daily.sql
--- Phase 7 C: wide daily row per (season, scoring_period, team, player, slot)
--- consolidating today's int_player_daily_stats (long, stat-level points) +
--- int_player_daily_scores (per-player ESPN platform total).
---
--- This is an ADDITIVE new model. The old int_player_daily_stats /
--- int_player_daily_scores stay in place and feed
--- int_player_weekly_performance unchanged until sub-chunk D rewires the
--- weekly model to consume this one. Final consumer cutover happens in
--- sub-chunks G/H.
+-- Wide daily row per (season, scoring_period, team, player, lineup_slot).
+-- Combines per-stat point contributions with per-player ESPN platform totals
+-- and player display metadata in one row.
 --
 -- Grain: (season_year, scoring_period, team_id, player_id, lineup_slot).
 -- matchup_period travels as a derived column (functionally determined by
@@ -17,45 +11,40 @@
 -- Carries:
 --   - Identifier 5-tuple + matchup_period
 --   - Player metadata: display_name (nickname-resolved), position, pro_team,
---     lineup_slot_category, games_played
+--     eligible_slots, lineup_slot_category, games_played
 --   - platform_points: ESPN's per-player per-day total (from stg_box_scores)
---   - Wide counting stats for the 39 stats that flow through
---     int_player_daily_stats today (post-B1's PA is_counting=false drop)
+--   - Wide counting stats for every scored stat in the seed
 --   - Per-stat *_pts: stat_value * current-season points_per_unit, computed
---     via the stg_scoring_settings join (Phase 7 follows HANDOFF §7's
---     calculated_* semantic: current weights applied universally including
---     to historical rows -- stg_scoring_settings already surfaces only the
---     current season's settings, so this is automatic)
+--     via the stg_scoring_settings join. Calculated_* semantic per HANDOFF §7:
+--     current weights applied universally, including to historical rows
+--     (stg_scoring_settings surfaces only current-season settings, so this is
+--     automatic).
 --   - Catch-all totals: total_hitting_stat_pts, total_pitching_stat_pts,
 --     total_stat_pts (sum across ALL scored stats, robust to future seed
 --     additions even if the per-stat *_pts columns don't get extended)
 --   - is_active_slot: true when lineup_slot_category != 'inactive'.
 --     Downstream active/inactive facts apply the inverse filter at their
---     level; this model carries every slot so both can read from one source
+--     level; this model carries every slot so both can read from one source.
 --   - negative_points: magnitude (positive) sum of all negative point
---     contributions on this day. Per design table, the per-day generalization
---     of the doubly_wasted_pts concept (which today lives in the recap
---     formatter). Stored as magnitude so the leaderboard's
---     ORDER BY stat_value DESC ranks "most damage" naturally
+--     contributions on this day. Stored as magnitude so the leaderboard's
+--     ORDER BY stat_value DESC ranks "most damage" naturally.
 --
 -- The pivot uses seed-side stat_names as CASE keys ('1B'/'2B'/'3B'/'64' for
--- SINGLES/DOUBLES/TRIPLES/SHO) with column aliases as the leaderboard
--- column names -- matching int_player_weekly_performance's existing
--- convention. The seed-to-leaderboard translation lives in stat_catalog.py
--- (for Python consumers) and in this CASE-key/alias pattern (for SQL).
+-- SINGLES/DOUBLES/TRIPLES/SHO) with column aliases as the leaderboard column
+-- names. The seed-to-leaderboard translation lives in stat_catalog.py (for
+-- Python consumers) and in this CASE-key/alias pattern (for SQL).
 --
--- Materialization: view. Daily layer at our scale (~600K rows) reads fine
+-- Materialization: view. Daily layer at this scale (~600K rows) reads fine
 -- live; the table cost is at the weekly layer one level up. View at daily,
 -- table at weekly is the right split.
 
 {{ config(materialized='view') }}
 
 with daily_long as (
-    -- Mechanical replica of int_player_daily_stats's filter chain. INNER
-    -- JOIN classification (is_counting=true filter), LEFT JOIN scoring
-    -- settings (current-season weights). Slot-stat compatibility filter
-    -- kept identical so per-stat hitter-in-pitching-slot mismatches drop
-    -- the same way they do today.
+    -- Long-form per-stat join chain: INNER JOIN classification
+    -- (is_counting=true filter), LEFT JOIN scoring settings
+    -- (current-season weights). Slot-stat compatibility filter ensures
+    -- hitter-in-pitching-slot mismatches drop appropriately.
     select
         d.season_year,
         d.matchup_period,

@@ -122,7 +122,7 @@ worth surfacing:
   a free agent on a given day, query kona without status filter and
   anti-join against the wrapper's rostered lineups for that
   scoring period. Captures transactions correctly without a transaction
-  log — and it took embarrassingly long to think of.
+  log.
 
 - **Seed-driven Jinja UNPIVOT in `mart_stat_leaderboard` ([Phase 7](archive/phase_7_working/)).**
   The leaderboard's wide-to-long pivot used to live as a hand-maintained

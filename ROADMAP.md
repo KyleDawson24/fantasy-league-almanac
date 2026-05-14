@@ -77,6 +77,31 @@ a single afternoon.
   contention would let records filter or annotate accordingly. Scoped
   as v1.x for now; may slide to v2.0 depending on what playoff-bracket
   data the ESPN API exposes (discovery TBD).
+- **Auto-populate `matchup_schedule` from ESPN settings API.** Currently
+  `matchup_schedule.csv` is a hand-maintained seed (~25 rows per season:
+  date ranges, `is_playoff`, `playoff_round`, `is_abnormal`). Most fields
+  are derivable from the espn-api wrapper's `league.settings`:
+  - `season_year`, `matchup_period`, `start_date`, `end_date` from
+    `settings.matchup_periods` (dict of mp → scoring_period list)
+  - `is_playoff`: anything past `settings.regular_season_count`
+  - `playoff_round`: derived from `settings.playoff_team_count` plus
+    position of mp within the playoff range
+
+  `is_abnormal` (All-Star break, weather-shortened weeks, commissioner-
+  declared anomalies) is the only genuinely manual field — no ESPN API
+  concept for it.
+
+  Proposed shape: `extract.py` writes a new `raw.matchup_schedule`
+  (append-only with `extracted_at`); a new `stg_matchup_schedule` model
+  takes the latest snapshot and joins to a tiny
+  `matchup_schedule_overrides.csv` seed carrying only `is_abnormal`
+  patches (default false; commissioner adds rows when needed). Reduces
+  new-user setup friction from "populate 25 rows per season" to
+  "occasionally flag a weird week." Estimated effort: 1-2 days.
+
+  Before starting: maintainer has additional automation heuristics in
+  mind (particularly around `is_abnormal` detection and the override-
+  seed shape). Confirm scope before writing code.
 
 ### New analytics surfaces (data already exists)
 

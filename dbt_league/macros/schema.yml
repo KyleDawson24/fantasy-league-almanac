@@ -1,0 +1,151 @@
+version: 2
+
+macros:
+
+  # Hitting rates --------------------------------------------------------------
+
+  - name: batting_avg
+    description: >
+      Batting average: H / AB. Returns NULL when AB = 0. Grain-agnostic --
+      pass any hits / at-bats column names and apply at any grain.
+    arguments:
+      - name: h
+        type: string
+        description: 'Hits column name. Defaults to ''h''.'
+      - name: ab
+        type: string
+        description: 'At-bats column name. Defaults to ''ab''.'
+
+  - name: on_base_pct
+    description: >
+      On-base percentage: (H + BB + HBP) / (AB + BB + HBP + SF).
+      Returns NULL when the denominator is 0.
+    arguments:
+      - name: h
+        type: string
+        description: 'Hits column. Defaults to ''h''.'
+      - name: bb
+        type: string
+        description: 'Batter walks column. Defaults to ''b_bb''.'
+      - name: hbp
+        type: string
+        description: 'Hit-by-pitch column. Defaults to ''hbp''.'
+      - name: ab
+        type: string
+        description: 'At-bats column. Defaults to ''ab''.'
+      - name: sf
+        type: string
+        description: 'Sacrifice flies column. Defaults to ''sf''.'
+
+  - name: slugging_pct
+    description: >
+      Slugging percentage: TB / AB. Returns NULL when AB = 0.
+    arguments:
+      - name: tb
+        type: string
+        description: 'Total bases column. Defaults to ''tb''.'
+      - name: ab
+        type: string
+        description: 'At-bats column. Defaults to ''ab''.'
+
+  - name: ops
+    description: >
+      OPS: OBP + SLG. Composes on_base_pct and slugging_pct so there's
+      still only one definition of each underlying formula.
+    arguments:
+      - name: h
+        type: string
+        description: 'Hits column. Defaults to ''h''.'
+      - name: bb
+        type: string
+        description: 'Batter walks column. Defaults to ''b_bb''.'
+      - name: hbp
+        type: string
+        description: 'Hit-by-pitch column. Defaults to ''hbp''.'
+      - name: ab
+        type: string
+        description: 'At-bats column. Defaults to ''ab''.'
+      - name: sf
+        type: string
+        description: 'Sacrifice flies column. Defaults to ''sf''.'
+      - name: tb
+        type: string
+        description: 'Total bases column. Defaults to ''tb''.'
+
+  # Pitching rates -------------------------------------------------------------
+  # All pitching rates use innings pitched (IP = outs / 3) as the denominator.
+
+  - name: era
+    description: >
+      Earned run average: ER * 9 / IP, where IP = OUTS / 3.
+      Returns NULL when OUTS = 0.
+    arguments:
+      - name: er
+        type: string
+        description: 'Earned runs allowed column. Defaults to ''er''.'
+      - name: outs
+        type: string
+        description: 'Outs recorded column. Defaults to ''outs''.'
+
+  - name: whip
+    description: >
+      Walks + hits per inning pitched: (P_BB + P_H) / IP.
+      Returns NULL when OUTS = 0.
+    arguments:
+      - name: p_bb
+        type: string
+        description: 'Walks allowed column. Defaults to ''p_bb''.'
+      - name: p_h
+        type: string
+        description: 'Hits allowed column. Defaults to ''p_h''.'
+      - name: outs
+        type: string
+        description: 'Outs recorded column. Defaults to ''outs''.'
+
+  - name: k_per_9
+    description: >
+      Strikeouts per 9 innings: K * 9 / IP. Returns NULL when OUTS = 0.
+    arguments:
+      - name: k
+        type: string
+        description: 'Pitcher strikeouts column. Defaults to ''k''.'
+      - name: outs
+        type: string
+        description: 'Outs recorded column. Defaults to ''outs''.'
+
+  - name: k_per_bb
+    description: >
+      Strikeout-to-walk ratio: K / P_BB. Returns NULL when P_BB = 0.
+    arguments:
+      - name: k
+        type: string
+        description: 'Pitcher strikeouts column. Defaults to ''k''.'
+      - name: p_bb
+        type: string
+        description: 'Walks allowed column. Defaults to ''p_bb''.'
+
+  - name: hr_per_9
+    description: >
+      Home runs allowed per 9 innings: P_HR * 9 / IP. Returns NULL when
+      OUTS = 0. Surfaced as a fct column on the team active fact for the
+      seed-driven leaderboard UNPIVOT.
+    arguments:
+      - name: p_hr
+        type: string
+        description: 'Home runs allowed column. Defaults to ''p_hr''.'
+      - name: outs
+        type: string
+        description: 'Outs recorded column. Defaults to ''outs''.'
+
+  - name: bb_per_9
+    description: >
+      Walks per 9 innings: P_BB * 9 / IP. Returns NULL when OUTS = 0.
+      Surfaced as a fct column on the team active fact for the
+      seed-driven leaderboard UNPIVOT.
+    arguments:
+      - name: p_bb
+        type: string
+        description: 'Walks allowed column. Defaults to ''p_bb''.'
+      - name: outs
+        type: string
+        description: 'Outs recorded column. Defaults to ''outs''.'

@@ -674,52 +674,57 @@ External coordination:
 
 ## Git History (commits in Phase 7)
 
-39 commits on `claude/optimistic-euclid-8ec80e` (oldest first):
+46 commits on `claude/optimistic-euclid-8ec80e` (oldest first):
 
 ```
-56e3c32 Phase 7 prep: test scaffold, connection consolidation, output polish
-457a7a9 Phase 7 architecture review (working doc)
-dbc0318 Phase 7 continuation brief (working doc) for fresh-chat resumption
-20f78a2 Phase 7 Step A: golden-output baseline + row-count snapshot
-9b0c3e3 Phase 7 Step B1: stat_classification seed expansion (Y-scope)
-073c262 Phase 7 B1 fix: preserve recap behavior + mart tiebreak
-1f6d365 Phase 7 Step B2: seed-query helper module
-75624e8 Phase 7 Step C: int_player_daily wide-daily model
-25bd5de Phase 7 Step D1: performance_status + wasted_bucket flags on weekly int
-e2767e8 Phase 7 Step D2: rename active fact + fix contributor tiebreak flakes
-45eac88 Phase 7 Step D3: switch active fact filter to performance_status
-8d9e5f9 Phase 7 Step E1: fct_weekly_player_inactive_performance
-07aa8e3 Phase 7 Step E2: rename team active fact + transitional compat view
-52cf536 Phase 7 Step E3: fct_weekly_team_inactive_performance
-f23d508 Phase 7 Step E4: promote hr_per_9 / bb_per_9 to fct columns
-05761a5 Phase 7 F-prep: exclude stat 30 from is_record_candidate
-5f4550a Phase 7 Step F: seed-driven Jinja UNPIVOT + performance_status partition
-c5e0d24 Phase 7 post-F cleanup: cycles archaeology + 3 latent bug fixes
-4b85b8b Phase 7 Step G1: rewire formatters.STAT_DISPLAY/STAT_ABBREV to stat_catalog
-334fe7f Phase 7 G2 + G4: collapse polarity logic into stat_catalog; widen SCORE_STAT_NAMES
-332a2ed Phase 7 G3: rename Python refs to fct_weekly_team_active_performance
-dd74daf Phase 7 Step G5: rewire get_wasted_points to fct_weekly_player_inactive_performance
-08b2736 Phase 7 Hpre: int_player_weekly_performance from int_player_daily + negative_points rollup
-4d66f75 Phase 7 Step H: drop dead/holdover models + rewire active fact off scores chain
-9a895d9 Phase 7 Steps 3-5 continuation brief for fresh-chat resumption
-4859146 Phase 7 Step 3: split records.py into data + logic + thin orchestrator
-1e87286 Phase 7 Step 3 brief update: §4 SHIPPED + deviations + v1.x note
-73bc195 Phase 7 Step 4 safe-tier: requirements.txt UTF-8 + relocate research scripts
-a3e23e1 Phase 7 Step 4: add MIT LICENSE
-7ce6bb4 Phase 7 Step 5: archive Phase 7 working docs
-6c17e9c Phase 7 Step 5: add CHANGELOG.md
-5b0483b Phase 7 Step 5: add ROADMAP.md
-0fb733f Phase 7 Step 5: dbt schema.yml cleanup pass
-b46112a Phase 7 architecture: rewire wasted-points consumer + add exposures + player-mart ROADMAP
-2e2b757 Phase 7 architecture: fix generic-P-slot misclassification in platform hit/pitch split
-284774e Phase 7 architecture: stale model-reference cleanup + delete broken regen tool
-3f25824 Phase 7 Step 5: add dbt_league/seeds/schema.yml
-be83e79 ROADMAP: add v1.x "auto-populate matchup_schedule from ESPN settings"
-894edff Phase 7 Step 5: add models/overview.md (dbt docs catalog landing page)
-27c70ae Phase 7 Step 5: add dbt_league/macros/schema.yml
-4ce027a Phase 7 Step 5: add SETUP.md + fix exposures.yml repo URLs
-68d186f Phase 7 Step 5: add README.md
-49625d5 overview.md: align H1 with README's "Fantasy Beat Reporter" branding
+42333d5 Phase 7 prep: test scaffold, connection consolidation, output polish
+204167b Phase 7 architecture review
+daa2c3c Phase 7 continuation brief
+e2aaff2 Phase 7 Step A: golden-output baseline + row-count snapshot
+9d96463 Phase 7 Step B1: stat_classification seed expansion (Y-scope)
+79bdd0e Phase 7 B1 fix: preserve recap behavior + mart tiebreak
+0df0a40 Phase 7 Step B2: seed-query helper module
+b99d838 Phase 7 Step C: int_player_daily wide-daily model
+79ba57c Phase 7 Step D1: performance_status + wasted_bucket flags on weekly int
+11a22c1 Phase 7 Step D2: rename active fact + fix contributor tiebreak flakes
+9fff538 Phase 7 Step D3: switch active fact filter to performance_status
+4ca48e5 Phase 7 Step E1: fct_weekly_player_inactive_performance
+0a38ffa Phase 7 Step E2: rename team active fact + transitional compat view
+32bba21 Phase 7 Step E3: fct_weekly_team_inactive_performance
+ba203b4 Phase 7 Step E4: promote hr_per_9 / bb_per_9 to fct columns
+aeaef77 Phase 7 F-prep: exclude stat 30 from is_record_candidate
+484d2fe Phase 7 Step F: seed-driven Jinja UNPIVOT + performance_status partition
+008823d Phase 7 post-F cleanup: cycles archaeology + 3 latent bug fixes
+1282296 Phase 7 Step G1: rewire formatters.STAT_DISPLAY/STAT_ABBREV to stat_catalog
+5b34312 Phase 7 G2 + G4: collapse polarity logic into stat_catalog; widen SCORE_STAT_NAMES
+944dfd6 Phase 7 G3: rename Python refs to fct_weekly_team_active_performance
+52a8082 Phase 7 Step G5: rewire get_wasted_points to fct_weekly_player_inactive_performance
+5cf682d Phase 7 Hpre: int_player_weekly_performance from int_player_daily + negative_points rollup
+bca9f56 Phase 7 Step H: drop dead/holdover models + rewire active fact off scores chain
+a737408 Phase 7 Steps 3-5 continuation brief
+c116bfd Phase 7 Step 3: split records.py into data + logic + thin orchestrator
+ecbeba9 Phase 7 Step 3 brief update: §4 SHIPPED + deviations + v1.x note
+3a897e6 Phase 7 Step 4 safe-tier: requirements.txt UTF-8 + relocate research scripts
+43ad5df Phase 7 Step 4: add MIT LICENSE
+21a15b3 Phase 7 Step 5: archive Phase 7 working docs
+016d7b2 Phase 7 Step 5: add CHANGELOG.md
+430f761 Phase 7 Step 5: add ROADMAP.md
+1eb1c67 Phase 7 Step 5: dbt schema.yml cleanup pass
+0c514f4 Phase 7 architecture: rewire wasted-points consumer + add exposures + player-mart ROADMAP
+33ed5c8 Phase 7 architecture: fix generic-P-slot misclassification in platform hit/pitch split
+a2541ac Phase 7 architecture: stale model-reference cleanup + delete broken regen tool
+a38f5ad Phase 7 Step 5: add dbt_league/seeds/schema.yml
+b461bbb ROADMAP: add v1.x "auto-populate matchup_schedule from ESPN settings"
+105ae32 Phase 7 Step 5: add models/overview.md (dbt docs catalog landing page)
+d096a27 Phase 7 Step 5: add dbt_league/macros/schema.yml
+12f8a9e Phase 7 Step 5: add SETUP.md + fix exposures.yml repo URLs
+ed23534 Phase 7 Step 5: add README.md
+ca72f73 overview.md: align H1 with README's "Fantasy Beat Reporter" branding
+fdcaf8b Phase 7 Step 5: add Phase 7 Documentation.md (retrospective)
+94a05d8 Pre-v1.0 fixes: dbt deps, output schema env var, .env defaults, doc tweaks
+d54b39c HANDOFF.md: post-Phase-7 staleness sweep
 ```
+
+(Plus the commit-message sweep on top, which refreshed this list.)
 
 (This doc and the v1.0.0 tag will close the phase.)

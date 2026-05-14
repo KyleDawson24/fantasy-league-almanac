@@ -114,7 +114,11 @@ match the defaults in this guide. Customize freely; the pipeline
 expects:
 
 - `RAW` schema for the append-only JSON landed by the Python extractor
-- `ANALYTICS` schema (or whatever your dbt target is) for the dbt models
+  (env: `SNOWFLAKE_SCHEMA`)
+- `ANALYTICS` schema for the dbt models (env:
+  `SNOWFLAKE_ANALYTICS_SCHEMA`, defaults to `ANALYTICS` if unset). Output
+  scripts read from this schema; if you pick a different dbt target
+  schema, set the env var to match.
 
 ### Capture your connection details
 
@@ -187,6 +191,8 @@ SNOWFLAKE_PASSWORD=<password>
 SNOWFLAKE_DATABASE=ESPN_FANTASY
 SNOWFLAKE_SCHEMA=RAW
 SNOWFLAKE_WAREHOUSE=COMPUTE_WH
+# Only set if your dbt target schema isn't named ANALYTICS:
+# SNOWFLAKE_ANALYTICS_SCHEMA=ANALYTICS
 ```
 
 Skip the Google Sheets vars for now (see section 9 if you want that
@@ -208,6 +214,8 @@ python extract/extract.py            # Extract recent matchup periods
                                       # for specific weeks)
 
 cd dbt_league
+dbt deps                              # Install dbt_utils package (first
+                                      # run only; idempotent)
 dbt seed                              # Load the four seed CSVs
 dbt build                             # Build models + run all tests
 
@@ -293,8 +301,8 @@ Create a new Google Sheet in your account. Grab its ID from the URL:
 https://docs.google.com/spreadsheets/d/<this_part_is_the_id>/edit
 ```
 
-The script auto-creates the three tabs (`Rank 1 Records`, `Top 5 with
-Contributors`, `Full Leaderboard Dump`) on first write.
+The script auto-creates the three tabs (`All-Time Records`, `Current
+Season Records`, `Leaderboard Dump`) on first write.
 
 ### Add the env vars
 

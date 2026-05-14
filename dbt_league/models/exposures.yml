@@ -68,8 +68,8 @@ exposures:
     description: >
       Opt-in Google Sheets sink for the records report. Same underlying
       data as records_report but materialized into a 17-column, 3-tab
-      workbook for offline analysis (rank-1 records / top-5 with
-      contributors / full leaderboard dump).
+      workbook for offline analysis (All-Time Records / Current Season
+      Records / Leaderboard Dump tabs, auto-created on first write).
 
       Triggered by setting the SHEETS_OUTPUT_ID environment variable when
       running output/generate_records_report.py; writer logic lives in

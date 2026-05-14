@@ -23,10 +23,15 @@ runs:
 ```bash
 python extract/extract.py
 cd dbt_league && dbt build
-cd .. && python output/generate_summary.py > recap.txt
+cd .. && python output/generate_summary.py
 ```
 
-…and gets a fully-formatted ESPN-BBCode recap of the week — best/worst
+The script prints BBCode to stdout and also writes a timestamped file
+to `output/logs/`. The log file is the clean copy — stdout has a
+"Log saved to: ..." status line that you'd want to skip if copying
+into the league's front-page editor.
+
+The result: a fully-formatted ESPN-BBCode recap of the week — best/worst
 matchup totals with top contributors, a wasted-performances callout, any
 all-time records broken or tied, and the running current-season + all-time
 records. Paste it into the league's front-page editor and ship.

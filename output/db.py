@@ -47,12 +47,17 @@ def _build_config():
     so import-time env-var availability doesn't matter — load_dotenv()
     runs before this whether init() was called or query_snowflake() was
     called first."""
+    # SNOWFLAKE_SCHEMA names the raw landing schema (used by extract.py).
+    # The output scripts read dbt-built models, which live in a different
+    # schema -- SNOWFLAKE_ANALYTICS_SCHEMA, defaulting to ANALYTICS to
+    # match the dbt profile convention. Customize if your dbt target
+    # schema is named differently.
     return {
         "account":   os.getenv("SNOWFLAKE_ACCOUNT"),
         "user":      os.getenv("SNOWFLAKE_USER"),
         "password":  os.getenv("SNOWFLAKE_PASSWORD"),
         "database":  os.getenv("SNOWFLAKE_DATABASE"),
-        "schema":    "ANALYTICS",
+        "schema":    os.getenv("SNOWFLAKE_ANALYTICS_SCHEMA", "ANALYTICS"),
         "warehouse": os.getenv("SNOWFLAKE_WAREHOUSE"),
     }
 

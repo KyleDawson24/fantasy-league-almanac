@@ -1,0 +1,150 @@
+version: 2
+
+seeds:
+  - name: stat_classification
+    description: >
+      Seed-driven catalog of every stat the pipeline knows about. Single
+      source of truth for stat metadata: identity (stat_name, ESPN ID),
+      classification (category, derived vs counting), display (display_name,
+      abbrev), and record-surfacing rules (polarity, is_record_candidate,
+      is_always_tracked).
+
+      The seed drives multiple downstream consumers:
+      (1) mart_stat_leaderboard's Jinja UNPIVOT loop iterates over rows
+      where is_record_candidate=true, emitting one CTE-row per stat into
+      the unioned mart.
+      (2) Python output scripts read display_name / abbrev / polarity /
+      always_tracked via the lru_cached accessors in output/stat_catalog.py.
+      (3) The records-section consumer-side filter (should_track_record)
+      uses polarity + is_always_tracked to decide what surfaces as a
+      tracked record.
+
+      Adding or modifying a stat is a CSV edit + reseed; no Python or
+      mart-SQL change required. Reseed with
+      `dbt seed --full-refresh -s stat_classification` (plain `dbt seed`
+      may treat the existing table as already-loaded and skip).
+    columns:
+      - name: stat_name
+        description: >
+          Primary key. Matches the key in the raw box-scores breakdown
+          VARIANT, so stays in ESPN's namespace where possible: '1B' / '2B'
+          / '3B' for singles/doubles/triples, '64' for shutouts (no
+          English label from ESPN), 'HBP_P' for pitcher hit-by-pitch
+          (renamed at extract to disambiguate from batter HBP). Derived
+          stats (SB_CS, W_L, SV_BLSV) and score totals (CALCULATED_*,
+          PLATFORM_*) are project-defined and don't have an ESPN stat_id.
+        tests:
+          - not_null
+          - unique
+      - name: espn_stat_id
+        description: 'ESPN numeric stat ID from the raw breakdown VARIANT. NULL for derived stats and score totals not in ESPN''s catalog.'
+      - name: stat_category
+        description: '''hitting'' | ''pitching'' | ''fielding'' | ''unknown'' | ''total''. Drives the slot-stat-category compatibility filter at int_player_daily (a hitter''s hitting stats only count when slotted as a hitter, etc.). ''total'' covers the score-column rows (CALCULATED_*, PLATFORM_*).'
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['hitting', 'pitching', 'fielding', 'unknown', 'total']
+      - name: espn_stat_label
+        description: 'ESPN''s English label for the stat (e.g., "Strikeouts (Pitcher)"). Carried as traceability metadata; downstream consumers use display_name and abbrev instead. NULL for derived stats and score totals (no ESPN-side equivalent).'
+      - name: display_name
+        description: 'Project-owned display label used by output formatters. Read via stat_catalog.get_display_map(). Diverges from espn_stat_label where the project wants different wording (e.g., "K/9" instead of "Strikeouts Per 9 Innings").'
+      - name: abbrev
+        description: 'Compact display form for tight rendering contexts. Read via stat_catalog.get_abbrev_map(). Frequently matches stat_name but can differ (e.g., display "K/9" for stat_name "K_PER_9").'
+      - name: is_counting
+        description: 'True for stats that have a wide column on int_player_daily and propagate as SUM rollups up the DAG. False for rate stats (computed at fact layer via macros), ESPN internal flags that aren''t scored, and score-total rows.'
+      - name: is_derived
+        description: 'True for stats computed from other counting stats via an inline SQL expression rather than a direct ESPN breakdown value. Currently: PA, SB_CS, W_L, SV_BLSV. When true, derivation_expr is non-empty and the mart Jinja loop inlines the expression.'
+      - name: derivation_expr
+        description: 'SQL expression computing the derived value from fct counting columns (e.g., "ab + b_bb + hbp + sf" for PA). Non-empty only when is_derived=true. Read at mart compile time by the seed-driven Jinja UNPIVOT loop.'
+      - name: is_always_tracked
+        description: 'Bypasses the polarity rule at team grain -- the stat surfaces in records regardless of whether its polarity would normally exclude it. Currently flagged: H, TB, XBH, SF, ER, PA. Use sparingly; this is the "always meaningful in records context" override.'
+      - name: is_record_candidate
+        description: 'Appears in mart_stat_leaderboard. The Jinja UNPIVOT loop iterates rows where this is true, emitting one ranked CTE per stat. Setting false on a stat drops it from the leaderboard without touching SQL.'
+      - name: polarity
+        description: '''positive'' | ''negative'' | ''neutral''. Drives consumer-side Best/Worst labeling and which record directions surface. For positive stats (HR, K), ''most'' = Best. For negative stats (ER, WHIP), ''most'' = Worst. Neutral stats don''t surface as records. Polarity merges scoring-settings sign and project-defined overrides at seed-edit time; consumers read via stat_catalog.get_polarity_map().'
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['positive', 'negative', 'neutral']
+      - name: notes
+        description: 'Free-text context for unusual rows -- mislabels, scoring-weight discoveries, deprecated stats, ESPN internal flags. Often references the Phase X documentation where the row''s history was hashed out.'
+
+  - name: matchup_schedule
+    description: >
+      Per-week calendar metadata: start/end dates, abnormal-week flag, and
+      playoff round identification. One row per (season_year, matchup_period).
+      Drives format_week_label() in the output layer ("Week 5" vs
+      "Semi-Finals") and is_abnormal exclusion across leaderboard CTEs.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - season_year
+              - matchup_period
+    columns:
+      - name: season_year
+        description: 'MLB season year.'
+        tests:
+          - not_null
+      - name: matchup_period
+        description: 'ESPN weekly matchup number (1-indexed; opening week is 1).'
+        tests:
+          - not_null
+      - name: start_date
+        description: 'First MLB scoring period day in this matchup_period.'
+      - name: end_date
+        description: 'Last MLB scoring period day in this matchup_period.'
+      - name: is_abnormal
+        description: 'Flag for matchup periods that should be excluded from records (All-Star break, weather-shortened weeks, opening week with extended date range). Every leaderboard CTE filters on is_abnormal = false.'
+        tests:
+          - not_null
+      - name: abnormal_reason
+        description: 'Free-text explanation when is_abnormal=true. Empty otherwise.'
+      - name: is_playoff
+        description: 'Flag for playoff weeks. Triggers playoff_round substitution in format_week_label() output.'
+        tests:
+          - not_null
+      - name: playoff_round
+        description: '"Round 1" / "Semi-Finals" / "Finals" when is_playoff=true; NULL otherwise.'
+
+  - name: owner_nicknames
+    description: >
+      Display name resolution for team owners. Maps ESPN's owner GUID to
+      a preferred_name override; defaults to first_name when preferred_name
+      is empty. One row per league member.
+
+      Not currently joined into the dbt models (owner_name reaches the
+      mart via stg_box_scores's raw ESPN-side value); this seed is staged
+      for the v1.x dim_player + owner-side modeling work tracked in
+      ROADMAP.
+    columns:
+      - name: owner_id
+        description: 'ESPN GUID for the team owner. Stable across seasons.'
+        tests:
+          - not_null
+          - unique
+      - name: first_name
+        description: 'First name as registered with ESPN.'
+      - name: last_name
+        description: 'Last name as registered with ESPN.'
+      - name: preferred_name
+        description: 'Override for first_name when the owner prefers a different rendering (nickname, alternate spelling). Empty means fall back to first_name.'
+
+  - name: player_nicknames
+    description: >
+      Override display names for specific MLB players. Joined at
+      stg_box_scores to populate display_name = COALESCE(nickname,
+      player_name), which then propagates through every downstream model.
+      Typically used for memorable nicknames ("Big Dumper" for Cal Raleigh)
+      that the league refers to colloquially.
+    columns:
+      - name: player_id
+        description: 'ESPN stable numeric player identifier.'
+        tests:
+          - not_null
+          - unique
+      - name: player_name
+        description: 'Player''s real name. Stored for human reference when editing the seed; not actually joined downstream (the join is by player_id).'
+      - name: nickname
+        description: 'Display override. When set, becomes display_name on stg_box_scores and propagates through all subsequent models.'

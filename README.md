@@ -88,7 +88,7 @@ active and inactive performance facts ("active = fantasy reality;
 inactive = MLB reality") and feed a seed-driven leaderboard that ranks
 both lenses.
 
-Full lineage and column-level docs are in the hosted dbt catalog;
+Full lineage and column-level docs are in the [hosted dbt catalog](https://kyledawson24.github.io/fantasy-league-front-page/);
 the local source-of-truth is the `dbt_league/` directory.
 
 ---
@@ -201,9 +201,10 @@ fresh Snowflake free-tier account in under 45 minutes.
 - **Phase X.Y Documentation.md** files in the repo root — the
   decision log. Each phase has its own retro covering what shipped,
   what was considered, and why the call was made.
-- **Hosted dbt catalog** — model lineage and column-level docs (link
-  pending GitHub Pages setup; for now run `dbt docs generate && dbt
-  docs serve` locally).
+- **[Hosted dbt catalog](https://kyledawson24.github.io/fantasy-league-front-page/)**
+  — model lineage and column-level docs. Regenerated manually; rerun
+  `dbt docs generate --static && cp dbt_league/target/static_index.html
+  docs/index.html` to refresh, then commit + push.
 
 ---
 

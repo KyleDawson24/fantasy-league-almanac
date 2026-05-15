@@ -55,19 +55,16 @@ SCORE_STAT_NAMES = (
 
 # ---------- Polarity-aware filter rules ----------
 #
-# Phase 7 G2: the polarity merge logic that lived in records.py
-# (get_stat_polarity reading stg_scoring_settings; _IMPLICIT_POLARITY
-# hardcoding rates / wasted / derived / score stats; get_effective_polarity
-# combining them) moved to the seed at B1. The merged values are now
-# stored directly in stat_classification.polarity and read via
-# stat_catalog.get_polarity_map(). Likewise get_always_tracked_stats
-# moved to stat_catalog.get_always_tracked().
+# The polarity merge logic that used to live in records.py moved to the
+# seed: per-stat polarity is stored directly in stat_classification.polarity
+# and read via stat_catalog.get_polarity_map(). The seed-driven auto-
+# tracked set is read via stat_catalog.get_auto_tracked().
 #
 # What stays here:
 #   - best_or_worst_label    -- pure presentation helper (takes injected
 #                               polarity dict, returns Best/Worst string)
 #   - should_track_record    -- consumer-side filter (grain x direction
-#                               matrix using injected polarity + always-
+#                               matrix using injected polarity + auto-
 #                               tracked sets). Caller injects the dicts;
 #                               keeps the signature testable without
 #                               monkeypatching.
@@ -95,29 +92,29 @@ def best_or_worst_label(stat_name, direction, effective_polarity):
     return 'Best' if direction == 'most' else 'Worst'
 
 
-def should_track_record(grain, stat_name, direction, polarity, always_tracked=None):
-    """Phase 5 polarity-aware filter rules (direction values per Phase
-    6.3.3 are 'most' / 'fewest'):
-      - Player grain: only score-level stats; both directions surface
-        (Phase 6.3.3 chunk 4.5: previously 'most' only -- the handoff
-        doc's locked decision was to extend; enacted here)
-      - Team grain, score columns: both directions
-      - Team grain, always-tracked stat (per stat_classification seed):
-        both directions, regardless of polarity (Phase 6.3.3 chunk 4.5)
-      - Team grain, positive individual stat: both directions
-      - Team grain, negative individual stat: 'most' (most-of-bad) only
-      - Zero-weighted (neutral) stats: skipped entirely
+def should_track_record(grain, stat_name, direction, polarity, auto_tracked=None):
+    """Polarity-aware filter rules (direction values are 'most' / 'fewest'):
+      - Player grain: only score-level stats; both directions surface.
+      - Team grain, score columns: both directions.
+      - Team grain, auto_tracked stat (per stat_classification seed):
+        both directions, regardless of polarity. These are stats tracked
+        regardless of the league's scoring settings -- universal counting
+        stats and project-defined derivations that lack a points_per_unit
+        weight.
+      - Team grain, positive individual stat: both directions.
+      - Team grain, negative individual stat: 'most' (most-of-bad) only.
+      - Zero-weighted (neutral) stats: skipped entirely.
 
-    `always_tracked` defaults to None for backward-compat with callers
-    that don't load the seed-driven set yet. Pass the result of
-    stat_catalog.get_always_tracked() to enable the always-tracked override.
+    `auto_tracked` defaults to None for callers that don't load the seed-
+    driven set. Pass the result of stat_catalog.get_auto_tracked() to
+    enable the bypass for stats outside scoring settings.
     """
     if grain == 'player':
         return stat_name in SCORE_STAT_NAMES
     # team grain
     if stat_name in SCORE_STAT_NAMES:
         return True
-    if always_tracked and stat_name in always_tracked:
+    if auto_tracked and stat_name in auto_tracked:
         return True
     pol = polarity.get(stat_name)
     if pol is None or pol == 'neutral':
@@ -146,17 +143,16 @@ _TEAM_NON_SEED_STATS = frozenset({
 })
 
 
-def _orchestrator_filter(grain, stat_name, direction, polarity, always_tracked):
-    """Phase 6.3.3 chunk 3 layered filter for the leaderboard-dump
-    orchestrator:
-      - All should_track_record-passing rows pass (which now consults
-        the always_tracked seed-driven set).
+def _orchestrator_filter(grain, stat_name, direction, polarity, auto_tracked):
+    """Layered filter for the leaderboard-dump orchestrator:
+      - All should_track_record-passing rows pass (which consults the
+        auto_tracked seed-driven set).
       - Plus team-grain stats in _TEAM_NON_SEED_STATS (rate stats /
         WASTED_POINTS / derived counts) in BOTH directions, since these
         carry no scoring-settings polarity but are meaningful at team
         grain (and aren't in the seed).
     """
-    if should_track_record(grain, stat_name, direction, polarity, always_tracked):
+    if should_track_record(grain, stat_name, direction, polarity, auto_tracked):
         return True
     return grain == 'team' and stat_name in _TEAM_NON_SEED_STATS
 

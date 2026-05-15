@@ -9,23 +9,6 @@ current architecture; v2.0 = structural change.
 Low-risk changes building on the current architecture. Most would ship in
 a single afternoon.
 
-### Stat catalog refinements
-
-- **Split `is_always_tracked` into two flags.** The column currently
-  double-duties as "force-surface in the recap's new-records section
-  regardless of polarity" and "this stat is meaningful and shouldn't be
-  filtered as noise." Splitting into `is_record_force_surface` +
-  `is_tracked` clears the conflation.
-- **Surface `NEGATIVE_POINTS` as a record candidate.** The column exists
-  on all four facts as of v1.0 but isn't yet flagged
-  `is_record_candidate=true` in `stat_classification.csv`. Adding it
-  unlocks "Most/Fewest Negative Points" callouts in the recap — a real
-  consumer-facing expansion.
-- **Promote stat 30 (Hit for the Cycle).** Discovered during Phase 7
-  F-prep: 15-pt scoring weight, two real candidates across two seasons.
-  Currently flagged `is_record_candidate=false`. Promoting unlocks a
-  "First cycle of the season!" callout via `output/league_notes.py`.
-
 ### Output polish
 
 - **"No active no-hitters yet" rendering.** When a "most no-hitters"-

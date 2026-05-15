@@ -25,9 +25,9 @@ orchestrator. The records sections and Sheets Tab 3 (Leaderboard Dump)
 need contributor lists for many records per script run; the bulk
 helpers issue a single batched query rather than N round-trips.
 
-Phase 7 G2: polarity + always_tracked maps moved to stat_catalog
-(stat_catalog.get_polarity_map / get_always_tracked); records.py was
-left as consumer-side filter + presentation logic plus orchestrators.
+Phase 7 G2: polarity + auto-tracked maps moved to stat_catalog
+(stat_catalog.get_polarity_map / get_auto_tracked); records.py was left
+as consumer-side filter + presentation logic plus orchestrators.
 
 Phase 7 Step 3: the consumer-side filter + presentation logic moved
 to records_logic.py and the data-access functions moved to
@@ -96,7 +96,7 @@ def get_records_set_this_week(season_year, matchup_period):
     are skipped.
     """
     polarity = stat_catalog.get_polarity_map()
-    always_tracked = stat_catalog.get_always_tracked()
+    auto_tracked = stat_catalog.get_auto_tracked()
 
     candidates = query_snowflake("""
         SELECT *
@@ -113,7 +113,7 @@ def get_records_set_this_week(season_year, matchup_period):
         grain = cand['entity_grain']
         stat = cand['stat_name']
         direction = cand['record_direction']
-        if not should_track_record(grain, stat, direction, polarity, always_tracked):
+        if not should_track_record(grain, stat, direction, polarity, auto_tracked):
             continue
 
         # Rank 2 = prior holder. With recency tiebreak, also tells us
@@ -184,7 +184,7 @@ def get_records_with_contributors(scope, top_n=5):
     identity fields and an empty contributors list.
     """
     polarity = stat_catalog.get_polarity_map()
-    always_tracked = stat_catalog.get_always_tracked()
+    auto_tracked = stat_catalog.get_auto_tracked()
 
     rows = query_snowflake("""
         SELECT entity_grain, stat_name, record_direction, rank,
@@ -202,7 +202,7 @@ def get_records_with_contributors(scope, top_n=5):
         r for r in rows
         if _orchestrator_filter(
             r['entity_grain'], r['stat_name'],
-            r['record_direction'], polarity, always_tracked,
+            r['record_direction'], polarity, auto_tracked,
         )
     ]
 

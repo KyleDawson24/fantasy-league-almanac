@@ -66,6 +66,7 @@ with active as (
         sum(xbh)     as xbh,
         sum(gdp)     as gdp,
         sum(b_ibb)   as b_ibb,
+        sum(cyc)     as cyc,
 
         -- Hitting point contributions
         sum(h_pts)       as h_pts,
@@ -86,6 +87,7 @@ with active as (
         sum(xbh_pts)     as xbh_pts,
         sum(gdp_pts)     as gdp_pts,
         sum(b_ibb_pts)   as b_ibb_pts,
+        sum(cyc_pts)     as cyc_pts,
 
         -- Pitching counting
         sum(w)       as w,
@@ -188,13 +190,13 @@ select
     -- Hitting counting
     a.h, a.ab, a.b_bb, a.b_so, a.hbp, a.sf, a.hr, a.r, a.rbi,
     a.sb, a.cs, a.tb, a.singles, a.doubles, a.triples, a.xbh,
-    a.gdp, a.b_ibb,
+    a.gdp, a.b_ibb, a.cyc,
 
     -- Hitting point contributions
     a.h_pts, a.ab_pts, a.b_bb_pts, a.b_so_pts, a.hbp_pts, a.sf_pts,
     a.hr_pts, a.r_pts, a.rbi_pts, a.sb_pts, a.cs_pts, a.tb_pts,
     a.singles_pts, a.doubles_pts, a.triples_pts, a.xbh_pts,
-    a.gdp_pts, a.b_ibb_pts,
+    a.gdp_pts, a.b_ibb_pts, a.cyc_pts,
 
     -- Pitching counting
     a.w, a.l, a.k, a.er, a.outs, a.qs, a.sv, a.hld,

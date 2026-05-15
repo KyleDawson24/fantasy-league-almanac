@@ -183,16 +183,16 @@ split landed in Phase 7 Step 3. Current shape:
   count_value_occurrences` for the saturated-tier backfill (honest
   one-way edge; no cycle).
 
-Polarity and always-tracked sets are NOT in this code anymore -- those
+Polarity and auto-tracked sets are NOT in this code anymore -- those
 moved to the `stat_classification` seed at Phase 7 B1 and surface via
-`stat_catalog.get_polarity_map()` / `get_always_tracked()`.
+`stat_catalog.get_polarity_map()` / `get_auto_tracked()`.
 
 Key concepts:
 - **Seed-to-leaderboard name translation** lives in
   `output/stat_catalog.py` (`SEED_TO_LEADERBOARD`). The seed has
-  `'1B'`/`'2B'`/`'3B'`/`'64'` (raw stat IDs); the leaderboard has
-  `'SINGLES'`/`'DOUBLES'`/`'TRIPLES'`/`'SHO'` (column names). The dbt
-  mart applies the equivalent rename via Jinja seed-loop aliases.
+  `'1B'`/`'2B'`/`'3B'`/`'30'`/`'64'` (raw stat IDs); the leaderboard has
+  `'SINGLES'`/`'DOUBLES'`/`'TRIPLES'`/`'CYC'`/`'SHO'` (column names). The
+  dbt mart applies the equivalent rename via Jinja seed-loop aliases.
 - **`_TEAM_NON_SEED_STATS`** (in `records_logic.py`) -- rate stats /
   WASTED_POINTS / derived counts. These don't have polarity in the
   scoring seed; the orchestrator filter allows them at team grain in
@@ -238,9 +238,10 @@ The weekly recap. Imports from formatters + records + league_notes. Section orde
 
 [u][b]New Records[/b][/u]    (skipped if no records broken/tied this MP)
 
-  Tough Luck / Lucky Bastard / Fair-and-Just  (each only if true)
-
   League Notes from league_notes.CALLOUTS  (skipped if no callouts fired)
+  Includes Tough Luck / Lucky Bastard / Fair-and-Just (matchup-outcome
+  callouts; migrated into the registry in v1.x) plus the rare-event and
+  oddity callouts (no_hitters, cycles, clean_slate, zero_steals, ...).
 
 [u][b]Current Season Records[/b][/u]    (9 lines: 6 team + 3 player)
 
@@ -298,15 +299,15 @@ The hard-won stuff. If you need to debug something weird, check here first.
 
 ### Scoring-settings + leaderboard naming
 
-- The `stat_classification` seed uses ESPN's raw stat IDs/names: `'1B'`, `'2B'`, `'3B'`, `'64'`, `'B_IBB'`, `'HBP_P'`, etc.
-- The leaderboard mart uses spelled-out column names: `'SINGLES'`, `'DOUBLES'`, `'TRIPLES'`, `'SHO'`, etc.
+- The `stat_classification` seed uses ESPN's raw stat IDs/names: `'1B'`, `'2B'`, `'3B'`, `'30'`, `'64'`, `'B_IBB'`, `'HBP_P'`, etc.
+- The leaderboard mart uses spelled-out column names: `'SINGLES'`, `'DOUBLES'`, `'TRIPLES'`, `'CYC'`, `'SHO'`, etc.
 - `SEED_TO_LEADERBOARD` in `output/stat_catalog.py` translates between them (Python side). The dbt mart applies the equivalent rename via Jinja seed-loop aliases. Add to both whenever a new seed→column rename happens.
 
 ### Polarity conventions
 
 - Polarity is stored as a column in `stat_classification` (`positive` | `negative` | `neutral`) and read at runtime via `stat_catalog.get_polarity_map()`. The seed value pre-merges what used to be runtime logic: `sign(points_per_unit)` from scoring settings for scored stats, plus hardcoded values for stats not in scoring settings (rates ERA/WHIP/BB9/HR9 → negative; K9/KBB → positive; WASTED_POINTS → negative; derived stats PA/SB-CS/W-L/SV-BLSV → positive; score columns → positive). To change polarity, edit the seed CSV directly and reseed.
 - Stats with `polarity = 'neutral'` (or absent from the seed entirely) don't surface as records.
-- `is_always_tracked` seed flag: bypasses the polarity rule at team grain. Currently flagged: H, TB, XBH, SF, ER, PA. Edit the seed to add/remove members; reseed (`dbt seed --full-refresh -s stat_classification`).
+- `auto_tracked` seed flag: bypasses the polarity rule at team grain for stats tracked regardless of league scoring settings (distinct from stats tracked because they appear in scoring_settings). Currently flagged: H, TB, XBH, SF, ER, PA. Edit the seed to add/remove members; reseed (`dbt seed --full-refresh -s stat_classification`).
 
 ### `platform_*` vs `calculated_*`
 
@@ -361,7 +362,7 @@ These are calls already made; lead with the established pattern rather than re-d
 - **Mart stays thin; contributor stitching via Python helpers** when consumer count is low. Denormalize when 3+ consumers materialize.
 - **Threshold filter at output, not in mart**. Constants (e.g., `HITTER_AB_THRESHOLD = 225`) live in `records.py`. Exception: player-grain rate stats are dropped at mart layer entirely (Path A) — 1-IP relief outliers carry no signal and would dominate ad-hoc mart queries.
 - **Counts not points for player-grain contributors** — readability over precision.
-- **`is_always_tracked` seed flag** drives team-grain stats that surface as records regardless of polarity.
+- **`auto_tracked` seed flag** drives team-grain stats that surface as records regardless of polarity (stats tracked regardless of league scoring settings).
 - **`format_week_label` pattern**: load schedule lookup once via `records.load_schedule_lookup()`, thread the dict through every formatter that needs week labels. Explicit threading (parameter on every relevant function) instead of module-global state.
 - **`league_notes.py` registry pattern**: each callout is a function appended to `CALLOUTS`; comment out to disable. Try/except per callout so a buggy one can't kill the recap.
 
@@ -418,18 +419,16 @@ Highlights as of v1.0:
   player-entity foundation the project hasn't had. Absorbs the
   `get_wasted_points` staging-reach concern and unlocks career-milestone
   callouts.
-- **Now (v1.x small)**: stat-catalog refinements (split `is_always_tracked`
-  into two flags, surface NEGATIVE_POINTS as a record candidate, promote
-  stat 30 = Hit for the Cycle), output polish, Sheets formatting
-  preservation, dependency-inject `count_value_occurrences` into
-  `collapse_ties`.
+- **Now (v1.x small)**: output polish, Sheets formatting preservation,
+  dependency-inject `count_value_occurrences` into `collapse_ties`. The
+  stat-catalog cleanup (is_always_tracked rename, NEGATIVE_POINTS record
+  candidate, stat 30 = Hit for the Cycle promotion) shipped in v1.x.
 - **Next (v2.0, likely-exclusive)**: cross-platform Yahoo/Sleeper extract
   OR DuckDB target. MetricFlow as a deliberate learning exercise.
 - **Decided Against**: frequency-table tab (tie-collapse covers it),
   player-grain rate stats at mart layer (Phase 6.3.3 Path A choice).
 
-For the open architectural questions surfaced during Phase 7 review
-that didn't ship in v1.0 -- `is_always_tracked` semantic conflation,
+For the open architectural questions surfaced during Phase 7 review --
 inactive-fact grain edge case, PLATFORM_* in SCORE_STAT_NAMES product
 call -- see `Phase 7 Documentation.md` § "Open Investigations Carried
 Forward".

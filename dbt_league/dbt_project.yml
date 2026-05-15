@@ -78,8 +78,12 @@ seeds:
         is_derived: boolean
         derivation_expr: varchar
         # Record-surfacing rules (Phase 7 B1: is_record_candidate + polarity
-        # added; collapse _IMPLICIT_POLARITY / should_track_record into seed)
-        is_always_tracked: boolean
+        # added; collapse _IMPLICIT_POLARITY / should_track_record into seed.
+        # v1.x: is_always_tracked renamed to auto_tracked -- the column flags
+        # stats that are tracked regardless of league scoring settings, in
+        # contrast to "is_scored" which would mark stats tracked because
+        # they appear in scoring_settings.)
+        auto_tracked: boolean
         is_record_candidate: boolean
         polarity: varchar
         notes: varchar

@@ -32,13 +32,16 @@ from db import query_snowflake
 #
 # Phase 7 B1 retired the K/9 -> K_PER_9 and K/BB -> K_PER_BB entries by
 # renaming the seed rows directly; the rate-stat divergence is now
-# represented at the seed level. Remaining entries handle the four
-# stat-name shapes that can't be safely renamed because they appear in
-# the breakdown VARIANT and the stg FK test pins them.
+# represented at the seed level. Remaining entries handle stat-name
+# shapes that can't be safely renamed because they appear in the
+# breakdown VARIANT and the stg FK test pins them. v1.x added '30' ->
+# 'CYC' (Hit for the Cycle) when stat 30 was promoted to a tracked
+# stat with a wide column.
 SEED_TO_LEADERBOARD = {
     '1B': 'SINGLES',
     '2B': 'DOUBLES',
     '3B': 'TRIPLES',
+    '30': 'CYC',
     '64': 'SHO',
 }
 
@@ -58,7 +61,7 @@ def _load_catalog() -> tuple:
             stat_name, espn_stat_id, stat_category,
             espn_stat_label, display_name, abbrev,
             is_counting, is_derived, derivation_expr,
-            is_always_tracked, is_record_candidate, polarity,
+            auto_tracked, is_record_candidate, polarity,
             notes
         FROM stat_classification
     """)
@@ -103,15 +106,16 @@ def get_polarity_map() -> dict:
 
 
 @lru_cache(maxsize=1)
-def get_always_tracked() -> frozenset:
-    """Leaderboard stat_names where is_always_tracked=true. These stats
-    short-circuit should_track_record to True (force-surface in the
-    recap's new-records section even if the polarity rule wouldn't).
-    Replaces records.get_always_tracked_stats."""
+def get_auto_tracked() -> frozenset:
+    """Leaderboard stat_names where auto_tracked=true. These stats surface
+    as records regardless of the league's scoring settings (they have no
+    points_per_unit-derived polarity to drive should_track_record).
+    Implementation short-circuits should_track_record to True at team
+    grain so both directions surface."""
     return frozenset(
         to_leaderboard_name(r['stat_name'])
         for r in _load_catalog()
-        if r['is_always_tracked']
+        if r['auto_tracked']
     )
 
 

@@ -4,13 +4,18 @@
 -- Mechanical reshape only -- business filters (active slots, counting stats)
 -- are applied in intermediate.
 --
--- Phase 7 B1: filter out raw rate-stat keys K/9 and K/BB. ESPN emits these
--- per-pitcher in the breakdown VARIANT but they're not aggregatable for our
--- team-level pipeline (we compute K_PER_9 / K_PER_BB from K and OUTS at the
--- mart). The seed got the K/9 / K/BB rows repurposed (renamed to K_PER_9 /
--- K_PER_BB) so the FK test would otherwise fail on these stg rows; the
--- filter keeps the FK invariant clean. Rows are dropped at int anyway via
--- is_counting=false, so no downstream consumer notices.
+-- Filter out wrapper-emitted breakdown keys that don't correspond to a
+-- seed row we want to carry:
+--   - 'K/9' and 'K/BB' (Phase 7 B1): per-pitcher rate stats emitted by ESPN
+--     but not aggregatable for our team-level pipeline. The seed repurposed
+--     the rows as K_PER_9 / K_PER_BB so these keys would otherwise fail
+--     the FK test. Dropped at int anyway via is_counting=false.
+--   - 'CYC' (v1.x): the wrapper translates ESPN stat ID 31 to 'CYC' but
+--     that data is NOT cycles (148 non-zero rows across 113 players -- see
+--     STAT_31 seed row notes). v1.x renamed the seed row to STAT_31 so the
+--     real cycles stat (id 30) can own the CYC leaderboard column without
+--     a dict-collision in stat_catalog. Filtering wrapper 'CYC' rows here
+--     preserves the FK invariant without resurrecting the mislabel.
 
 with players as (
     select * from {{ ref('stg_box_scores') }}
@@ -35,7 +40,7 @@ flattened as (
     from players,
         lateral flatten(input => breakdown) b
     where breakdown is not null
-      and b.key::string not in ('K/9', 'K/BB')
+      and b.key::string not in ('K/9', 'K/BB', 'CYC')
 )
 
 select * from flattened

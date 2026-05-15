@@ -134,7 +134,8 @@ class TestShouldTrackRecord:
     """Polarity-aware filter rules:
       Player grain: only score-level stats; both directions.
       Team score columns: both directions.
-      Team always-tracked: both directions regardless of polarity.
+      Team auto_tracked stat: both directions regardless of polarity
+        (force-surface for stats not in the league's scoring settings).
       Team positive stat: both directions.
       Team negative stat: 'most' (most-of-bad) only.
       Neutral / unknown: skipped entirely.
@@ -146,13 +147,13 @@ class TestShouldTrackRecord:
             'ER': 'negative',
             'NEUTRAL_STAT': 'neutral',
         }
-        self.always_tracked = frozenset({'TB'})
+        self.auto_tracked = frozenset({'TB'})
 
     def test_player_grain_score_stat_passes(self):
         for direction in ('most', 'fewest'):
             assert records.should_track_record(
                 'player', 'CALCULATED_POINTS', direction,
-                self.polarity, self.always_tracked,
+                self.polarity, self.auto_tracked,
             )
 
     def test_player_grain_individual_stat_dropped(self):
@@ -160,29 +161,30 @@ class TestShouldTrackRecord:
         for direction in ('most', 'fewest'):
             assert not records.should_track_record(
                 'player', 'HR', direction,
-                self.polarity, self.always_tracked,
+                self.polarity, self.auto_tracked,
             )
 
     def test_team_score_stat_both_directions(self):
         for direction in ('most', 'fewest'):
             assert records.should_track_record(
                 'team', 'CALCULATED_POINTS', direction,
-                self.polarity, self.always_tracked,
+                self.polarity, self.auto_tracked,
             )
 
-    def test_team_always_tracked_both_directions(self):
-        # TB is in always_tracked even though not in polarity dict.
+    def test_team_auto_tracked_both_directions(self):
+        # TB is in the auto_tracked set (auto_tracked=true) even though not
+        # in the polarity dict -- a stat not in scoring settings still surfaces.
         for direction in ('most', 'fewest'):
             assert records.should_track_record(
                 'team', 'TB', direction,
-                self.polarity, self.always_tracked,
+                self.polarity, self.auto_tracked,
             )
 
     def test_team_positive_stat_both_directions(self):
         for direction in ('most', 'fewest'):
             assert records.should_track_record(
                 'team', 'HR', direction,
-                self.polarity, self.always_tracked,
+                self.polarity, self.auto_tracked,
             )
 
     def test_team_negative_stat_most_only(self):
@@ -190,29 +192,29 @@ class TestShouldTrackRecord:
         # for many teams every week — not a meaningful record.
         assert records.should_track_record(
             'team', 'ER', 'most',
-            self.polarity, self.always_tracked,
+            self.polarity, self.auto_tracked,
         )
         assert not records.should_track_record(
             'team', 'ER', 'fewest',
-            self.polarity, self.always_tracked,
+            self.polarity, self.auto_tracked,
         )
 
     def test_team_neutral_stat_dropped(self):
         for direction in ('most', 'fewest'):
             assert not records.should_track_record(
                 'team', 'NEUTRAL_STAT', direction,
-                self.polarity, self.always_tracked,
+                self.polarity, self.auto_tracked,
             )
 
     def test_team_unknown_stat_dropped(self):
         for direction in ('most', 'fewest'):
             assert not records.should_track_record(
                 'team', 'NOT_IN_POLARITY', direction,
-                self.polarity, self.always_tracked,
+                self.polarity, self.auto_tracked,
             )
 
-    def test_always_tracked_default_none_safe(self):
-        # always_tracked=None → polarity rule applies normally.
+    def test_auto_tracked_default_none_safe(self):
+        # auto_tracked=None → polarity rule applies normally.
         assert records.should_track_record(
             'team', 'HR', 'most', self.polarity, None,
         )
@@ -230,29 +232,29 @@ class TestOrchestratorFilter:
 
     def setup_method(self):
         self.polarity = {'HR': 'positive', 'ER': 'negative'}
-        self.always_tracked = frozenset({'TB'})
+        self.auto_tracked = frozenset({'TB'})
 
     def test_passes_should_track_record_passers(self):
         # Any (grain, stat, direction) that passes should_track_record
         # passes _orchestrator_filter too.
         assert records._orchestrator_filter(
-            'team', 'HR', 'most', self.polarity, self.always_tracked,
+            'team', 'HR', 'most', self.polarity, self.auto_tracked,
         )
 
     def test_team_grain_rate_stat_both_directions(self):
         for direction in ('most', 'fewest'):
             assert records._orchestrator_filter(
-                'team', 'ERA', direction, self.polarity, self.always_tracked,
+                'team', 'ERA', direction, self.polarity, self.auto_tracked,
             )
             assert records._orchestrator_filter(
-                'team', 'WHIP', direction, self.polarity, self.always_tracked,
+                'team', 'WHIP', direction, self.polarity, self.auto_tracked,
             )
 
     def test_team_grain_wasted_points_both_directions(self):
         for direction in ('most', 'fewest'):
             assert records._orchestrator_filter(
                 'team', 'WASTED_POINTS', direction,
-                self.polarity, self.always_tracked,
+                self.polarity, self.auto_tracked,
             )
 
     def test_team_grain_derived_counting_stat_both_directions(self):
@@ -260,7 +262,7 @@ class TestOrchestratorFilter:
             for stat in ('PA', 'SB_CS', 'W_L', 'SV_BLSV'):
                 assert records._orchestrator_filter(
                     'team', stat, direction,
-                    self.polarity, self.always_tracked,
+                    self.polarity, self.auto_tracked,
                 )
 
     def test_player_grain_non_seed_stat_dropped(self):
@@ -269,7 +271,7 @@ class TestOrchestratorFilter:
         for direction in ('most', 'fewest'):
             assert not records._orchestrator_filter(
                 'player', 'ERA', direction,
-                self.polarity, self.always_tracked,
+                self.polarity, self.auto_tracked,
             )
 
 

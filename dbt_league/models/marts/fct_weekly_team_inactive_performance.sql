@@ -80,6 +80,7 @@ team_rollup as (
         sum(xbh)     as xbh,
         sum(gdp)     as gdp,
         sum(b_ibb)   as b_ibb,
+        sum(cyc)     as cyc,
 
         -- Hitting point contributions
         sum(h_pts)       as h_pts,
@@ -100,6 +101,7 @@ team_rollup as (
         sum(xbh_pts)     as xbh_pts,
         sum(gdp_pts)     as gdp_pts,
         sum(b_ibb_pts)   as b_ibb_pts,
+        sum(cyc_pts)     as cyc_pts,
 
         -- Pitching counting
         sum(w)       as w,

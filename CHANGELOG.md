@@ -8,6 +8,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Each entry links to the corresponding `Phase X.Y Documentation.md` in the
 repository root for the architectural detail behind the change.
 
+## [Unreleased]
+
+### Added
+- `NEGATIVE_POINTS` promoted to a record candidate. The fact-layer column
+  already existed (gross magnitude of net-negative platform_points,
+  per-day rolled up); the seed flip surfaces "Most Negative Points"
+  team-grain records.
+- Stat 30 (Hit for the Cycle) promoted to a tracked stat. New wide `cyc`
+  column on int_player_daily, int_player_weekly_performance, and all four
+  facts. `'30'` → `'CYC'` added to `SEED_TO_LEADERBOARD`.
+- `cycles` callout in `output/league_notes.py` — one BBCode line per
+  player who hit for the cycle this MP, with cumulative league-history
+  ordinal and a "first of the season" flourish on the first one.
+
+### Changed
+- `is_always_tracked` seed column renamed to `auto_tracked`. New name
+  carries the intended semantic clearly: tracked regardless of league
+  scoring settings, distinct from stats tracked because they appear in
+  `scoring_settings`. The helper `stat_catalog.get_always_tracked()` is
+  now `get_auto_tracked()`; `records_logic.should_track_record`'s
+  `always_tracked` parameter renamed to `auto_tracked`.
+- Mislabeled `stat_name='CYC'` seed row (ESPN stat ID 31, a non-cycle
+  daily-achievement flag) renamed to `STAT_31` so the real cycles stat
+  (id 30) can own the CYC leaderboard column. `stg_player_stat_breakdowns`
+  filters wrapper-emitted `'CYC'` rows to preserve the FK invariant.
+- Matchup-outcome callouts (Tough Luck, Lucky Bastard, Fair-and-Just)
+  migrated from inline definitions in `generate_summary.py` into the
+  `league_notes.CALLOUTS` registry. Render output preserved: render_callouts
+  now inserts a blank-line separator between callouts that fire, matching
+  the inline blank-prefix-each pattern they had before. Single home for
+  all conditional flavor callouts; reordering is now a list edit.
+
 ## [1.0.0] — 2026-05-13
 
 First stable release. Phase 7 was a portfolio-prep rearchitect spanning

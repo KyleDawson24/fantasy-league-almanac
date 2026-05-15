@@ -59,12 +59,11 @@
 
 -- ----------------------------------------------------------------------
 -- Compile-time fetch of the stat universe from the seed. is_record_
--- candidate=true returns exactly the 56 leaderboard columns (39 raw
--- counting + 4 derived + 6 rate + 1 wasted + 6 score). The CASE applies
--- the seed -> leaderboard name translation for stats whose names differ
--- (1B -> SINGLES, 64 -> SHO). Duplicates stat_catalog.SEED_TO_LEADERBOARD
--- — keep both in sync. Phase 7 F-prep excluded stat '30' (Hit for the
--- Cycle) since no wide '30' column exists yet on any fact.
+-- candidate=true returns the leaderboard columns (40 raw counting +
+-- 4 derived + 6 rate + 2 totals (wasted + negative) + 6 score = 58
+-- as of v1.x). The CASE applies the seed -> leaderboard name translation
+-- for stats whose names differ (1B -> SINGLES, 64 -> SHO, 30 -> CYC).
+-- Duplicates stat_catalog.SEED_TO_LEADERBOARD -- keep both in sync.
 --
 -- run_query executes at compile time; the loop unrolls into static SQL
 -- before Snowflake sees it. `execute` guard yields an empty list during
@@ -75,6 +74,7 @@
             when '1B' then 'SINGLES'
             when '2B' then 'DOUBLES'
             when '3B' then 'TRIPLES'
+            when '30' then 'CYC'
             when '64' then 'SHO'
             else stat_name
         end as leaderboard_name,

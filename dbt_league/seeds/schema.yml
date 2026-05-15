@@ -7,16 +7,16 @@ seeds:
       source of truth for stat metadata: identity (stat_name, ESPN ID),
       classification (category, derived vs counting), display (display_name,
       abbrev), and record-surfacing rules (polarity, is_record_candidate,
-      is_always_tracked).
+      auto_tracked).
 
       The seed drives multiple downstream consumers:
       (1) mart_stat_leaderboard's Jinja UNPIVOT loop iterates over rows
       where is_record_candidate=true, emitting one CTE-row per stat into
       the unioned mart.
       (2) Python output scripts read display_name / abbrev / polarity /
-      always_tracked via the lru_cached accessors in output/stat_catalog.py.
+      auto_tracked via the lru_cached accessors in output/stat_catalog.py.
       (3) The records-section consumer-side filter (should_track_record)
-      uses polarity + is_always_tracked to decide what surfaces as a
+      uses polarity + auto_tracked to decide what surfaces as a
       tracked record.
 
       Adding or modifying a stat is a CSV edit + reseed; no Python or
@@ -56,8 +56,8 @@ seeds:
         description: 'True for stats computed from other counting stats via an inline SQL expression rather than a direct ESPN breakdown value. Currently: PA, SB_CS, W_L, SV_BLSV. When true, derivation_expr is non-empty and the mart Jinja loop inlines the expression.'
       - name: derivation_expr
         description: 'SQL expression computing the derived value from fct counting columns (e.g., "ab + b_bb + hbp + sf" for PA). Non-empty only when is_derived=true. Read at mart compile time by the seed-driven Jinja UNPIVOT loop.'
-      - name: is_always_tracked
-        description: 'Bypasses the polarity rule at team grain -- the stat surfaces in records regardless of whether its polarity would normally exclude it. Currently flagged: H, TB, XBH, SF, ER, PA. Use sparingly; this is the "always meaningful in records context" override.'
+      - name: auto_tracked
+        description: 'True for stats tracked regardless of the league''s scoring settings -- universal counting stats and project-defined derivations meaningful for cross-season records even without a points_per_unit weight. Distinct from stats that are tracked because they appear in scoring_settings (those flow through the polarity rule via points_per_unit-derived polarity). Currently flagged: H, TB, XBH, SF, ER, PA. Implementation bypasses the polarity rule at team grain so both ''most'' and ''fewest'' directions surface.'
       - name: is_record_candidate
         description: 'Appears in mart_stat_leaderboard. The Jinja UNPIVOT loop iterates rows where this is true, emitting one ranked CTE per stat. Setting false on a stat drops it from the leaderboard without touching SQL.'
       - name: polarity

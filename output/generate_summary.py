@@ -105,46 +105,6 @@ def get_contribution_callouts(scores, players):
         'top_pitcher':        find_top_pitcher(players),
     }
 
-def find_tough_luck(scores):
-    ranked = sorted(scores, key=lambda x: x['platform_points'], reverse=True)
-    second_place = ranked[1]
-    if second_place['result'] == 'L':
-        return {
-            'team': second_place['team_name'],
-            'points': second_place['platform_points'],
-            'opponent': second_place['opponent_name'],
-            'opponent_points': second_place['opponent_points'],
-        }
-    return None
-
-
-def find_lucky_bastard(scores):
-    ranked = sorted(scores, key=lambda x: x['platform_points'], reverse=True)
-    second_worst = ranked[-2]
-    if second_worst['result'] == 'W':
-        return {
-            'team': second_worst['team_name'],
-            'points': second_worst['platform_points'],
-            'opponent': second_worst['opponent_name'],
-            'opponent_points': second_worst['opponent_points'],
-        }
-    return None
-
-
-def check_fair_and_just(scores):
-    ranked = sorted(scores, key=lambda x: x['platform_points'], reverse=True)
-    # Count active matchups from scores that have an opponent
-    num_matchups = len([s for s in scores if s['opponent_name'] is not None]) // 2
-    for i, team in enumerate(ranked):
-        if team['result'] is None:
-            return False  # bye week team
-        if i < num_matchups and team['result'] != 'W':
-            return False
-        if i >= num_matchups and team['result'] != 'L':
-            return False
-    return True
-
-
 # ---------- Top Scorer / Top Hitter / Top Pitcher callouts ----------
 #
 # Phase 5: stat-line rendering lives in output/formatters.py so the
@@ -717,39 +677,12 @@ def generate_summary(matchup_period, scores, contributions, wasted_points,
     # New Records (Phase 5 #3) -- skipped entirely when no records were broken
     lines.extend(format_new_records_section(new_records, players, schedule_lookup))
 
-    # Tough Luck
-    tough_luck = find_tough_luck(scores)
-    if tough_luck:
-        lines.extend([
-            f"",
-            f"[b]Tough Luck[/b]: {tough_luck['team']} scored {tough_luck['points']:.1f} pts, "
-            f"second most in the league, but lost to "
-            f"{tough_luck['opponent']}'s {tough_luck['opponent_points']:.1f}",
-        ])
-
-    # Lucky Bastard
-    lucky = find_lucky_bastard(scores)
-    if lucky:
-        lines.extend([
-            f"",
-            f"[b]Lucky Bastard[/b]: {lucky['team']} scored just {lucky['points']:.1f} pts, "
-            f"second worst in the league, but beat "
-            f"{lucky['opponent']}'s {lucky['opponent_points']:.1f}",
-        ])
-
-    # Fair and Just League
-    if check_fair_and_just(scores):
-        num_matchups = len([s for s in scores if s['opponent_name'] is not None]) // 2
-        lines.extend([
-            f"",
-            f"[b]A FAIR AND JUST LEAGUE![/b] The top {num_matchups} scoring teams "
-            f"all won this week, and the bottom {num_matchups} all lost.",
-        ])
-
-    # Phase 6.3.3 chunk 6.6: League-flavor callouts. Each is a function
-    # in output/league_notes.py that returns 0+ BBCode lines. Section is
-    # skipped entirely when no rules fired (consistent with how Tough
-    # Luck / Fair and Just sections are conditional).
+    # League-flavor callouts. Each is a function in output/league_notes.py
+    # that returns 0+ BBCode lines. Section is skipped entirely when no
+    # rules fired. Includes the matchup-outcome callouts (Tough Luck /
+    # Lucky Bastard / Fair-and-Just) that used to render inline here --
+    # v1.x migrated them into the registry so all conditional flavor
+    # callouts live in one place.
     import league_notes
     callout_ctx = league_notes.build_ctx(
         active_season, matchup_period, schedule_lookup,

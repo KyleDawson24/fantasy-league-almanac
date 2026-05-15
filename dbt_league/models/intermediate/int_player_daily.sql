@@ -110,6 +110,7 @@ daily_wide as (
         sum(case when stat_name = 'XBH'   then stat_value else 0 end) as xbh,
         sum(case when stat_name = 'GDP'   then stat_value else 0 end) as gdp,
         sum(case when stat_name = 'B_IBB' then stat_value else 0 end) as b_ibb,
+        sum(case when stat_name = '30'    then stat_value else 0 end) as cyc,
 
         -- Hitting point contributions
         sum(case when stat_name = 'H'     then stat_points else 0 end) as h_pts,
@@ -130,6 +131,7 @@ daily_wide as (
         sum(case when stat_name = 'XBH'   then stat_points else 0 end) as xbh_pts,
         sum(case when stat_name = 'GDP'   then stat_points else 0 end) as gdp_pts,
         sum(case when stat_name = 'B_IBB' then stat_points else 0 end) as b_ibb_pts,
+        sum(case when stat_name = '30'    then stat_points else 0 end) as cyc_pts,
 
         -- Pitching counting stats
         sum(case when stat_name = 'W'     then stat_value else 0 end) as w,
@@ -227,11 +229,11 @@ final as (
         -- Wide stats (passthrough)
         w.h, w.ab, w.b_bb, w.b_so, w.hbp, w.sf, w.hr, w.r, w.rbi,
         w.sb, w.cs, w.tb, w.singles, w.doubles, w.triples, w.xbh,
-        w.gdp, w.b_ibb,
+        w.gdp, w.b_ibb, w.cyc,
         w.h_pts, w.ab_pts, w.b_bb_pts, w.b_so_pts, w.hbp_pts, w.sf_pts,
         w.hr_pts, w.r_pts, w.rbi_pts, w.sb_pts, w.cs_pts, w.tb_pts,
         w.singles_pts, w.doubles_pts, w.triples_pts, w.xbh_pts,
-        w.gdp_pts, w.b_ibb_pts,
+        w.gdp_pts, w.b_ibb_pts, w.cyc_pts,
         w.w, w.l, w.k, w.er, w.outs, w.qs, w.sv, w.hld,
         w.p_h, w.p_bb, w.p_hr, w.p_r, w.cg, w.blk, w.wp,
         w.hbp_p, w.blsv, w.nh, w.pg, w.pk, w.sho,

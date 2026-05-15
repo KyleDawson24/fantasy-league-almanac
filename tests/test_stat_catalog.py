@@ -16,7 +16,7 @@ import stat_catalog
 from stat_catalog import (
     SEED_TO_LEADERBOARD,
     get_abbrev_map,
-    get_always_tracked,
+    get_auto_tracked,
     get_derived_exprs,
     get_display_map,
     get_polarity_map,
@@ -34,6 +34,7 @@ class TestToLeaderboardName:
         assert to_leaderboard_name('1B') == 'SINGLES'
         assert to_leaderboard_name('2B') == 'DOUBLES'
         assert to_leaderboard_name('3B') == 'TRIPLES'
+        assert to_leaderboard_name('30') == 'CYC'
         assert to_leaderboard_name('64') == 'SHO'
 
     def test_passes_through_unmapped(self):
@@ -42,11 +43,11 @@ class TestToLeaderboardName:
         assert to_leaderboard_name('B_BB') == 'B_BB'
         assert to_leaderboard_name('K_PER_9') == 'K_PER_9'  # post-B1 rename
 
-    def test_seed_to_leaderboard_minimal_after_b1(self):
-        # B1's K/9 -> K_PER_9 rename retired two entries; only the four
-        # name-shape mismatches remain that can't be renamed (1B/2B/3B in
-        # the breakdown VARIANT, 64 as ESPN's shutout stat ID).
-        assert set(SEED_TO_LEADERBOARD) == {'1B', '2B', '3B', '64'}
+    def test_seed_to_leaderboard_post_v1x(self):
+        # 1B/2B/3B/64 retained from Phase 7 B1 (breakdown VARIANT keys
+        # we can't rename without breaking the stg FK invariant).
+        # 30 -> CYC added in v1.x when Hit for the Cycle was promoted.
+        assert set(SEED_TO_LEADERBOARD) == {'1B', '2B', '3B', '30', '64'}
 
 
 # ---------------------------------------------------------------------------
@@ -58,7 +59,7 @@ def _clear_catalog_cache():
     """Make sure the lru_cache doesn't leak fixture state between modules."""
     stat_catalog._load_catalog.cache_clear()
     for fn in (get_display_map, get_abbrev_map, get_polarity_map,
-               get_always_tracked, get_record_candidates, get_derived_exprs):
+               get_auto_tracked, get_record_candidates, get_derived_exprs):
         fn.cache_clear()
     yield
 
@@ -137,44 +138,47 @@ class TestPolarityMap:
 
 
 @pytest.mark.warehouse
-class TestAlwaysTracked:
-    def test_pre_b1_set_preserved(self):
-        # B1-fix locked these as the canonical force-surface set. Any
-        # change should be a deliberate decision.
+class TestAutoTracked:
+    def test_canonical_set_preserved(self):
+        # Stats tracked regardless of the league's scoring settings.
+        # Small, deliberate set; change only intentionally.
         expected = {'H', 'TB', 'XBH', 'SF', 'ER', 'PA'}
-        assert get_always_tracked() == expected
+        assert get_auto_tracked() == expected
 
-    def test_new_b1_rows_not_force_surfaced(self):
-        # PLATFORM_*, WASTED_POINTS, rates, derived (except PA) should NOT
-        # short-circuit should_track_record in v1.0 -- they only surface if
-        # the polarity rule passes.
-        ts = get_always_tracked()
+    def test_scored_and_derived_rows_not_auto_tracked(self):
+        # PLATFORM_*, CALCULATED_*, WASTED_POINTS, NEGATIVE_POINTS, rates,
+        # derived (except PA) should NOT short-circuit should_track_record;
+        # they surface via polarity or scoring-settings membership. PA is
+        # the exception -- universally counted across slots, auto-tracks.
+        ts = get_auto_tracked()
         for stat in ('PLATFORM_POINTS', 'PLATFORM_HITTING_PTS', 'PLATFORM_PITCHING_PTS',
                      'CALCULATED_POINTS', 'CALCULATED_HITTING_PTS', 'CALCULATED_PITCHING_PTS',
-                     'WASTED_POINTS', 'ERA', 'WHIP',
+                     'WASTED_POINTS', 'NEGATIVE_POINTS', 'ERA', 'WHIP',
                      'K_PER_9', 'K_PER_BB', 'HR_PER_9', 'BB_PER_9',
                      'SB_CS', 'W_L', 'SV_BLSV'):
-            assert stat not in ts, f"{stat} unexpectedly in always_tracked"
+            assert stat not in ts, f"{stat} unexpectedly in auto_tracked set"
 
 
 @pytest.mark.warehouse
 class TestRecordCandidates:
     def test_size_matches_expectation(self):
-        # 56 = exactly the leaderboard UNPIVOT list (39 counting + 4 derived
-        # + 6 rate + 1 wasted + 6 score). Initial B1 derivation produced 57
-        # because the polarity rule promoted stat '30' (Hit for the Cycle,
-        # discovered via 15-pt scoring weight); F-prep override flipped it
-        # to is_record_candidate=false since no fact has a wide '30' column
-        # yet. v1.x candidate: promote cycles to a tracked stat.
-        assert len(get_record_candidates()) == 56
+        # 58 = leaderboard UNPIVOT list as of v1.x: 40 counting (added CYC)
+        # + 4 derived + 6 rate + 2 totals (WASTED_POINTS, NEGATIVE_POINTS)
+        # + 6 score.
+        assert len(get_record_candidates()) == 58
 
     def test_known_record_stats(self):
         rc = get_record_candidates()
         # Counting stats with positive polarity.
         for stat in ('HR', 'RBI', 'R', 'SB', 'K', 'W', 'SV'):
             assert stat in rc
-        # Score stats added in B1.
+        # CYC promoted in v1.x.
+        assert 'CYC' in rc
+        # Score stats.
         for stat in ('CALCULATED_POINTS', 'PLATFORM_POINTS'):
+            assert stat in rc
+        # Totals (WASTED and NEGATIVE added in v1.x).
+        for stat in ('WASTED_POINTS', 'NEGATIVE_POINTS'):
             assert stat in rc
         # Rate stats.
         for stat in ('ERA', 'WHIP', 'K_PER_9'):

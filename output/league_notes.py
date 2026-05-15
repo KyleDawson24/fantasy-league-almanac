@@ -1,10 +1,12 @@
 """
 output/league_notes.py
 
-League-flavor "color" callouts for the weekly summary. Same shape as
-the existing find_tough_luck / check_fair_and_just inline functions in
-generate_summary.py, but factored into its own module so the rule list
-is easy to read, edit, and extend without touching the main script.
+League-flavor "color" callouts for the weekly summary. The single home
+for conditional fun-facts the recap surfaces alongside the structural
+sections (matchup recap, new records, season+all-time records). Each
+callout is a function returning 0+ BBCode lines; the registry below
+controls render order and lets the rule list grow without touching
+generate_summary.py.
 
 How to add a callout
 --------------------
@@ -75,6 +77,64 @@ from formatters import fmt_ip, fmt_value
 
 
 # ============================================================
+# Matchup-outcome callouts (W/L lens; second-place / second-worst / sweep)
+# ============================================================
+
+def tough_luck(ctx):
+    """Second-highest-scoring team in the league lost. The 'unlucky' end
+    of the high-score-but-lost spectrum."""
+    ranked = sorted(ctx['scores'], key=lambda x: x['platform_points'], reverse=True)
+    if len(ranked) < 2:
+        return []
+    second_place = ranked[1]
+    if second_place['result'] != 'L':
+        return []
+    return [
+        f"[b]Tough Luck[/b]: {second_place['team_name']} scored "
+        f"{second_place['platform_points']:.1f} pts, second most in the "
+        f"league, but lost to {second_place['opponent_name']}'s "
+        f"{second_place['opponent_points']:.1f}"
+    ]
+
+
+def lucky_bastard(ctx):
+    """Second-lowest-scoring team won. The 'lucky' end of the
+    low-score-but-won spectrum."""
+    ranked = sorted(ctx['scores'], key=lambda x: x['platform_points'], reverse=True)
+    if len(ranked) < 2:
+        return []
+    second_worst = ranked[-2]
+    if second_worst['result'] != 'W':
+        return []
+    return [
+        f"[b]Lucky Bastard[/b]: {second_worst['team_name']} scored just "
+        f"{second_worst['platform_points']:.1f} pts, second worst in the "
+        f"league, but beat {second_worst['opponent_name']}'s "
+        f"{second_worst['opponent_points']:.1f}"
+    ]
+
+
+def fair_and_just(ctx):
+    """Top half of the scoring all won AND bottom half all lost --
+    every score-rank-vs-result pair lined up the 'fair' way."""
+    ranked = sorted(ctx['scores'], key=lambda x: x['platform_points'], reverse=True)
+    num_matchups = len([s for s in ctx['scores'] if s.get('opponent_name') is not None]) // 2
+    if num_matchups == 0:
+        return []
+    for i, team in enumerate(ranked):
+        if team['result'] is None:
+            return []  # bye-week team breaks the rule
+        if i < num_matchups and team['result'] != 'W':
+            return []
+        if i >= num_matchups and team['result'] != 'L':
+            return []
+    return [
+        f"[b]A FAIR AND JUST LEAGUE![/b] The top {num_matchups} scoring "
+        f"teams all won this week, and the bottom {num_matchups} all lost."
+    ]
+
+
+# ============================================================
 # Pattern 1: regular occurrence, list inline
 # ============================================================
 
@@ -141,6 +201,129 @@ def no_hitters(ctx):
     return out
 
 
+def cycles(ctx):
+    """One line per player who hit for the cycle this week. Same shape
+    as no_hitters: rare-event with cumulative league-history ordinal.
+    Adds a 'first of season' note when this week's cycle is the first
+    of the current season."""
+    hitters = [p for p in ctx['players'] if (p.get('cyc') or 0) > 0]
+    if not hitters:
+        return []
+
+    cumulative = records.league_history_count(
+        'player', 'CYC', 1, op='>=',
+    )
+    season_total = records.query_snowflake("""
+        SELECT COALESCE(SUM(cyc), 0) AS n
+        FROM fct_weekly_player_active_performance
+        WHERE season_year = %s
+    """, (ctx['season_year'],))[0]['n']
+
+    if cumulative is None:
+        next_ord = None
+    else:
+        next_ord = cumulative - len(hitters) + 1
+
+    # season_total counts cycles through this matchup (inclusive); the
+    # first cycle of the season is the one where season_total - i + 1 == 1.
+    season_count_after_this_week = season_total
+    season_starts_at = season_count_after_this_week - len(hitters) + 1
+
+    out = []
+    for i, p in enumerate(sorted(hitters, key=lambda p: p['display_name'])):
+        hits  = int(p.get('h')   or 0)
+        hr    = int(p.get('hr')  or 0)
+        rbi   = int(p.get('rbi') or 0)
+        if next_ord is not None:
+            ordinal_str = f"the {records.ordinal(next_ord)} cycle in league history"
+            next_ord += 1
+        else:
+            ordinal_str = "a cycle"
+        line = (
+            f"[b]Cycle![/b] {p['display_name']} ({p['team_abbrev']}) "
+            f"hit for {ordinal_str}. Line: {hits} H, {hr} HR, {rbi} RBI."
+        )
+        # First cycle of the season gets an extra flourish.
+        if season_starts_at + i == 1:
+            line = line + " The first of the season!"
+        out.append(line)
+    return out
+
+
+def clean_slate(ctx):
+    """Teams where every active-slot player-day in the MP had
+    platform_points >= 0 — among players who appeared in at least one
+    real-world game. Functionally equivalent to fct.negative_points = 0
+    at the team-MP rollup, with a "fielded > 0 players" guard so an
+    all-rest-day team doesn't qualify vacuously.
+
+    Frequency context: zero hits in 454 historical team-MPs at probe
+    time, so each fire is genuinely first-time-ever (or nearly so).
+    Worth a per-team line."""
+    candidates = [
+        s for s in ctx['scores'] if (s.get('negative_points') or 0) == 0
+    ]
+    if not candidates:
+        return []
+
+    # Per-team distinct-player count restricted to days the player
+    # actually appeared in a game. games_played lives only on
+    # int_player_daily; the team/player active facts don't carry it.
+    fielded_rows = records.query_snowflake("""
+        SELECT team_id,
+               COUNT(DISTINCT player_id) AS fielded_players
+        FROM int_player_daily
+        WHERE season_year = %s
+          AND matchup_period = %s
+          AND is_active_slot = true
+          AND games_played >= 1
+        GROUP BY team_id
+    """, (ctx['season_year'], ctx['matchup_period']))
+    fielded_by_team = {r['team_id']: r['fielded_players'] for r in fielded_rows}
+
+    qualifying = [
+        c for c in candidates if fielded_by_team.get(c['team_id'], 0) > 0
+    ]
+    if not qualifying:
+        return []
+
+    # League-history count of qualifying team-MPs through the current
+    # MP. Mirrors the trigger criteria exactly (neg_days = 0 AND fielded
+    # > 0) so the count and the trigger never disagree. Abnormal MPs
+    # excluded to match records.league_history_count's convention.
+    hist = records.query_snowflake("""
+        WITH team_mp AS (
+          SELECT
+            d.season_year,
+            d.matchup_period,
+            d.team_id,
+            SUM(CASE WHEN d.platform_points < 0 THEN 1 ELSE 0 END) AS neg_days,
+            COUNT(DISTINCT CASE WHEN d.games_played >= 1 THEN d.player_id END) AS fielded
+          FROM int_player_daily d
+          JOIN matchup_schedule s
+            ON d.season_year = s.season_year
+           AND d.matchup_period = s.matchup_period
+          WHERE s.is_abnormal = false
+            AND d.is_active_slot = true
+          GROUP BY 1, 2, 3
+        )
+        SELECT COUNT(*) AS n
+        FROM team_mp
+        WHERE neg_days = 0 AND fielded > 0
+    """)
+    n_total = hist[0]['n'] if hist else len(qualifying)
+
+    qualifying.sort(key=lambda s: s.get('team_abbrev') or '')
+    plural = '' if n_total == 1 else 's'
+    return [
+        f"[b]I'm Doing My Part![/b] {s['team_name']} fielded "
+        f"{fielded_by_team[s['team_id']]} players, and not a one of those "
+        f"patriots sabotaged the cause -- each put up at least 0 points. "
+        f"This has happened {n_total} time{plural} in league history."
+        for s in qualifying
+    ]
+
+
 # ============================================================
 # Pattern 3: regular occurrence, varied template
 # ============================================================
@@ -167,7 +350,16 @@ def hr_drought(ctx):
 # ============================================================
 
 CALLOUTS = [
+    # Matchup-outcome callouts first -- they're the most structurally
+    # tied to the W/L results and read first in the recap by convention.
+    tough_luck,
+    lucky_bastard,
+    fair_and_just,
+    # Rare events
     no_hitters,
+    cycles,
+    clean_slate,
+    # Recurring oddities
     zero_steals,
     hr_drought,
     # ... add 5-10 of your own here
@@ -175,18 +367,24 @@ CALLOUTS = [
 
 
 def render_callouts(ctx):
-    """Returns a list of fired callout lines. Empty when no rules fired
-    this week. Caller (generate_summary.py) wraps the section header
-    around this output and skips the section entirely if the list is
-    empty."""
+    """Returns a list of fired callout lines, with a single blank-line
+    separator between callouts that fire. Empty when no rules fired this
+    week. Caller (generate_summary.py) wraps the section break around
+    this output and skips the section entirely if the list is empty."""
     lines = []
     for fn in CALLOUTS:
         try:
-            lines.extend(fn(ctx))
+            new_lines = fn(ctx)
         except Exception as e:
             # A buggy callout shouldn't kill the weekly recap. Log and
             # continue so the rest of the rules still fire.
             print(f"[league_notes] callout {fn.__name__} crashed: {e}")
+            continue
+        if not new_lines:
+            continue
+        if lines:
+            lines.append("")
+        lines.extend(new_lines)
     return lines
 
 

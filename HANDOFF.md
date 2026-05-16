@@ -91,7 +91,7 @@ espn-league-manager/
 ## 4. Setup
 
 ### Required credentials
-- **Snowflake**: account, user, password, database (`ESPN_FANTASY`), warehouse. Stored in `.env`.
+- **Snowflake**: account, user, auth credentials, database (`ESPN_FANTASY`), warehouse. Stored in `.env`. Auth is either key-pair (recommended; required when MFA is enforced) via `SNOWFLAKE_PRIVATE_KEY_PATH` + optional `SNOWFLAKE_PRIVATE_KEY_PASSPHRASE`, or password (legacy) via `SNOWFLAKE_PASSWORD`. `db.py::_build_config` detects which one is set. See SETUP.md §4.
 - **ESPN cookies**: `ESPN_S2` and `SWID` for league access (stored in `.env` or `ESPN Fantasy Baseball Cookies.txt`).
 - **Google Cloud OAuth client** (only needed if running the Sheets sink): a desktop OAuth client JSON file from a GCP project with the Sheets API enabled. Path stored in `.env` as `GOOGLE_OAUTH_CLIENT_PATH`. First run opens a browser tab for consent; refresh token cached to `output/.sheets_oauth_token.json` (gitignored).
 - **`SHEETS_OUTPUT_ID`**: the Google Sheet ID to write to. **When unset, the Sheets sink is a no-op** — this is the canonical "don't touch the live sheet" mode.

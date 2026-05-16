@@ -46,20 +46,41 @@ def _build_config():
     """Build the Snowflake connector config from env vars. Called lazily
     so import-time env-var availability doesn't matter — load_dotenv()
     runs before this whether init() was called or query_snowflake() was
-    called first."""
-    # SNOWFLAKE_SCHEMA names the raw landing schema (used by extract.py).
-    # The output scripts read dbt-built models, which live in a different
-    # schema -- SNOWFLAKE_ANALYTICS_SCHEMA, defaulting to ANALYTICS to
-    # match the dbt profile convention. Customize if your dbt target
-    # schema is named differently.
-    return {
+    called first.
+
+    Auth: prefers key-pair when SNOWFLAKE_PRIVATE_KEY_PATH is set
+    (recommended after MFA enforcement on the account, since password
+    auth then triggers an MFA prompt the connector can't satisfy
+    interactively). Falls back to password auth otherwise, preserving
+    backward compatibility for accounts without MFA.
+
+    SNOWFLAKE_SCHEMA names the raw landing schema (used by extract.py).
+    The output scripts read dbt-built models, which live in a different
+    schema -- SNOWFLAKE_ANALYTICS_SCHEMA, defaulting to ANALYTICS to
+    match the dbt profile convention. Customize if your dbt target
+    schema is named differently.
+    """
+    config = {
         "account":   os.getenv("SNOWFLAKE_ACCOUNT"),
         "user":      os.getenv("SNOWFLAKE_USER"),
-        "password":  os.getenv("SNOWFLAKE_PASSWORD"),
         "database":  os.getenv("SNOWFLAKE_DATABASE"),
         "schema":    os.getenv("SNOWFLAKE_ANALYTICS_SCHEMA", "ANALYTICS"),
         "warehouse": os.getenv("SNOWFLAKE_WAREHOUSE"),
     }
+
+    private_key_path = os.getenv("SNOWFLAKE_PRIVATE_KEY_PATH")
+    if private_key_path:
+        config["private_key_file"] = private_key_path
+        # Encrypted private keys: set SNOWFLAKE_PRIVATE_KEY_PASSPHRASE.
+        # Unencrypted keys can leave it unset.
+        passphrase = os.getenv("SNOWFLAKE_PRIVATE_KEY_PASSPHRASE")
+        if passphrase:
+            config["private_key_file_pwd"] = passphrase
+    else:
+        # Password auth fallback (pre-MFA accounts).
+        config["password"] = os.getenv("SNOWFLAKE_PASSWORD")
+
+    return config
 
 
 def init():

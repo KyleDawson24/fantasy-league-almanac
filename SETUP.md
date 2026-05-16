@@ -125,10 +125,86 @@ expects:
 You'll need these for both `.env` and the dbt profile:
 
 - **Account identifier**: shown in the Snowsight URL as `<account>.snowflakecomputing.com`. Use the full identifier including region (e.g., `abc12345.us-east-1`).
-- **Username + password**: your Snowflake login.
+- **Username**: your Snowflake login.
 - **Role**: `ACCOUNTADMIN` for setup; you can rotate to a more restricted role later.
 - **Database**: `ESPN_FANTASY` (or whatever you created above).
 - **Warehouse**: `COMPUTE_WH`.
+
+### Authentication: key-pair (recommended) vs password
+
+Snowflake supports password authentication, but **the moment MFA is
+enforced on your account, password-based scripts stop working** — the
+Python connector can't satisfy an interactive MFA prompt and fails
+with `Multi-factor authentication is required for this account`.
+MFA enforcement is increasingly default on new accounts.
+
+**Key-pair authentication** sidesteps MFA entirely (it's the
+Snowflake-recommended programmatic-access path) and is what the rest
+of this guide steers toward. One-time setup, no expiring tokens, works
+forever. If your account doesn't yet have MFA enforced, password auth
+still works as a fallback — the pipeline detects which one you've
+configured.
+
+#### Generate an RSA key pair
+
+Run this from anywhere; it writes the keys to your home directory:
+
+```bash
+python -c "
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+import os
+key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+home = os.path.expanduser('~')
+priv = os.path.join(home, '.snowflake_rsa_key.p8')
+pub  = os.path.join(home, '.snowflake_rsa_key.pub')
+with open(priv, 'wb') as f:
+    f.write(key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption()))
+with open(pub, 'wb') as f:
+    f.write(key.public_key().public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo))
+print('Private key:', priv)
+print('Public key body to paste into ALTER USER:')
+body = open(pub).read().replace('-----BEGIN PUBLIC KEY-----', '').replace('-----END PUBLIC KEY-----', '').replace('\\n', '').strip()
+print(body)
+"
+```
+
+The script prints the public-key body (with PEM headers stripped, one
+line) — that's what goes into the Snowflake `ALTER USER` command below.
+
+The private key file (`~/.snowflake_rsa_key.p8`) needs to stay on your
+machine. Don't commit it; don't share it. The path goes into `.env` in
+step 6.
+
+> **Encrypted private keys (optional).** If you want the private key
+> encrypted with a passphrase, change the `encryption_algorithm` line
+> above to `serialization.BestAvailableEncryption(b'your-passphrase')`
+> and set `SNOWFLAKE_PRIVATE_KEY_PASSPHRASE` in `.env` to match. For a
+> single-user personal project the unencrypted key is reasonable since
+> `.env` is gitignored alongside it; an encrypted key matters more in
+> shared environments.
+
+#### Register the public key on your Snowflake user
+
+In Snowsight, open a worksheet and run (substituting your username and
+the public-key body from the previous step):
+
+```sql
+ALTER USER your_username SET RSA_PUBLIC_KEY='MIIBIjANBgkq...QIDAQAB';
+
+-- Verify:
+DESC USER your_username;
+-- Look for RSA_PUBLIC_KEY_FP -- a fingerprint string indicates the key registered.
+```
+
+You can also skip the `python -c` script above and use Snowflake's
+own openssl-based instructions in their docs if you prefer; either
+PKCS8 RSA key works.
 
 ---
 
@@ -137,7 +213,29 @@ You'll need these for both `.env` and the dbt profile:
 dbt looks for connection profiles at `~/.dbt/profiles.yml` (Linux/Mac)
 or `C:\Users\<you>\.dbt\profiles.yml` (Windows).
 
-Create the file with:
+Create the file. **Pick one auth path:**
+
+**Key-pair auth (recommended):**
+
+```yaml
+dbt_league:
+  target: dev
+  outputs:
+    dev:
+      type: snowflake
+      account: <account.region>
+      user: <username>
+      private_key_path: /full/path/to/.snowflake_rsa_key.p8
+      # private_key_passphrase: only-set-for-encrypted-keys
+      role: ACCOUNTADMIN
+      database: ESPN_FANTASY
+      schema: ANALYTICS
+      warehouse: COMPUTE_WH
+      threads: 4
+      client_session_keep_alive: false
+```
+
+**Password auth (only if MFA is NOT enforced):**
 
 ```yaml
 dbt_league:
@@ -163,8 +261,9 @@ cd dbt_league
 dbt debug
 ```
 
-You should see `All checks passed!`. If not, work through whatever
-dbt reports red.
+You should see `All checks passed!`. If `dbt debug` fails with an MFA
+error, you're on password auth against an MFA-enforced account —
+switch to the key-pair stanza above.
 
 ---
 
@@ -176,7 +275,11 @@ Copy the template and fill in real values:
 cp .env.example .env
 ```
 
-Edit `.env` with the values from steps 3 + 4:
+Edit `.env` with the values from steps 3 + 4. Match the auth path you
+picked for the dbt profile in step 5 (key-pair recommended; password
+fallback only for accounts without MFA enforced):
+
+**Key-pair auth (recommended):**
 
 ```bash
 # ESPN
@@ -187,13 +290,32 @@ LEAGUE_ID=<your league ID>
 # Snowflake
 SNOWFLAKE_ACCOUNT=<account.region>
 SNOWFLAKE_USER=<username>
+SNOWFLAKE_DATABASE=ESPN_FANTASY
+SNOWFLAKE_SCHEMA=RAW
+SNOWFLAKE_WAREHOUSE=COMPUTE_WH
+SNOWFLAKE_PRIVATE_KEY_PATH=/full/path/to/.snowflake_rsa_key.p8
+# SNOWFLAKE_PRIVATE_KEY_PASSPHRASE=only_set_for_encrypted_keys
+# Only set if your dbt target schema isn't named ANALYTICS:
+# SNOWFLAKE_ANALYTICS_SCHEMA=ANALYTICS
+```
+
+**Password auth (only if MFA is not enforced on your account):**
+
+```bash
+# ESPN ... (same as above)
+
+# Snowflake
+SNOWFLAKE_ACCOUNT=<account.region>
+SNOWFLAKE_USER=<username>
 SNOWFLAKE_PASSWORD=<password>
 SNOWFLAKE_DATABASE=ESPN_FANTASY
 SNOWFLAKE_SCHEMA=RAW
 SNOWFLAKE_WAREHOUSE=COMPUTE_WH
-# Only set if your dbt target schema isn't named ANALYTICS:
-# SNOWFLAKE_ANALYTICS_SCHEMA=ANALYTICS
 ```
+
+The output scripts' `db.init()` detects which one you've configured:
+when `SNOWFLAKE_PRIVATE_KEY_PATH` is set, it uses key-pair auth;
+otherwise it falls back to password.
 
 Skip the Google Sheets vars for now (see section 9 if you want that
 sink later).

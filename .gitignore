@@ -7,6 +7,14 @@ ESPN Fantasy Baseball Cookies.txt
 # Stored next to the script as .sheets_oauth_token.json; gitignored to
 # keep per-user credentials out of git.
 output/.sheets_oauth_token.json
+# Defensive: any private-key file shape, in case one ever ends up
+# inside the repo dir by accident. Keys are recommended to live in the
+# home directory (see SETUP.md key-pair auth section); these patterns
+# are belt-and-suspenders.
+*.p8
+*.pem
+*.key
+id_rsa*
 
 # Python
 .venv/

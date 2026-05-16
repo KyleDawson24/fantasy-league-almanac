@@ -214,10 +214,15 @@ select
     -- scored" line: rules-normalized point production if their stat line
     -- had counted (which it didn't, because they were benched / on IL /
     -- on the waiver wire).
-    total_hitting_stat_pts  as calculated_hitting_pts,
-    total_pitching_stat_pts as calculated_pitching_pts,
-    total_stat_pts          as calculated_points,
-    negative_points         as negative_points
+    --
+    -- v1.x: rounded to 1 decimal at the fact layer (mirrors the active
+    -- player fact). ROUND returns a NUMBER, so when the team inactive
+    -- fact does SUM(rounded_player_values) the team total stays exact
+    -- and the team-total = SUM(players) invariant is preserved.
+    round(total_hitting_stat_pts,  1) as calculated_hitting_pts,
+    round(total_pitching_stat_pts, 1) as calculated_pitching_pts,
+    round(total_stat_pts,          1) as calculated_points,
+    round(negative_points,         1) as negative_points
 
 from inactive
 

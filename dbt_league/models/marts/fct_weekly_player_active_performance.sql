@@ -227,19 +227,27 @@ select
     -- aren't pivoted into dedicated *_pts columns above (e.g. GDP, B_IBB,
     -- HBP_P, PK, BLSV, NH, PG). The *_pts columns remain available for per-stat
     -- consumer callouts; calculated_* uses the comprehensive totals.
-    a.total_hitting_stat_pts  as calculated_hitting_pts,
-    a.total_pitching_stat_pts as calculated_pitching_pts,
-    a.total_stat_pts          as calculated_points,
+    --
+    -- v1.x: rounded to 1 decimal at the fact layer to kill the cosmetic
+    -- float-precision wobble (e.g. 126.95 -> 126.9 vs 127.0 across
+    -- --full-refresh rebuilds). ROUND returns a NUMBER, so when the team
+    -- fact does SUM(rounded_player_values) the team total stays exact
+    -- and the team-total = SUM(players) invariant is preserved.
+    round(a.total_hitting_stat_pts,  1) as calculated_hitting_pts,
+    round(a.total_pitching_stat_pts, 1) as calculated_pitching_pts,
+    round(a.total_stat_pts,          1) as calculated_points,
 
     -- Gross-negative-production rollup (per-day magnitude of net-negative
-    -- platform_points, summed across active days).
-    a.negative_points         as negative_points,
+    -- platform_points, summed across active days). Rounded 1 decimal at
+    -- fact layer (see calculated_* note above).
+    round(a.negative_points, 1)         as negative_points,
 
     -- Platform scoring (ESPN's pre-computed values, the official arbiter for W/L).
     -- Sourced from int_player_weekly_performance via the active CTE above.
-    a.platform_points,
-    a.platform_hitting_pts,
-    a.platform_pitching_pts
+    -- Rounded 1 decimal at fact layer (see calculated_* note above).
+    round(a.platform_points,         1) as platform_points,
+    round(a.platform_hitting_pts,    1) as platform_hitting_pts,
+    round(a.platform_pitching_pts,   1) as platform_pitching_pts
 
 from active a
 

@@ -234,7 +234,13 @@ matchup_pairs as (
 team_with_platform as (
     select
         tr.*,
-        tps.platform_points,
+        -- v1.x: round at fact layer to kill cosmetic float wobble. The
+        -- raw API value (wrapper's home_score) is a FLOAT and shouldn't
+        -- carry more than 1 decimal of meaningful precision anyway --
+        -- ESPN scores tab displays 1 decimal. Other team-level totals
+        -- (calculated_*, platform_*_pts, negative_points) inherit
+        -- exactness from the player-fact NUMBER rounding upstream.
+        round(tps.platform_points, 1)            as platform_points,
         tr.platform_hitting_pts + tr.platform_pitching_pts
             as player_rollup_platform_points,
         round(

@@ -387,6 +387,80 @@ class TestCollapseOneGroupNonSaturated:
         assert collapsed['matchup_period'] == 7  # the latest, not just last in input
 
 
+# ---------- _collapse_one_group (saturated cases, via DI count_fn) ----------
+
+class TestCollapseOneGroupSaturated:
+    """The saturated-tier branch backfills tie_count via the injected
+    count_fn. v1.x DI cleanup made this testable without a warehouse;
+    pre-DI the only way to exercise this path was the byte-diff golden
+    BBCode regression."""
+
+    def test_saturated_tier_uses_count_fn(self):
+        # Build a 10-row tier all tied at the same value, ranks 1..10.
+        # tier[-1]['rank'] == 10 triggers the saturated branch.
+        group = [
+            _row(i, 5, team_id=i, team_abbrev=f'T{i}')
+            for i in range(1, 11)
+        ]
+        calls = []
+
+        def mock_count(grain, stat_name, value):
+            calls.append((grain, stat_name, value))
+            return 247  # truth value beyond the visible 10
+
+        result = records._collapse_one_group(group, max_n=3, count_fn=mock_count)
+        assert len(result) == 1
+        assert result[0]['is_collapsed'] is True
+        assert result[0]['tie_count'] == 247  # from count_fn, not tier_size
+        assert calls == [('team', 'HR', 5)]
+
+    def test_saturated_tier_count_fn_none_falls_back_to_tier_size(self):
+        # count_fn returning None (the no-fct-counterpart case) falls back
+        # to visible tier_size -- still an undercount when saturated, but
+        # honest about it.
+        group = [
+            _row(i, 5, team_id=i, team_abbrev=f'T{i}')
+            for i in range(1, 11)
+        ]
+
+        def mock_count_returning_none(grain, stat_name, value):
+            return None
+
+        result = records._collapse_one_group(
+            group, max_n=3, count_fn=mock_count_returning_none,
+        )
+        assert result[0]['tie_count'] == 10  # fell back to visible tier_size
+
+    def test_saturated_tier_count_fn_absent_falls_back_to_tier_size(self):
+        # count_fn omitted entirely (the default-None path) also falls
+        # back. Matches the count_fn-returns-None case; lets non-warehouse
+        # callers use collapse_ties without needing a counter.
+        group = [
+            _row(i, 5, team_id=i, team_abbrev=f'T{i}')
+            for i in range(1, 11)
+        ]
+        result = records._collapse_one_group(group, max_n=3)
+        assert result[0]['tie_count'] == 10
+
+    def test_non_saturated_tier_skips_count_fn(self):
+        # Tier sits at ranks 1..3 (well under 10) so the algorithm trusts
+        # visible tier_size. count_fn should not be invoked.
+        group = [
+            _row(i, 5, team_id=i, team_abbrev=f'T{i}')
+            for i in range(1, 5)  # 4 rows at rank 1..4, all tied at 5
+        ]
+        calls = []
+
+        def spy_count(grain, stat_name, value):
+            calls.append((grain, stat_name, value))
+            return 999
+
+        result = records._collapse_one_group(group, max_n=3, count_fn=spy_count)
+        assert result[0]['is_collapsed'] is True
+        assert result[0]['tie_count'] == 4  # visible tier_size, not 999
+        assert calls == []  # count_fn never called -- not saturated
+
+
 # ---------- collapse_ties (multi-group integration) ----------
 
 class TestCollapseTies:

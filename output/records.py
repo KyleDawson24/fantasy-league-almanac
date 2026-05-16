@@ -207,7 +207,11 @@ def get_records_with_contributors(scope, top_n=5):
     ]
 
     # Phase 6.3.3 chunk 4: collapse first, contributor-stitch second.
-    collapsed = collapse_ties(surviving, max_n=top_n)
+    # count_fn=count_value_occurrences (v1.x DI cleanup) lets the saturated-
+    # tier branch backfill accurate counts when the visible tier hits the
+    # mart's top-10 cap; records_logic stays import-pure (no records_data
+    # dependency) so the algorithm can be unit-tested with a mock counter.
+    collapsed = collapse_ties(surviving, max_n=top_n, count_fn=count_value_occurrences)
 
     real_rows = [r for r in collapsed if not r.get('is_collapsed')]
     team_tuples = [

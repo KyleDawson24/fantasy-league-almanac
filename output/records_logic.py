@@ -2,14 +2,18 @@
 output/records_logic.py
 
 Pure-function consumer-side rules and presentation helpers for the
-records pipeline.
+records pipeline. No SQL originates here, and no imports from
+records_data -- the module is import-pure with respect to the data
+layer so its rules can be unit-tested without a warehouse round-trip.
 
-Phase 7 Step 3 split: extracted from records.py. No SQL originates
-here. One transitive DB call lives in _collapse_one_group, which calls
-records_data.count_value_occurrences to backfill tie counts when a
-tier saturates the mart's top-10 cap; that's an honest logic->data
-edge (one-way, no cycle: records_data does not import from this
-module).
+The one place the algorithm needs to query the warehouse
+(_collapse_one_group's saturated-tier backfill: when a tied tier hits
+the mart's top-10 cap, the visible row count is an undercount of the
+true tie cohort) is handled via dependency injection: callers pass a
+`count_fn` argument and this module remains ignorant of where the
+count comes from. v1.x DI cleanup; previously this module imported
+count_value_occurrences directly, which was the only logic->data
+import in the project.
 
 Public API:
 - SCORE_STAT_NAMES                      -- score-level stat_names tuple
@@ -18,10 +22,11 @@ Public API:
 - best_or_worst_label(...)              -- polarity-aware "Best"/"Worst"
 - format_week_label(...)                -- "Week N" or playoff round name
 - ordinal(n)                            -- "1st" / "2nd" / etc.
-- collapse_ties(records, max_n=5)       -- tie-collapse algorithm
+- collapse_ties(records, max_n=5,       -- tie-collapse algorithm; pass
+                count_fn=None)             count_fn=count_value_occurrences
+                                           in production for accurate
+                                           saturated-tier counts
 """
-
-from records_data import count_value_occurrences
 
 
 # Score-level stat_names in the leaderboard. The records-section
@@ -240,7 +245,7 @@ def _sort_new_records(records):
 INLINE_COLLAPSE_THRESHOLD = 3
 
 
-def collapse_ties(records, max_n=5):
+def collapse_ties(records, max_n=5, count_fn=None):
     """Walk leaderboard rows grouped by (entity_grain, stat_name,
     record_direction) and either pass a tier through unchanged or
     replace it with one synthetic 'N tied at value' row, depending on
@@ -250,6 +255,14 @@ def collapse_ties(records, max_n=5):
     in full only if its members fit under the cap; otherwise a single
     collapsed row is emitted and we stop processing the group. The cap
     target is the visible ranks count, not the underlying tie count.
+
+    `count_fn`, when supplied, is a callable(grain, stat_name, value)
+    used to backfill the synthetic row's tie_count when an overflow
+    tier saturates the mart's top-10 cap (visible tier_size is then an
+    undercount of the true tie cohort). In production this is
+    records_data.count_value_occurrences. When count_fn is None or
+    returns None (rate stats, WASTED_POINTS -- no fct counterpart),
+    tie_count falls back to the visible tier_size, an honest undercount.
 
     Input expected to be ordered by (entity_grain, stat_name,
     record_direction, rank) -- which is what get_records_with_contributors
@@ -262,8 +275,7 @@ def collapse_ties(records, max_n=5):
         entity_grain, stat_name, record_direction,    inherited
         rank: 'collapsed',                            marker
         is_collapsed: True,
-        tie_count: N,                                 accurate via
-                                                       count_value_occurrences
+        tie_count: N,                                 accurate via count_fn
                                                        when mart top-10 saturates
         stat_value: tied value,
         season_year, matchup_period: most recent
@@ -284,14 +296,15 @@ def collapse_ties(records, max_n=5):
     out = []
     for _, group_iter in groupby(records, key=group_key):
         group = sorted(group_iter, key=lambda r: r['rank'])
-        out.extend(_collapse_one_group(group, max_n))
+        out.extend(_collapse_one_group(group, max_n, count_fn=count_fn))
     return out
 
 
-def _collapse_one_group(group, max_n):
-    """Apply the chunk 4 rule to one pre-sorted (by rank asc) group of
+def _collapse_one_group(group, max_n, count_fn=None):
+    """Apply the collapse rule to one pre-sorted (by rank asc) group of
     leaderboard rows. Returns a flat list (mix of original and at most
-    one synthetic collapsed row)."""
+    one synthetic collapsed row). See collapse_ties for count_fn
+    semantics."""
     out = []
     used = 0
     i = 0
@@ -317,16 +330,17 @@ def _collapse_one_group(group, max_n):
 
         # If the group runs to the mart's top-10 cap, the visible tier
         # is potentially an undercount of the true tie cohort -- the
-        # rest is hidden behind the rank<=10 filter. Backfill via
-        # count_value_occurrences (queries fct directly, accurate).
-        # Otherwise visible tier_size is the truth. count returns None
+        # rest is hidden behind the rank<=10 filter. Backfill via the
+        # injected count_fn (records_data.count_value_occurrences in
+        # production, accurate via direct fct query). Otherwise visible
+        # tier_size is the truth. count_fn None / count returns None
         # for stats with no fct counterpart (WASTED_POINTS / rate stats);
         # we fall back to visible tier_size in that case -- still an
         # undercount when saturated, but those stats rarely saturate
         # at top-10 and the alternative is a runtime crash.
         saturated = tier[-1]['rank'] >= 10
-        if saturated:
-            counted = count_value_occurrences(grain, template['stat_name'], v)
+        if saturated and count_fn is not None:
+            counted = count_fn(grain, template['stat_name'], v)
             tie_count = counted if counted is not None else tier_size
         else:
             tie_count = tier_size

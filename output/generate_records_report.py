@@ -180,9 +180,24 @@ def format_record(stat_name, holders, schedule_lookup):
         # the fallback keeps the renderer total-function).
         count = records.count_value_occurrences('team', stat_name, record_value)
         count_str = f"{count}" if count is not None else f"{len(top_tier)}+"
-        lines.append(
-            f"[b]{display}[/b]: {record_str} across {count_str} team-weeks"
-        )
+
+        # v1.x: floor-zero rendering. When the rank-1 value is 0 on a
+        # positive-polarity stat, "0 across N team-weeks" reads as if a
+        # record exists when actually no team has ever recorded the stat
+        # at all (NH/PG/CYC are the typical cases). Render explicitly as
+        # "None recorded yet" instead. Negative-polarity stats with
+        # rank-1=0 in the 'most' direction (e.g., "team with the most
+        # errors had 0 errors") are legitimate good-record cases and
+        # keep the count rendering.
+        polarity = stat_catalog.get_polarity_map().get(stat_name, 'positive')
+        if record_value == 0 and polarity == 'positive':
+            lines.append(
+                f"[b]{display}[/b]: None recorded yet (across {count_str} team-weeks)"
+            )
+        else:
+            lines.append(
+                f"[b]{display}[/b]: {record_str} across {count_str} team-weeks"
+            )
         # Skip second-place tier when collapsing -- tier 2 at a long-tail
         # floor is usually also a tied long tail (e.g., 0 in tier 1, 1 in
         # tier 2 with another 200 ties), and adds noise rather than insight.

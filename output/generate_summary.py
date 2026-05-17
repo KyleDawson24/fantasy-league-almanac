@@ -112,11 +112,11 @@ def get_contribution_callouts(scores, players):
 # recap prefix "Player (TeamAbbr), X.X pts -- "; everything after the
 # first " -- " comes from the shared utility.
 #
-# Top Scorer (new in Phase 5) is always rendered alongside Top Hitter and
-# Top Pitcher even though for typical weeks it duplicates one of them.
-# The structure is intentional: it covers the rare two-way case (Ohtani
-# topping the league overall while not topping either category alone) and
-# keeps the three-callout shape consistent week-to-week.
+# Top Scorer renders only on two-way weeks -- when the leading player
+# had BOTH non-zero hitting AND non-zero pitching contributions. On
+# pure-pitcher or pure-hitter top-scorer weeks (the typical case), the
+# Top Scorer line is identical to Top Pitcher or Top Hitter and adds
+# noise. v1.x conditional fix; pre-v1.x always rendered.
 
 
 def find_top_scorer(players):
@@ -656,16 +656,21 @@ def generate_summary(matchup_period, scores, contributions, wasted_points,
     # Player-level superlatives across the whole league (top scorer / top hitter
     # / top pitcher by platform_points / platform_hitting_pts / platform_pitching_pts
     # respectively). Stashed in the contributions dict by get_contribution_callouts.
-    # Top Scorer is rendered alongside the category leaders even when it
-    # duplicates one of them — see comment near find_top_scorer for rationale.
+    # v1.x: Top Scorer renders only on two-way weeks (player with non-zero
+    # hitting AND pitching contributions); otherwise it duplicates Top
+    # Hitter or Top Pitcher. See comment near find_top_scorer.
     top_scorer = contributions.get('top_scorer')
     top_hitter = contributions.get('top_hitter')
     top_pitcher = contributions.get('top_pitcher')
-    if top_scorer:
-        lines.extend([
-            f"",
-            f"[b]Top Scorer[/b]: {format_top_scorer_line(top_scorer)}",
-        ])
+    top_scorer_is_two_way = (
+        top_scorer is not None
+        and (top_scorer.get('platform_hitting_pts') or 0) > 0
+        and (top_scorer.get('platform_pitching_pts') or 0) > 0
+    )
+    if top_scorer_is_two_way or top_hitter or top_pitcher:
+        lines.append("")
+    if top_scorer_is_two_way:
+        lines.append(f"[b]Top Scorer[/b]: {format_top_scorer_line(top_scorer)}")
     if top_hitter:
         lines.append(f"[b]Top Hitter[/b]: {format_hitter_line(top_hitter)}")
     if top_pitcher:

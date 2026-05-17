@@ -535,6 +535,76 @@ models:
         tests:
           - not_null
 
+  - name: mart_league_weekly_benchmarks
+    description: >
+      One row per (season_year, matchup_period) with league-wide
+      aggregate score lenses (mean, max, min) plus the percentile rank
+      of each mean within league history.
+
+      Powers "hot week / cold week" callouts in the weekly recap and
+      similar collective-mood content. Three score lenses: total
+      calculated_points, calculated_hitting_pts, calculated_pitching_pts.
+      All three use the calculated_* lens (cross-season comparable
+      under current-season scoring weights) -- the right lens for
+      historical comparison. Platform_* lens not included; cross-season
+      comparison under varying historical weights would be misleading.
+
+      Aggregation includes every active-roster team-week (no bye-team
+      filter; bye-week teams still rostered players and accrued points).
+      Excludes is_abnormal weeks (All-Star break, weather-shortened,
+      etc.) to match the convention every other leaderboard CTE uses.
+
+      Percentile uses PERCENT_RANK over the full history. A value of
+      0.95 means this week's mean is higher than 95% of weeks the
+      league has ever recorded. Consumers typically read it as "Nth
+      percentile" via ROUND(pctile * 100, 0).
+
+      Grain: (season_year, matchup_period). View materialization
+      (small aggregation, source is already a table).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - season_year
+              - matchup_period
+    columns:
+      - name: season_year
+        description: 'Season year.'
+        tests:
+          - not_null
+      - name: matchup_period
+        description: 'Matchup period within the season.'
+        tests:
+          - not_null
+      - name: team_count
+        description: 'Number of team-weeks aggregated. Constant in normal weeks (= league size); informational guardrail in case the upstream filter ever drops a team unexpectedly.'
+        tests:
+          - not_null
+      - name: calculated_points_mean
+        description: 'League average calculated total points for this week. Rounded to 1 decimal (matches fact-layer rounding).'
+      - name: calculated_points_max
+        description: 'Highest calculated_points by any team this week.'
+      - name: calculated_points_min
+        description: 'Lowest calculated_points by any team this week.'
+      - name: calculated_points_pctile
+        description: 'PERCENT_RANK of calculated_points_mean across all weeks in league history (0..1). 0.95 = higher than 95% of recorded weeks.'
+      - name: calculated_hitting_pts_mean
+        description: 'League average calculated hitting points this week. Rounded 1 decimal.'
+      - name: calculated_hitting_pts_max
+        description: 'Highest calculated_hitting_pts by any team this week.'
+      - name: calculated_hitting_pts_min
+        description: 'Lowest calculated_hitting_pts by any team this week.'
+      - name: calculated_hitting_pts_pctile
+        description: 'PERCENT_RANK of calculated_hitting_pts_mean across all weeks in league history.'
+      - name: calculated_pitching_pts_mean
+        description: 'League average calculated pitching points this week. Rounded 1 decimal.'
+      - name: calculated_pitching_pts_max
+        description: 'Highest calculated_pitching_pts by any team this week.'
+      - name: calculated_pitching_pts_min
+        description: 'Lowest calculated_pitching_pts by any team this week.'
+      - name: calculated_pitching_pts_pctile
+        description: 'PERCENT_RANK of calculated_pitching_pts_mean across all weeks in league history.'
+
   - name: fct_weekly_player_inactive_performance
     description: >
       Wide-format player-weekly fact for INACTIVE-slot performance (lineup_slot IN BE/IL/FA).

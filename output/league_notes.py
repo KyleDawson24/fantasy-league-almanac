@@ -325,6 +325,85 @@ def clean_slate(ctx):
 
 
 # ============================================================
+# League-wide benchmark callouts (mart_league_weekly_benchmarks)
+# ============================================================
+
+# Threshold bands for hot/cold callouts. Percentile of the week's
+# league-mean within league history (PERCENT_RANK so 0..1, where 1.0 =
+# highest ever). Tiered framing: extreme (== 1.0 / == 0.0) gets the
+# "highest/lowest in league history" superlative; otherwise the
+# top/bottom 15% bucket fires with an Nth-percentile rendering.
+_HOT_PCTILE_THRESHOLD  = 0.85
+_COLD_PCTILE_THRESHOLD = 0.15
+
+# Per-lens phrasing. Each entry: (mart column prefix, hot lead-in,
+# cold lead-in, lens label for "in league history" suffix). The
+# function below picks the appropriate template per fired lens.
+_BENCHMARK_LENSES = [
+    ('calculated_points',
+     'Hot Week',  'Slow Week',          'calculated points'),
+    ('calculated_hitting_pts',
+     'Bats Were Loud', 'Bats Were Quiet', 'hitting points'),
+    ('calculated_pitching_pts',
+     'Arms Day',  'Rough Day for Arms', 'pitching points'),
+]
+
+
+def league_benchmarks(ctx):
+    """Collective-mood callouts driven by mart_league_weekly_benchmarks.
+    Emits 0-3 lines depending on whether the current MP's league means
+    sit in the extreme percentile bands for overall / hitting / pitching.
+
+    Renders three tiers per lens:
+      - pctile == 1.0  -> "highest in league history"
+      - pctile >= 0.85 -> "<N>th percentile in league history"
+      - pctile == 0.0  -> "lowest in league history"
+      - pctile <= 0.15 -> "<N>th percentile in league history"
+      - middling       -> silent (no line)
+    """
+    rows = records.query_snowflake("""
+        SELECT calculated_points_mean,         calculated_points_pctile,
+               calculated_hitting_pts_mean,    calculated_hitting_pts_pctile,
+               calculated_pitching_pts_mean,   calculated_pitching_pts_pctile
+        FROM mart_league_weekly_benchmarks
+        WHERE season_year = %s AND matchup_period = %s
+    """, (ctx['season_year'], ctx['matchup_period']))
+    if not rows:
+        return []
+    bench = rows[0]
+
+    out = []
+    for prefix, hot_lead, cold_lead, lens_label in _BENCHMARK_LENSES:
+        mean   = bench.get(f'{prefix}_mean')
+        pctile = bench.get(f'{prefix}_pctile')
+        if mean is None or pctile is None:
+            continue
+
+        # Tier the framing.
+        if pctile >= _HOT_PCTILE_THRESHOLD:
+            lead = hot_lead
+            if pctile == 1.0:
+                rank_str = f'highest in league history'
+            else:
+                rank_str = f'{int(round(pctile * 100))}th percentile in league history'
+            out.append(
+                f"[b]{lead}:[/b] League averaged {mean} {lens_label} "
+                f"this week -- {rank_str}."
+            )
+        elif pctile <= _COLD_PCTILE_THRESHOLD:
+            lead = cold_lead
+            if pctile == 0.0:
+                rank_str = f'lowest in league history'
+            else:
+                rank_str = f'{int(round(pctile * 100))}th percentile in league history'
+            out.append(
+                f"[b]{lead}:[/b] League averaged {mean} {lens_label} "
+                f"this week -- {rank_str}."
+            )
+    return out
+
+
+# ============================================================
 # Pattern 3: regular occurrence, varied template
 # ============================================================
 
@@ -355,6 +434,9 @@ CALLOUTS = [
     tough_luck,
     lucky_bastard,
     fair_and_just,
+    # League-wide collective-mood callouts (top/bottom percentile bands
+    # via mart_league_weekly_benchmarks).
+    league_benchmarks,
     # Rare events
     no_hitters,
     cycles,

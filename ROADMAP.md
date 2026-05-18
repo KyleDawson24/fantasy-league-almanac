@@ -1,48 +1,15 @@
 # Roadmap
 
-This project shipped v1.0.0 on 2026-05-13. The items below are what's on
-deck, organized by priority and ambition. v1.x = incremental polish on the
-current architecture; v2.0 = structural change.
+This project shipped v1.0.0 on 2026-05-13 and v1.0.1 on 2026-05-18
+(polish + flavor expansion; see CHANGELOG.md for the full v1.0.1
+entry). The items below are what's still on deck, organized by
+priority and ambition. v1.x = incremental polish on the current
+architecture; v2.0 = structural change.
 
 ## Now (v1.x — incremental polish)
 
 Low-risk changes building on the current architecture. Most would ship in
 a single afternoon.
-
-### Output polish
-
-- **"No active no-hitters yet" rendering.** When a "most no-hitters"-
-  style stat has all-time rank-1 value 0, the records section currently
-  reads as if a record exists. Render explicitly or skip the row.
-- **Conditional third "Top Scorer" line.** Top Scorer / Hitter / Pitcher
-  render together; Top Scorer often duplicates one of the others when
-  nobody had a two-way Ohtani-style week. Show the Top Scorer line only
-  when the overall winner had both non-zero hitting AND non-zero pitching
-  contributions.
-- **Round one-decimal points at the fact layer.** Eliminates the cosmetic
-  126.9 ↔ 127.0 flipping seen when the underlying value is ~126.95 and
-  summation order varies across dbt rebuilds.
-
-### Sheets sink
-
-- **Preserve user-applied formatting on tab updates.** The current
-  `_replace_tab` uses `worksheet.clear()` + `update()`, which wipes color
-  coding, frozen rows, and column widths. Switch to in-place `update()`
-  for the data range plus targeted `batch_clear` for trailing rows when
-  the new dataset is smaller.
-
-### Code organization
-
-- **Dependency-inject `count_value_occurrences` into `collapse_ties`.**
-  The Phase 7 Step 3 split left `records_logic.collapse_ties` with one
-  explicit import of `count_value_occurrences` from `records_data`, used
-  only for saturated-tier backfill. Replacing it with a `count_fn`
-  parameter would make `records_logic` truly pure and enable unit-test
-  coverage of the saturated-tier path (currently exercised only via the
-  warehouse-marked golden-output regression).
-- **Factor shared output-script boilerplate.** UTF-8 stdout reconfig +
-  dotenv loading + schedule lookup are duplicated across both consumer
-  scripts. Pull into `output/_setup.py`.
 
 ### Data wiring
 
@@ -101,11 +68,6 @@ a single afternoon.
   in Next). Framed as a v1.x "proof of progress" — even partial
   scaffolding ships value (consumer simplification, lineage clarity)
   and lays foundation for full player-profile analytics post-v1.0.
-- **League-level performance benchmarking.** Records today are per-team;
-  ungrouping to track league-wide weekly aggregates ("this week we
-  averaged 250 points, 70th percentile in league history") unlocks
-  collective-mood callouts in the recap. Small change — new view over
-  existing facts.
 - **`fct_team_career_stats` mart.** Career-aggregate equivalent of
   `fct_weekly_team_active_performance` — "who has the most points scored
   for their team in league history," etc. Team-side counterpart to
@@ -232,6 +194,16 @@ Ideas worth exploring if the project evolves in their direction.
   thresholds. Team-grain rates stay because natural denominator
   accumulation keeps them meaningful; player rates would need per-stat
   threshold tuning to avoid small-sample noise, with diminishing return.
+- **Sheets sink formatting-preservation (`_replace_tab` in-place update).**
+  Considered in v1.x as a fix for the "weekly run wipes formatting"
+  complaint, but dropped at v1.0.1 — the upcoming Sheets surface
+  redesign supersedes the in-place-update logic. Will rebuild from
+  scratch when the new layout lands.
+- **`output/_setup.py` boilerplate factoring.** v1.x Handoff item;
+  most of what was named (UTF-8 stdout reconfig, `load_dotenv`,
+  Snowflake config) already shipped in Phase 7 via `output/db.py::
+  init()`. Remainder (the single-line schedule_lookup load per
+  consumer) wasn't worth the additional indirection.
 
 ---
 

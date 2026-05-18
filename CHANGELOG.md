@@ -8,37 +8,127 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Each entry links to the corresponding `Phase X.Y Documentation.md` in the
 repository root for the architectural detail behind the change.
 
-## [Unreleased]
+## [1.0.1] — 2026-05-18
+
+A v1.0 polish release. Strictly speaking the changes here include
+several new features that would justify a v1.1.0 under a strict
+semver reading — record-surfacing for NEGATIVE_POINTS, the Hit-for-
+the-Cycle stat, a league-wide benchmarks mart, an always-on "League
+This Week" recap line, eight new league_notes callouts, and key-pair
+Snowflake auth. The maintainer chose to land them as a 1.0.x patch
+to keep the v1.x label reserved for a more meaningful structural
+inflection (the player-entity flagship). Treat 1.0.1 as "polish that
+grew."
 
 ### Added
-- `NEGATIVE_POINTS` promoted to a record candidate. The fact-layer column
-  already existed (gross magnitude of net-negative platform_points,
-  per-day rolled up); the seed flip surfaces "Most Negative Points"
-  team-grain records.
-- Stat 30 (Hit for the Cycle) promoted to a tracked stat. New wide `cyc`
-  column on int_player_daily, int_player_weekly_performance, and all four
-  facts. `'30'` → `'CYC'` added to `SEED_TO_LEADERBOARD`.
-- `cycles` callout in `output/league_notes.py` — one BBCode line per
-  player who hit for the cycle this MP, with cumulative league-history
-  ordinal and a "first of the season" flourish on the first one.
+
+- **New tracked records.** `NEGATIVE_POINTS` (gross-negative-production
+  rollup, already on the four facts) and `CYC` (Hit for the Cycle, new
+  wide column propagated through `int_player_daily`, `int_player_weekly_
+  performance`, and all four facts) promoted to `is_record_candidate=
+  true` and surfaced in the records report.
+- **`League This Week:` always-on summary line.** First line of the
+  weekly recap, surfaces the league's mean overall / hitting / pitching
+  points alongside the historical ranking ("273.4 (2nd of 30) points
+  overall …"). Renders every week regardless of whether anything
+  noteworthy fired; foregrounds league-level context as a baseline.
+- **Eight new league_notes callouts:**
+  - `cycles` — per-player cycle announcement with cumulative history
+    ordinal and "first of the season" flourish.
+  - `no_quality_starts` — teams that started at least one SP but
+    produced zero QS; cumulative 0-QS-with-starts ordinal.
+  - `hr_streak_active` — teams whose ≥7-day HR streak is still alive
+    at MP end; cites all-time league record for context.
+  - `hr_streak_ended` — streaks of ≥10 consecutive HR-days that broke
+    in the recap MP.
+  - `hero` — second-banana-margin walk-off lens: a player whose
+    individual outperformance vs. their #2 single-handedly closed the
+    margin in a narrow win.
+  - `scapegoat` — symmetric loss-attribution lens: a player whose
+    negative output exceeded the loss margin.
+  - `mismatch` — top vs. bottom scorer in the same head-to-head
+    matchup; cumulative-margin-rank ordinal.
+  - `no_negative_days` — teams where every active player-day had
+    `platform_points ≥ 0`; "first of the season" flourish on first
+    qualifying team.
+  - `hot_week` / `cold_week` — league-level outlier callouts driven
+    by the new benchmarks mart.
+- **`mart_league_weekly_benchmarks`** — aggregate of league-week means
+  + percentile rank within league history for overall / hitting /
+  pitching points. Powers the always-on `League This Week:` line and
+  the hot/cold-week callouts. Future surfaces (frontend, dashboard)
+  read from one mart instead of recomputing.
+- **`output/league_notes.py` registry pattern** is now the single home
+  for all conditional flavor callouts (matchup-outcome lenses migrated
+  in from inline `generate_summary.py` definitions). `render_callouts`
+  inserts a blank-line separator between callouts that fire, preserving
+  the prior inline rendering.
+- **Snowflake key-pair authentication** support in `output/db.py` and
+  `extract/extract.py`. Required after MFA enforcement on the account;
+  password-based auth fails with an interactive MFA prompt the
+  connector can't satisfy. `SNOWFLAKE_PRIVATE_KEY_PATH` + optional
+  `SNOWFLAKE_PRIVATE_KEY_PASSPHRASE` env vars; full walkthrough in
+  SETUP.md §4.
+- **Recap polish:** "None recorded yet (across N team-weeks)" rendering
+  for records with floor-zero values (no-hitters, perfect games,
+  cycles) instead of the ambiguous "0 across N team-weeks" form;
+  conditional Top Scorer line that suppresses when the overall winner
+  duplicates Top Hitter or Top Pitcher.
+- **Random seed determinism.** `random` seeded per-recap so varied-
+  template callouts (e.g., `hr_drought`) pick the same phrasing across
+  rebuilds of the same MP.
+- **dbt docs catalog hosted via GitHub Pages** — initial publish at
+  https://kyledawson24.github.io/fantasy-league-front-page/.
 
 ### Changed
-- `is_always_tracked` seed column renamed to `auto_tracked`. New name
-  carries the intended semantic clearly: tracked regardless of league
-  scoring settings, distinct from stats tracked because they appear in
-  `scoring_settings`. The helper `stat_catalog.get_always_tracked()` is
-  now `get_auto_tracked()`; `records_logic.should_track_record`'s
-  `always_tracked` parameter renamed to `auto_tracked`.
-- Mislabeled `stat_name='CYC'` seed row (ESPN stat ID 31, a non-cycle
-  daily-achievement flag) renamed to `STAT_31` so the real cycles stat
-  (id 30) can own the CYC leaderboard column. `stg_player_stat_breakdowns`
-  filters wrapper-emitted `'CYC'` rows to preserve the FK invariant.
-- Matchup-outcome callouts (Tough Luck, Lucky Bastard, Fair-and-Just)
-  migrated from inline definitions in `generate_summary.py` into the
-  `league_notes.CALLOUTS` registry. Render output preserved: render_callouts
-  now inserts a blank-line separator between callouts that fire, matching
-  the inline blank-prefix-each pattern they had before. Single home for
-  all conditional flavor callouts; reordering is now a list edit.
+
+- **`is_always_tracked` seed column → `auto_tracked`** with corresponding
+  rename of `stat_catalog.get_always_tracked()` →
+  `get_auto_tracked()` and the `always_tracked` parameter on
+  `records_logic.should_track_record` → `auto_tracked`. The new name
+  separates "tracked regardless of league scoring settings" cleanly
+  from the implicit "tracked because the stat is scored" pathway.
+- **Mislabeled `stat_name='CYC'` seed row** (ESPN stat ID 31, a
+  non-cycle daily-achievement flag) renamed to `STAT_31` so the real
+  cycle stat (id 30) can own the `CYC` leaderboard column.
+  `stg_player_stat_breakdowns` now filters wrapper-emitted `'CYC'`
+  rows so the seed FK invariant holds without the mislabel row.
+- **Score totals rounded at the fact layer.** `calculated_*`,
+  `platform_*_pts`, `platform_points`, and `negative_points` rounded
+  to 1 decimal at the player-fact layer; team-fact totals inherit
+  exactness from `SUM(NUMBER)` arithmetic so the team_total =
+  SUM(players) invariant holds. Kills the cosmetic 126.9 ↔ 127.0
+  wobble seen across `--full-refresh` rebuilds.
+- **`records_logic` import-pure** with respect to the data layer. The
+  only logic→data import (`count_value_occurrences`) replaced with a
+  `count_fn` parameter injected by `records.get_records_with_
+  contributors`. The saturated-tier branch is now unit-testable
+  without a Snowflake round-trip; four new tests cover it.
+
+### Fixed
+
+- **`no_quality_starts` historical ordinal drift.** The cumulative
+  count used `league_history_count('team', 'QS', 0)`, which includes
+  team-MPs where no SP started at all — so the ordinal drifted upward
+  from the trigger's actual definition. Fix mirrors the trigger's
+  `lineup_slot='SP' AND games_played≥1` filter in the historical
+  count.
+- **`hr_streak_active` "new record" claim on tied streaks.** Said "a
+  new league record" when the longest active streak matched the
+  existing record. Two issues — (a) `record_len` included the active
+  streak itself, and (b) the comparison was `>=` rather than `>`.
+  Fix: exclude the current longest active run from the prior-record
+  calculation and split into explicit new / tied / existing-stands
+  branches.
+- **Hero template trailing whitespace.** Two templates ended with a
+  space inside the string (rendered into baselines); two more had
+  trailing whitespace after the closing quote. Cleaned up.
+
+### Removed
+
+- Parked `_replace_tab` formatting-preservation change in
+  `output/sheets_writer.py` discarded — pending Sheets surface
+  redesign supersedes the in-place-update logic.
 
 ## [1.0.0] — 2026-05-13
 

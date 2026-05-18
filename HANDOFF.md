@@ -294,8 +294,8 @@ The hard-won stuff. If you need to debug something weird, check here first.
 4. **Stat ID 64 = Shutouts**: ESPN's stat list has no human-readable name for stat 64; wrapper passes through as numeric `'64'`. Per Phase 3.2 reverse-engineering (5 pts/shutout matched a Hosstros delta), confirmed it's SHO. Seed keeps the literal `'64'` (matching the raw breakdown VARIANT key); int model aliases via `case when stat_name = '64' then ... as sho`.
 5. **Stat IDs 22, 61, 78, 79, 80**: ESPN internal flags. Documented in seed `notes` column. Don't pivot.
 6. **Stat ID 66 (PG)** was previously misidentified as "Pitches Per Game"; Phase 3.2 confirmed via scoring settings (250-pt bonus) it's Perfect Games.
-7. **Stat ID 30 = Hit for the Cycle (CYC)** (Phase 7 archaeology): same scoring-weight pattern as PG/SHO. 15 pts/unit (rare-event tier with NH no-hitters), 2 observed rows across 2 seasons matching real cycle candidates. Seed labels it correctly post-Phase-7. `is_record_candidate=false` for now (no wide column on any fact); v1.x candidate for promotion to a tracked stat with a league_notes.py "First cycle of the season!" callout.
-8. **Stat ID 31 (seed name `CYC`)** is NOT cycles — labeled as such since seed import but disproven by Phase 7: 148 non-zero rows across 113 players over 2 seasons (impossible for cycles; real MLB has ~5-10 per year league-wide) and no scoring weight. Some other ESPN daily-achievement flag (multi-hit game? extra-base-hit-game?). Seed updated to flag the mislabel; `is_counting=false` so it drops at int_player_daily.
+7. **Stat ID 30 = Hit for the Cycle (CYC)** (Phase 7 archaeology, promoted in v1.0.1): same scoring-weight pattern as PG/SHO. 15 pts/unit (rare-event tier with NH no-hitters), 2 observed rows across 2 seasons matching real cycle candidates. v1.0.1 promoted it to a tracked stat: wide `cyc` column on `int_player_daily`, `int_player_weekly_performance`, and all four facts; `is_record_candidate=true`; surfaced in the records report and via a `cycles` callout in `league_notes.py`.
+8. **Stat ID 31 (formerly seed name `CYC`, now `STAT_31`)** is NOT cycles — labeled as such since seed import but disproven by Phase 7 archaeology: 148 non-zero rows across 113 players over 2 seasons (impossible for cycles; real MLB has ~5-10 per year league-wide) and no scoring weight. Some other ESPN daily-achievement flag (multi-hit game? extra-base-hit-game?). v1.0.1 renamed the seed row to `STAT_31` so the real cycle stat (id 30) could own the `CYC` leaderboard column; `stg_player_stat_breakdowns` filters wrapper-emitted `'CYC'` rows so the FK invariant holds.
 
 ### Scoring-settings + leaderboard naming
 
@@ -414,15 +414,22 @@ Forward-looking work is tracked in `ROADMAP.md` at repo root. That doc
 has the public Now / Next / Later / Decided Against buckets and stays
 authoritative as items ship.
 
-Highlights as of v1.0:
+Highlights as of v1.0.1:
 - **Now (v1.x flagship)**: `dim_player` + `fct_player_career` -- the
   player-entity foundation the project hasn't had. Absorbs the
   `get_wasted_points` staging-reach concern and unlocks career-milestone
   callouts.
-- **Now (v1.x small)**: output polish, Sheets formatting preservation,
-  dependency-inject `count_value_occurrences` into `collapse_ties`. The
-  stat-catalog cleanup (is_always_tracked rename, NEGATIVE_POINTS record
-  candidate, stat 30 = Hit for the Cycle promotion) shipped in v1.x.
+- **Shipped in v1.0.1**: stat-catalog cleanup (auto_tracked rename,
+  NEGATIVE_POINTS record candidate, stat 30 = Hit for the Cycle
+  promotion); recap polish (fact-layer rounding, conditional Top
+  Scorer line, "none yet" rendering); DI cleanup
+  (`count_value_occurrences` injected via `count_fn`,
+  `records_logic` import-pure); league-wide benchmarks mart +
+  always-on `League This Week:` recap line + hot/cold-week callouts;
+  Snowflake key-pair auth; 8 new league_notes callouts.
+- **Open v1.x items**: Owner Names in the Mart, Career Stats Per Team,
+  Playoff Contention Identification, Calendar Auto-Populate. Sheets
+  Sink Hardening dropped (upcoming Sheets surface redesign supersedes).
 - **Next (v2.0, likely-exclusive)**: cross-platform Yahoo/Sleeper extract
   OR DuckDB target. MetricFlow as a deliberate learning exercise.
 - **Decided Against**: frequency-table tab (tie-collapse covers it),

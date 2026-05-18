@@ -137,6 +137,51 @@ def find_top_pitcher(players):
     return max(pitchers, key=lambda p: p['platform_pitching_pts']) if pitchers else None
 
 
+# ---------- League This Week (always-on collective lens) ----------
+#
+# v1.x: list the league's collective averages every week regardless of
+# whether anything extreme happened. Foregrounds the league-wide
+# context (rank of overall / hitting / pitching means in league
+# history) so the per-team superlatives that follow have a frame of
+# reference. Sources mart_league_weekly_benchmarks (one row per
+# season_year + matchup_period; absolute ranks + total_weeks
+# denormalized for single-query reads). A later v1.x pass may add
+# conditional "Hot Week / Cold Week" flourishes on top of this; the
+# always-on line stays.
+
+def format_league_this_week(season_year, matchup_period):
+    """Single BBCode line listing league averages + ranks across the
+    three calculated_* lenses. Empty string if the mart has no row
+    for (season_year, matchup_period) -- defensive only; the mart
+    builds from the same fact the recap reads.
+    """
+    rows = query_snowflake("""
+        SELECT calculated_points_mean,        calculated_points_rank,
+               calculated_hitting_pts_mean,   calculated_hitting_pts_rank,
+               calculated_pitching_pts_mean,  calculated_pitching_pts_rank,
+               total_weeks_in_history
+        FROM mart_league_weekly_benchmarks
+        WHERE season_year = %s AND matchup_period = %s
+    """, (season_year, matchup_period))
+    if not rows:
+        return ''
+    b = rows[0]
+    n = b['total_weeks_in_history']
+
+    def fmt(mean, rank):
+        return f"{mean} ({records.ordinal(rank)} of {n})"
+
+    return (
+        f"[b]League This Week:[/b] "
+        f"{fmt(b['calculated_points_mean'], b['calculated_points_rank'])} "
+        f"points overall, "
+        f"{fmt(b['calculated_hitting_pts_mean'], b['calculated_hitting_pts_rank'])} "
+        f"points of offense, and "
+        f"{fmt(b['calculated_pitching_pts_mean'], b['calculated_pitching_pts_rank'])} "
+        f"points of pitching."
+    )
+
+
 def format_top_scorer_line(player):
     """Top Scorer recap callout: total platform_points + top-5 across both pools."""
     return (
@@ -641,6 +686,17 @@ def generate_summary(matchup_period, scores, contributions, wasted_points,
     lines = [
         f"[u][b]{active_week_label} Recap[/b][/u]",
         f"",
+    ]
+
+    # v1.x: League This Week line. Always-on collective lens at the
+    # top of the recap so the per-team superlatives below have a
+    # frame of reference. Skipped silently if the mart has no row
+    # (defensive only).
+    league_line = format_league_this_week(active_season, matchup_period)
+    if league_line:
+        lines.extend([league_line, ""])
+
+    lines.extend([
         f"[b]Best Overall[/b]: {best_overall['platform_points']:.1f} pts by {best_overall['team_name']}",
         f"{fmt_players(contributions['top_overall'])}",
         f"[b]Best Hitting[/b]: {best_hitting['platform_hitting_pts']:.1f} pts by {best_hitting['team_name']}",
@@ -651,7 +707,7 @@ def generate_summary(matchup_period, scores, contributions, wasted_points,
         f"[b]Worst Overall[/b]: {worst_overall['platform_points']:.1f} pts by {worst_overall['team_name']}",
         f"[b]Worst Hitting[/b]: {worst_hitting['platform_hitting_pts']:.1f} pts by {worst_hitting['team_name']}",
         f"[b]Worst Pitching[/b]: {worst_pitching['platform_pitching_pts']:.1f} pts by {worst_pitching['team_name']}",
-    ]
+    ])
 
     # Player-level superlatives across the whole league (top scorer / top hitter
     # / top pitcher by platform_points / platform_hitting_pts / platform_pitching_pts

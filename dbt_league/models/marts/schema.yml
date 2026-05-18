@@ -580,6 +580,8 @@ models:
         description: 'Number of team-weeks aggregated. Constant in normal weeks (= league size); informational guardrail in case the upstream filter ever drops a team unexpectedly.'
         tests:
           - not_null
+      - name: total_weeks_in_history
+        description: 'Total league-weeks across all loaded seasons (constant per row; denormalized for single-query consumer reads).'
       - name: calculated_points_mean
         description: 'League average calculated total points for this week. Rounded to 1 decimal (matches fact-layer rounding).'
       - name: calculated_points_max
@@ -588,6 +590,8 @@ models:
         description: 'Lowest calculated_points by any team this week.'
       - name: calculated_points_pctile
         description: 'PERCENT_RANK of calculated_points_mean across all weeks in league history (0..1). 0.95 = higher than 95% of recorded weeks.'
+      - name: calculated_points_rank
+        description: 'Absolute RANK of calculated_points_mean across all weeks (DESC, so 1 = highest mean ever). Powers the always-on League This Week summary line. Ties get the same rank (RANK semantics, not DENSE_RANK).'
       - name: calculated_hitting_pts_mean
         description: 'League average calculated hitting points this week. Rounded 1 decimal.'
       - name: calculated_hitting_pts_max
@@ -596,6 +600,8 @@ models:
         description: 'Lowest calculated_hitting_pts by any team this week.'
       - name: calculated_hitting_pts_pctile
         description: 'PERCENT_RANK of calculated_hitting_pts_mean across all weeks in league history.'
+      - name: calculated_hitting_pts_rank
+        description: 'Absolute RANK of calculated_hitting_pts_mean across all weeks (DESC, so 1 = highest mean ever).'
       - name: calculated_pitching_pts_mean
         description: 'League average calculated pitching points this week. Rounded 1 decimal.'
       - name: calculated_pitching_pts_max
@@ -604,6 +610,8 @@ models:
         description: 'Lowest calculated_pitching_pts by any team this week.'
       - name: calculated_pitching_pts_pctile
         description: 'PERCENT_RANK of calculated_pitching_pts_mean across all weeks in league history.'
+      - name: calculated_pitching_pts_rank
+        description: 'Absolute RANK of calculated_pitching_pts_mean across all weeks (DESC, so 1 = highest mean ever).'
 
   - name: fct_weekly_player_inactive_performance
     description: >

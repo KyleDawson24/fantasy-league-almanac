@@ -57,22 +57,32 @@ select
     matchup_period,
     team_count,
 
-    round(calculated_points_mean,         1) as calculated_points_mean,
+    -- Total league-weeks in history (constant per row; denormalized
+    -- here so the always-on consumer can read it in a single query
+    -- without needing a separate COUNT(*) round-trip).
+    count(*) over () as total_weeks_in_history,
+
+    -- Calculated total points (cross-season lens).
+    round(calculated_points_mean,         1)                       as calculated_points_mean,
     calculated_points_max,
     calculated_points_min,
-    percent_rank() over (order by calculated_points_mean)
-                                             as calculated_points_pctile,
+    percent_rank() over (order by calculated_points_mean)          as calculated_points_pctile,
+    -- 1 = highest mean ever (DESC ordering). Convention: 1st = "best"
+    -- in sports-stat speak. Ties get the same rank (RANK, not DENSE).
+    rank()         over (order by calculated_points_mean desc)     as calculated_points_rank,
 
-    round(calculated_hitting_pts_mean,    1) as calculated_hitting_pts_mean,
+    -- Calculated hitting points.
+    round(calculated_hitting_pts_mean,    1)                       as calculated_hitting_pts_mean,
     calculated_hitting_pts_max,
     calculated_hitting_pts_min,
-    percent_rank() over (order by calculated_hitting_pts_mean)
-                                             as calculated_hitting_pts_pctile,
+    percent_rank() over (order by calculated_hitting_pts_mean)     as calculated_hitting_pts_pctile,
+    rank()         over (order by calculated_hitting_pts_mean desc) as calculated_hitting_pts_rank,
 
-    round(calculated_pitching_pts_mean,   1) as calculated_pitching_pts_mean,
+    -- Calculated pitching points.
+    round(calculated_pitching_pts_mean,   1)                       as calculated_pitching_pts_mean,
     calculated_pitching_pts_max,
     calculated_pitching_pts_min,
-    percent_rank() over (order by calculated_pitching_pts_mean)
-                                             as calculated_pitching_pts_pctile
+    percent_rank() over (order by calculated_pitching_pts_mean)    as calculated_pitching_pts_pctile,
+    rank()         over (order by calculated_pitching_pts_mean desc) as calculated_pitching_pts_rank
 
 from per_week

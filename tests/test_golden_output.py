@@ -12,10 +12,13 @@ checkpoints during Step 2:
 To regenerate after an intentional output change:
     REGENERATE_BASELINES=1 pytest tests/ -m warehouse
 
-Baseline week pinned to Week 6 of the 2026 season (current MAX(matchup_period)
-at Phase 7 capture). If Snowflake gets Week 7 data mid-rearchitect, the
-summary script will auto-advance and this test will fail loudly — at that
-point regenerate or extend the script with a --matchup-period flag.
+Baseline tracks "the current MAX(matchup_period)" — the summary script
+auto-advances each Sunday, so the fixture is a snapshot of whatever the
+latest loaded MP is. Regenerate after each Sunday run; the fixture
+filename intentionally drops the week number so we don't have to rename
+it weekly. A future v1.x fix would extend the script with a
+--matchup-period flag to pin a fixed week and make the test stable
+across weekly extracts.
 """
 
 import json
@@ -90,7 +93,7 @@ def _golden(fixture_name: str, actual: str) -> None:
 
 def test_summary_bbcode_matches_baseline():
     actual = _normalize(_run_script("output/generate_summary.py"))
-    _golden("baseline_summary_week6.txt", actual)
+    _golden("baseline_summary_current.txt", actual)
 
 
 def test_records_report_bbcode_matches_baseline():

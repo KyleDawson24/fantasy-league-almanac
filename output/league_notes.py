@@ -185,16 +185,16 @@ _HERO_TEMPLATES = [
     "Baseball is a game of inches and {team_name} needed every inch of {hero_name}'s swinging hog to win this week.",
 
     "[b]Hero:[/b] {hero_name} put up {hero_pts:.1f} for {team_name} this week, "
-    "who only beat {opp_name} by {margin:.1f}. " 
+    "who only beat {opp_name} by {margin:.1f}. "
     "'Oh so surely {team_name} would have still won even if {hero_name} had been average' you might say "
     "but that's a stupid thing to have thought and the science refutes you, fool! {team_name}'s second best player only produced {second_pts:.1f} points! "
-    "had {hero_name} only done what his team's number two had managed, {team_name} would have lost, and we'd all be speaking German! ",
+    "had {hero_name} only done what his team's number two had managed, {team_name} would have lost, and we'd all be speaking German!",
 
     "[b]Hero:[/b] {hero_name} put up {hero_pts:.1f} for {team_name} this week, {gap:.1f} more than {team_name}'s #2 scorer "
     "'kind of an arbitrary thing to call out' you might find yourself thinking, especially if you're a stupid guy'; "
-    "{team_name} only beat {opp_name} by {margin:.1f}; if {hero_name} had merely been excellent instead of a star, his guys would have lost ",
+    "{team_name} only beat {opp_name} by {margin:.1f}; if {hero_name} had merely been excellent instead of a star, his guys would have lost",
 
-    "[b]Hero:[/b] {hero_name} put up {hero_pts:.1f} for {team_name} this week, {gap:.1f} more than {team_name}'s #2 scorer, single handedly accounting for the {margin:.1f} point gap by which {team_name} defeated {opp_name}"   
+    "[b]Hero:[/b] {hero_name} put up {hero_pts:.1f} for {team_name} this week, {gap:.1f} more than {team_name}'s #2 scorer, single handedly accounting for the {margin:.1f} point gap by which {team_name} defeated {opp_name}"
 ]
 
 
@@ -714,10 +714,36 @@ def no_quality_starts(ctx):
     if not teams:
         return []
     teams.sort(key=lambda s: s.get('team_abbrev') or '')
-    total_through_now = records.league_history_count('team', 'QS', 0, op='=')
-    # league_history_count returns None for stats with no fct counterpart;
-    # QS does have one, so this should always populate -- but degrade
-    # gracefully (drop the ordinal clause) if it ever doesn't.
+    # Historical count mirrors the trigger criteria exactly: at least one
+    # SP start AND zero quality starts in the MP, abnormal weeks excluded.
+    # league_history_count('team','QS',0) would include team-MPs where no
+    # SP started at all (which the trigger excludes), drifting the ordinal
+    # upward from the actual trigger definition.
+    hist_rows = records.query_snowflake("""
+        WITH team_mp_starts AS (
+            SELECT
+                season_year, matchup_period, team_id,
+                SUM(CASE WHEN lineup_slot = 'SP' AND games_played >= 1
+                         THEN 1 ELSE 0 END) AS sp_starts
+            FROM int_player_daily
+            GROUP BY 1, 2, 3
+        )
+        SELECT COUNT(*) AS n
+        FROM fct_weekly_team_active_performance t
+        JOIN matchup_schedule s
+            ON t.season_year = s.season_year
+           AND t.matchup_period = s.matchup_period
+        JOIN team_mp_starts tms
+            ON t.season_year = tms.season_year
+           AND t.matchup_period = tms.matchup_period
+           AND t.team_id = tms.team_id
+        WHERE s.is_abnormal = false
+          AND tms.sp_starts >= 1
+          AND t.qs = 0
+    """)
+    total_through_now = hist_rows[0]['n'] if hist_rows else None
+    # Defensive None-guard: if the query ever fails to populate, fall back
+    # to dropping the ordinal clause rather than crashing the recap.
     base_ord = (None if total_through_now is None
                 else total_through_now - len(teams) + 1)
     out = []
@@ -887,19 +913,35 @@ def hr_streak_active(ctx):
         teams_phrase = f"{names[0]} and {names[1]}"
     else:
         teams_phrase = ", ".join(names[:-1]) + f", and {names[-1]}"
-    # All-time league record (longest run in the dataset, which extends
-    # through this MP's end -- so includes any current active streak).
+    # All-time league record EXCLUDING the current longest active streak
+    # (otherwise that streak's own length would pose as a "prior record"
+    # against itself, making every record-tying/breaking case indistinguishable).
+    # The dataset extends through this MP's end, so without this guard the
+    # longest active run would self-equal record_len whenever it's the
+    # all-time leader.
     record_len  = 0
     record_team = None
     record_year = None
     for td in data['team_data'].values():
         for r in td['runs']:
+            is_the_longest_active = (
+                r['is_active']
+                and td['team_name'] == longest['team_name']
+                and r['length']     == longest['streak_len']
+            )
+            if is_the_longest_active:
+                continue
             if r['length'] > record_len:
                 record_len  = r['length']
                 record_team = td['team_name']
                 record_year = r['end']['season_year']
-    if longest['streak_len'] >= record_len:
+    if longest['streak_len'] > record_len:
         record_clause = "a new league record."
+    elif longest['streak_len'] == record_len:
+        record_clause = (
+            f"tying the all-time league record of {record_len} "
+            f"set by {record_team} in {record_year}."
+        )
     else:
         record_clause = (
             f"league record is {record_len} by {record_team} in {record_year}."

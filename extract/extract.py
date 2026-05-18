@@ -107,11 +107,23 @@ LEAGUE_ID = int(os.getenv("LEAGUE_ID"))
 SNOWFLAKE_CONFIG = {
     "account": os.getenv("SNOWFLAKE_ACCOUNT"),
     "user": os.getenv("SNOWFLAKE_USER"),
-    "password": os.getenv("SNOWFLAKE_PASSWORD"),
     "database": os.getenv("SNOWFLAKE_DATABASE"),
     "schema": os.getenv("SNOWFLAKE_SCHEMA"),
     "warehouse": os.getenv("SNOWFLAKE_WAREHOUSE"),
 }
+
+# Auth: prefer key-pair when SNOWFLAKE_PRIVATE_KEY_PATH is set
+# (required for MFA-enforced accounts; the connector can't satisfy an
+# interactive MFA prompt). Falls back to password otherwise. Mirrors
+# output/db.py::_build_config; keep the two in sync. See SETUP.md §4.
+_private_key_path = os.getenv("SNOWFLAKE_PRIVATE_KEY_PATH")
+if _private_key_path:
+    SNOWFLAKE_CONFIG["private_key_file"] = _private_key_path
+    _passphrase = os.getenv("SNOWFLAKE_PRIVATE_KEY_PASSPHRASE")
+    if _passphrase:
+        SNOWFLAKE_CONFIG["private_key_file_pwd"] = _passphrase
+else:
+    SNOWFLAKE_CONFIG["password"] = os.getenv("SNOWFLAKE_PASSWORD")
 
 ESPN_API_BASE = "https://lm-api-reads.fantasy.espn.com/apis/v3/games/flb/seasons"
 

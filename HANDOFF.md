@@ -414,13 +414,23 @@ Forward-looking work is tracked in `ROADMAP.md` at repo root. That doc
 has the public Now / Next / Later / Decided Against buckets and stays
 authoritative as items ship.
 
-Highlights as of v1.0.1:
+Highlights as of v1.0.2:
 - **Now (v1.x flagship)**: `dim_player` + `fct_player_career` -- the
-  player-entity foundation the project hasn't had. Absorbs the
-  `get_wasted_points` staging-reach concern and unlocks career-milestone
-  callouts.
-- **Shipped in v1.0.1**: stat-catalog cleanup (auto_tracked rename,
-  NEGATIVE_POINTS record candidate, stat 30 = Hit for the Cycle
+  player-entity foundation the project hasn't had. v1.0.2 laid the
+  contract-layer groundwork (`dim_stat`, `dim_matchup_period`,
+  `fct_player_daily_performance`) that `dim_player` slots into
+  cleanly.
+- **Shipped in v1.0.2** (refactor-only; byte-identical output): new
+  mart-layer contracts (`dim_stat`, `dim_matchup_period`,
+  `fct_player_daily_performance`); `int_player_weekly_performance`
+  promoted to `fct_weekly_player_performance`; schedule columns
+  denormalized onto the four weekly facts; output scripts repointed
+  through the new contract layer; `SEED_TO_LEADERBOARD` and
+  `to_leaderboard_name` removed (`dim_stat.leaderboard_name` is the
+  single source of truth); dbt exposures rewired; raw + duplicate-
+  CASE-block edges eliminated from the catalog DAG.
+- **Shipped in v1.0.1**: stat-catalog cleanup (`auto_tracked` rename,
+  NEGATIVE_POINTS as record candidate, stat 30 = Hit for the Cycle
   promotion); recap polish (fact-layer rounding, conditional Top
   Scorer line, "none yet" rendering); DI cleanup
   (`count_value_occurrences` injected via `count_fn`,

@@ -1,10 +1,11 @@
 # Roadmap
 
-This project shipped v1.0.0 on 2026-05-13 and v1.0.1 on 2026-05-18
-(polish + flavor expansion; see CHANGELOG.md for the full v1.0.1
-entry). The items below are what's still on deck, organized by
-priority and ambition. v1.x = incremental polish on the current
-architecture; v2.0 = structural change.
+This project shipped v1.0.0 on 2026-05-13, v1.0.1 on 2026-05-18
+(polish + flavor expansion), and v1.0.2 on 2026-05-19 (DAG hygiene
++ dbt-architecture cleanup; refactor-only). See CHANGELOG.md for
+the per-release entries. The items below are what's still on deck,
+organized by priority and ambition. v1.x = incremental polish on
+the current architecture; v2.0 = structural change.
 
 ## Now (v1.x — incremental polish)
 

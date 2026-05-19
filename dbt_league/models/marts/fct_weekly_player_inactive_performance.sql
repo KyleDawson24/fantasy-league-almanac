@@ -159,21 +159,21 @@ with inactive as (
         -- the player's inactive days in this bucket).
         sum(negative_points)         as negative_points
 
-    from {{ ref('int_player_weekly_performance') }}
+    from {{ ref('fct_weekly_player_performance') }}
     where performance_status = 'inactive'
     group by 1, 2, 3, 4, 5
 )
 
 select
-    season_year,
-    matchup_period,
-    team_id,
-    team_name,
-    team_abbrev,
-    owner_name,
-    player_id,
-    player_name,
-    wasted_bucket,
+    i.season_year,
+    i.matchup_period,
+    i.team_id,
+    i.team_name,
+    i.team_abbrev,
+    i.owner_name,
+    i.player_id,
+    i.player_name,
+    i.wasted_bucket,
 
     -- Hitting counting
     h, ab, b_bb, b_so, hbp, sf, hr, r, rbi,
@@ -222,12 +222,21 @@ select
     round(total_hitting_stat_pts,  1) as calculated_hitting_pts,
     round(total_pitching_stat_pts, 1) as calculated_pitching_pts,
     round(total_stat_pts,          1) as calculated_points,
-    round(negative_points,         1) as negative_points
+    round(negative_points,         1) as negative_points,
 
-from inactive
+    -- v1.1.0: schedule attributes denormalized onto the fact. See
+    -- fct_weekly_player_active_performance for the convention rationale.
+    s.is_abnormal,
+    s.is_playoff,
+    s.playoff_round
+
+from inactive i
+left join {{ ref('dim_matchup_period') }} s
+    on i.season_year = s.season_year
+    and i.matchup_period = s.matchup_period
 
 {% if is_incremental() %}
-where (season_year * 100 + matchup_period) >= (
+where (i.season_year * 100 + i.matchup_period) >= (
     select coalesce(max(season_year * 100 + matchup_period), 0) from {{ this }}
 )
 {% endif %}

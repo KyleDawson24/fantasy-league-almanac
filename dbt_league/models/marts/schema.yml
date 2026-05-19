@@ -1,6 +1,240 @@
 version: 2
 
 models:
+  - name: dim_stat
+    description: >
+      Consumer-facing dimension for stat metadata. Thin view over the
+      stat_classification seed; gives output scripts and external
+      readers a stable contract layer independent of the seed's
+      internal schema.
+
+      Adds vs. the seed: leaderboard_name (seed_name post SEED_TO_
+      LEADERBOARD translation -- '1B' -> 'SINGLES', '30' -> 'CYC',
+      '64' -> 'SHO', etc.). All other seed columns pass through.
+
+      Materialized as view. Python consumers reach this dim via
+      output/stat_catalog.py's @lru_cache helpers (one fetch per
+      script process). The mart_stat_leaderboard model still iterates
+      stat_classification directly at Jinja compile time via
+      run_query; future cleanup may consolidate to dim_stat as the
+      sole source.
+    columns:
+      - name: stat_name
+        description: 'Seed-side primary key. Matches the breakdown VARIANT key.'
+        tests:
+          - not_null
+          - unique
+      - name: leaderboard_name
+        description: >
+          Consumer-facing leaderboard column name. Equals stat_name for
+          most stats; translated for the small set whose seed name differs
+          from the leaderboard column name (1B/2B/3B singles/doubles/triples,
+          30 cycles, 64 shutouts).
+        tests:
+          - not_null
+          - unique
+      - name: espn_stat_id
+        description: 'ESPN numeric stat ID. NULL for derived stats / score totals.'
+      - name: stat_category
+        description: '''hitting'' | ''pitching'' | ''fielding'' | ''unknown'' | ''total''.'
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['hitting', 'pitching', 'fielding', 'unknown', 'total']
+      - name: espn_stat_label
+        description: 'ESPN''s English label. Traceability metadata; consumers prefer display_name/abbrev.'
+      - name: display_name
+        description: 'Project-owned display label. Read via stat_catalog.get_display_map().'
+      - name: abbrev
+        description: 'Compact display form. Read via stat_catalog.get_abbrev_map().'
+      - name: is_counting
+        description: 'True for stats with a wide column on int_player_daily that propagate as SUM rollups.'
+      - name: is_derived
+        description: 'True for stats computed from other counting stats via derivation_expr.'
+      - name: derivation_expr
+        description: 'SQL expression for derived stats (e.g., "ab + b_bb + hbp + sf" for PA).'
+      - name: auto_tracked
+        description: 'Bypasses the polarity rule at team grain for stats tracked regardless of league scoring settings.'
+      - name: is_record_candidate
+        description: 'True if the stat appears in mart_stat_leaderboard. Drives the Jinja UNPIVOT loop.'
+      - name: polarity
+        description: '''positive'' | ''negative'' | ''neutral''. Drives consumer-side Best/Worst labeling.'
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['positive', 'negative', 'neutral']
+      - name: notes
+        description: 'Free-text context for unusual rows.'
+
+  - name: dim_matchup_period
+    description: >
+      Consumer-facing dimension for matchup-period calendar metadata.
+      Thin view over the matchup_schedule seed; gives output scripts
+      and external readers a stable contract layer.
+
+      v1.1.0 DAG cleanup. Calendar-automation work (roadmapped) will
+      replace the hand-maintained seed with an extract-driven raw
+      table plus a thin overrides seed; once that lands, this dim
+      re-points at the new sources without consumer changes.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - season_year
+              - matchup_period
+    columns:
+      - name: season_year
+        description: 'MLB season year.'
+        tests:
+          - not_null
+      - name: matchup_period
+        description: 'ESPN weekly matchup number (1-indexed).'
+        tests:
+          - not_null
+      - name: start_date
+        description: 'First MLB scoring period day in this matchup_period.'
+      - name: end_date
+        description: 'Last MLB scoring period day in this matchup_period.'
+      - name: is_abnormal
+        description: 'Excluded from records (All-Star break, weather-shortened weeks, etc.).'
+        tests:
+          - not_null
+      - name: abnormal_reason
+        description: 'Free-text explanation when is_abnormal=true.'
+      - name: is_playoff
+        description: 'True for playoff weeks. Drives playoff_round substitution in format_week_label().'
+        tests:
+          - not_null
+      - name: playoff_round
+        description: '"Round 1" / "Semi-Finals" / "Finals" when is_playoff=true; NULL otherwise.'
+
+  - name: fct_player_daily_performance
+    description: >
+      Comprehensive player-daily performance fact. Thin view over
+      int_player_daily that adds two grain-defining status columns
+      (performance_status, wasted_bucket) so weekly facts and per-day
+      consumers can inherit them from one canonical derivation.
+
+      The "comprehensive" framing: every slot, every roster status,
+      the real-world MLB stat line with fantasy roster context
+      attached. Active vs. inactive splits happen at the weekly fact
+      layer downstream.
+
+      v1.1.0 DAG cleanup. Output scripts that previously reached into
+      int_player_daily for per-day metadata (get_wasted_points'
+      pro_team / position / eligible_slots snapshot, league_notes
+      callouts for HR streaks / no_negative_days / SP-start counts)
+      should re-point at this fact in a follow-on commit.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - season_year
+              - scoring_period
+              - team_id
+              - player_id
+              - lineup_slot
+    columns:
+      - name: season_year
+        tests:
+          - not_null
+      - name: scoring_period
+        tests:
+          - not_null
+      - name: player_id
+        tests:
+          - not_null
+      - name: lineup_slot
+        tests:
+          - not_null
+      - name: performance_status
+        description: '''active'' (lineup_slot NOT IN BE/IL/FA) or ''inactive'' (lineup_slot IN BE/IL/FA).'
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['active', 'inactive']
+      - name: wasted_bucket
+        description: '''FA'' (free agent), ''ROSTERED_INACTIVE'' (BE/IL), or NULL (active). Categorizes the two flavors of inactive.'
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['FA', 'ROSTERED_INACTIVE']
+              config:
+                where: "wasted_bucket is not null"
+      - name: is_active_slot
+        description: 'Boolean equivalent of performance_status = ''active''. Retained for backward compatibility.'
+      - name: platform_points
+        description: 'ESPN per-player per-day total. NULL for FA rows in some edge cases.'
+      - name: negative_points
+        description: 'Magnitude (positive) of net-negative platform_points on this day. Zero when platform_points >= 0.'
+
+  - name: fct_weekly_player_performance
+    description: >
+      Comprehensive player-weekly performance fact. Aggregates from
+      fct_player_daily_performance to weekly grain while preserving
+      lineup_slot so the downstream active/inactive splits can filter
+      cleanly.
+
+      GRAIN: one row per (season_year, matchup_period, team_id,
+      player_id, lineup_slot). The model name implies one row per
+      player-week, but the actual grain includes lineup_slot -- a
+      player who occupied multiple slots within a single matchup_period
+      produces multiple rows here. Deliberate: the downstream
+      active/inactive facts filter by slot before aggregating the slot
+      dimension away, which is only possible if the slot is preserved
+      here.
+
+      v1.1.0 DAG cleanup: this model was previously
+      int_player_weekly_performance (intermediate-layer view). Promoted
+      to mart-layer fact because it represents a legitimate analytical
+      surface in its own right -- the comprehensive weekly stat line
+      with fantasy roster context, before the active/inactive lens is
+      applied. Now sources from fct_player_daily_performance so the
+      daily-to-weekly DAG edge is real (rather than a side branch off
+      int_player_daily).
+
+      performance_status and wasted_bucket are inherited from
+      fct_player_daily_performance via GROUP BY -- they're functionally
+      dependent on lineup_slot which is already in the grouping key.
+
+      Materialization: table. Two downstream facts (active, inactive)
+      read from this for every mart_stat_leaderboard query; materialization
+      avoids re-aggregating ~600K daily rows on each consumer query.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - season_year
+              - matchup_period
+              - team_id
+              - player_id
+              - lineup_slot
+    columns:
+      - name: season_year
+        tests:
+          - not_null
+      - name: matchup_period
+        tests:
+          - not_null
+      - name: player_id
+        tests:
+          - not_null
+      - name: lineup_slot
+        description: 'Fantasy lineup slot. Part of the grain.'
+        tests:
+          - not_null
+      - name: performance_status
+        description: '''active'' or ''inactive''. Inherited from fct_player_daily_performance.'
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['active', 'inactive']
+      - name: wasted_bucket
+        description: '''FA'', ''ROSTERED_INACTIVE'', or NULL. Inherited from fct_player_daily_performance.'
+
   - name: fct_weekly_player_active_performance
     description: >
       Wide-format player-weekly convergence fact for ACTIVE-slot performance (lineup_slot NOT IN BE/IL/FA).

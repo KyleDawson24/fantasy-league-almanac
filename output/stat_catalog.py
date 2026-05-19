@@ -54,16 +54,19 @@ def to_leaderboard_name(seed_stat: str) -> str:
 
 @lru_cache(maxsize=1)
 def _load_catalog() -> tuple:
-    """Fetch the full stat_classification table once per process. Returns
-    a tuple of dicts (tuple, not list, for hash-stability)."""
+    """Fetch the stat catalog once per process. Reads from dim_stat
+    (the consumer-facing contract layer over the stat_classification
+    seed) so public outputs depend on a mart-layer model rather than
+    an internal seed. Returns a tuple of dicts (tuple, not list, for
+    hash-stability)."""
     rows = query_snowflake("""
         SELECT
-            stat_name, espn_stat_id, stat_category,
+            stat_name, leaderboard_name, espn_stat_id, stat_category,
             espn_stat_label, display_name, abbrev,
             is_counting, is_derived, derivation_expr,
             auto_tracked, is_record_candidate, polarity,
             notes
-        FROM stat_classification
+        FROM dim_stat
     """)
     return tuple(rows)
 

@@ -167,4 +167,15 @@ team_rollup as (
     group by 1, 2, 3, 4
 )
 
-select * from team_rollup
+select
+    tr.*,
+    -- v1.1.0: schedule attributes denormalized onto the fact for
+    -- consumer-side filter/label use. See fct_weekly_team_active for
+    -- the convention rationale.
+    s.is_abnormal,
+    s.is_playoff,
+    s.playoff_round
+from team_rollup tr
+left join {{ ref('dim_matchup_period') }} s
+    on tr.season_year = s.season_year
+    and tr.matchup_period = s.matchup_period

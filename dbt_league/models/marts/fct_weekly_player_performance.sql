@@ -1,21 +1,51 @@
--- int_player_weekly_performance.sql
--- Wide-format player-weekly rollup. Source: int_player_daily (the wide-daily
--- model). Aggregates daily counting + per-stat point columns + negative_points
--- to the (season, matchup, team, player, slot) grain.
+-- fct_weekly_player_performance.sql
+-- Comprehensive player-weekly performance fact. Aggregates the daily
+-- comprehensive fact to weekly grain while preserving lineup_slot in
+-- the grain so downstream active/inactive splits can filter cleanly.
 --
--- lineup_slot is preserved as a grain dimension so the fact layer can filter
--- active vs inactive contributions and aggregate the slot dimension away
--- post-filter. A player who occupied multiple slots within a matchup_period
--- produces multiple rows here -- one per (player, matchup, slot). The fact
--- layer applies the slot filter then SUMs across surviving slots.
+-- ==========================================================================
+-- GRAIN NOTE (read carefully -- the model name is slightly misleading):
+-- ==========================================================================
+--   One row per (season_year, matchup_period, team_id, player_id, lineup_slot).
 --
--- Grain: one row per (season_year, matchup_period, team_id, player_id, lineup_slot).
--- Rates are computed at the fact layer because meaningful rate values require
--- the slot filter to be applied first (rate over all-slots sums mixes active
--- and bench production).
+-- The name "weekly_player_performance" implies one row per player per
+-- week. The actual grain includes lineup_slot, so a player who occupied
+-- multiple slots within a single matchup_period produces multiple rows
+-- here -- one per (player, MP, slot). This is deliberate: the
+-- downstream active/inactive facts filter by slot before aggregating
+-- the slot dimension away, which is only possible if the slot is
+-- preserved here.
+-- ==========================================================================
+--
+-- v1.1.0 DAG cleanup: this model was previously
+-- `int_player_weekly_performance` (intermediate-layer view). Promoted to
+-- a mart-layer fact because it represents a legitimate analytical
+-- surface in its own right: the comprehensive weekly stat line with
+-- fantasy roster context attached, before the active/inactive lens is
+-- applied. Other fantasy platforms (ESPN, Yahoo, etc.) surface this
+-- shape by default ("here's what Cal Raleigh did this week"); having a
+-- consumer-facing contract for it lets future readers query directly
+-- without going through the active/inactive split.
+--
+-- Source: fct_player_daily_performance. Previously sourced directly from
+-- int_player_daily; v1.1.0 re-pointed to fct_player_daily so the daily-
+-- to-weekly edge in the DAG is real (the fct_player_daily layer is
+-- load-bearing, not a dead-end branch).
+--
+-- performance_status and wasted_bucket are inherited from the daily
+-- fact (computed centrally there from lineup_slot). Both are
+-- functionally dependent on lineup_slot, so propagating via GROUP BY
+-- works without changing the grain.
+--
+-- Materialization: table. This is the aggregation/cache boundary --
+-- two downstream facts (active, inactive) read from it for every
+-- mart_stat_leaderboard query. Materializing avoids re-aggregating
+-- ~600K daily rows on each consumer query.
+
+{{ config(materialized='table') }}
 
 with daily as (
-    select * from {{ ref('int_player_daily') }}
+    select * from {{ ref('fct_player_daily_performance') }}
 ),
 
 weekly as (
@@ -30,25 +60,12 @@ weekly as (
         player_name,
         lineup_slot,
 
-        -- Flag columns derived from lineup_slot. Make the active/inactive
-        -- distinction explicit at the int layer so the active and inactive
-        -- facts can both filter cleanly. Row count unchanged -- the int
-        -- already carries every slot (no filter at this layer); these
-        -- columns just annotate what's already there.
-        --
-        -- performance_status mirrors the WHERE clause on the active fact
-        -- (lineup_slot NOT IN ('BE', 'IL', 'FA') -> 'active').
-        -- wasted_bucket distinguishes the two flavors of inactive:
-        -- 'FA' for free agents, 'ROSTERED_INACTIVE' for BE/IL, NULL for active.
-        case
-            when lineup_slot in ('BE', 'IL', 'FA') then 'inactive'
-            else 'active'
-        end as performance_status,
-        case
-            when lineup_slot = 'FA'          then 'FA'
-            when lineup_slot in ('BE', 'IL') then 'ROSTERED_INACTIVE'
-            else null
-        end as wasted_bucket,
+        -- Inherited from fct_player_daily_performance (computed once at
+        -- the daily layer from lineup_slot). Functionally dependent on
+        -- lineup_slot which is in the grouping key, so adding them to
+        -- GROUP BY doesn't change uniqueness.
+        performance_status,
+        wasted_bucket,
 
         -- Hitting counting stats
         sum(h)       as h,
@@ -139,7 +156,7 @@ weekly as (
         sum(sho_pts)   as sho_pts,
 
         -- Catch-all totals (sum across ALL scored stats, even ones not
-        -- represented in the wide *_pts columns). The fact layer uses
+        -- represented in the wide *_pts columns). Downstream facts use
         -- these for calculated_points so the value is correct regardless
         -- of which stats are explicitly pivoted; per-stat *_pts columns
         -- remain available for "top N contributing stats" callouts.
@@ -147,31 +164,29 @@ weekly as (
         sum(total_pitching_stat_pts) as total_pitching_stat_pts,
         sum(total_stat_pts)          as total_stat_pts,
 
-        -- Phase 7 Hpre: negative_points rollup. Per-day platform-level
-        -- net-negative magnitude (sum at the daily layer is preserved
-        -- by simple SUM here -- magnitude semantics aggregate cleanly
-        -- across days). Sub-chunk E's facts can now propagate this
-        -- without re-deriving from int_player_daily directly.
+        -- Negative-production rollup. Per-day platform-level net-negative
+        -- magnitude (sum at the daily layer is preserved by simple SUM
+        -- here -- magnitude semantics aggregate cleanly across days).
         sum(negative_points) as negative_points,
 
         -- platform_points + slot-based hitting/pitching split pulled
-        -- through from int_player_daily so the active fact can read them
-        -- here without needing a separate scores-fact join.
+        -- through so the active fact can read them here without needing
+        -- a separate scores-fact join.
         sum(platform_points)       as platform_points,
         sum(platform_hitting_pts)  as platform_hitting_pts,
         sum(platform_pitching_pts) as platform_pitching_pts,
 
         -- display_name is stable per player_id (nickname-resolved at
-        -- stg_box_scores). MAX is just to satisfy the GROUP BY; same
-        -- value in every row of a (player_id) partition.
+        -- stg_box_scores). MAX is just to satisfy GROUP BY; same value
+        -- in every row of a (player_id) partition.
         max(display_name) as display_name
 
     from daily
     -- Group by the 9 identifier columns + 2 derived flag columns.
     -- The flag columns are deterministic functions of lineup_slot
-    -- (already in the grouping key), so they don't change uniqueness,
-    -- but Snowflake requires non-aggregated SELECT columns to appear
-    -- in GROUP BY.
+    -- (already in the grouping key), so they don't change uniqueness.
+    -- Snowflake requires non-aggregated SELECT columns to appear in
+    -- GROUP BY regardless.
     group by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11
 )
 

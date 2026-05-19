@@ -164,7 +164,7 @@ with active as (
         -- player_id (same value across the player's active slots).
         max(display_name)          as display_name
 
-    from {{ ref('int_player_weekly_performance') }}
+    from {{ ref('fct_weekly_player_performance') }}
     -- Phase 7 D3: filter switched from the slot-enumeration form to the
     -- seed-aligned performance_status flag (D1 added it). team_id IS NOT
     -- NULL is implied by performance_status = 'active' in current data
@@ -243,13 +243,25 @@ select
     round(a.negative_points, 1)         as negative_points,
 
     -- Platform scoring (ESPN's pre-computed values, the official arbiter for W/L).
-    -- Sourced from int_player_weekly_performance via the active CTE above.
+    -- Sourced from fct_weekly_player_performance via the active CTE above.
     -- Rounded 1 decimal at fact layer (see calculated_* note above).
     round(a.platform_points,         1) as platform_points,
     round(a.platform_hitting_pts,    1) as platform_hitting_pts,
-    round(a.platform_pitching_pts,   1) as platform_pitching_pts
+    round(a.platform_pitching_pts,   1) as platform_pitching_pts,
+
+    -- v1.1.0 DAG cleanup: schedule attributes denormalized onto the
+    -- fact so format_week_label and is_abnormal-filter consumers can
+    -- read them directly off rows. dim_matchup_period is the canonical
+    -- source. Future: records.load_schedule_lookup() and the Python
+    -- schedule_lookup dict can be dropped once all consumers migrate.
+    s.is_abnormal,
+    s.is_playoff,
+    s.playoff_round
 
 from active a
+left join {{ ref('dim_matchup_period') }} s
+    on a.season_year = s.season_year
+    and a.matchup_period = s.matchup_period
 
 {% if is_incremental() %}
 where (a.season_year * 100 + a.matchup_period) >= (

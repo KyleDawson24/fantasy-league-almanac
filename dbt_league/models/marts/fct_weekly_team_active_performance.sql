@@ -324,9 +324,15 @@ with_rates as (
 
 select
     wr.*,
-    datediff('day', ms.start_date, ms.end_date) + 1 as days_in_period
+    datediff('day', ms.start_date, ms.end_date) + 1 as days_in_period,
+    -- v1.1.0: schedule attributes denormalized onto the fact so
+    -- format_week_label and is_abnormal-filter consumers can read
+    -- them directly off fact rows.
+    ms.is_abnormal,
+    ms.is_playoff,
+    ms.playoff_round
 from with_rates wr
-left join {{ ref('matchup_schedule') }} ms
+left join {{ ref('dim_matchup_period') }} ms
     on wr.season_year = ms.season_year
     and wr.matchup_period = ms.matchup_period
 

@@ -33,6 +33,10 @@ extract/debug_stats_keys.py
 #Customized League Note
 output/LeagueNote.txt
 
+# Private working notes -- wishlist ideas + clarification Q&A from
+# development sessions. Not for public consumption.
+WISHLIST.md
+
 # dbt
 target/
 dbt_packages/

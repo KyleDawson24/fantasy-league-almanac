@@ -33,9 +33,11 @@ extract/debug_stats_keys.py
 #Customized League Note
 output/LeagueNote.txt
 
-# Private working notes -- wishlist ideas + clarification Q&A from
-# development sessions. Not for public consumption.
-WISHLIST.md
+# Private working notes -- wishlist / clarifications / discussions
+# / interview-question prep from development sessions. Reviewed at
+# every push; items appended with OBSOLETE markers rather than
+# deleted. Not for public consumption.
+BRAINTHOUGHTS.md
 
 # dbt
 target/

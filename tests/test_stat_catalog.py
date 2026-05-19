@@ -1,53 +1,22 @@
 """Tests for output/stat_catalog.py.
 
-Two flavors:
-  - Pure-function tests for to_leaderboard_name (no Snowflake; default suite).
-  - Warehouse-marked tests that hit Snowflake to verify the helpers return
-    the right shape against the post-B1 seed. These check that the helpers
-    return the right shape against the post-B1 seed. Phase 7 G removed
-    the formatters.STAT_DISPLAY / STAT_ABBREV / records._IMPLICIT_POLARITY
-    Python dicts; the stat_catalog helpers are now the single source of
-    truth (no Python truth to subset-compare against).
+All warehouse-marked -- the helpers read from dim_stat (a view over
+the stat_classification seed). v1.1.0 removed SEED_TO_LEADERBOARD and
+to_leaderboard_name; the translation is now a column on dim_stat
+(leaderboard_name), and the helpers key off that column directly.
 """
 
 import pytest
 
 import stat_catalog
 from stat_catalog import (
-    SEED_TO_LEADERBOARD,
     get_abbrev_map,
     get_auto_tracked,
     get_derived_exprs,
     get_display_map,
     get_polarity_map,
     get_record_candidates,
-    to_leaderboard_name,
 )
-
-
-# ---------------------------------------------------------------------------
-# Pure-function tests (no Snowflake)
-# ---------------------------------------------------------------------------
-
-class TestToLeaderboardName:
-    def test_translates_known_pairs(self):
-        assert to_leaderboard_name('1B') == 'SINGLES'
-        assert to_leaderboard_name('2B') == 'DOUBLES'
-        assert to_leaderboard_name('3B') == 'TRIPLES'
-        assert to_leaderboard_name('30') == 'CYC'
-        assert to_leaderboard_name('64') == 'SHO'
-
-    def test_passes_through_unmapped(self):
-        # Most stat_names match between seed and leaderboard (HR, RBI, K, ...)
-        assert to_leaderboard_name('HR') == 'HR'
-        assert to_leaderboard_name('B_BB') == 'B_BB'
-        assert to_leaderboard_name('K_PER_9') == 'K_PER_9'  # post-B1 rename
-
-    def test_seed_to_leaderboard_post_v1x(self):
-        # 1B/2B/3B/64 retained from Phase 7 B1 (breakdown VARIANT keys
-        # we can't rename without breaking the stg FK invariant).
-        # 30 -> CYC added in v1.x when Hit for the Cycle was promoted.
-        assert set(SEED_TO_LEADERBOARD) == {'1B', '2B', '3B', '30', '64'}
 
 
 # ---------------------------------------------------------------------------

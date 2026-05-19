@@ -18,12 +18,15 @@
 --     alongside as the rules-normalized derivation.
 --
 -- Pipeline:
---   1. Read int_player_weekly_performance (slot-preserved counting + pts +
---      platform totals)
---   2. Filter to active slots (lineup_slot NOT IN ('BE', 'IL', 'FA'))
---   3. Aggregate counting and pts columns across slots (collapse slot dim)
---   4. Compute rate stats via macros from the aggregated counting columns
---   5. Sum *_pts columns into calculated_points / hitting / pitching subtotals
+--   1. Read fct_weekly_player_performance (slot-preserved counting + pts +
+--      platform totals; v1.1.0 promoted this from the int layer).
+--   2. Filter to active rows (performance_status = 'active').
+--   3. Aggregate counting and pts columns across slots (collapse slot dim).
+--   4. Compute rate stats via macros from the aggregated counting columns.
+--   5. Sum *_pts columns into calculated_points / hitting / pitching subtotals.
+--   6. LEFT JOIN dim_matchup_period for schedule attributes (is_abnormal /
+--      is_playoff / playoff_round denormalized onto the fact for consumer-
+--      side filter/label use).
 --
 -- Grain: one row per (season_year, matchup_period, team_id, player_id).
 --
@@ -151,9 +154,9 @@ with active as (
         sum(negative_points) as negative_points,
 
         -- Platform scoring rolled up across the player's active slots
-        -- in the matchup. int_player_weekly_performance carries
+        -- in the matchup. fct_weekly_player_performance carries
         -- SUM(platform_points) plus the slot-based hitting/pitching
-        -- split (computed at int_player_daily); this fact aggregates
+        -- split (computed at fct_player_daily_performance); this fact aggregates
         -- those across surviving slots after the active filter.
         sum(platform_points)       as platform_points,
         sum(platform_hitting_pts)  as platform_hitting_pts,
@@ -222,7 +225,7 @@ select
     {{ k_per_bb('a.k', 'a.p_bb') }}          as k_per_bb,
 
     -- Calculated scoring (current season's weights applied to stat breakdowns).
-    -- Uses the catch-all totals from int_player_weekly_performance, which sum
+    -- Uses the catch-all totals from fct_weekly_player_performance, which sum
     -- stat_points across ALL scored stats. This is correct even for stats that
     -- aren't pivoted into dedicated *_pts columns above (e.g. GDP, B_IBB,
     -- HBP_P, PK, BLSV, NH, PG). The *_pts columns remain available for per-stat

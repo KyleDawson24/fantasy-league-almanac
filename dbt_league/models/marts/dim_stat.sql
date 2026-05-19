@@ -8,14 +8,14 @@
 -- (CSV edits + reseed); the dim is what consumers reference.
 --
 -- Adds vs. the seed:
---   - leaderboard_name -- seed_name post SEED_TO_LEADERBOARD translation
---     ('1B' -> 'SINGLES', '30' -> 'CYC', '64' -> 'SHO', etc.). Consumers
---     keying on leaderboard column names join here directly without
---     re-implementing the translation. Today the translation lives in
---     three places: this dim, output/stat_catalog.py::SEED_TO_LEADERBOARD,
---     and the CASE block in mart_stat_leaderboard.sql's Jinja compile-time
---     loop. Future cleanup may consolidate to dim_stat as the sole source;
---     for now mirror to avoid touching the mart's compile-time path.
+--   - leaderboard_name -- seed_name post the project's documented
+--     translation ('1B' -> 'SINGLES', '2B' -> 'DOUBLES', '3B' ->
+--     'TRIPLES', '30' -> 'CYC', '64' -> 'SHO'; else pass-through). This
+--     CASE is the SINGLE place the translation lives. v1.1.0 round 3
+--     eliminated the Python-side mirror (output/stat_catalog.py used to
+--     carry SEED_TO_LEADERBOARD + to_leaderboard_name) and the duplicate
+--     CASE in mart_stat_leaderboard.sql's compile-time loop -- both now
+--     read leaderboard_name from here.
 --   - All other seed columns carried through unchanged.
 --
 -- Materialization: view. Seed is ~100 rows; no aggregation, no caching

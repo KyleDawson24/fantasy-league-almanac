@@ -241,7 +241,7 @@ models:
       The consumer-facing entity for "what did this player do this week" -- counting stats, per-stat point contributions, rate stats, and fantasy scoring totals all in one row per player per matchup.
       See fct_weekly_player_inactive_performance for the symmetric inactive counterpart.
 
-      Pipeline: read int_player_weekly_performance (slot-preserved counting + pts + platform totals), filter to active slots, aggregate across slots, compute rates via shared macros, sum *_pts into calculated_* totals.
+      Pipeline: read fct_weekly_player_performance (the v1.1.0 comprehensive weekly fact), filter to active rows via performance_status, aggregate across slots, compute rates via shared macros, sum *_pts into calculated_* totals. LEFT JOIN dim_matchup_period for schedule attributes denormalized onto fact rows.
       Incremental fact -- merge by unique_key.
       Grain: (season_year, matchup_period, team_id, player_id).
     tests:
@@ -850,7 +850,7 @@ models:
   - name: fct_weekly_player_inactive_performance
     description: >
       Wide-format player-weekly fact for INACTIVE-slot performance (lineup_slot IN BE/IL/FA).
-      Symmetric counterpart to fct_weekly_player_active_performance; together they cover the full universe of player-weeks at int_player_weekly_performance.
+      Symmetric counterpart to fct_weekly_player_active_performance; together they cover the full universe of player-weeks at fct_weekly_player_performance.
 
       Grain: (season_year, matchup_period, player_id, wasted_bucket).
       wasted_bucket is part of the grain so a player who appears as ROSTERED_INACTIVE on team A AND as FA in the same matchup_period (rare: drop mid-week) gets two distinct rows.

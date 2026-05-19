@@ -21,16 +21,18 @@ exposures:
       lines per team, "records set this week" highlights derived from the
       mart leaderboard, wasted-points callouts (active starters whose
       negative performances cost the manager points vs an empty slot),
-      and league-color callouts (no-hitters, milestones) from
-      output/league_notes.py.
+      league-wide benchmarks line ("League This Week" from the benchmarks
+      mart), and league-color callouts (no-hitters, milestones,
+      streaks, etc.) from output/league_notes.py.
     depends_on:
       - ref('fct_weekly_team_active_performance')
       - ref('fct_weekly_player_active_performance')
       - ref('fct_weekly_player_inactive_performance')
+      - ref('fct_player_daily_performance')
       - ref('mart_stat_leaderboard')
-      - ref('int_player_daily')
-      - ref('matchup_schedule')
-      - ref('stat_classification')
+      - ref('mart_league_weekly_benchmarks')
+      - ref('dim_stat')
+      - ref('dim_matchup_period')
     owner:
       name: Kyle Dawson
       email: kpdawson24@gmail.com
@@ -54,8 +56,8 @@ exposures:
       - ref('mart_stat_leaderboard')
       - ref('fct_weekly_player_active_performance')
       - ref('fct_weekly_team_active_performance')
-      - ref('matchup_schedule')
-      - ref('stat_classification')
+      - ref('dim_stat')
+      - ref('dim_matchup_period')
     owner:
       name: Kyle Dawson
       email: kpdawson24@gmail.com
@@ -81,8 +83,8 @@ exposures:
       - ref('mart_stat_leaderboard')
       - ref('fct_weekly_player_active_performance')
       - ref('fct_weekly_team_active_performance')
-      - ref('matchup_schedule')
-      - ref('stat_classification')
+      - ref('dim_stat')
+      - ref('dim_matchup_period')
     owner:
       name: Kyle Dawson
       email: kpdawson24@gmail.com

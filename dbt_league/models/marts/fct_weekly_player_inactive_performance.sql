@@ -3,7 +3,7 @@
 -- (lineup_slot IN ('BE', 'IL', 'FA')). Mirror of
 -- fct_weekly_player_active_performance for the inactive half of the split;
 -- together they cover the full universe of player-weeks captured at
--- int_player_weekly_performance.
+-- fct_weekly_player_performance.
 --
 -- Grain: one row per (season_year, matchup_period, player_id, wasted_bucket).
 -- wasted_bucket is in the grain so a player who appeared as both BE/IL on a

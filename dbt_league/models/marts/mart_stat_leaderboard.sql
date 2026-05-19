@@ -58,28 +58,25 @@
 {{ config(materialized='view') }}
 
 -- ----------------------------------------------------------------------
--- Compile-time fetch of the stat universe from the seed. is_record_
+-- Compile-time fetch of the stat universe from dim_stat. is_record_
 -- candidate=true returns the leaderboard columns (40 raw counting +
 -- 4 derived + 6 rate + 2 totals (wasted + negative) + 6 score = 58
--- as of v1.x). The CASE applies the seed -> leaderboard name translation
--- for stats whose names differ (1B -> SINGLES, 64 -> SHO, 30 -> CYC).
--- Duplicates stat_catalog.SEED_TO_LEADERBOARD -- keep both in sync.
+-- as of v1.x). leaderboard_name is the dim's canonical column (seed
+-- '1B'/'2B'/'3B' -> 'SINGLES'/'DOUBLES'/'TRIPLES', '30' -> 'CYC', '64'
+-- -> 'SHO'); reading it here means the seed -> leaderboard translation
+-- lives in exactly one place (dim_stat) instead of duplicated across
+-- this loop, the dim, and the Python stat_catalog helpers.
 --
 -- run_query executes at compile time; the loop unrolls into static SQL
 -- before Snowflake sees it. `execute` guard yields an empty list during
--- the parse phase so model parsing doesn't require the seed to exist.
+-- the parse phase so model parsing doesn't require dim_stat to exist
+-- yet. dbt's DAG ordering guarantees dim_stat is built before this
+-- model compiles, so the run_query at compile time has fresh data.
 {% set stat_query %}
     select
-        case stat_name
-            when '1B' then 'SINGLES'
-            when '2B' then 'DOUBLES'
-            when '3B' then 'TRIPLES'
-            when '30' then 'CYC'
-            when '64' then 'SHO'
-            else stat_name
-        end as leaderboard_name,
+        leaderboard_name,
         derivation_expr
-    from {{ ref('stat_classification') }}
+    from {{ ref('dim_stat') }}
     where is_record_candidate = true
     order by 1
 {% endset %}
@@ -93,7 +90,11 @@
 
 
 with current_year as (
-    select max(season_year) as y from {{ source('raw', 'box_scores') }}
+    -- v1.1.0: sourced from the team-active fact instead of raw.box_scores
+    -- so the DAG shows mart_stat_leaderboard depending on mart-layer
+    -- contracts rather than a raw-source edge. Functionally identical;
+    -- the team fact is incrementally built off the same raw rows.
+    select max(season_year) as y from {{ ref('fct_weekly_team_active_performance') }}
 ),
 
 team_active_source as (

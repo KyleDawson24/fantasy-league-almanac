@@ -210,11 +210,17 @@ fresh Snowflake free-tier account in under 45 minutes.
 
 ## Status
 
-- **v1.0.1** — current. Polish release on top of v1.0.0: 8 new
+- **v1.0.2** — current. DAG hygiene + dbt-architecture cleanup. New
+  `dim_stat` / `dim_matchup_period` / `fct_player_daily_performance`
+  contract layer; `int_player_weekly_performance` promoted to
+  `fct_weekly_player_performance`; schedule columns denormalized onto
+  weekly facts. No consumer-visible behavior change (byte-identical
+  output). See `CHANGELOG.md`.
+- **v1.0.1** — 2026-05-18. Polish release on top of v1.0.0: 8 new
   `league_notes` callouts, "League This Week" always-on recap line,
   league-wide benchmarks mart, Hit-for-the-Cycle as a tracked stat,
   Snowflake key-pair auth support, fact-layer rounding to kill float
-  wobble. See `CHANGELOG.md`.
+  wobble.
 - **v1.0.0** — first stable release (2026-05-13).
 - **License**: MIT (see [LICENSE](LICENSE)).
 - **Built with**: dbt 1.11 · Snowflake · Python 3.13 · `espn-api`

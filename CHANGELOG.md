@@ -8,6 +8,117 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Each entry links to the corresponding `Phase X.Y Documentation.md` in the
 repository root for the architectural detail behind the change.
 
+## [1.0.2] — 2026-05-19
+
+DAG hygiene + dbt-architecture cleanup release. No consumer-visible
+behavior change — the recap and records report render byte-identical
+output pre- vs. post-refactor against the golden BBCode regression.
+What changed is internal: the dbt DAG got a contract-layer cleanup
+that separates "config seeds" from "data marts," promotes a real
+weekly fact out of the intermediate layer, and adds a daily fact that
+gives output scripts a mart-layer entry point instead of reaching
+back into intermediates.
+
+Strictly per semver this is arguably a 1.1.0 (new public models
+shipped). Per the maintainer's reading, v1.x stays reserved for the
+`dim_player` flagship inflection where consumer-visible behavior will
+shift; 1.0.x stays "polish + refactor" releases. Treat 1.0.2 as
+"the v1.0 architecture, redrawn."
+
+### Added
+
+- **`dim_stat`** — mart-layer dimension over the `stat_classification`
+  seed. Adds a `leaderboard_name` column (seed-name post translation:
+  `1B` → `SINGLES`, `30` → `CYC`, `64` → `SHO`, etc.) and carries all
+  other seed columns through unchanged. Single source of truth for the
+  seed → leaderboard name translation; `output/stat_catalog.py` and
+  the `mart_stat_leaderboard` compile-time loop both read from here.
+- **`dim_matchup_period`** — mart-layer dimension over the
+  `matchup_schedule` seed. Carries calendar metadata
+  (`is_abnormal` / `is_playoff` / `playoff_round` / start/end dates)
+  for consumer-side reads.
+- **`fct_player_daily_performance`** — mart-layer fact over
+  `int_player_daily`. Exposes per-day data (counting stats, point
+  contributions, per-day platform totals, per-day metadata) to
+  consumers via a contract layer. Adds `performance_status` and
+  `wasted_bucket` columns derived centrally from `lineup_slot` and
+  inherited up through the weekly facts.
+- **Schedule columns on the four weekly facts.** `is_abnormal`,
+  `is_playoff`, and `playoff_round` denormalized from
+  `dim_matchup_period` onto `fct_weekly_player_active_performance`,
+  `fct_weekly_player_inactive_performance`,
+  `fct_weekly_team_active_performance`, and
+  `fct_weekly_team_inactive_performance`. Consumers can filter abnormal
+  weeks and render week labels directly off fact rows without a
+  schedule-lookup dict.
+
+### Changed
+
+- **`int_player_weekly_performance` promoted to
+  `fct_weekly_player_performance`.** Renamed and moved from
+  `dbt_league/models/intermediate/` to `dbt_league/models/marts/`.
+  Re-sourced from `fct_player_daily_performance` so the
+  daily-to-weekly DAG edge is load-bearing rather than a side branch
+  off the int layer. Materialized as a table (was a view) since two
+  downstream facts (active, inactive) read from it on every
+  `mart_stat_leaderboard` query.
+- **Consumer migration.** `output/generate_summary.py::get_wasted_
+  points` and several `output/league_notes.py` callouts repointed from
+  `int_player_daily` to `fct_player_daily_performance`.
+  `output/records_data.py::load_schedule_lookup` repointed from
+  `matchup_schedule` to `dim_matchup_period`. `output/stat_catalog.py`
+  repointed from `stat_classification` to `dim_stat`, and helpers
+  consolidated to read `leaderboard_name` directly from the dim
+  (rather than re-applying the Python-side `SEED_TO_LEADERBOARD`
+  mapping).
+- **`mart_stat_leaderboard`:**
+  - Four `INNER JOIN matchup_schedule ... WHERE s.is_abnormal = false`
+    patterns (one per source CTE) simplified to
+    `WHERE f.is_abnormal = false` against the denormalized column on
+    each fact.
+  - Compile-time `run_query` switched from `ref('stat_classification')`
+    to `ref('dim_stat')`; duplicate CASE block deleted. The seed →
+    leaderboard name translation now lives in exactly one place
+    (`dim_stat.sql`).
+  - `current_year` CTE switched from `source('raw', 'box_scores')` to
+    `ref('fct_weekly_team_active_performance')`. One fewer raw-source
+    edge in the catalog DAG.
+- **`mart_league_weekly_benchmarks`:** dropped the
+  `matchup_schedule` JOIN that existed purely for the `is_abnormal`
+  filter; now uses the denormalized column on the weekly team fact.
+- **`output/records_data.py::league_history_count`:** dropped the
+  `matchup_schedule` JOIN for the same reason.
+- **dbt exposures** (`dbt_league/models/exposures.yml`) routed through
+  the new mart-layer contracts (`dim_stat`, `dim_matchup_period`,
+  `fct_player_daily_performance`) instead of the old `int_player_daily`
+  / `matchup_schedule` / `stat_classification` direct references.
+  `weekly_recap` gains `mart_league_weekly_benchmarks` (added at v1.0.1
+  but never declared on the exposure).
+- **`tests/capture_row_counts.py`:** `MODELS` list updated for the
+  rename and additions.
+
+### Removed
+
+- **`SEED_TO_LEADERBOARD` constant + `to_leaderboard_name` function**
+  from `output/stat_catalog.py`. Replaced by `dim_stat.leaderboard_
+  name`. Three corresponding tests in `TestToLeaderboardName` deleted;
+  translation coverage retained transitively via
+  `TestDisplayMap::test_translation_applied`.
+
+### Internal
+
+- `BRAINTHOUGHTS.md` private working-notes doc convention: four-section
+  structure (Wishlist / Clarifications / Discussions and Tweaks /
+  Interview Questions). Reviewed at every push; entries never deleted
+  except under a narrow "CLARIFICATIONS doesn't need to preserve
+  example-bound details about replaced architecture unless the
+  framing is a teaching moment" carve-out.
+
+Verification: dbt build clean (116 PASS / 0 ERROR with the new models
+and tests); pytest tests/ green (113 passed); pytest tests/ -m
+warehouse green (15 passed including byte-diff golden BBCode
+regression — confirms the refactor is consumer-side transparent).
+
 ## [1.0.1] — 2026-05-18
 
 A v1.0 polish release. Strictly speaking the changes here include

@@ -156,7 +156,7 @@ def mismatch(ctx):
         WITH all_margins AS (
           SELECT ABS(t.platform_points - t.opponent_points) AS m
           FROM fct_weekly_team_active_performance t
-          JOIN matchup_schedule s
+          JOIN dim_matchup_period s
             ON t.season_year = s.season_year
            AND t.matchup_period = s.matchup_period
           WHERE s.is_abnormal = false
@@ -316,7 +316,7 @@ def scapegoat_net_negative(ctx):
     placeholders = ','.join(['%s'] * len(pids))
     games = records.query_snowflake(
         f"""SELECT player_id, SUM(games_played) AS games
-            FROM int_player_daily
+            FROM fct_player_daily_performance
             WHERE season_year = %s AND matchup_period = %s
               AND is_active_slot = true
               AND player_id IN ({placeholders})
@@ -336,7 +336,7 @@ def scapegoat_net_negative(ctx):
           SELECT t.season_year, t.matchup_period, t.team_id,
                  (t.opponent_points - t.platform_points) AS margin
           FROM fct_weekly_team_active_performance t
-          JOIN matchup_schedule s
+          JOIN dim_matchup_period s
             ON t.season_year = s.season_year
            AND t.matchup_period = s.matchup_period
           WHERE t.result = 'L' AND s.is_abnormal = false
@@ -388,7 +388,7 @@ def scapegoat_gross_negative(ctx):
     placeholders = ','.join(['%s'] * len(pids))
     neg = records.query_snowflake(
         f"""SELECT player_id, COUNT(*) AS neg_days
-            FROM int_player_daily
+            FROM fct_player_daily_performance
             WHERE season_year = %s AND matchup_period = %s
               AND is_active_slot = true
               AND platform_points < 0
@@ -410,7 +410,7 @@ def scapegoat_gross_negative(ctx):
           SELECT t.season_year, t.matchup_period, t.team_id,
                  (t.opponent_points - t.platform_points) AS margin
           FROM fct_weekly_team_active_performance t
-          JOIN matchup_schedule s
+          JOIN dim_matchup_period s
             ON t.season_year = s.season_year
            AND t.matchup_period = s.matchup_period
           WHERE t.result = 'L' AND s.is_abnormal = false
@@ -573,12 +573,13 @@ def no_negative_days(ctx):
         return []
 
     # Per-team distinct-player count restricted to days the player
-    # actually appeared in a game. games_played lives only on
-    # int_player_daily; the team/player active facts don't carry it.
+    # actually appeared in a game. games_played is a daily-grain column
+    # carried on fct_player_daily_performance; the weekly facts don't
+    # expose it (they roll up to MP grain).
     fielded_rows = records.query_snowflake("""
         SELECT team_id,
                COUNT(DISTINCT player_id) AS fielded_players
-        FROM int_player_daily
+        FROM fct_player_daily_performance
         WHERE season_year = %s
           AND matchup_period = %s
           AND is_active_slot = true
@@ -605,8 +606,8 @@ def no_negative_days(ctx):
             d.team_id,
             SUM(CASE WHEN d.platform_points < 0 THEN 1 ELSE 0 END) AS neg_days,
             COUNT(DISTINCT CASE WHEN d.games_played >= 1 THEN d.player_id END) AS fielded
-          FROM int_player_daily d
-          JOIN matchup_schedule s
+          FROM fct_player_daily_performance d
+          JOIN dim_matchup_period s
             ON d.season_year = s.season_year
            AND d.matchup_period = s.matchup_period
           WHERE s.is_abnormal = false
@@ -649,7 +650,7 @@ def baseblunders(ctx):
           SUM(CASE WHEN t.cs > t.sb THEN 1 ELSE 0 END) AS cs_gt_sb_n,
           SUM(CASE WHEN t.cs >= 1 AND t.sb = 0 THEN 1 ELSE 0 END) AS zero_sb_n
         FROM fct_weekly_team_active_performance t
-        JOIN matchup_schedule s
+        JOIN dim_matchup_period s
           ON t.season_year = s.season_year
          AND t.matchup_period = s.matchup_period
         WHERE s.is_abnormal = false
@@ -701,7 +702,7 @@ def no_quality_starts(ctx):
     placeholders = ','.join(['%s'] * len(team_ids))
     gs_rows = records.query_snowflake(
         f"""SELECT team_id, COUNT(*) AS gs_count
-            FROM int_player_daily
+            FROM fct_player_daily_performance
             WHERE season_year = %s AND matchup_period = %s
               AND lineup_slot = 'SP'
               AND games_played >= 1
@@ -725,12 +726,12 @@ def no_quality_starts(ctx):
                 season_year, matchup_period, team_id,
                 SUM(CASE WHEN lineup_slot = 'SP' AND games_played >= 1
                          THEN 1 ELSE 0 END) AS sp_starts
-            FROM int_player_daily
+            FROM fct_player_daily_performance
             GROUP BY 1, 2, 3
         )
         SELECT COUNT(*) AS n
         FROM fct_weekly_team_active_performance t
-        JOIN matchup_schedule s
+        JOIN dim_matchup_period s
             ON t.season_year = s.season_year
            AND t.matchup_period = s.matchup_period
         JOIN team_mp_starts tms
@@ -804,7 +805,7 @@ def _hr_streak_data(ctx):
     mp_bounds = records.query_snowflake("""
         SELECT MIN(scoring_period) AS first_sp,
                MAX(scoring_period) AS last_sp
-        FROM int_player_daily
+        FROM fct_player_daily_performance
         WHERE season_year = %s AND matchup_period = %s
     """, (recap_year, recap_mp))[0]
     recap_first_sp = mp_bounds['first_sp']
@@ -813,7 +814,7 @@ def _hr_streak_data(ctx):
         SELECT season_year, matchup_period, scoring_period,
                team_id, team_abbrev, team_name,
                SUM(ab) AS ab_total, SUM(hr) AS hr_total
-        FROM int_player_daily
+        FROM fct_player_daily_performance
         WHERE is_active_slot = true
           AND lineup_slot_category = 'hitting'
           AND (season_year < %s

@@ -45,10 +45,9 @@ with per_week as (
         min(t.calculated_pitching_pts)      as calculated_pitching_pts_min
 
     from {{ ref('fct_weekly_team_active_performance') }} t
-    inner join {{ ref('matchup_schedule') }} s
-        on t.season_year = s.season_year
-        and t.matchup_period = s.matchup_period
-    where s.is_abnormal = false
+    -- v1.1.0: is_abnormal is denormalized onto fct_weekly_team_active_
+    -- performance, so the dim join is no longer needed for this filter.
+    where t.is_abnormal = false
     group by 1, 2
 )
 

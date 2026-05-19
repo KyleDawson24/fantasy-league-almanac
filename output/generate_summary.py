@@ -260,11 +260,9 @@ def get_wasted_points(season_year, matchup_period, limit=5):
             -- VARIANT-typed; comes back as a JSON string the formatter
             -- parses with json.loads().
             --
-            -- Sourced from int_player_daily (one layer up from staging) so
-            -- this consumer doesn't reach directly into stg_box_scores.
-            -- int_player_daily carries the same per-day metadata at the
-            -- same grain. DISTINCT in the outer projection because
-            -- int_player_daily's grain includes lineup_slot; a player in
+            -- Sourced from fct_player_daily_performance (the v1.1.0 mart-
+            -- layer daily contract). DISTINCT in the outer projection
+            -- because the fact's grain includes lineup_slot; a player in
             -- multiple slots on the same scoring_period produces duplicate
             -- rows here, but the player-level columns (pro_team, position,
             -- eligible_slots, display_name) are identical across them.
@@ -275,7 +273,7 @@ def get_wasted_points(season_year, matchup_period, limit=5):
                            PARTITION BY player_id
                            ORDER BY scoring_period DESC
                        ) AS rn
-                FROM int_player_daily
+                FROM fct_player_daily_performance
                 WHERE season_year = %s AND matchup_period = %s
             )
             WHERE rn = 1

@@ -345,13 +345,12 @@ def league_history_count(grain, stat_name, value, op='='):
     fct = ('fct_weekly_team_active_performance' if grain == 'team'
            else 'fct_weekly_player_active_performance')
     col_expr = _DERIVED_STAT_FCT_EXPR.get(stat_name, stat_name.lower())
+    # v1.1.0: is_abnormal is now denormalized onto the weekly facts, so
+    # this filter doesn't need the separate dim/seed JOIN anymore.
     rows = query_snowflake(f"""
         SELECT COUNT(*) AS n
         FROM {fct} f
-        JOIN matchup_schedule s
-          ON f.season_year = s.season_year
-         AND f.matchup_period = s.matchup_period
-        WHERE s.is_abnormal = false
+        WHERE f.is_abnormal = false
           AND ({col_expr}) {op} %s
     """, (value,))
     return rows[0]['n'] if rows else 0
@@ -361,12 +360,20 @@ def league_history_count(grain, stat_name, value, op='='):
 
 def load_schedule_lookup():
     """Build a (season_year, matchup_period) -> {is_playoff, playoff_round}
-    dict from matchup_schedule. One query per script run; pass the result
+    dict from dim_matchup_period. One query per script run; pass the result
     to format_week_label() instead of re-querying for each record.
+
+    v1.1.0: switched from the matchup_schedule seed to dim_matchup_period
+    (the consumer-facing contract layer over the seed). is_abnormal /
+    is_playoff / playoff_round are also now denormalized onto the four
+    weekly facts; consumers reading fact rows directly can skip this
+    lookup entirely. Kept for callers that don't have a fact row in hand
+    (e.g., historical-record iterators in generate_records_report.py).
+    Deletion candidate once all callers migrate.
     """
     rows = query_snowflake("""
         SELECT season_year, matchup_period, is_playoff, playoff_round
-        FROM matchup_schedule
+        FROM dim_matchup_period
     """)
     return {
         (r['season_year'], r['matchup_period']): {

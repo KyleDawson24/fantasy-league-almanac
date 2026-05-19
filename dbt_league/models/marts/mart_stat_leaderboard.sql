@@ -123,10 +123,9 @@ team_active_source as (
         {%- endif -%}
         {%- endfor %}
     from {{ ref('fct_weekly_team_active_performance') }} t
-    inner join {{ ref('matchup_schedule') }} s
-        on t.season_year = s.season_year
-        and t.matchup_period = s.matchup_period
-    where s.is_abnormal = false
+    -- v1.1.0: is_abnormal denormalized onto the weekly facts -- no
+    -- need for the dim/seed JOIN to filter abnormal weeks.
+    where t.is_abnormal = false
 ),
 
 team_inactive_source as (
@@ -161,10 +160,7 @@ team_inactive_source as (
         {%- endif -%}
         {%- endfor %}
     from {{ ref('fct_weekly_team_inactive_performance') }} ti
-    inner join {{ ref('matchup_schedule') }} s
-        on ti.season_year = s.season_year
-        and ti.matchup_period = s.matchup_period
-    where s.is_abnormal = false
+    where ti.is_abnormal = false
 ),
 
 player_active_source as (
@@ -196,10 +192,7 @@ player_active_source as (
         {%- endif -%}
         {%- endfor %}
     from {{ ref('fct_weekly_player_active_performance') }} p
-    inner join {{ ref('matchup_schedule') }} s
-        on p.season_year = s.season_year
-        and p.matchup_period = s.matchup_period
-    where s.is_abnormal = false
+    where p.is_abnormal = false
 ),
 
 player_inactive_source as (
@@ -237,10 +230,7 @@ player_inactive_source as (
         {%- endif -%}
         {%- endfor %}
     from {{ ref('fct_weekly_player_inactive_performance') }} pi
-    inner join {{ ref('matchup_schedule') }} s
-        on pi.season_year = s.season_year
-        and pi.matchup_period = s.matchup_period
-    where s.is_abnormal = false
+    where pi.is_abnormal = false
 ),
 
 combined as (

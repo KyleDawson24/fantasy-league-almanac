@@ -2,7 +2,7 @@
 
 **Audience:** A developer taking over day-to-day development. The original maintainer (the user) continues to operate this weekly for their own 14-team H2H league, so behavior changes that break the weekly post will surface immediately. Read top-to-bottom once; thereafter, jump to the section you need.
 
-**Status as of handoff:** Phase 7 shipped (the v1.0 polish + rearchitect phase). The full retrospective is in `Phase 7 Documentation.md`; the highlights are 9 → 7 active business-logic dbt models with symmetric active/inactive split, seed-driven Jinja UNPIVOT in `mart_stat_leaderboard`, a 3-way split of the former monolithic `records.py`, MIT LICENSE, and a full public documentation surface (CHANGELOG / ROADMAP / README / SETUP / dbt docs catalog). Last operational verification: 2026 Week 6 golden BBCode regression, byte-identical pre/post-rearchitect.
+**Status as of handoff:** v1.1.0 shipped the league almanac Google Sheets surface on top of the v1.0 Phase 7 architecture. The stable core is still the symmetric active/inactive dbt model, seed-driven `mart_stat_leaderboard`, and Phase 7 records-module split; the new product surface is `output/generate_almanac_sheet.py`, which builds Home, Records, Team Weeks, and per-team active-stats tabs. Last operational verification: v1.1.0 almanac visual check, golden TSV snapshot at `tests/fixtures/almanac_v1_1_0/`, pytest default + warehouse green, dbt build clean, and static docs regenerated.
 
 ---
 
@@ -12,9 +12,10 @@ An end-to-end ELT pipeline that turns ESPN's fantasy baseball API into:
 
 1. A **BBCode-formatted weekly recap** (`output/generate_summary.py`) that the league commissioner posts to the ESPN league frontpage every Sunday after the matchup_period closes.
 2. A **BBCode all-time-records report** (`output/generate_records_report.py`) — same target audience, covers the full league history.
-3. A **Google Sheet with three tabs of records** (`output/sheets_writer.py`, opt-in via env var) — All-Time Records, Current Season Records, Leaderboard Dump. 17-column schema with contributor breakdowns.
+3. A **Google Sheets league almanac** (`output/generate_almanac_sheet.py`, opt-in via env var) — Home, Records, Team Weeks, and one active-stats tab per fantasy team. This is the primary Sheets surface as of v1.1.0.
+4. A **legacy Google Sheet records sink** (`output/sheets_writer.py`, opt-in via env var) — All-Time Records / Current Season Records / Leaderboard Dump. Still present, but not the forward-looking Sheets product.
 
-The user runs it weekly. Output #1 is the canonical league deliverable; #2 fires alongside; #3 is a sink the user enables when they want the sheet refreshed.
+The user runs it weekly. Output #1 is the canonical league deliverable; #2 fires alongside; #3 is the browsable league archive/almanac; #4 is legacy support.
 
 This is also a **portfolio piece** — the user is targeting Senior Data Analyst / Analytics Lead roles. Every architectural decision has been documented in `Phase X.Y Documentation.md` files in the repo root for that reason. Don't optimize the project as if it were closed-source production code; the documentation IS part of the deliverable.
 
@@ -24,7 +25,7 @@ This is also a **portfolio piece** — the user is targeting Senior Data Analyst
 
 ## 2. Architecture in one paragraph
 
-Three stages: **extract** (Python pulls ESPN's API → Snowflake `RAW` schema, append-only), **transform** (dbt builds `staging` views → `intermediate` views → `marts` facts and the leaderboard), **output** (Python reads marts and produces BBCode + Sheets). Each stage is independently runnable. The user's weekly cadence is `extract → dbt build → output/generate_summary.py → output/generate_records_report.py`. Backfills happen when extract logic or seed data changes (`extract --year YYYY --all` then `dbt build --full-refresh`).
+Three stages: **extract** (Python pulls ESPN's API → Snowflake `RAW` schema, append-only), **transform** (dbt builds `staging` views → `intermediate` views → `marts` facts and the leaderboard), **output** (Python reads marts and produces BBCode + Sheets). Each stage is independently runnable. The user's weekly cadence is `extract → dbt build → output/generate_summary.py → output/generate_records_report.py → output/generate_almanac_sheet.py`. Backfills happen when extract logic or seed data changes (`extract --year YYYY --all` then `dbt build --full-refresh`).
 
 **Mental model:**
 - Extract is the only place that talks to ESPN. It's brittle (vendor wrapper has bugs we work around); changes here usually mean a re-extract.
@@ -56,7 +57,9 @@ espn-league-manager/
 ├── output/
 │   ├── records.py                       # Data access layer (1000+ lines; see §6)
 │   ├── formatters.py                    # STAT_DISPLAY/ABBREV maps + rendering helpers
-│   ├── sheets_writer.py                 # Google Sheets sink; opt-in
+│   ├── sheets_writer.py                 # Legacy Google Sheets records sink; opt-in
+│   ├── almanac_sheets.py                # v1.1 Google Sheets league almanac
+│   ├── generate_almanac_sheet.py        # Almanac entry point + TSV previews
 │   ├── league_notes.py                  # Registry-pattern color callouts (user-extensible)
 │   ├── generate_summary.py              # Weekly recap BBCode
 │   ├── generate_records_report.py       # All-time records BBCode + Sheets opt-in sink
@@ -135,6 +138,10 @@ python output/generate_summary.py > /tmp/recap.bbcode
 # 4. Generate the all-time records report (and refresh the Sheet)
 python output/generate_records_report.py
 # If SHEETS_OUTPUT_ID is set, this also rewrites the three Sheets tabs.
+
+# 5. Refresh the league almanac Google Sheet
+python output/generate_almanac_sheet.py
+# Use --no-sheets or --preview-dir during development.
 ```
 
 ### Backfills
@@ -149,14 +156,14 @@ Backfill duration: ~30 min currently (Phase 4.x bookmark targets ~3-5 min via pa
 
 ### Don't-write-to-the-live-sheet idiom (CRITICAL during dev)
 
-`generate_records_report.py` writes to the user's live league Google Sheet when `SHEETS_OUTPUT_ID` is set. It IS set in the user's `.env`. The script's `load_dotenv()` populates it into the process env, so:
+`generate_records_report.py` and `generate_almanac_sheet.py` write to the user's live league Google Sheet when `SHEETS_OUTPUT_ID` is set. It IS set in the user's `.env`. The scripts' `load_dotenv()` path populates it into the process env, so:
 
 - ❌ `unset SHEETS_OUTPUT_ID && python output/generate_records_report.py` — DOES NOT suppress; `load_dotenv` repopulates.
 - ❌ `$env:SHEETS_OUTPUT_ID = '' ; python ...` — DOES NOT suppress; same reason.
 - ✅ `SHEETS_OUTPUT_ID=DRY_RUN python output/generate_records_report.py` — works; the env var is set (to a fake value), `load_dotenv` won't override an existing env var, the Sheets call fails with an invalid sheet ID, the script's try/except prints `[sheets] write failed: ...` and BBCode output is unaffected.
 - ✅ Direct helper imports: `python -c "from generate_records_report import format_record, ..."` and skip `main()` entirely.
 
-The fix is documented in memory at `feedback_test_running_side_effects.md`. As of v1.0 there's a `--no-sheets` CLI flag on `generate_records_report.py` for explicit suppression -- the preferred idiom. The DRY_RUN env-var workaround above is kept as a fallback for direct-helper-import paths that bypass the CLI.
+The fix is documented in memory at `feedback_test_running_side_effects.md`. As of v1.0 there's a `--no-sheets` CLI flag on `generate_records_report.py` for explicit suppression, and the almanac entry point also has `--no-sheets` plus `--preview-dir` for TSV inspection. The DRY_RUN env-var workaround above is kept as a fallback for direct-helper-import paths that bypass the CLI.
 
 ---
 
@@ -188,11 +195,11 @@ moved to the `stat_classification` seed at Phase 7 B1 and surface via
 `stat_catalog.get_polarity_map()` / `get_auto_tracked()`.
 
 Key concepts:
-- **Seed-to-leaderboard name translation** lives in
-  `output/stat_catalog.py` (`SEED_TO_LEADERBOARD`). The seed has
-  `'1B'`/`'2B'`/`'3B'`/`'30'`/`'64'` (raw stat IDs); the leaderboard has
-  `'SINGLES'`/`'DOUBLES'`/`'TRIPLES'`/`'CYC'`/`'SHO'` (column names). The
-  dbt mart applies the equivalent rename via Jinja seed-loop aliases.
+- **Seed-to-leaderboard name translation** lives in `dim_stat`.
+  The seed has `'1B'`/`'2B'`/`'3B'`/`'30'`/`'64'` (raw stat IDs); the
+  leaderboard has `'SINGLES'`/`'DOUBLES'`/`'TRIPLES'`/`'CYC'`/`'SHO'`
+  (column names). `dim_stat.leaderboard_name` is the single source of
+  truth; Python display helpers read it through `output/stat_catalog.py`.
 - **`_TEAM_NON_SEED_STATS`** (in `records_logic.py`) -- rate stats /
   WASTED_POINTS / derived counts. These don't have polarity in the
   scoring seed; the orchestrator filter allows them at team grain in
@@ -218,10 +225,21 @@ Rendering primitives + display tables:
 
 ### `output/sheets_writer.py`
 
-OAuth client + 17-col writer + 3 tabs. Three things to know:
+Legacy OAuth client + 17-col writer + 3 records tabs. Three things to know:
 - `_replace_tab` does `worksheet.clear()` + `update()`. **This may wipe user-applied formatting** — there's an open follow-up task to switch to in-place updates.
 - All three tabs go through `records.get_records_with_contributors`. Tabs 1+2 use `top_n=1` so the tie-collapse algorithm trivially passes rank-1 rows through (except for inline-collapsed tiers of 2-3); Tab 3 uses `top_n=5` and the floor-zero situational stats (CG/HLD/NH/PG fewest) collapse to one row each.
 - Polarity-aware Best/Worst labels via `records.best_or_worst_label()`.
+
+### `output/almanac_sheets.py` + `output/generate_almanac_sheet.py`
+
+The v1.1 Google Sheets league almanac. Generates Home, Records, Team
+Weeks, and one active-stats tab per team. It currently contains both
+data-access SQL and rendering logic; this is accepted for v1.1.0 so the
+league can review the product, but v1.1.1 should split it along the
+records.py layer lines and move reusable analytical contracts into dbt.
+Use `python output/generate_almanac_sheet.py --no-sheets --preview-dir
+output/almanac_preview` during development; the golden v1.1.0 snapshot
+lives at `tests/fixtures/almanac_v1_1_0/`.
 
 ### `output/league_notes.py`
 
@@ -301,7 +319,10 @@ The hard-won stuff. If you need to debug something weird, check here first.
 
 - The `stat_classification` seed uses ESPN's raw stat IDs/names: `'1B'`, `'2B'`, `'3B'`, `'30'`, `'64'`, `'B_IBB'`, `'HBP_P'`, etc.
 - The leaderboard mart uses spelled-out column names: `'SINGLES'`, `'DOUBLES'`, `'TRIPLES'`, `'CYC'`, `'SHO'`, etc.
-- `SEED_TO_LEADERBOARD` in `output/stat_catalog.py` translates between them (Python side). The dbt mart applies the equivalent rename via Jinja seed-loop aliases. Add to both whenever a new seed→column rename happens.
+- `dim_stat.leaderboard_name` translates between them. The dbt mart reads
+  this value in its Jinja seed loop, and Python reads it through
+  `output/stat_catalog.py`. Add new seed-to-column translations in
+  `dim_stat.sql`, not in parallel Python/dbt maps.
 
 ### Polarity conventions
 
@@ -385,26 +406,30 @@ These are calls already made; lead with the established pattern rather than re-d
 
 ## 9. What works today
 
-Verified end-to-end as of Phase 6.3.3 ship (2026 Week 5):
+Verified end-to-end as of v1.1.0 ship:
 
-- `dbt build --full-refresh` runs clean: 58 PASS / 0 ERROR / 0 WARN.
-- `python output/generate_summary.py` produces the full BBCode recap with all sections, including:
-  - 8 new tracked stats (GDP, B_IBB, HBP_P, BLSV, NH, PG, PK, SHO) surfacing as records when records are set.
-  - Playoff round names where applicable (`Round 1` for 2025 MP24, etc.).
-  - Polarity-aware Best/Worst direction labels.
-  - emoji-safe rendering (utf-8 stdout reconfig).
-- `python output/generate_records_report.py` produces BBCode + writes 3 tabs to Google Sheets (when `SHEETS_OUTPUT_ID` set):
-  - Tab 1 (All-Time): 100 rows, rank-1 holder per (stat, direction).
-  - Tab 2 (Current Season): 100 rows, same shape scoped to active season.
-  - Tab 3 (Leaderboard Dump): 807 rows, top-5 per (stat, direction, scope), both scopes interleaved.
-  - Tie-collapse fires for floor-zero situational stats (CG/HLD/NH/PG fewest collapse to single rows with N in the hundreds).
-  - 17-column schema with per-row contributors (player names + counts for team grain, stat names + counts for player grain).
-- 3 archived smoke tests pass (`archive/chunk{3,4,5}_smoke.py`).
+- `dbt build` runs clean: PASS=140 / WARN=0 / ERROR=0 / NO-OP=4.
+- `pytest` default suite is green: 148 passed / 15 deselected.
+- `pytest tests/ -m warehouse` is green: 15 passed / 148 deselected,
+  including golden BBCode regressions.
+- `python output/generate_summary.py` produces the full BBCode recap
+  with the Phase 7/v1.0 behavior intact.
+- `python output/generate_records_report.py` produces the BBCode records
+  report and can still write the legacy 3-tab records Sheet when
+  `SHEETS_OUTPUT_ID` is set.
+- `python output/generate_almanac_sheet.py` writes the v1.1 almanac
+  workbook when `SHEETS_OUTPUT_ID` is set, and can generate TSV previews
+  via `--no-sheets --preview-dir`.
+- `tests/fixtures/almanac_v1_1_0/` is the golden TSV baseline for the
+  planned v1.1.1 almanac refactor.
 
 ### Coverage
 
-- **Snowflake state**: 2025 (full season + playoffs MP24-26) and 2026 (MP1-5) loaded.
-- **Live Sheet**: populated with current Phase 6.3.3 17-col data (1007 rows across 3 tabs). The user accepted this state during verification (sheet was previously a 10-col schema from Phase 6.3.2 — clean replacement).
+- **Snowflake state**: 2025 full season plus 2026 current-season data
+  loaded for the maintainer's league.
+- **Live Sheet**: v1.1 almanac output visually checked by the maintainer.
+  The legacy records-sheet sink remains available but is no longer the
+  forward-looking Sheets product.
 
 ---
 
@@ -414,12 +439,19 @@ Forward-looking work is tracked in `ROADMAP.md` at repo root. That doc
 has the public Now / Next / Later / Decided Against buckets and stays
 authoritative as items ship.
 
-Highlights as of v1.0.2:
-- **Now (v1.x flagship)**: `dim_player` + `fct_player_career` -- the
-  player-entity foundation the project hasn't had. v1.0.2 laid the
-  contract-layer groundwork (`dim_stat`, `dim_matchup_period`,
-  `fct_player_daily_performance`) that `dim_player` slots into
-  cleanly.
+Highlights as of v1.1.0:
+- **Now (v1.1.1)**: refactor the almanac without changing the generated
+  workbook. Use `tests/fixtures/almanac_v1_1_0/` as the golden TSV
+  baseline, move reusable SQL into dbt contracts, and split
+  `output/almanac_sheets.py` into data/logic/render/write layers.
+- **Next player-layer work**: start with pure performance facts sliced
+  by season/team/player/slot. Acquisition, trades, free-agent signing,
+  and league-note callout history should join in as separate models
+  later rather than nullable columns on the performance fact.
+- **Shipped in v1.1.0**: Google Sheets league almanac with Home,
+  Records, Team Weeks, and one active-stats tab per team; roster-settings
+  extraction; `dim_roster_slot_counts`; `mart_daily_roster_snapshot`;
+  golden TSV fixture for refactor regression.
 - **Shipped in v1.0.2** (refactor-only; byte-identical output): new
   mart-layer contracts (`dim_stat`, `dim_matchup_period`,
   `fct_player_daily_performance`); `int_player_weekly_performance`
@@ -439,7 +471,8 @@ Highlights as of v1.0.2:
   Snowflake key-pair auth; 8 new league_notes callouts.
 - **Open v1.x items**: Owner Names in the Mart, Career Stats Per Team,
   Playoff Contention Identification, Calendar Auto-Populate. Sheets
-  Sink Hardening dropped (upcoming Sheets surface redesign supersedes).
+  Sink Hardening dropped for the legacy sink; future formatting work
+  belongs in the almanac writer.
 - **Next (v2.0, likely-exclusive)**: cross-platform Yahoo/Sleeper extract
   OR DuckDB target. MetricFlow as a deliberate learning exercise.
 - **Decided Against**: frequency-table tab (tie-collapse covers it),
@@ -462,8 +495,8 @@ The user runs this every week. Behaviors they specifically rely on — break the
 - **Records show owner names**, recap doesn't — locked Phase 5.
 - **`Matchup #N` was renamed to `Week N` everywhere** — locked Phase 5.
 - **Playoff weeks render as round names** (`Round 1` / `Semi-Finals` / `Finals`) instead of `Week 24-26` — locked Phase 6.3.3 chunk 6.
-- **Sheet schema is 17 cols across 3 tabs** — locked Phase 6.3.3 chunk 5. Adding a column requires bumping `_HEADER` in `sheets_writer.py` and the row-builder logic; consumers of the Sheet (the user's manual analysis) probably do not adapt automatically.
-- **`SHEETS_OUTPUT_ID` env-var opt-in** for the Sheets sink — don't accidentally make it opt-out.
+- **Legacy records sheet schema is 17 cols across 3 tabs** — locked Phase 6.3.3 chunk 5 for `sheets_writer.py`. The v1.1 almanac is the forward-looking Sheets surface and has its own tab-specific schemas.
+- **`SHEETS_OUTPUT_ID` env-var opt-in** for both Sheets sinks — don't accidentally make either sink opt-out.
 - **`output/LeagueNote.txt` is appended verbatim** under "Additional Notes" when non-empty. The user uses this for ad-hoc commissioner messages each week.
 
 If you change a public-facing behavior, surface it before merging. The user is the most important QA on this project.

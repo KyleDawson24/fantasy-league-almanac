@@ -5,27 +5,28 @@
 ELT pipeline for an ESPN Fantasy Baseball head-to-head points league.
 Extracts box-score data from ESPN's API, transforms it through staging /
 intermediate / mart layers in Snowflake, and generates weekly BBCode
-recaps plus an all-time records report for posting on the league's front
-page.
+recaps, an all-time records report, and a browsable Google Sheets league
+almanac.
 
-This dbt project is the transform layer. It feeds two Python output
-scripts (`generate_summary.py` for the weekly recap,
-`generate_records_report.py` for the all-time records dump) and an
-optional Google Sheets sink. See the **Exposures** section in the
-sidebar for the formally-declared consumers.
+This dbt project is the transform layer. It feeds Python output scripts
+(`generate_summary.py` for the weekly recap, `generate_records_report.py`
+for the all-time records dump, and `generate_almanac_sheet.py` for the
+Sheets almanac). See the **Exposures** section in the sidebar for the
+formally-declared consumers.
 
 ## Architecture at a glance
 
     ESPN Fantasy API (espn-api wrapper)
         -> Python extractor
-        -> Snowflake RAW.BOX_SCORES (append-only JSON)
+        -> Snowflake RAW.BOX_SCORES / RAW.ROSTER_SETTINGS (append-only JSON)
         -> dbt staging       (1:1 reshape, no business logic)
         -> dbt intermediate  (slot-validity filter; daily + weekly wide rollups)
         -> dbt marts         (active/inactive symmetric facts;
+                              roster settings/history contracts;
                               seed-driven leaderboard)
-        -> Python output scripts (BBCode + Google Sheets)
+        -> Python output scripts (BBCode + Google Sheets almanac)
 
-The dbt project has 10 models total: 3 staging, 2 intermediate, 5 marts.
+The dbt project has 16 models total: 3 staging, 1 intermediate, 12 marts.
 Browse the **Models** section in the sidebar for full lineage and
 column-level docs.
 
@@ -64,17 +65,24 @@ record_direction)` partition emits 10 ranked rows. The top-10 emission
 is a visibility buffer: consumers display top-5 but the extra 5 ranks
 let consumer-side tie-collapse logic detect tier saturation.
 
+**Roster settings and roster history.** `dim_roster_slot_counts` reshapes
+ESPN roster settings into one row per configured lineup slot, including
+starter counts and position maximums. `mart_daily_roster_snapshot`
+preserves the full roster shell from box scores so almanac tabs can count
+rostered days and include zero-stat bench/IL players that do not survive
+the stat-breakdown performance path.
+
 ## Where to look next
 
 - **Models** sidebar -- per-model descriptions, columns, and lineage.
 - **Sources** sidebar -- the upstream RAW tables (ESPN box scores,
-  scoring settings).
+  scoring settings, roster settings).
 - **Seeds** sidebar -- the four seed CSVs that feed the pipeline.
   `stat_classification` is the Phase 7 keystone and deserves a closer
   read.
-- **Exposures** sidebar -- the three downstream consumers
-  (`weekly_recap`, `records_report`, `records_sheet`) with owner and
-  description.
+- **Exposures** sidebar -- the downstream consumers
+  (`weekly_recap`, `records_report`, `records_sheet`, `league_almanac`)
+  with owner and description.
 
 ## Project documentation
 

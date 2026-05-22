@@ -1,7 +1,8 @@
 # Fantasy Beat Reporter
 
 > An ELT pipeline that turns ESPN Fantasy Baseball box-score data into weekly
-> BBCode recaps and an all-time records report. Built so the league
+> BBCode recaps, all-time records reports, and a multi-tab league almanac
+> in Google Sheets. Built so the league
 > commissioner spends Sunday afternoons posting copy, not pulling stats.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -24,6 +25,8 @@ runs:
 python extract/extract.py
 cd dbt_league && dbt build
 cd .. && python output/generate_summary.py
+python output/generate_records_report.py
+python output/generate_almanac_sheet.py
 ```
 
 The script prints BBCode to stdout and also writes a timestamped file
@@ -38,7 +41,9 @@ records. Paste it into the league's front-page editor and ship.
 
 There's also an all-time records report
 (`output/generate_records_report.py`) that can optionally write to a
-Google Sheet for offline analysis.
+Google Sheet for offline analysis, plus the v1.1 almanac writer
+(`output/generate_almanac_sheet.py`) that builds a browsable league
+workbook: Home, Records, Team Weeks, and one active-stats tab per team.
 
 ### Sample output
 
@@ -80,13 +85,15 @@ flowchart LR
     C --> D[dbt staging<br/>→ intermediate<br/>→ marts]
     D --> E1[Weekly recap<br/>BBCode]
     D --> E2[Records report<br/>BBCode + Sheets]
+    D --> E3[League almanac<br/>Google Sheets]
 ```
 
-Three layers, two consumers. The dbt project alone is 10 models (3
-staging, 2 intermediate, 5 marts); the marts split symmetrically into
-active and inactive performance facts ("active = fantasy reality;
-inactive = MLB reality") and feed a seed-driven leaderboard that ranks
-both lenses.
+Three layers, three user-facing consumers. The dbt project alone is 16
+models (3 staging, 1 intermediate, 12 marts); the marts split
+symmetrically into active and inactive performance facts ("active =
+fantasy reality; inactive = MLB reality"), expose roster-settings /
+roster-history contracts for the almanac, and feed a seed-driven
+leaderboard that ranks both lenses.
 
 Full lineage and column-level docs are in the [hosted dbt catalog](https://kyledawson24.github.io/fantasy-league-front-page/);
 the local source-of-truth is the `dbt_league/` directory.
@@ -157,9 +164,10 @@ For an analytics engineering / dbt-focused reader, the project covers:
 - **Real-data debugging discipline:** the doubleheader fix above, the
   stat-ID-31 mislabel archaeology, the `CYC` stat (id 30) reidentification.
   Each documented with raw evidence and reasoning in the phase docs.
-- **Two consumer surfaces from one transform layer:** ESPN-front-page
-  BBCode and Google Sheets, with the Sheets sink declared as a formal
-  dbt exposure. Adding a third (Discord, email, etc.) is an interface
+- **Three consumer surfaces from one transform layer:** ESPN-front-page
+  BBCode, the all-time records report, and a browsable Google Sheets
+  league almanac, with Sheets outputs declared as formal dbt exposures.
+  Adding a fourth (Discord, email, static HTML, etc.) is an interface
   implementation, not a re-thread.
 - **Iterative documentation:** seven Phase X.Y docs capturing the
   decision log, a CHANGELOG mapped to semver, a ROADMAP with Now / Next
@@ -190,7 +198,7 @@ fresh Snowflake free-tier account in under 45 minutes.
   (ESPN cookies, Snowflake provisioning, dbt profile, optional Google
   Sheets sink).
 - **[CHANGELOG.md](CHANGELOG.md)** — version history mapped retroactively
-  from Phase 1 (v0.1.0) to Phase 7 (v1.0.0). Tells the story of how the
+  from Phase 1 (v0.1.0) through the current v1.x releases. Tells the story of how the
   pipeline got to its current shape.
 - **[ROADMAP.md](ROADMAP.md)** — what's next: v1.x polish, v2.0
   structural changes, Later speculation, and what's explicitly Decided
@@ -210,12 +218,17 @@ fresh Snowflake free-tier account in under 45 minutes.
 
 ## Status
 
-- **v1.0.2** — current. DAG hygiene + dbt-architecture cleanup. New
+- **v1.1.0** — current. Product-facing almanac release: a browsable
+  Google Sheets workbook with Home, Records, Team Weeks, and per-team
+  active-stats tabs, backed by roster-settings extraction and roster
+  history marts. Ships with a golden TSV snapshot for the planned
+  v1.1.1 refactor. See `CHANGELOG.md`.
+- **v1.0.2** — 2026-05-19. DAG hygiene + dbt-architecture cleanup. New
   `dim_stat` / `dim_matchup_period` / `fct_player_daily_performance`
   contract layer; `int_player_weekly_performance` promoted to
   `fct_weekly_player_performance`; schedule columns denormalized onto
   weekly facts. No consumer-visible behavior change (byte-identical
-  output). See `CHANGELOG.md`.
+  output).
 - **v1.0.1** — 2026-05-18. Polish release on top of v1.0.0: 8 new
   `league_notes` callouts, "League This Week" always-on recap line,
   league-wide benchmarks mart, Hit-for-the-Cycle as a tracked stat,

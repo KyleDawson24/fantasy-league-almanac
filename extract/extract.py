@@ -3,9 +3,9 @@ extract.py — ESPN Fantasy Baseball data extraction pipeline.
 
 Handles multiple extraction types from a single entry point:
   1. Box scores: daily player-level stats for each matchup period
-  2. Scoring settings: league scoring weights per season (opt-in)
+  2. League settings: scoring weights + roster settings per season (opt-in)
 
-Box scores are extracted by default. Scoring settings require an explicit
+Box scores are extracted by default. League settings require an explicit
 flag (--include-settings or --settings-only) because they change rarely
 and don't need to run on every weekly pull.
 
@@ -15,9 +15,9 @@ Usage:
   py extract/extract.py 5                            -> box scores for matchup period 5
   py extract/extract.py --year 2025 1 2 3            -> box scores for specific periods, 2025
   py extract/extract.py --year 2026 --all            -> all COMPLETED matchup periods for 2026 (full backfill)
-  py extract/extract.py --include-settings           -> recent box scores + scoring settings
-  py extract/extract.py --settings-only              -> scoring settings only, no box scores
-  py extract/extract.py --settings-only --year 2025  -> scoring settings for 2025 only
+  py extract/extract.py --include-settings           -> recent box scores + league settings
+  py extract/extract.py --settings-only              -> league settings only, no box scores
+  py extract/extract.py --settings-only --year 2025  -> league settings for 2025 only
 """
 
 import argparse
@@ -584,6 +584,28 @@ def get_recent_matchup_periods(year, lookback_days=21):
 # ---------------------------------------------------------------------------
 # ESPN extraction — scoring settings
 # ---------------------------------------------------------------------------
+def fetch_league_settings(year):
+    """
+    Pull league settings from ESPN's raw API.
+
+    The espn-api wrapper exposes only a subset of settings. The raw
+    mSettings payload carries both scoringSettings and rosterSettings.
+    We persist the pieces we consume as append-only raw snapshots so dbt
+    can build stable contract dims over them.
+    """
+    url = f"{ESPN_API_BASE}/{year}/segments/0/leagues/{LEAGUE_ID}"
+
+    response = requests.get(
+        url,
+        params={"view": "mSettings"},
+        cookies={"swid": SWID, "espn_s2": ESPN_S2},
+    )
+    response.raise_for_status()
+
+    data = response.json()
+    return data["settings"]
+
+
 def fetch_scoring_settings(year):
     """
     Pull scoring settings from ESPN's raw API (not the espn-api wrapper,
@@ -599,17 +621,7 @@ def fetch_scoring_settings(year):
     seed (with espn_stat_id column) bridges numeric IDs to human-readable
     stat names in the staging layer.
     """
-    url = f"{ESPN_API_BASE}/{year}/segments/0/leagues/{LEAGUE_ID}"
-
-    response = requests.get(
-        url,
-        params={"view": "mSettings"},
-        cookies={"swid": SWID, "espn_s2": ESPN_S2},
-    )
-    response.raise_for_status()
-
-    data = response.json()
-    scoring_items = data["settings"]["scoringSettings"]["scoringItems"]
+    scoring_items = fetch_league_settings(year)["scoringSettings"]["scoringItems"]
 
     print(f"  Retrieved {len(scoring_items)} scoring items for {year}")
     return scoring_items
@@ -652,11 +664,61 @@ def load_scoring_settings_to_snowflake(conn, scoring_items, year):
         cursor.close()
 
 
+def load_roster_settings_to_snowflake(conn, roster_settings, year):
+    """
+    Append roster settings as a new row in RAW.ROSTER_SETTINGS.
+
+    The full rosterSettings object is stored (lineupSlotCounts,
+    positionLimits, lineupSlotStatLimits, etc.). dbt's
+    dim_roster_slot_counts model reshapes the two slot-count/maximum
+    dictionaries into the consumer contract.
+    """
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS ROSTER_SETTINGS (
+                season_year     INTEGER,
+                raw_json        VARIANT,
+                extracted_at    TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()
+            )
+        """)
+
+        cursor.execute(
+            """
+            INSERT INTO ROSTER_SETTINGS (season_year, raw_json)
+            SELECT %s, PARSE_JSON(%s)
+            """,
+            (year, json.dumps(roster_settings)),
+        )
+
+        conn.commit()
+        print(f"  Loaded roster settings for {year} into Snowflake.")
+
+    finally:
+        cursor.close()
+
+
 def extract_scoring_settings(conn, year):
     """Pull scoring settings from ESPN and load to Snowflake."""
     print(f"\nScoring settings for {year}:")
     scoring_items = fetch_scoring_settings(year)
     load_scoring_settings_to_snowflake(conn, scoring_items, year)
+
+
+def extract_league_settings(conn, year):
+    """Pull scoring + roster settings from ESPN and load to Snowflake."""
+    print(f"\nLeague settings for {year}:")
+    settings = fetch_league_settings(year)
+
+    scoring_items = settings["scoringSettings"]["scoringItems"]
+    print(f"  Retrieved {len(scoring_items)} scoring items for {year}")
+    load_scoring_settings_to_snowflake(conn, scoring_items, year)
+
+    roster_settings = settings["rosterSettings"]
+    slot_count = len(roster_settings.get("lineupSlotCounts", {}) or {})
+    print(f"  Retrieved roster settings for {year} ({slot_count} slot counts)")
+    load_roster_settings_to_snowflake(conn, roster_settings, year)
 
 
 # ---------------------------------------------------------------------------
@@ -667,7 +729,7 @@ if __name__ == "__main__":
         description="Extract ESPN Fantasy Baseball data into Snowflake.",
         epilog=(
             "By default, extracts recent box scores only. Use --include-settings "
-            "to also pull scoring settings, or --settings-only to pull just settings."
+            "to also pull league settings, or --settings-only to pull just settings."
         ),
     )
     parser.add_argument(
@@ -687,11 +749,11 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--include-settings", action="store_true",
-        help="Also extract scoring settings for the season",
+        help="Also extract league settings for the season",
     )
     parser.add_argument(
         "--settings-only", action="store_true",
-        help="Extract scoring settings only (skip box scores)",
+        help="Extract league settings only (skip box scores)",
     )
     args = parser.parse_args()
 
@@ -703,9 +765,9 @@ if __name__ == "__main__":
 
     with get_snowflake_connection() as conn:
 
-        # --- Scoring settings ---
+        # --- League settings ---
         if do_settings:
-            extract_scoring_settings(conn, year)
+            extract_league_settings(conn, year)
 
         # --- Box scores ---
         if do_box_scores:

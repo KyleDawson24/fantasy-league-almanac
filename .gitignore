@@ -33,6 +33,11 @@ extract/debug_stats_keys.py
 #Customized League Note
 output/LeagueNote.txt
 
+# Generated almanac previews / ad hoc local reports. Golden release
+# snapshots should live under a tracked fixture/docs path, not output/.
+output/almanac_preview*/
+output/*.tsv
+
 # Private working notes -- wishlist / clarifications / discussions
 # / interview-question prep from development sessions. Reviewed at
 # every push; items appended with OBSOLETE markers rather than

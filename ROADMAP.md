@@ -1,16 +1,40 @@
 # Roadmap
 
 This project shipped v1.0.0 on 2026-05-13, v1.0.1 on 2026-05-18
-(polish + flavor expansion), and v1.0.2 on 2026-05-19 (DAG hygiene
-+ dbt-architecture cleanup; refactor-only). See CHANGELOG.md for
-the per-release entries. The items below are what's still on deck,
-organized by priority and ambition. v1.x = incremental polish on
-the current architecture; v2.0 = structural change.
+(polish + flavor expansion), v1.0.2 on 2026-05-19 (DAG hygiene and
+dbt-architecture cleanup; refactor-only), and v1.1.0 on 2026-05-22
+(Google Sheets league almanac). See CHANGELOG.md for the per-release
+entries. The items below are what's still on deck, organized by
+priority and ambition. v1.x = incremental polish on the current
+architecture; v2.0 = structural change.
 
 ## Now (v1.x — incremental polish)
 
 Low-risk changes building on the current architecture. Most would ship in
 a single afternoon.
+
+### Almanac refactor (v1.1.1)
+
+- **Byte-identical almanac refactor.** v1.1.0 shipped the product surface
+  first so the league can review it. The next release should be a pure
+  refactor against `tests/fixtures/almanac_v1_1_0/`: no tab/column
+  changes, only relocation and cleanup.
+- **Build a wide `mart_team_matchup` view.** One row per team-week with
+  the team's full active line, the opponent's full active line, margin,
+  and combined matchup totals. Team-week surfaces read it directly;
+  matchup-record consumers dedupe the two opponent-swapped rows when
+  ranking a matchup as a single game.
+- **Start the player/team/slot performance layer.** Build the pure
+  performance fact needed for career-with-team and team active-stats
+  views: season/team/player/slot counting stats with rates derived
+  downstream. Keep acquisition, transactions, and callout counts as
+  separate future joins rather than nullable columns on this fact.
+- **Split `output/almanac_sheets.py`.** Mirror the Phase 7 records split:
+  data reads, selection logic, rendering/formatting, and Sheets-write
+  orchestration should be distinct modules.
+- **Keep the selection logic in Python.** All-league and per-team roster
+  filling should share one configurable roster-fill function; do not add
+  an all-league-candidates mart unless a second consumer needs it.
 
 ### Data wiring
 
@@ -197,9 +221,9 @@ Ideas worth exploring if the project evolves in their direction.
   threshold tuning to avoid small-sample noise, with diminishing return.
 - **Sheets sink formatting-preservation (`_replace_tab` in-place update).**
   Considered in v1.x as a fix for the "weekly run wipes formatting"
-  complaint, but dropped at v1.0.1 — the upcoming Sheets surface
-  redesign supersedes the in-place-update logic. Will rebuild from
-  scratch when the new layout lands.
+  complaint, but dropped at v1.0.1 — the v1.1.0 almanac surface
+  superseded the old 3-tab records-sheet layout. Any future work should
+  target the almanac writer, not the legacy records-sheet sink.
 - **`output/_setup.py` boilerplate factoring.** v1.x Handoff item;
   most of what was named (UTF-8 stdout reconfig, `load_dotenv`,
   Snowflake config) already shipped in Phase 7 via `output/db.py::

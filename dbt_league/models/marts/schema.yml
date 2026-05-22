@@ -109,6 +109,115 @@ models:
       - name: playoff_round
         description: '"Round 1" / "Semi-Finals" / "Finals" when is_playoff=true; NULL otherwise.'
 
+  - name: dim_roster_slot_counts
+    description: >
+      Consumer-facing dimension for roster slot settings. One row per
+      ESPN lineup slot in the latest rosterSettings snapshot for each
+      season. Starter counts come from rosterSettings.lineupSlotCounts;
+      maximums come from rosterSettings.positionLimits where ESPN exposes
+      a direct primary-position limit. Flex and roster-management slots
+      surface maximum_display='N/A'; raw -1 limits surface as 'No Limit'.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - season_year
+              - lineup_slot_id
+    columns:
+      - name: season_year
+        description: 'ESPN season year.'
+        tests:
+          - not_null
+      - name: lineup_slot_id
+        description: 'ESPN lineup slot ID used by box score rows.'
+        tests:
+          - not_null
+      - name: lineup_slot
+        description: 'Human-readable lineup slot label (C, 1B, SP, BE, IL, etc.).'
+        tests:
+          - not_null
+      - name: starter_count
+        description: 'Configured number of starters for this lineup slot.'
+        tests:
+          - not_null
+      - name: position_limit_id
+        description: 'ESPN primary-position ID used for maximum roster limits, when directly applicable.'
+      - name: raw_position_limit
+        description: 'Raw ESPN position limit value. -1 means No Limit; NULL means not applicable.'
+      - name: maximum_count
+        description: 'Numeric maximum when the slot has a finite max; NULL for No Limit or N/A.'
+      - name: maximum_type
+        description: '''limited'', ''no_limit'', or ''not_applicable''.'
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['limited', 'no_limit', 'not_applicable']
+      - name: maximum_display
+        description: 'UI-friendly maximum label: numeric string, No Limit, or N/A.'
+        tests:
+          - not_null
+      - name: is_active_lineup_slot
+        description: 'True when starter_count > 0 and the slot is not BE or IL.'
+        tests:
+          - not_null
+      - name: sort_order
+        description: 'Stable roster display ordering.'
+        tests:
+          - not_null
+
+  - name: mart_daily_roster_snapshot
+    description: >
+      Daily roster snapshot mart. One row per rostered fantasy player
+      per scoring period, including zero-stat players who do not survive
+      the stat-breakdown performance path. Excludes free agents. This is
+      the public mart contract for roster pages and rostered-day counts.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - season_year
+              - scoring_period
+              - team_id
+              - player_id
+              - lineup_slot
+    columns:
+      - name: season_year
+        tests:
+          - not_null
+      - name: matchup_period
+        tests:
+          - not_null
+      - name: scoring_period
+        tests:
+          - not_null
+      - name: team_id
+        tests:
+          - not_null
+      - name: player_id
+        tests:
+          - not_null
+      - name: lineup_slot
+        tests:
+          - not_null
+      - name: slots_to_fill
+        description: 'Configured count for this lineup slot, from dim_roster_slot_counts.'
+        tests:
+          - not_null
+      - name: slot_sort_order
+        tests:
+          - not_null
+      - name: is_active_lineup_slot
+        tests:
+          - not_null
+      - name: roster_status
+        description: '''active'' for starter lineup slots, ''inactive'' for BE/IL.'
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['active', 'inactive']
+
   - name: fct_player_daily_performance
     description: >
       Comprehensive player-daily performance fact. Thin view over

@@ -8,6 +8,80 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Each entry links to the corresponding `Phase X.Y Documentation.md` in the
 repository root for the architectural detail behind the change.
 
+## [1.1.0] — 2026-05-22
+
+League almanac release. This is the first v1.x product expansion after
+the stable BBCode/records foundation: a browsable Google Sheets workbook
+for league members, with a Home tab, curated Records tab, Team Weeks
+archive, and one active-stats tab per fantasy team.
+
+This ships intentionally before the almanac internals are fully refactored.
+The output is product-ready enough to collect league feedback; the known
+architectural debt is that several almanac analytical queries still live
+inside `output/almanac_sheets.py` instead of dbt contracts. v1.1.1 is
+reserved for a refactor-only pass against the golden TSV snapshot captured
+in this release.
+
+### Added
+
+- **League almanac Google Sheets surface.** New
+  `output/generate_almanac_sheet.py` entry point and
+  `output/almanac_sheets.py` writer build a multi-tab workbook:
+  `Home`, `Records`, `Team Weeks`, and one team active-stats tab per
+  fantasy team.
+- **Home tab.** Surfaces an all-league team of the week and
+  season-to-date all-league lineup, filled from the league's configured
+  roster shape instead of hardcoded lineup assumptions.
+- **Curated Records tab.** Side-by-side current-season and all-time
+  record book covering score records, team hitting/pitching records,
+  rate records, and lineup-slot records. Period cells link to ESPN
+  matchup-view boxscores; rate records use the documented 225 AB /
+  50 IP thresholds at output time.
+- **Team Active Stats tabs.** Each team gets a browsable current-season
+  and all-time roster-history view: likely starting lineup by active
+  usage, bench/IL/other sections, current fantasy-team abbreviations,
+  rostered days, games, active points, bench/IL points, PPG, and compact
+  hitter/pitcher stat lines.
+- **Team Weeks tab.** Wide team-week archive with scored hitting and
+  pitching stats, calculated hitting/pitching/total points, margin,
+  matchup totals, league averages, matchup links, color scales, hidden
+  helper columns, and record emphasis for standard-length weeks.
+- **Roster-settings extraction.** `extract/extract.py` now persists the
+  ESPN `rosterSettings` payload into `raw.roster_settings`.
+- **Roster-setting marts.** New `dim_roster_slot_counts` exposes lineup
+  slot counts and position maximums; new `mart_daily_roster_snapshot`
+  gives roster-history consumers a shell that includes zero-stat
+  rostered players.
+- **Golden almanac snapshot.** `tests/fixtures/almanac_v1_1_0/` captures
+  the v1.1.0 TSV output as the byte-diff baseline for the planned
+  v1.1.1 refactor.
+
+### Changed
+
+- **Boxscore links now target matchup view.** Almanac links use ESPN's
+  `view=matchup` URL shape so they open the full matchup view rather
+  than the final scoring day.
+- **Generated preview artifacts are ignored.** `.gitignore` now excludes
+  almanac preview directories and ad-hoc TSV reports under `output/`.
+- **dbt catalog metadata.** Exposures and overview docs now declare the
+  almanac as a first-class downstream consumer alongside the recap and
+  records report.
+
+### Internal
+
+- **Almanac unit coverage.** `tests/test_almanac_sheets.py` covers the
+  roster-fill logic, record-tab shaping, team-week shaping, and formatting
+  helpers that are most likely to drift during the v1.1.1 refactor.
+- **Known v1.1.1 refactor target.** Move reusable analytical SQL out of
+  `output/almanac_sheets.py` into dbt contracts where appropriate
+  (`mart_team_matchup`, player/team/slot history), split data/logic/
+  rendering modules, and keep the generated TSV snapshot byte-identical.
+
+Verification: dbt build clean (PASS=140 / WARN=0 / ERROR=0 / NO-OP=4,
+including 120 data tests and 4 exposures); dbt static docs regenerated;
+pytest default green (148 passed, 15 deselected); pytest warehouse green
+(15 passed, 148 deselected).
+
 ## [1.0.2] — 2026-05-19
 
 DAG hygiene + dbt-architecture cleanup release. No consumer-visible

@@ -86,6 +86,13 @@ seeds:
         auto_tracked: boolean
         is_record_candidate: boolean
         polarity: varchar
+        # v1.1.1: rate-stat min-volume qualifier. qualifier_stat names the
+        # denominator column (e.g. 'ab', 'outs') and qualifier_min is the
+        # threshold below which the stat doesn't qualify as a record.
+        # NULL on every non-rate stat -- mart_stat_leaderboard skips the
+        # threshold filter when qualifier_min is NULL.
+        qualifier_stat: varchar
+        qualifier_min: integer
         notes: varchar
     player_nicknames:
       +column_types:

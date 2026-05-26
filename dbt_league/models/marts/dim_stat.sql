@@ -63,6 +63,13 @@ select
     auto_tracked,
     is_record_candidate,
     polarity,
+    -- v1.1.1: rate-stat min-volume qualifier. qualifier_stat names the
+    -- denominator column (e.g. 'ab', 'outs') and qualifier_min is the
+    -- threshold below which the rate doesn't qualify as a record.
+    -- NULL on every non-rate stat -- mart_stat_leaderboard skips the
+    -- threshold filter when qualifier_min IS NULL.
+    qualifier_stat,
+    qualifier_min,
     notes
 
 from {{ ref('stat_classification') }}

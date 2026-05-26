@@ -80,7 +80,15 @@ STAT_ORDER = [
 # rates / wasted / derived. The new Sheets dump (chunks 5-6) handles
 # these via get_records_with_contributors() instead.
 _REPORT_EXCLUDED_STATS = frozenset({
+    # Pitching rate stats -- this report's per-stat contributor query
+    # interpolates stat_name as a player-fact column and assumes a per-
+    # player breakdown story exists; rates don't.
     'ERA', 'WHIP', 'K_PER_9', 'K_PER_BB', 'HR_PER_9', 'BB_PER_9',
+    # Hitting rate stats -- v1.1.1 promoted these to is_record_candidate=
+    # true so they enter mart_stat_leaderboard (with the qualifier_min
+    # filter applied) for the almanac. Same per-player-breakdown
+    # limitation applies to this report; exclude from display.
+    'AVG', 'OBP', 'SLG', 'OPS',
     'WASTED_POINTS',
     'PA', 'SB_CS', 'W_L', 'SV_BLSV',
 })

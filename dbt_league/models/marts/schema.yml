@@ -64,6 +64,10 @@ models:
           - accepted_values:
               arguments:
                 values: ['positive', 'negative', 'neutral']
+      - name: qualifier_stat
+        description: 'v1.1.1: name of the denominator column (e.g. ''ab'', ''outs'') used as a min-volume gate for rate-stat records. NULL on every non-rate stat.'
+      - name: qualifier_min
+        description: 'v1.1.1: minimum value of qualifier_stat below which the rate doesn''t qualify as a record. mart_stat_leaderboard skips the threshold filter when this is NULL. Examples: 225 AB for hitting rate stats, 150 outs (= 50 IP) for pitching rate stats.'
       - name: notes
         description: 'Free-text context for unusual rows.'
 
@@ -343,6 +347,8 @@ models:
                 values: ['active', 'inactive']
       - name: wasted_bucket
         description: '''FA'', ''ROSTERED_INACTIVE'', or NULL. Inherited from fct_player_daily_performance.'
+      - name: games_played
+        description: 'MLB games played by this player in this matchup_period and lineup_slot, summed up from int_player_daily (where DH days carry games_played=2). Added v1.1.1 so fct_player_season_performance can roll it up to season grain.'
 
   - name: fct_weekly_player_active_performance
     description: >
@@ -955,6 +961,190 @@ models:
         description: 'PERCENT_RANK of calculated_pitching_pts_mean across all weeks in league history.'
       - name: calculated_pitching_pts_rank
         description: 'Absolute RANK of calculated_pitching_pts_mean across all weeks (DESC, so 1 = highest mean ever).'
+
+  - name: mart_team_matchup
+    description: >
+      Wide matchup-grain view over fct_weekly_team_active_performance. Each
+      row carries one team's full active line (passed through from the base
+      fact), the opponent's calculated-lens scores, head-to-head margin
+      and combined matchup totals, and the league-wide per-week averages
+      on the calculated lens.
+
+      Architectural rationale: opponent points, margin, and league
+      averages are properties of the matchup and the league, not the
+      team. They don't belong as columns on the team fact, which holds
+      the team_total = SUM(players) invariant for its own production.
+      Additionally, the league-average window partitions across every
+      team in the period, so it cannot live on the incrementally-merged
+      base fact.
+
+      Grain: one row per (season_year, matchup_period, team_id),
+      filtered to team-weeks with an opponent. Two rows per matchup --
+      consumers ranking a matchup as a single game dedupe via LEAST/
+      GREATEST on team_id or by filtering to team_id < opponent_id.
+
+      First consumer: output/generate_almanac_sheet.py Team Weeks tab.
+      View materialization (pure derivation; window forbids incremental).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - season_year
+              - matchup_period
+              - team_id
+    columns:
+      - name: season_year
+        description: 'Season year.'
+        tests:
+          - not_null
+      - name: matchup_period
+        description: 'Matchup period within the season.'
+        tests:
+          - not_null
+      - name: team_id
+        description: 'ESPN team_id for this side of the matchup.'
+        tests:
+          - not_null
+      - name: opponent_id
+        description: 'ESPN team_id for the opposing side. NOT NULL by construction (the view filters opponent_id IS NOT NULL).'
+        tests:
+          - not_null
+      - name: sort_key
+        description: 'Stable chronological sort key (season_year * 100 + matchup_period). Sorts the full archive without re-deriving in consumers.'
+        tests:
+          - not_null
+      - name: opponent_calculated_hitting_pts
+        description: 'Opponent calculated hitting points (cross-season comparable lens). Pulled from the matched opponent row on the base fact.'
+      - name: opponent_calculated_pitching_pts
+        description: 'Opponent calculated pitching points (cross-season comparable lens).'
+      - name: opponent_calculated_points
+        description: 'Opponent calculated total points (cross-season comparable lens).'
+      - name: calculated_margin
+        description: 'this_team.calculated_points - opponent.calculated_points. May disagree with `result` (platform-derived W/L) when commissioner adjustments exist; that divergence is meaningful, not drift.'
+      - name: matchup_calculated_hitting_pts
+        description: 'this_team + opponent calculated hitting points. Combined matchup output for "highest scoring contest" content and for normalizing a team against the contest it was in.'
+      - name: matchup_calculated_pitching_pts
+        description: 'this_team + opponent calculated pitching points.'
+      - name: matchup_calculated_points
+        description: 'this_team + opponent calculated total points.'
+      - name: league_avg_hitting_points
+        description: 'AVG(calculated_hitting_pts) OVER (PARTITION BY season_year, matchup_period). Constant for every row sharing the same (season, period). Includes every team in the period (this team and its opponent).'
+      - name: league_avg_pitching_points
+        description: 'AVG(calculated_pitching_pts) over the league-week.'
+      - name: league_avg_total_points
+        description: 'AVG(calculated_points) over the league-week.'
+
+  - name: fct_player_season_performance
+    description: >
+      v1.1.1 foundational brick of the player profile layer. Season-grain
+      counterpart to fct_weekly_player_performance: collapses
+      matchup_period while preserving the (season, team, player, slot)
+      decomposition.
+
+      Grain: one row per (season_year, team_id, player_id, lineup_slot).
+      team_id is nullable -- NULL rows represent FA time (lineup_slot 'FA'
+      pairs with NULL team_id by construction).
+
+      Slot-bearing all-slots design (mirrors fct_weekly_player_performance,
+      not the active-only spinoff): rows for active slots carry stat
+      contributions credited to a fantasy team; rows for BE/IL/FA carry
+      player MLB production NOT credited to a fantasy team that day.
+      performance_status and wasted_bucket inherit the partition cleanly.
+
+      Per BRAINTHOUGHTS [ARCH] "the player profile is an assembly of
+      bricks, not a mega-model": this is brick #1. Stays pure baseball
+      performance (counting stats sliced by team/season/slot; no rates,
+      since rates cannot be summed across grains). Future bricks join in
+      independently -- dim_player for identity/bio/eligibility, a
+      transactions model for acquisition history (needs new extract),
+      and a callout-counts model.
+
+      Consumer rollups are plain GROUP BY collapses:
+      player career = GROUP BY player_id;
+      player career-by-team = GROUP BY player_id, team_id;
+      player season = GROUP BY player_id, season_year;
+      player season-by-team = GROUP BY player_id, season_year, team_id.
+      Matchup-grain questions go to fct_weekly_player_performance (already
+      at that grain).
+
+      Active vs inactive vs total framings are consumer-side filters:
+      total IRL production has no filter; rostered production filters
+      team_id IS NOT NULL; fantasy-credited filters performance_status =
+      'active'; per-team filters team_id = X (FA naturally absent).
+
+      Display fields (team_name, team_abbrev, owner_name, player_name,
+      display_name) are NOT grain keys. They're helpers selected as the
+      value from the most recent matchup_period within the (season,
+      entity) partition -- owners and team names can shift mid-season;
+      latest-in-season reads naturally for downstream display.
+
+      Materialization: view. Source is already a table; the rollup is
+      small (collapses matchup_period out of a ~30K-row source); no
+      incremental benefit.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - season_year
+              - team_id
+              - player_id
+              - lineup_slot
+    columns:
+      - name: season_year
+        description: 'Season year. Part of the grain.'
+        tests:
+          - not_null
+      - name: team_id
+        description: 'Fantasy team_id while the player was rostered to a team. NULL when the player was a FA during a given lineup_slot row (lineup_slot = ''FA'').'
+      - name: player_id
+        description: 'ESPN player_id. Part of the grain.'
+        tests:
+          - not_null
+      - name: lineup_slot
+        description: 'Fantasy lineup slot. Part of the grain. Active slots (C/1B/2B/3B/SS/IF/LF/CF/RF/OF/DH/UTIL/SP*/RP*/P) reflect fantasy-credited production; BE/IL/FA reflect MLB production that was not credited to a fantasy team that day.'
+        tests:
+          - not_null
+      - name: performance_status
+        description: '''active'' or ''inactive''. Functionally dependent on lineup_slot; inherited via GROUP BY from fct_weekly_player_performance.'
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['active', 'inactive']
+      - name: wasted_bucket
+        description: '''FA'', ''ROSTERED_INACTIVE'', or NULL. Inherited from fct_weekly_player_performance. NULL on active rows (where the wasted-bucket concept doesn''t apply).'
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['FA', 'ROSTERED_INACTIVE']
+                quote: true
+                where: 'wasted_bucket is not null'
+      - name: team_name
+        description: 'Display helper, not a grain key. Latest-in-season value for this team_id within the row''s season_year. NULL on FA rows.'
+      - name: team_abbrev
+        description: 'Display helper, not a grain key. Latest-in-season value.'
+      - name: owner_name
+        description: 'Display helper, not a grain key. Latest-in-season value.'
+      - name: player_name
+        description: 'Display helper, not a grain key. Latest-in-season value for this player_id within the row''s season_year.'
+      - name: display_name
+        description: 'Display helper, not a grain key. Nickname-resolved player name; latest-in-season value.'
+      - name: calculated_hitting_pts
+        description: 'SUM of total_hitting_stat_pts from fct_weekly_player_performance. Catch-all hitting points under current-season scoring rules (cross-season comparable).'
+      - name: calculated_pitching_pts
+        description: 'SUM of total_pitching_stat_pts.'
+      - name: calculated_points
+        description: 'SUM of total_stat_pts -- combined hitting + pitching catch-all under current rules.'
+      - name: platform_points
+        description: 'SUM of player-level platform_points (kona''s appliedTotal). On active rows this is what the player contributed to the fantasy team''s score; on inactive/FA rows it is the player''s MLB-game fantasy points that were not credited to any team that day.'
+      - name: platform_hitting_pts
+        description: 'SUM of platform_hitting_pts (slot-based hitting split passthrough from the weekly fact).'
+      - name: platform_pitching_pts
+        description: 'SUM of platform_pitching_pts.'
+      - name: negative_points
+        description: 'SUM of per-day net-negative platform_points magnitudes; sum semantics aggregate cleanly across days and weeks.'
+      - name: games_played
+        description: 'SUM of MLB games_played from the weekly fact (where DH days carry games_played=2 upstream). Natural denominator for per-game analysis at season grain.'
 
   - name: fct_weekly_player_inactive_performance
     description: >

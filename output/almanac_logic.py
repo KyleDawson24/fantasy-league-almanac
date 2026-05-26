@@ -1,0 +1,800 @@
+"""output/almanac_logic.py
+
+Tier 2c.3 (v1.1.1): selection rules + tab-row orchestration for the
+league almanac.
+
+This module owns the consumer-side decisions that aren't pure data and
+aren't pure rendering: pick the all-league roster from candidate rows,
+group + sort record specs into sectioned shapes, decide which display
+helper applies to which roster row, etc.
+
+Dependencies (downward only): almanac_data, almanac_render. Logic
+orchestrates render -- the build_* functions construct full tab-row
+lists by calling individual format_* helpers in almanac_render.
+"""
+
+import math
+import os
+from collections import defaultdict
+
+import almanac_data
+import almanac_render
+import records
+import stat_catalog
+from almanac_data import (
+    HITTING_RECORD_LABELS,
+    HITTING_RECORD_ORDER,
+    PITCHING_STAT_ORDER,
+    RATE_RECORD_SPECS,
+    _fact_stat_column_name,
+    _lineup_slot_stat_name,
+    _team_record_label,
+    get_lineup_slot_record_specs,
+    get_scored_record_specs,
+    slot_label,
+)
+from almanac_render import (
+    HOME_HEADER,
+    HOME_TAB,
+    RECORDS_HEADER,
+    RECORDS_MATRIX_DETAIL_HEADER,
+    RECORDS_MATRIX_WIDTH,
+    RECORDS_TAB,
+    TEAM_HISTORY_DETAIL_HEADER,
+    TEAM_HISTORY_HITTER_HEADER,
+    TEAM_HISTORY_HITTER_STATS,
+    TEAM_HISTORY_MIXED_HEADER,
+    TEAM_HISTORY_MIXED_STATS,
+    TEAM_HISTORY_PITCHER_HEADER,
+    TEAM_HISTORY_PITCHER_STATS,
+    TEAM_ROSTER_HEADER,
+    TEAM_ROSTER_MATRIX_WIDTH,
+    TEAM_WEEKS_BASE_HEADER,
+    TEAM_WEEKS_SCORE_HEADER,
+    TEAM_WEEKS_TAB,
+    SLOT_ORDER,
+    boxscore_formula,
+    format_all_league_team_row,
+    format_record_matrix_row,
+    format_record_row,
+    format_team_history_matrix_row,
+    format_team_roster_row,
+    format_team_week_row,
+    team_tab_title,
+    _boxscore_url,
+    _collapsed_holder,
+    _compact_inactive_slot,
+    _empty_team_history_display_row,
+    _format_record_side,
+    _format_record_value,
+    _format_sheet_date,
+    _format_team_week_stat,
+    _inactive_position_display,
+    _is_active_display_slot,
+    _is_hitter_display_slot,
+    _is_pitcher_display_slot,
+    _one_decimal,
+    _period_boxscore_formula,
+    _record_details,
+    _record_label,
+    _records_matrix_scope_header,
+    _round_half_up,
+    _safe_sheet_title,
+    _slot_sort_key,
+    _team_history_display_row,
+    _team_history_scope_header,
+    _team_history_section_header_row,
+    _team_history_side_cells,
+    _team_history_stat_line,
+    _team_week_specs_for_category,
+    _team_week_stat_header,
+    _team_week_stat_headers,
+)
+from formatters import fmt_ip, format_top_scorer_stats_line
+
+
+SCORE_RECORD_SPECS = [
+    {
+        'section': 'Score Records',
+        'label': 'Best Team Total Points',
+        'grain': 'team',
+        'stat_name': 'CALCULATED_POINTS',
+        'direction': 'most',
+    },
+    {
+        'section': 'Score Records',
+        'label': 'Best Team Hitting Points',
+        'grain': 'team',
+        'stat_name': 'CALCULATED_HITTING_PTS',
+        'direction': 'most',
+    },
+    {
+        'section': 'Score Records',
+        'label': 'Best Team Pitching Points',
+        'grain': 'team',
+        'stat_name': 'CALCULATED_PITCHING_PTS',
+        'direction': 'most',
+    },
+    {
+        'section': 'Score Records',
+        'label': 'Best Player Total Points',
+        'grain': 'player',
+        'stat_name': 'CALCULATED_POINTS',
+        'direction': 'most',
+    },
+    {
+        'section': 'Score Records',
+        'label': 'Best Player Hitting Points',
+        'grain': 'player',
+        'stat_name': 'CALCULATED_HITTING_PTS',
+        'direction': 'most',
+    },
+    {
+        'section': 'Score Records',
+        'label': 'Best Player Pitching Points',
+        'grain': 'player',
+        'stat_name': 'CALCULATED_PITCHING_PTS',
+        'direction': 'most',
+    },
+    {
+        'section': 'Score Records',
+        'spacer': True,
+    },
+    {
+        'section': 'Score Records',
+        'label': 'Worst Team Total Points',
+        'grain': 'team',
+        'stat_name': 'CALCULATED_POINTS',
+        'direction': 'fewest',
+    },
+    {
+        'section': 'Score Records',
+        'label': 'Worst Team Hitting Points',
+        'grain': 'team',
+        'stat_name': 'CALCULATED_HITTING_PTS',
+        'direction': 'fewest',
+    },
+    {
+        'section': 'Score Records',
+        'label': 'Worst Team Pitching Points',
+        'grain': 'team',
+        'stat_name': 'CALCULATED_PITCHING_PTS',
+        'direction': 'fewest',
+    },
+    {
+        'section': 'Score Records',
+        'label': 'Worst Player Total Points',
+        'grain': 'player',
+        'stat_name': 'CALCULATED_POINTS',
+        'direction': 'fewest',
+    },
+    {
+        'section': 'Score Records',
+        'label': 'Worst Player Hitting Points',
+        'grain': 'player',
+        'stat_name': 'CALCULATED_HITTING_PTS',
+        'direction': 'fewest',
+    },
+    {
+        'section': 'Score Records',
+        'label': 'Worst Player Pitching Points',
+        'grain': 'player',
+        'stat_name': 'CALCULATED_PITCHING_PTS',
+        'direction': 'fewest',
+    },
+]
+
+
+def _attach_almanac_contributors(record_rows):
+    """Attach contributor details after tie-collapse trims visible rows."""
+    real_rows = [r for r in record_rows if not r.get('is_collapsed')]
+    team_tuples = [
+        (r['season_year'], r['matchup_period'], r['team_id'], r['stat_name'])
+        for r in real_rows
+        if r['entity_grain'] == 'team' and r['team_id'] is not None
+    ]
+    player_tuples = [
+        (r['season_year'], r['matchup_period'], r['player_id'])
+        for r in real_rows
+        if r['entity_grain'] == 'player' and r['player_id'] is not None
+    ]
+    positive_player_tuples = [
+        (r['season_year'], r['matchup_period'], r['player_id'])
+        for r in real_rows
+        if (
+            r['entity_grain'] == 'player'
+            and r['player_id'] is not None
+            and r.get('record_direction') != 'fewest'
+        )
+    ]
+    balanced_player_tuples = [
+        (r['season_year'], r['matchup_period'], r['player_id'])
+        for r in real_rows
+        if (
+            r['entity_grain'] == 'player'
+            and r['player_id'] is not None
+            and r.get('record_direction') == 'fewest'
+        )
+    ]
+
+    team_contribs = records.get_team_contributors_bulk(team_tuples) if team_tuples else {}
+    player_contribs = {}
+    if positive_player_tuples:
+        player_contribs.update(records.get_player_contributors_bulk(positive_player_tuples))
+    if balanced_player_tuples:
+        player_contribs.update(records.get_player_contributors_bulk(
+            balanced_player_tuples,
+            positives_only=False,
+        ))
+
+    for row in record_rows:
+        if row.get('is_collapsed'):
+            row['contributors'] = []
+        elif row['entity_grain'] == 'team':
+            key = (
+                row['season_year'],
+                row['matchup_period'],
+                row['team_id'],
+                row['stat_name'],
+            )
+            row['contributors'] = team_contribs.get(key, [])
+        else:
+            key = (row['season_year'], row['matchup_period'], row['player_id'])
+            row['contributors'] = player_contribs.get(key, [])
+
+
+def select_all_league_team(candidates, slot_caps):
+    """Pick top active performers by actual lineup slot.
+
+    The comprehensive weekly fact preserves `lineup_slot`, so this uses
+    the same roster-slot lens ESPN users recognize. If a player appears
+    in multiple active slots during a week, keep only their highest-
+    scoring slot row so the all-league roster never selects the same
+    player twice.
+    """
+    best_by_player = {}
+    for row in candidates:
+        player_id = row.get('player_id')
+        if player_id is None:
+            continue
+        current = best_by_player.get(player_id)
+        if current is None or _candidate_sort_key(row) < _candidate_sort_key(current):
+            best_by_player[player_id] = row
+
+    by_slot = defaultdict(list)
+    for row in best_by_player.values():
+        slot = row.get('lineup_slot')
+        if slot in slot_caps:
+            by_slot[slot].append(row)
+
+    selected = []
+    for slot in sorted(slot_caps, key=_slot_sort_key):
+        capacity = slot_caps[slot]
+        rows = sorted(by_slot.get(slot, []), key=_candidate_sort_key)
+        for slot_rank, row in enumerate(rows[:capacity], 1):
+            out = dict(row)
+            out['slot_rank'] = slot_rank
+            out['slots_to_fill'] = capacity
+            out['slot_label'] = slot_label(slot, slot_rank, capacity)
+            selected.append(out)
+
+    return selected
+
+
+def build_home_tab_rows(weekly_rows, season_rows, season_year, matchup_period,
+                        league_id=None):
+    """Build the Home tab value matrix."""
+    rows = [
+        ['Fantasy Beat Reporter Almanac'],
+        [f'All-League Team of the Week: {season_year} Week {matchup_period}'],
+        [],
+        HOME_HEADER,
+    ]
+    rows.extend([
+        format_all_league_team_row(row, league_id=league_id)
+        for row in weekly_rows
+    ])
+    rows.extend([
+        [],
+        [f'All-League Team Season-to-Date: {season_year}'],
+        [],
+        HOME_HEADER,
+    ])
+    rows.extend([
+        format_all_league_team_row(row, league_id=league_id)
+        for row in season_rows
+    ])
+    return rows
+
+
+def build_team_weeks_tab_rows(team_week_rows, stat_specs, league_id=None,
+                              schedule_lookup=None):
+    """Build the team-week matchup archive tab."""
+    schedule_lookup = schedule_lookup or {}
+    hitting_specs = _team_week_specs_for_category(stat_specs, 'hitting')
+    pitching_specs = _team_week_specs_for_category(stat_specs, 'pitching')
+    header = [
+        *TEAM_WEEKS_BASE_HEADER,
+        *_team_week_stat_headers(hitting_specs),
+        '',
+        *_team_week_stat_headers(pitching_specs),
+        '',
+        *TEAM_WEEKS_SCORE_HEADER,
+    ]
+    rows = [header]
+    for row in team_week_rows:
+        rows.append(format_team_week_row(
+            row,
+            hitting_specs,
+            pitching_specs,
+            league_id=league_id,
+            schedule_lookup=schedule_lookup,
+        ))
+    return rows
+
+
+def build_records_tab_rows(all_time_records, current_season_records, league_id=None,
+                           display_map=None, schedule_lookup=None, record_specs=None):
+    """Build the almanac Records tab as a side-by-side record book."""
+    display_map = display_map or stat_catalog.get_display_map()
+    schedule_lookup = schedule_lookup or records.load_schedule_lookup()
+    record_specs = record_specs or [
+        *SCORE_RECORD_SPECS,
+        *get_scored_record_specs(),
+        *RATE_RECORD_SPECS,
+        *get_lineup_slot_record_specs(),
+    ]
+
+    all_time_index = _index_records(all_time_records)
+    current_index = _index_records(current_season_records)
+
+    # v1.1.1: thresholds come from dim_stat (via stat_catalog.get_rate_
+    # qualifiers) rather than Python constants. If multiple rate stats
+    # ever carry diverging qualifiers within the same category, this
+    # rendering would need to grow.
+    _rate_quals = stat_catalog.get_rate_qualifiers()
+    _ab_min = max((m for q, m in _rate_quals.values() if q == 'ab'), default=0)
+    _outs_min = max((m for q, m in _rate_quals.values() if q == 'outs'), default=0)
+    _ip_min = _outs_min // 3
+    rows = [
+        ['League Records'],
+        [
+            'Counting Stats only look at standard-length matchups. '
+            f'Pitching Rate stats require min {_ip_min} IP, '
+            f'Hitting Rate stats require min {_ab_min} AB. '
+            'Boxscore links go to the most recent instance of the record.'
+        ],
+        [],
+    ]
+
+    for section_title, specs in _group_record_specs(record_specs):
+        section_rows = []
+        for spec in specs:
+            if spec.get('spacer'):
+                if section_rows and section_rows[-1] != []:
+                    section_rows.append([])
+                continue
+            current_record = current_index.get(_spec_key(spec))
+            all_time_record = all_time_index.get(_spec_key(spec))
+            if _record_never_occurred(current_record):
+                current_record = None
+            if _record_never_occurred(all_time_record):
+                all_time_record = None
+            if current_record or all_time_record:
+                section_rows.append(format_record_matrix_row(
+                    spec,
+                    current_record=current_record,
+                    all_time_record=all_time_record,
+                    league_id=league_id,
+                    display_map=display_map,
+                    schedule_lookup=schedule_lookup,
+                ))
+
+        if section_rows:
+            rows.extend([
+                _records_matrix_scope_header(section_title),
+                RECORDS_MATRIX_DETAIL_HEADER,
+            ])
+            rows.extend(section_rows)
+            rows.append([])
+
+    if rows and rows[-1] == []:
+        rows.pop()
+    return rows
+
+
+def _group_record_specs(record_specs):
+    """Group record specs by section while preserving first-seen order."""
+    grouped = []
+    by_section = {}
+    for spec in record_specs:
+        section = spec.get('section') or 'Records'
+        if section not in by_section:
+            by_section[section] = []
+            grouped.append((section, by_section[section]))
+        by_section[section].append(spec)
+    return grouped
+
+
+def _spec_key(spec):
+    if spec.get('spacer'):
+        return None
+    return (
+        spec.get('grain'),
+        spec.get('stat_name'),
+        spec.get('direction'),
+    )
+
+
+def _record_never_occurred(record):
+    """Suppress positive-event records whose top value is still zero."""
+    if not record:
+        return False
+    return (
+        record.get('record_direction') == 'most'
+        and (record.get('stat_value') or 0) == 0
+        and record.get('stat_name') not in {
+            'CALCULATED_POINTS',
+            'CALCULATED_HITTING_PTS',
+            'CALCULATED_PITCHING_PTS',
+            'PLATFORM_POINTS',
+            'PLATFORM_HITTING_PTS',
+            'PLATFORM_PITCHING_PTS',
+        }
+        and not str(record.get('stat_name') or '').startswith('LINEUP_SLOT_POINTS__')
+    )
+
+
+def _index_records(record_rows):
+    """Index records by (grain, stat, direction) for curated lookup."""
+    return {
+        (
+            row.get('entity_grain'),
+            row.get('stat_name'),
+            row.get('record_direction'),
+        ): row
+        for row in record_rows
+    }
+
+
+def build_team_roster_tabs(roster_rows, season_year, league_id=None, slot_caps=None):
+    """Build one team active-stat roster tab per fantasy team."""
+    grouped = defaultdict(list)
+    for row in roster_rows:
+        grouped[row.get('team_id')].append(row)
+
+    tabs = []
+    for team_id in sorted(grouped):
+        team_rows = expand_team_roster_rows(grouped[team_id], slot_caps)
+        first = team_rows[0]
+        title = team_tab_title(first)
+        scoring_period = first.get('latest_scoring_period')
+        rows = [
+            [first.get('team_name') or f'Team {team_id}'],
+            [
+                f"{season_year} roster snapshot"
+                + (f" through scoring period {scoring_period}" if scoring_period else "")
+            ],
+            [],
+            TEAM_ROSTER_HEADER,
+        ]
+        rows.extend([
+            format_team_roster_row(row, league_id=league_id)
+            for row in team_rows
+        ])
+        tabs.append((title, rows))
+
+    return tabs
+
+
+def expand_team_roster_rows(team_rows, slot_caps=None):
+    """Add blank rows for configured roster slots with no current player."""
+    if not slot_caps:
+        return team_rows
+
+    expanded = list(team_rows)
+    by_slot = defaultdict(list)
+    for row in team_rows:
+        by_slot[row.get('lineup_slot')].append(row)
+
+    template = team_rows[0] if team_rows else {}
+    for slot in sorted(slot_caps, key=_slot_sort_key):
+        capacity = slot_caps[slot]
+        existing = len(by_slot.get(slot, []))
+        for slot_rank in range(existing + 1, capacity + 1):
+            expanded.append(_blank_roster_row(template, slot, slot_rank, capacity))
+
+    return sorted(
+        expanded,
+        key=lambda r: (
+            _slot_sort_key(r.get('lineup_slot')),
+            int(r.get('slot_rank') or 1),
+            r.get('display_name') or r.get('player_name') or '',
+        ),
+    )
+
+
+def _blank_roster_row(template, slot, slot_rank, slots_to_fill):
+    """Build an empty roster-slot placeholder row."""
+    return {
+        'season_year': template.get('season_year'),
+        'latest_matchup_period': template.get('latest_matchup_period'),
+        'latest_scoring_period': template.get('latest_scoring_period'),
+        'latest_matchup_end_date': template.get('latest_matchup_end_date'),
+        'team_id': template.get('team_id'),
+        'team_name': template.get('team_name'),
+        'team_abbrev': template.get('team_abbrev'),
+        'owner_name': template.get('owner_name'),
+        'lineup_slot': slot,
+        'slot_rank': slot_rank,
+        'slots_to_fill': slots_to_fill,
+        'is_empty_slot': True,
+    }
+
+
+def build_team_history_tabs(history_data, season_year, league_id=None, slot_caps=None):
+    """Build side-by-side current-season/all-time roster history tabs."""
+    del league_id
+    slot_caps = slot_caps or {}
+    players = history_data.get('players') or []
+    active_slots = history_data.get('active_slots') or []
+
+    teams = {}
+    players_by_team_scope = defaultdict(list)
+    for row in players:
+        team_id = row.get('team_id')
+        scope = row.get('scope')
+        if team_id is None or not scope:
+            continue
+        teams.setdefault(team_id, row)
+        players_by_team_scope[(team_id, scope)].append(row)
+
+    active_by_team_scope = defaultdict(list)
+    for row in active_slots:
+        team_id = row.get('team_id')
+        scope = row.get('scope')
+        if team_id is None or not scope:
+            continue
+        active_by_team_scope[(team_id, scope)].append(row)
+
+    tabs = []
+    for team_id in sorted(teams, key=lambda tid: _team_sort_key(teams[tid])):
+        team_meta = teams[team_id]
+        current_rows = build_team_history_side(
+            players_by_team_scope[(team_id, 'current_season')],
+            active_by_team_scope[(team_id, 'current_season')],
+            slot_caps,
+        )
+        all_time_rows = build_team_history_side(
+            players_by_team_scope[(team_id, 'all_time')],
+            active_by_team_scope[(team_id, 'all_time')],
+            slot_caps,
+        )
+        row_labels = _team_history_row_labels(current_rows, all_time_rows)
+        period_end_date = _format_sheet_date(team_meta.get('latest_matchup_end_date'))
+        rows = [
+            [team_meta.get('team_name') or f'Team {team_id}'],
+            [
+                f"{season_year} roster history"
+                + (f" through {period_end_date}" if period_end_date else "")
+            ],
+            [],
+            _team_history_scope_header(),
+            TEAM_ROSTER_HEADER,
+        ]
+        for label in row_labels:
+            rows.append(format_team_history_matrix_row(
+                label,
+                current_rows.get(label),
+                all_time_rows.get(label),
+            ))
+        tabs.append((team_tab_title(team_meta), rows))
+
+    return tabs
+
+
+def build_team_history_side(player_rows, active_slot_rows, slot_caps):
+    """Arrange one scope of team/player history into roster-shaped rows."""
+    players = {
+        row.get('player_id'): row
+        for row in player_rows
+        if row.get('player_id') is not None
+    }
+
+    active_by_slot = defaultdict(list)
+    for row in active_slot_rows:
+        player = players.get(row.get('player_id'))
+        if not player:
+            continue
+        candidate = dict(player)
+        candidate.update(row)
+        active_by_slot[row.get('lineup_slot')].append(candidate)
+
+    active_caps = {
+        slot: count
+        for slot, count in slot_caps.items()
+        if slot not in {'BE', 'IL'}
+    }
+    selected_ids = set()
+    output = {}
+
+    for slot in sorted(active_caps, key=_slot_sort_key):
+        capacity = active_caps[slot]
+        candidates = sorted(
+            active_by_slot.get(slot, []),
+            key=lambda r: (
+                -int(r.get('active_days_in_slot') or 0),
+                -float(r.get('active_points_in_slot') or 0),
+                r.get('display_name') or r.get('player_name') or '',
+            ),
+        )
+        chosen = []
+        for candidate in candidates:
+            player_id = candidate.get('player_id')
+            if player_id in selected_ids:
+                continue
+            chosen.append(candidate)
+            selected_ids.add(player_id)
+            if len(chosen) == capacity:
+                break
+        for slot_rank, row in enumerate(chosen, 1):
+            label = slot_label(slot, slot_rank, capacity)
+            output[label] = _team_history_display_row(
+                row,
+                label,
+                display_slot=label,
+            )
+
+    remaining = [
+        row for row in players.values()
+        if row.get('player_id') not in selected_ids
+    ]
+
+    bench_count = int(slot_caps.get('BE') or 0)
+    bench_candidates = sorted(
+        remaining,
+        key=lambda r: (
+            -float(r.get('active_points') or 0),
+            -int(r.get('rostered_days') or 0),
+            r.get('display_name') or r.get('player_name') or '',
+        ),
+    )
+    for slot_rank, row in enumerate(bench_candidates[:bench_count], 1):
+        label = slot_label('BE', slot_rank, bench_count)
+        position = _inactive_position_display(row)
+        output[label] = _team_history_display_row(
+            row,
+            label,
+            display_slot=_compact_inactive_slot('BE', position),
+        )
+        selected_ids.add(row.get('player_id'))
+
+    remaining = [
+        row for row in players.values()
+        if row.get('player_id') not in selected_ids
+    ]
+
+    il_count = int(slot_caps.get('IL') or 0)
+    il_candidates = [
+        row for row in remaining
+        if int(row.get('il_days') or 0) > 0
+    ]
+    il_candidates.sort(
+        key=lambda r: (
+            -int(r.get('il_days') or 0),
+            -int(r.get('rostered_days') or 0),
+            r.get('display_name') or r.get('player_name') or '',
+        ),
+    )
+    for slot_rank in range(1, il_count + 1):
+        label = slot_label('IL', slot_rank, il_count)
+        if slot_rank <= len(il_candidates):
+            row = il_candidates[slot_rank - 1]
+            position = _inactive_position_display(row)
+            output[label] = _team_history_display_row(
+                row,
+                label,
+                display_slot=_compact_inactive_slot('IL', position),
+            )
+            selected_ids.add(row.get('player_id'))
+        else:
+            output[label] = _empty_team_history_display_row()
+
+    remaining = [
+        row for row in players.values()
+        if row.get('player_id') not in selected_ids
+    ]
+    remaining.sort(
+        key=lambda r: (
+            -float(r.get('active_points') or 0),
+            -int(r.get('rostered_days') or 0),
+            r.get('display_name') or r.get('player_name') or '',
+        ),
+    )
+    for row_number, row in enumerate(remaining, 1):
+        label = f'Other {row_number}'
+        position = _inactive_position_display(row)
+        output[label] = _team_history_display_row(
+            row,
+            label,
+            display_slot=_compact_inactive_slot('Other', position),
+        )
+
+    return output
+
+
+def _team_history_row_labels(current_rows, all_time_rows):
+    base_labels = [label for label in current_rows if not label.startswith('Other ')]
+    labels = list(base_labels)
+    for label in all_time_rows:
+        if not label.startswith('Other ') and label not in labels:
+            labels.append(label)
+    labels = _insert_before_first(
+        labels,
+        TEAM_HISTORY_HITTER_HEADER,
+        _is_hitter_team_history_label,
+    )
+    labels = _insert_before_first(
+        labels,
+        TEAM_HISTORY_PITCHER_HEADER,
+        _is_pitcher_team_history_label,
+    )
+    labels = _insert_before_first(
+        labels,
+        TEAM_HISTORY_MIXED_HEADER,
+        _is_mixed_team_history_label,
+    )
+    other_count = max(
+        _max_other_index(current_rows),
+        _max_other_index(all_time_rows),
+    )
+    labels.extend(f'Other {i}' for i in range(1, other_count + 1))
+    if other_count:
+        labels.insert(len(labels) - other_count, '')
+    return labels
+
+
+def _insert_before_first(labels, marker, predicate):
+    for index, label in enumerate(labels):
+        if predicate(label):
+            return [*labels[:index], marker, *labels[index:]]
+    return labels
+
+
+def _is_hitter_team_history_label(label):
+    return label and not _is_pitcher_team_history_label(label) and not _is_mixed_team_history_label(label)
+
+
+def _is_pitcher_team_history_label(label):
+    return str(label).startswith(('SP', 'RP', 'P '))
+
+
+def _is_mixed_team_history_label(label):
+    return str(label).startswith(('BE', 'IL'))
+
+
+def _max_other_index(rows):
+    max_index = 0
+    for label in rows:
+        if label.startswith('Other '):
+            try:
+                max_index = max(max_index, int(label.split(' ', 1)[1]))
+            except (IndexError, ValueError):
+                pass
+    return max_index
+
+
+def _team_sort_key(row):
+    title = team_tab_title(row)
+    try:
+        team_id = int(row.get('team_id'))
+    except (TypeError, ValueError):
+        team_id = 9999
+    return (title.casefold(), team_id)
+
+
+def _candidate_sort_key(row):
+    points = row.get('platform_points') or 0
+    display_name = row.get('display_name') or row.get('player_name') or ''
+    slot = row.get('lineup_slot') or ''
+    return (-points, _slot_sort_key(slot), display_name)

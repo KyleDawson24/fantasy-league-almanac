@@ -176,6 +176,12 @@ weekly as (
         sum(platform_hitting_pts)  as platform_hitting_pts,
         sum(platform_pitching_pts) as platform_pitching_pts,
 
+        -- v1.1.1: MLB games played, summed up from int_player_daily
+        -- (where DH days carry games_played=2). Natural denominator for
+        -- per-game analysis and required by fct_player_season_performance
+        -- for the season-grain rollup.
+        sum(games_played) as games_played,
+
         -- display_name is stable per player_id (nickname-resolved at
         -- stg_box_scores). MAX is just to satisfy GROUP BY; same value
         -- in every row of a (player_id) partition.

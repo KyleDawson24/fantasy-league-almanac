@@ -37,6 +37,7 @@ def _load_catalog() -> tuple:
             espn_stat_label, display_name, abbrev,
             is_counting, is_derived, derivation_expr,
             auto_tracked, is_record_candidate, polarity,
+            qualifier_stat, qualifier_min,
             notes
         FROM dim_stat
     """)
@@ -103,6 +104,22 @@ def get_record_candidates() -> frozenset:
         for r in _load_catalog()
         if r['is_record_candidate']
     )
+
+
+@lru_cache(maxsize=1)
+def get_rate_qualifiers() -> dict:
+    """leaderboard_name -> (qualifier_stat, qualifier_min) for rate stats
+    that have a min-volume gate (v1.1.1). Driven by the qualifier_stat /
+    qualifier_min columns on dim_stat (seed-side). Non-rate stats are
+    not included. Consumers reading rate records from mart_stat_leaderboard
+    use this to label the threshold and to project the qualifier value
+    (AB count for hitting rates, OUTS count for pitching rates) for
+    display alongside each record."""
+    return {
+        r['leaderboard_name']: (r['qualifier_stat'], int(r['qualifier_min']))
+        for r in _load_catalog()
+        if r.get('qualifier_min') is not None
+    }
 
 
 @lru_cache(maxsize=1)

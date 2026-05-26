@@ -98,10 +98,20 @@ class TestPolarityMap:
 
     def test_no_neutral_for_record_candidates(self):
         # Anything tracked as a record should have non-neutral polarity,
-        # otherwise the consumer side can't pick a direction.
+        # otherwise the consumer side can't pick a direction. Exception
+        # since v1.1.1: rate stats with a min-volume qualifier (AVG/OBP/
+        # SLG/OPS) are is_record_candidate=true (so the almanac can read
+        # qualified records from mart_stat_leaderboard) but polarity=
+        # neutral (the records-report _orchestrator_filter and the
+        # _REPORT_EXCLUDED_STATS allowlist filter them out of BBCode
+        # output anyway).
+        from stat_catalog import get_rate_qualifiers
+        rate_neutral_ok = set(get_rate_qualifiers())
         m = get_polarity_map()
         for stat in get_record_candidates():
             pol = m.get(stat)
+            if pol == 'neutral' and stat in rate_neutral_ok:
+                continue
             assert pol in ('positive', 'negative'), \
                 f"{stat} is a record candidate but polarity={pol!r}"
 
@@ -131,10 +141,12 @@ class TestAutoTracked:
 @pytest.mark.warehouse
 class TestRecordCandidates:
     def test_size_matches_expectation(self):
-        # 58 = leaderboard UNPIVOT list as of v1.x: 40 counting (added CYC)
-        # + 4 derived + 6 rate + 2 totals (WASTED_POINTS, NEGATIVE_POINTS)
-        # + 6 score.
-        assert len(get_record_candidates()) == 58
+        # 62 = leaderboard UNPIVOT list as of v1.1.1: 40 counting (added
+        # CYC in v1.x) + 4 derived + 10 rate (6 pitching pre-existing +
+        # 4 hitting promoted in v1.1.1 to expose them via qualified-rate
+        # records in mart_stat_leaderboard) + 2 totals (WASTED_POINTS,
+        # NEGATIVE_POINTS) + 6 score.
+        assert len(get_record_candidates()) == 62
 
     def test_known_record_stats(self):
         rc = get_record_candidates()

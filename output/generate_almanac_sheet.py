@@ -48,7 +48,7 @@ def main():
         season_year, matchup_period = almanac_sheets.get_latest_matchup_period()
 
     weekly_team_rows = almanac_sheets.get_all_league_team(season_year, matchup_period)
-    season_team_rows = almanac_sheets.get_all_league_team_season_to_date(season_year)
+    season_team_rows = almanac_sheets.get_all_league_team(season_year)
     home_rows = almanac_sheets.build_home_tab_rows(
         weekly_team_rows,
         season_team_rows,

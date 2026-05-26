@@ -1,0 +1,5 @@
+# Lock test fixtures to LF line endings on all platforms. Without this,
+# Git for Windows' autocrlf=true can flip the working copy to CRLF on
+# checkout, breaking byte-diff tests that compare against UTF-8 writer
+# output (which emits LF).
+tests/fixtures/** text eol=lf

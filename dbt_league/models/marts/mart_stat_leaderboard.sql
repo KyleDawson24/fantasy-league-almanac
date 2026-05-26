@@ -75,7 +75,9 @@
 {% set stat_query %}
     select
         leaderboard_name,
-        derivation_expr
+        derivation_expr,
+        qualifier_stat,
+        qualifier_min
     from {{ ref('dim_stat') }}
     where is_record_candidate = true
     order by 1
@@ -114,11 +116,18 @@ team_active_source as (
         {%- for row in stats -%}
             {%- set name = row[0] -%}
             {%- set deriv = row[1] -%}
+            {%- set qual_stat = row[2] -%}
+            {%- set qual_min = row[3] -%}
             {%- set lc = name | lower %},
         {% if name == 'WASTED_POINTS' -%}
         null::float                as {{ lc }}
         {%- elif deriv -%}
         ({{ deriv }})              as {{ lc }}
+        {%- elif qual_min -%}
+        -- v1.1.1: rate-stat min-volume gate. Below the qualifier
+        -- threshold, project NULL so UNPIVOT's EXCLUDE NULLS drops the
+        -- row entirely. Qualifier columns come from dim_stat.
+        case when t.{{ qual_stat | lower }} >= {{ qual_min }} then t.{{ lc }} else null end as {{ lc }}
         {%- else -%}
         t.{{ lc }}                 as {{ lc }}
         {%- endif -%}
@@ -146,11 +155,15 @@ team_inactive_source as (
         {%- for row in stats -%}
             {%- set name = row[0] -%}
             {%- set deriv = row[1] -%}
+            {%- set qual_min = row[3] -%}
             {%- set lc = name | lower %},
         {% if name == 'WASTED_POINTS' -%}
         case when ti.wasted_bucket = 'ROSTERED_INACTIVE'
              then ti.calculated_points else null end as {{ lc }}
-        {%- elif name in ['ERA', 'WHIP', 'K_PER_9', 'K_PER_BB', 'HR_PER_9', 'BB_PER_9'] -%}
+        {%- elif qual_min -%}
+        -- v1.1.1: rate stats absent from inactive facts (bench rates
+        -- aren't meaningful). Driven by qual_min flag in dim_stat
+        -- rather than a hardcoded stat list.
         null::float                as {{ lc }}
         {%- elif name in ['PLATFORM_POINTS', 'PLATFORM_HITTING_PTS', 'PLATFORM_PITCHING_PTS'] -%}
         null::float                as {{ lc }}
@@ -181,10 +194,15 @@ player_active_source as (
         {%- for row in stats -%}
             {%- set name = row[0] -%}
             {%- set deriv = row[1] -%}
+            {%- set qual_min = row[3] -%}
             {%- set lc = name | lower %},
         {% if name == 'WASTED_POINTS' -%}
         null::float                as {{ lc }}
-        {%- elif name in ['ERA', 'WHIP', 'K_PER_9', 'K_PER_BB', 'HR_PER_9', 'BB_PER_9'] -%}
+        {%- elif qual_min -%}
+        -- v1.1.1: rate stats deliberately dropped at player grain
+        -- (Phase 6.3.3 Path A: single-IP relief produces 27.00 WHIP
+        -- outliers that dominate without signal). qual_min flag in
+        -- dim_stat drives this, replacing the hardcoded rate-stat list.
         null::float                as {{ lc }}
         {%- elif deriv -%}
         ({{ deriv }})              as {{ lc }}
@@ -217,10 +235,13 @@ player_inactive_source as (
         {%- for row in stats -%}
             {%- set name = row[0] -%}
             {%- set deriv = row[1] -%}
+            {%- set qual_min = row[3] -%}
             {%- set lc = name | lower %},
         {% if name == 'WASTED_POINTS' -%}
         null::float                as {{ lc }}
-        {%- elif name in ['ERA', 'WHIP', 'K_PER_9', 'K_PER_BB', 'HR_PER_9', 'BB_PER_9'] -%}
+        {%- elif qual_min -%}
+        -- v1.1.1: rate stats absent from player inactive (same Path A
+        -- reasoning as player active). Driven by qual_min flag.
         null::float                as {{ lc }}
         {%- elif name in ['PLATFORM_POINTS', 'PLATFORM_HITTING_PTS', 'PLATFORM_PITCHING_PTS'] -%}
         null::float                as {{ lc }}

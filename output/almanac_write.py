@@ -13,6 +13,8 @@ through the other three modules and pushes it to the spreadsheet.
 """
 
 import math
+import os
+import re
 import time
 
 import gspread
@@ -20,6 +22,7 @@ import gspread
 import almanac_data
 import almanac_logic
 import almanac_render
+import records
 from almanac_data import (
     get_all_league_team,
     get_almanac_records,

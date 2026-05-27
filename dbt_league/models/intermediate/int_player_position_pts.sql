@@ -3,13 +3,22 @@
 -- consumer. For each (season, matchup_period, team, player) day, the
 -- player's eligible_slots VARIANT array is exploded; each eligible
 -- slot code (minus BE / IL, which are roster slots not lineup
--- positions) gets attributed the player's platform_points for that
--- day. Points are then aggregated to matchup-period grain.
+-- positions) gets attributed the player's calculated points (i.e.
+-- total_hitting_stat_pts / total_pitching_stat_pts) for that day.
+-- Points are then aggregated to matchup-period grain.
 --
--- The mental model: "How many points has this player produced while
--- being eligible at position P, within window W?" Use this to fill
--- an optimal lineup: each lineup slot picks its best-fitting eligible
--- player, where "best-fitting" is by SUM(points) across the window.
+-- Points lens: calculated (cross-season-normalized scoring rules),
+-- not platform. The optimal-team primitive answers "who historically
+-- would have done well in this league's current scoring setting,"
+-- which is the calculated lens by definition; platform points reflect
+-- whatever ESPN's scoring was at the time and are not comparable
+-- across seasons when rules have changed.
+--
+-- The mental model: "How many calculated points has this player
+-- produced while being eligible at position P, within window W?"
+-- Use this to fill an optimal lineup: each lineup slot picks its
+-- best-fitting eligible player, where "best-fitting" is by SUM(points)
+-- across the window.
 --
 -- ==========================================================================
 -- GRAIN:
@@ -54,14 +63,19 @@ with daily_eligible as (
         d.pro_team,
         slot.value::string as position,
 
-        -- Position-category-appropriate platform points. For pitching
-        -- positions (SP / RP / P), use platform_pitching_pts; for every
-        -- other position (hitter slots + UTIL + DH + the unused CI/MI/
-        -- hybrid codes), use platform_hitting_pts.
+        -- Position-category-appropriate calculated points. For pitching
+        -- positions (SP / RP / P), use total_pitching_stat_pts; for
+        -- every other position (hitter slots + UTIL + DH + the unused
+        -- CI/MI/hybrid codes), use total_hitting_stat_pts. Both columns
+        -- are derived at int_player_daily by summing per-stat
+        -- stat_points within their respective categories, so they
+        -- represent the calculated (current-rules-normalized) point
+        -- value of that day's production.
         --
         -- For single-discipline players (~99% of the league), the
-        -- "other" component is 0, so position_platform_pts equals raw
-        -- platform_points -- behavior unchanged.
+        -- "other" component is 0, so position_calculated_pts equals
+        -- the player's full daily calculated total -- behavior matches
+        -- intuition.
         --
         -- For two-way players (Shohei): his SP row gets ONLY his
         -- pitching contribution; his UTIL/DH rows get ONLY his
@@ -70,9 +84,9 @@ with daily_eligible as (
         -- credits the team with hitting + pitching = full production
         -- when picked twice, without double-counting either component.
         case when slot.value::string in ('SP', 'RP', 'P')
-             then d.platform_pitching_pts
-             else d.platform_hitting_pts
-        end as position_platform_pts,
+             then d.total_pitching_stat_pts
+             else d.total_hitting_stat_pts
+        end as position_calculated_pts,
 
         d.performance_status
     from {{ ref('fct_player_daily_performance') }} d,
@@ -106,9 +120,9 @@ aggregated as (
         -- SUMs across matchup_periods or positions stay stable across
         -- summation orders.
         round(sum(case when performance_status = 'active'
-                       then position_platform_pts else 0 end), 1) as active_pts,
+                       then position_calculated_pts else 0 end), 1) as active_pts,
         round(sum(case when performance_status = 'inactive'
-                       then position_platform_pts else 0 end), 1) as inactive_pts,
+                       then position_calculated_pts else 0 end), 1) as inactive_pts,
 
         -- Eligibility days: count of distinct scoring periods (= days)
         -- the player was eligible at this position during this matchup

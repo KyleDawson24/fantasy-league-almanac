@@ -60,3 +60,91 @@ models:
           Magnitude (unsigned positive) of net-negative platform_points on this day: GREATEST(0, -platform_points).
           Per-day platform-level metric -- each negative day counts separately, even if the week-level platform total is net positive.
           Weekly rollup is SUM(negative_points). For a player with one -5 day and net-positive week: daily row has 5, weekly rollup = 5.
+
+  - name: int_player_position_pts
+    description: >
+      v1.1.1 (Approach 1 to the eligibility question): per-position points
+      accumulation for the get_optimal_team consumer.
+
+      For each (season, matchup_period, team, player) day, the player's
+      eligible_slots VARIANT array is exploded; each eligible slot code
+      (minus BE / IL, which are roster slots not lineup positions) gets
+      attributed the player's platform_points for that day. Points are
+      aggregated to matchup-period grain.
+
+      Mental model: "How many points has this player produced while
+      eligible at position P, within window W?" The dispatcher fills an
+      optimal lineup by picking each lineup slot's best-fitting eligible
+      player, where "best-fitting" is by SUM(points) across the window.
+
+      ESPN's eligible_slots already enumerates every fillable slot
+      directly (a 1B-eligible player automatically shows IF and UTIL
+      eligibility); no per-position derivation needed at this layer.
+      Combined codes (CI / MI / P) exist in the data and stay in the
+      int even though this league's roster shape doesn't use them.
+
+      Materialization: view. Single consumer today (the optimal-team
+      dispatcher); lives at int per the project convention "promote to
+      mart when 2-3+ consumers materialize." Row count ~65K for two
+      seasons; trivially re-aggregated per query.
+
+      Rounding: per-row points rounded to 1 decimal at this layer,
+      matching the v1.0.1 fact-layer precedent. Stabilizes downstream
+      SUMs against float-summation-order drift.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - season_year
+              - matchup_period
+              - team_id
+              - player_id
+              - position
+    columns:
+      - name: season_year
+        description: 'ESPN season year. Part of the grain.'
+        tests:
+          - not_null
+      - name: matchup_period
+        description: 'Matchup period within the season. Part of the grain.'
+        tests:
+          - not_null
+      - name: team_id
+        description: 'Fantasy team_id while the player was rostered. NULL for FA-time rows (the player was on the league''s free-agent pool that period).'
+      - name: player_id
+        description: 'ESPN player_id. Part of the grain.'
+        tests:
+          - not_null
+      - name: position
+        description: >
+          Eligibility code from the player's eligible_slots VARIANT array
+          (e.g., '1B', 'OF', 'SP', 'UTIL'). Combined codes like '1B/3B' or
+          '2B/SS' appear when ESPN expresses dual-slot eligibility. BE and
+          IL are filtered out (roster slots, not lineup positions).
+        tests:
+          - not_null
+      - name: player_name
+        description: 'Display helper, not a grain key. ESPN-reported player name for this matchup.'
+      - name: display_name
+        description: 'Display helper, not a grain key. Nickname-resolved player name (COALESCE(nickname, player_name)) from int_player_daily.'
+      - name: pro_team
+        description: 'Display helper, not a grain key. Player MLB team abbreviation for this matchup.'
+      - name: active_pts
+        description: >
+          SUM of position-category-appropriate platform points on days the
+          player was eligible at this position AND in an active fantasy slot.
+          Pitching positions (SP/RP/P) use platform_pitching_pts; every other
+          position uses platform_hitting_pts. For single-discipline players
+          (~99% of the league) this equals raw platform_points since the
+          "other" component is 0; for two-way players (Shohei) it correctly
+          attributes pitching production to pitching-position rows and
+          hitting production to hitting-position rows so the disjoint-stat-
+          categories selection rule can pick them at one of each without
+          double-counting. Rounded to 1 decimal at fact layer.
+      - name: inactive_pts
+        description: >
+          Same construction as active_pts but for inactive-slot days
+          (performance_status='inactive' -- BE / IL / FA). Position-
+          category-appropriate platform points, rounded 1 decimal.
+      - name: eligible_days
+        description: 'Count of distinct scoring periods (= days) the player was eligible at this position during this matchup period. Useful for per-day rate queries; not strictly required by the optimal-team selector.'

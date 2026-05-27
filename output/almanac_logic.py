@@ -281,6 +281,155 @@ def select_all_league_team(candidates, slot_caps):
     return selected
 
 
+# -------------------------------------------------------------------------
+# v1.1.1: generalized optimal-team selection (Approach 1 per BRAINTHOUGHTS
+# [ARCH]). Pairs with get_optimal_team_candidates in almanac_data.py.
+#
+# Gap-based heuristic: at each step, fill the slot type where the gap
+# between its top eligible candidate and its second-best is largest --
+# this is "fill the slot where picking the 2nd-best player hurts most."
+# Better than pure greedy (fill-each-slot-by-rank) when slots compete
+# for the same multi-position-eligible player.
+#
+# Disjoint-stat-categories rule: a player can be picked at most twice,
+# and only if the two slot categories are different (hitting vs
+# pitching). This handles two-way players (Shohei) correctly --
+# int_player_position_pts already attributes pitching points to
+# pitching positions and hitting points to hitting positions, so
+# picking Shohei at both SP and DH sums to his real total production
+# without double-counting either component. Same-category double
+# picks (e.g., 1B and DH for a hitter who's eligible at both) WOULD
+# double-count and are blocked.
+# -------------------------------------------------------------------------
+
+
+_PITCHING_SLOTS = frozenset({'SP', 'RP', 'P'})
+
+
+def _slot_category(slot):
+    """'pitching' for SP/RP/P, 'hitting' for everything else.
+
+    Mirrors the CASE expression in int_player_position_pts that drives
+    position_platform_pts -- keep these two in sync.
+    """
+    return 'pitching' if slot in _PITCHING_SLOTS else 'hitting'
+
+
+def get_optimal_team_selections(candidates, slot_caps):
+    """Pick an optimal lineup from a candidate pool, given roster shape.
+
+    Args:
+      candidates: list of dicts from get_optimal_team_candidates, each
+        carrying at least {player_id, position, position_pts} plus any
+        display fields (player_name, display_name, pro_team). Must be
+        sorted by position then position_pts DESC (the SQL ORDER BY
+        in get_optimal_team_candidates guarantees this).
+      slot_caps: dict {slot_code: starter_count}, e.g. from
+        get_slot_capacities. Slot codes must match the position
+        codes in candidates (a candidate with position='SP' can fill
+        a slot keyed 'SP').
+
+    Returns: list of dicts in fill-order, one per slot instance. Each
+    has the selected candidate's fields (copied through) PLUS:
+      - lineup_slot:    the slot type (e.g., 'SP', 'OF')
+      - slot_rank:      1, 2, ... for multi-instance slots (e.g., SP 1)
+      - slots_to_fill:  total instances of this slot type
+      - slot_label:     "SP" or "SP 1" depending on whether rank-
+                        distinguished (matches slot_label helper)
+      - platform_points: copy of position_pts under the field name
+                         the renderer expects
+
+    If a slot cannot be filled (no eligible candidates left), the
+    output row has all `None` value fields plus the slot metadata.
+    """
+    from collections import defaultdict
+
+    # Group candidates by position. Input is already sorted by points
+    # DESC within each position from the SQL ORDER BY.
+    by_position = defaultdict(list)
+    for c in candidates:
+        by_position[c['position']].append(c)
+
+    # Expand slot_caps into a list of pending slot instances.
+    pending = []
+    for slot, count in slot_caps.items():
+        pending.extend([slot] * int(count))
+
+    used = defaultdict(set)  # player_id -> set of categories already filled
+    rank_counters = defaultdict(int)  # slot -> last assigned rank
+    lineup = []
+
+    while pending:
+        # For each distinct slot still pending, find the (top, second)
+        # eligible candidates and compute the gap. Eligible = position
+        # matches AND the player hasn't already been used in this
+        # slot's category.
+        #
+        # Iterate slots in slot_caps order (deterministic; matches the
+        # league's roster shape declaration order via dim_roster_slot_
+        # counts.sort_order) so tied-gap scenarios break ties stably.
+        # Python set iteration order is NOT guaranteed stable across
+        # calls; using a sorted-by-insertion list keeps byte-diff
+        # deterministic.
+        best_gap = None
+        best_slot = None
+        best_player = None
+        distinct_pending = [s for s in slot_caps if s in pending]
+        for slot in distinct_pending:
+            cat = _slot_category(slot)
+            eligible = [
+                c for c in by_position.get(slot, [])
+                if cat not in used[c['player_id']]
+            ]
+            if not eligible:
+                continue
+            top = eligible[0]
+            second_pts = eligible[1]['position_pts'] if len(eligible) > 1 else 0
+            gap = top['position_pts'] - second_pts
+            if best_gap is None or gap > best_gap:
+                best_gap = gap
+                best_slot = slot
+                best_player = top
+
+        if best_slot is None:
+            # No remaining slot can be filled. Emit empty rows for the
+            # leftovers so the consumer sees the full lineup shape.
+            for slot in pending:
+                rank_counters[slot] += 1
+                cap = int(slot_caps[slot])
+                lineup.append({
+                    'lineup_slot': slot,
+                    'slot_rank': rank_counters[slot],
+                    'slots_to_fill': cap,
+                    'slot_label': slot_label(slot, rank_counters[slot], cap),
+                    'player_id': None,
+                    'player_name': None,
+                    'display_name': None,
+                    'pro_team': None,
+                    'position_pts': None,
+                    'platform_points': None,
+                })
+            break
+
+        # Assign best_player to one instance of best_slot.
+        rank_counters[best_slot] += 1
+        cap = int(slot_caps[best_slot])
+        out = dict(best_player)
+        out['lineup_slot'] = best_slot
+        out['slot_rank'] = rank_counters[best_slot]
+        out['slots_to_fill'] = cap
+        out['slot_label'] = slot_label(best_slot, rank_counters[best_slot], cap)
+        # Renderer expects `platform_points`; surface position_pts under
+        # both names so format_all_league_team_row works unchanged.
+        out['platform_points'] = best_player.get('position_pts')
+        lineup.append(out)
+
+        used[best_player['player_id']].add(_slot_category(best_slot))
+        pending.remove(best_slot)  # removes one instance
+
+    return lineup
+
+
 def build_home_tab_rows(weekly_rows, season_rows, season_year, matchup_period,
                         league_id=None):
     """Build the Home tab value matrix."""

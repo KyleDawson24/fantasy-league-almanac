@@ -273,256 +273,272 @@ def get_team_week_record_marks(stat_specs):
 
 
 def get_all_league_team(season_year, matchup_period=None):
-    """Fetch slot candidates and pick the all-league roster.
+    """Thin wrapper around the generalized get_optimal_team primitive.
 
-    Two modes:
-      - ``matchup_period`` provided: returns the All-League Team for that
-        specific week (rates and points scoped to that single matchup).
-      - ``matchup_period=None``: returns the season-to-date all-league
-        roster using slot stats accumulated through whatever data has
-        been loaded for ``season_year``.
+    Pre-v1.1.1 this was its own bespoke pipeline (USED-SLOT-based
+    candidates from fct_weekly_player_performance + a simpler fill-by-
+    slot selection). v1.1.1 reframed All-League Team as a special case
+    of "pick the highest-scoring possible lineup given filters" --
+    league-wide pool (team_id=None), active-fantasy-credited points
+    (points_type='active'), Approach 1 eligibility (per BRAINTHOUGHTS
+    [ARCH]), gap-based selection (almanac_logic.get_optimal_team_selections).
 
-    v1.1.1 Tier 2c.5: merged the previous two public functions
-    (``get_all_league_team`` and ``get_all_league_team_season_to_date``)
-    into a single dispatcher. The week-scoped and season-to-date SQL
-    paths are different enough to stay as private helpers below.
+    The week-specific vs season-to-date split is now just the
+    matchup_period argument; the underlying SQL handles either.
     """
+    return get_optimal_team(
+        season_year=season_year,
+        matchup_period=matchup_period,
+        team_id=None,
+        points_type='active',
+    )
+
+
+# -------------------------------------------------------------------------
+# v1.1.1: generalized optimal-team primitive (Approach 1 per
+# BRAINTHOUGHTS [ARCH] -- per-position points by daily eligibility set).
+#
+# get_optimal_team_candidates: read int_player_position_pts with the
+# right filters, return the (player, position, points) pool.
+#
+# Pairs with get_optimal_team_selections in almanac_logic.py (gap-based
+# selection + disjoint-stat-categories rule for two-way players) and
+# get_optimal_team in almanac_logic.py (thin chaining convenience).
+#
+# This subsumes get_all_league_team* once the wrappers stabilize.
+# -------------------------------------------------------------------------
+
+
+_VALID_POINTS_TYPES = ('active', 'inactive', 'all')
+
+
+def get_optimal_team_candidates(season_year=None, matchup_period=None,
+                                team_id=None, points_type='active'):
+    """Read int_player_position_pts and return one row per
+    (player_id, position) with summed points across the filter window.
+
+    All four parameters are filters; pass None to leave that dimension
+    unfiltered.
+
+    Args:
+      season_year:    Specific season to scope to. None = all-time.
+      matchup_period: Specific matchup_period within season_year.
+                      None = the full season (or all-time if
+                      season_year is also None).
+      team_id:        Specific fantasy team_id to scope to. None =
+                      league-wide pool, including FA-time rows
+                      (team_id IS NULL).
+      points_type:    'active', 'inactive', or 'all'. Picks which
+                      column to sum -- active_pts (fantasy-credited),
+                      inactive_pts (BE/IL/FA), or both. Defaults to
+                      'active' since that's by far the most common
+                      ask.
+
+    Returns: list of dict rows
+      {player_id, player_name, display_name, pro_team, position, position_pts}
+      sorted by (position, position_pts DESC). HAVING-filtered to drop
+      zero-or-negative rows so the candidate pool stays focused on
+      meaningful production. The column is `position_pts` (not
+      `platform_points`) because it's position-category-conditional --
+      pitching positions hold pitching points, hitting positions hold
+      hitting points. The wrapper translates this to `platform_points`
+      for the renderer's standard field expectations.
+    """
+    if points_type not in _VALID_POINTS_TYPES:
+        raise ValueError(
+            f"points_type must be one of {_VALID_POINTS_TYPES}; got {points_type!r}"
+        )
+
+    if points_type == 'active':
+        points_expr = 'sum(active_pts)'
+    elif points_type == 'inactive':
+        points_expr = 'sum(inactive_pts)'
+    else:  # 'all'
+        points_expr = 'sum(active_pts + inactive_pts)'
+
+    where_clauses = []
+    params = []
+    if season_year is not None:
+        where_clauses.append('season_year = %s')
+        params.append(season_year)
     if matchup_period is not None:
-        return _get_all_league_team_for_week(season_year, matchup_period)
-    return _get_all_league_team_season_to_date(season_year)
+        where_clauses.append('matchup_period = %s')
+        params.append(matchup_period)
+    if team_id is not None:
+        where_clauses.append('team_id = %s')
+        params.append(team_id)
+    where_sql = ' AND '.join(where_clauses) if where_clauses else '1 = 1'
 
-
-def _get_all_league_team_for_week(season_year, matchup_period):
-    """Fetch candidates and pick the all-league roster for one week."""
-    candidates = query_snowflake("""
-        WITH weekly AS (
-            SELECT
-                season_year,
-                matchup_period,
-                lineup_slot,
-                team_id,
-                team_name,
-                team_abbrev,
-                owner_name,
-                player_id,
-                player_name,
-                display_name,
-                platform_points,
-
-                h, ab, b_bb, b_so, hbp, sf, hr, r, rbi, sb, cs, tb,
-                singles, doubles, triples, xbh,
-                w, l, k, er, outs, qs, sv, hld,
-                p_h, p_bb, p_hr, p_r, cg, blk, wp,
-
-                h_pts, ab_pts, b_bb_pts, b_so_pts, hbp_pts, sf_pts,
-                hr_pts, r_pts, rbi_pts, sb_pts, cs_pts, tb_pts,
-                singles_pts, doubles_pts, triples_pts, xbh_pts,
-                w_pts, l_pts, k_pts, er_pts, outs_pts, qs_pts,
-                sv_pts, hld_pts, p_h_pts, p_bb_pts, p_hr_pts, p_r_pts,
-                cg_pts, blk_pts, wp_pts
-            FROM fct_weekly_player_performance
-            WHERE season_year = %s
-              AND matchup_period = %s
-              AND performance_status = 'active'
-              AND team_id IS NOT NULL
-        ),
-
-        latest_slot_context AS (
-            SELECT
-                season_year,
-                matchup_period,
-                team_id,
-                player_id,
-                lineup_slot,
-                pro_team
-            FROM mart_daily_roster_snapshot
-            WHERE season_year = %s
-              AND matchup_period = %s
-              AND roster_status = 'active'
-              AND team_id IS NOT NULL
-            QUALIFY ROW_NUMBER() OVER (
-                PARTITION BY season_year, matchup_period, team_id, player_id, lineup_slot
-                ORDER BY scoring_period DESC
-            ) = 1
-        )
-
+    rows = query_snowflake(f"""
         SELECT
-            w.*,
-            c.pro_team
-        FROM weekly w
-        LEFT JOIN latest_slot_context c
-            ON w.season_year = c.season_year
-            AND w.matchup_period = c.matchup_period
-            AND w.team_id = c.team_id
-            AND w.player_id = c.player_id
-            AND w.lineup_slot = c.lineup_slot
-    """, (season_year, matchup_period, season_year, matchup_period))
-
-    # v1.1.1 Tier 2c.1 note: select_all_league_team lives in
-    # almanac_sheets.py (will move to almanac_logic.py in 2c.3). Lazy
-    # import here to avoid the data <-> logic circular at module load.
-    # The data/logic separation cleans up in Tier 2c.5 alongside the
-    # all-league-team consolidation.
-    from almanac_sheets import select_all_league_team
-    slot_caps = get_slot_capacities(season_year, matchup_period)
-    return select_all_league_team(candidates, slot_caps)
-
-
-
-def _get_all_league_team_season_to_date(season_year):
-    """Fetch season-to-date slot performers and pick the all-league roster."""
-    candidates = query_snowflake("""
-        WITH slot_stats AS (
-            SELECT
-            season_year,
-            lineup_slot,
             player_id,
-            SUM(platform_points) AS platform_points,
+            MAX(player_name)  AS player_name,
+            MAX(display_name) AS display_name,
+            MAX(pro_team)     AS pro_team,
+            position,
+            ROUND({points_expr}, 1) AS position_pts
+        FROM int_player_position_pts
+        WHERE {where_sql}
+        GROUP BY player_id, position
+        HAVING {points_expr} > 0
+        ORDER BY position, position_pts DESC, player_id
+    """, params)
 
-            SUM(h) AS h,
-            SUM(ab) AS ab,
-            SUM(b_bb) AS b_bb,
-            SUM(b_so) AS b_so,
-            SUM(hbp) AS hbp,
-            SUM(sf) AS sf,
-            SUM(hr) AS hr,
-            SUM(r) AS r,
-            SUM(rbi) AS rbi,
-            SUM(sb) AS sb,
-            SUM(cs) AS cs,
-            SUM(tb) AS tb,
-            SUM(singles) AS singles,
-            SUM(doubles) AS doubles,
-            SUM(triples) AS triples,
-            SUM(xbh) AS xbh,
-            SUM(w) AS w,
-            SUM(l) AS l,
-            SUM(k) AS k,
-            SUM(er) AS er,
-            SUM(outs) AS outs,
-            SUM(qs) AS qs,
-            SUM(sv) AS sv,
-            SUM(hld) AS hld,
-            SUM(p_h) AS p_h,
-            SUM(p_bb) AS p_bb,
-            SUM(p_hr) AS p_hr,
-            SUM(p_r) AS p_r,
-            SUM(cg) AS cg,
-            SUM(blk) AS blk,
-            SUM(wp) AS wp,
+    return rows
 
-            SUM(h_pts) AS h_pts,
-            SUM(ab_pts) AS ab_pts,
-            SUM(b_bb_pts) AS b_bb_pts,
-            SUM(b_so_pts) AS b_so_pts,
-            SUM(hbp_pts) AS hbp_pts,
-            SUM(sf_pts) AS sf_pts,
-            SUM(hr_pts) AS hr_pts,
-            SUM(r_pts) AS r_pts,
-            SUM(rbi_pts) AS rbi_pts,
-            SUM(sb_pts) AS sb_pts,
-            SUM(cs_pts) AS cs_pts,
-            SUM(tb_pts) AS tb_pts,
-            SUM(singles_pts) AS singles_pts,
-            SUM(doubles_pts) AS doubles_pts,
-            SUM(triples_pts) AS triples_pts,
-            SUM(xbh_pts) AS xbh_pts,
-            SUM(w_pts) AS w_pts,
-            SUM(l_pts) AS l_pts,
-            SUM(k_pts) AS k_pts,
-            SUM(er_pts) AS er_pts,
-            SUM(outs_pts) AS outs_pts,
-            SUM(qs_pts) AS qs_pts,
-            SUM(sv_pts) AS sv_pts,
-            SUM(hld_pts) AS hld_pts,
-            SUM(p_h_pts) AS p_h_pts,
-            SUM(p_bb_pts) AS p_bb_pts,
-            SUM(p_hr_pts) AS p_hr_pts,
-            SUM(p_r_pts) AS p_r_pts,
-            SUM(cg_pts) AS cg_pts,
-            SUM(blk_pts) AS blk_pts,
-            SUM(wp_pts) AS wp_pts
-            FROM fct_weekly_player_performance
-            WHERE season_year = %s
-              AND performance_status = 'active'
-              AND team_id IS NOT NULL
-            GROUP BY 1, 2, 3
-        ),
 
-        latest_context AS (
-            SELECT
-                season_year,
-                matchup_period,
-                player_id,
-                team_id,
-                team_name,
-                team_abbrev,
-                owner_name,
-                player_name,
-                display_name
-            FROM fct_weekly_player_performance
-            WHERE season_year = %s
-              AND performance_status = 'active'
-              AND team_id IS NOT NULL
-            QUALIFY ROW_NUMBER() OVER (
-                PARTITION BY player_id
-                ORDER BY matchup_period DESC
-            ) = 1
-        ),
+# Stat columns the rendered All-League Team row needs (per format_top_
+# scorer_stats_line + the TOP_SCORER_STAT_DISPLAY map in formatters.py).
+# Kept aligned with the original _get_all_league_team_for_week query so
+# the rendered stat-line tail matches the pre-v1.1.1 output for any
+# player who happens to be picked by both the old and new selection
+# algorithms. v1.1.0 callers can refine.
+_OPTIMAL_TEAM_STAT_COLUMNS = (
+    # Hitting counting + per-stat _pts
+    'h', 'ab', 'b_bb', 'b_so', 'hbp', 'sf', 'hr', 'r', 'rbi', 'sb', 'cs', 'tb',
+    'singles', 'doubles', 'triples', 'xbh',
+    # Pitching counting + per-stat _pts
+    'w', 'l', 'k', 'er', 'outs', 'qs', 'sv', 'hld',
+    'p_h', 'p_bb', 'p_hr', 'p_r', 'cg', 'blk', 'wp',
+)
 
-        latest_player_context AS (
-            SELECT
-                season_year,
-                player_id,
-                pro_team
-            FROM mart_daily_roster_snapshot
-            WHERE season_year = %s
-            QUALIFY ROW_NUMBER() OVER (
-                PARTITION BY season_year, player_id
-                ORDER BY scoring_period DESC
-            ) = 1
-        )
 
+def _enrich_optimal_team_with_stats(selected_rows, season_year, matchup_period,
+                                    team_id, points_type):
+    """Merge stat columns into selected rows so the renderer's
+    format_top_scorer_stats_line tail renders correctly.
+
+    Runs a single SUM aggregation over fct_weekly_player_performance
+    for the selected player ids, scoped to the same filter window as
+    the candidates query. Mutates ``selected_rows`` in place AND
+    returns it (convenience).
+
+    For week-specific queries: the sum is over a single (player,
+    matchup) row, so it's a no-op aggregation -- the stat-line tail
+    matches today's pre-v1.1.1 output for that player.
+
+    For season-to-date / all-time / team-specific queries: the stat-
+    line tail represents accumulated production across the filter
+    window. Different framing than today's single-week tail, but the
+    natural extension of "stats during the same window the points
+    came from."
+    """
+    if not selected_rows:
+        return selected_rows
+    player_ids = [r['player_id'] for r in selected_rows if r.get('player_id')]
+    if not player_ids:
+        return selected_rows
+
+    where_clauses = []
+    params = []
+    if season_year is not None:
+        where_clauses.append('season_year = %s')
+        params.append(season_year)
+    if matchup_period is not None:
+        where_clauses.append('matchup_period = %s')
+        params.append(matchup_period)
+    if team_id is not None:
+        where_clauses.append('team_id = %s')
+        params.append(team_id)
+    if points_type == 'active':
+        where_clauses.append("performance_status = 'active'")
+    elif points_type == 'inactive':
+        where_clauses.append("performance_status = 'inactive'")
+    # 'all' -> no performance_status filter
+
+    placeholders = ', '.join(['%s'] * len(player_ids))
+    where_clauses.append(f'player_id IN ({placeholders})')
+    params.extend(player_ids)
+    where_sql = ' AND '.join(where_clauses)
+
+    stat_select = ',\n        '.join(
+        f'SUM({col}) AS {col}, SUM({col}_pts) AS {col}_pts'
+        for col in _OPTIMAL_TEAM_STAT_COLUMNS
+    )
+
+    rows = query_snowflake(f"""
         SELECT
-            s.season_year,
-            c.matchup_period,
-            s.lineup_slot,
-            c.team_id,
-            c.team_name,
-            c.team_abbrev,
-            c.owner_name,
-            s.player_id,
-            c.player_name,
-            c.display_name,
-            pc.pro_team,
-            s.platform_points,
-            'Season' AS period_label,
+            player_id,
+            -- Roster context fields the renderer reads. For week-
+            -- specific queries these are deterministic per row; for
+            -- broader windows MAX picks the most recent occurrence
+            -- as a fallback (display only -- the renderer suppresses
+            -- the boxscore link for period_label='Season').
+            MAX(season_year)    AS season_year,
+            MAX(matchup_period) AS matchup_period,
+            MAX(team_id)        AS team_id,
+            MAX(team_name)      AS team_name,
+            MAX(team_abbrev)    AS team_abbrev,
+            MAX(owner_name)     AS owner_name,
+            {stat_select}
+        FROM fct_weekly_player_performance
+        WHERE {where_sql}
+        GROUP BY player_id
+    """, params)
 
-            s.h, s.ab, s.b_bb, s.b_so, s.hbp, s.sf, s.hr, s.r, s.rbi,
-            s.sb, s.cs, s.tb, s.singles, s.doubles, s.triples, s.xbh,
-            s.w, s.l, s.k, s.er, s.outs, s.qs, s.sv, s.hld,
-            s.p_h, s.p_bb, s.p_hr, s.p_r, s.cg, s.blk, s.wp,
+    by_id = {r['player_id']: r for r in rows}
+    for sel in selected_rows:
+        pid = sel.get('player_id')
+        if pid is not None and pid in by_id:
+            # Don't overwrite display fields the selector already set
+            # (display_name, pro_team, slot_label, etc.). Only add
+            # what's missing.
+            for k, v in by_id[pid].items():
+                sel.setdefault(k, v)
+    return selected_rows
 
-            s.h_pts, s.ab_pts, s.b_bb_pts, s.b_so_pts, s.hbp_pts, s.sf_pts,
-            s.hr_pts, s.r_pts, s.rbi_pts, s.sb_pts, s.cs_pts, s.tb_pts,
-            s.singles_pts, s.doubles_pts, s.triples_pts, s.xbh_pts,
-            s.w_pts, s.l_pts, s.k_pts, s.er_pts, s.outs_pts, s.qs_pts,
-            s.sv_pts, s.hld_pts, s.p_h_pts, s.p_bb_pts, s.p_hr_pts,
-            s.p_r_pts, s.cg_pts, s.blk_pts, s.wp_pts
-        FROM slot_stats s
-        INNER JOIN latest_context c
-            ON s.season_year = c.season_year
-            AND s.player_id = c.player_id
-        LEFT JOIN latest_player_context pc
-            ON s.season_year = pc.season_year
-            AND s.player_id = pc.player_id
-    """, (season_year, season_year, season_year))
 
-    # Same lazy-import pattern as get_all_league_team above.
-    from almanac_sheets import select_all_league_team
-    slot_caps = get_slot_capacities(season_year, matchup_period=None)
-    return select_all_league_team(candidates, slot_caps)
+def get_optimal_team(season_year=None, matchup_period=None,
+                    team_id=None, points_type='active'):
+    """One-stop call: get the optimal lineup for any (timespan, scope,
+    points_type) combination.
 
+    Chains the three primitives:
+      1. get_optimal_team_candidates -- per-position candidate pool
+      2. almanac_logic.get_optimal_team_selections -- gap-based fill
+      3. _enrich_optimal_team_with_stats -- merge stat columns for
+         the renderer's top-N stat-line tail
+
+    Returns the selected lineup as a list of dicts ready for
+    format_all_league_team_row. For non-matchup-specific queries
+    (season-to-date or all-time), each row gets period_label='Season'
+    so the renderer suppresses the per-row boxscore URL (today's
+    season-to-date behavior; carried forward).
+
+    See get_optimal_team_candidates for parameter semantics.
+    """
+    candidates = get_optimal_team_candidates(
+        season_year=season_year,
+        matchup_period=matchup_period,
+        team_id=team_id,
+        points_type=points_type,
+    )
+
+    # Roster shape: use the specified season's config, or the latest
+    # season when None (per the v1.1.1 architectural call for all-time
+    # views -- current league shape, not historical-per-season).
+    if season_year is not None:
+        caps_year = season_year
+    else:
+        caps_year, _ = get_latest_matchup_period()
+    slot_caps = get_slot_capacities(caps_year, matchup_period=None)
+
+    # Lazy import to dodge module-load circular (data <-> logic;
+    # cleanup target tracked in v1.x Handoff carry-overs).
+    from almanac_logic import get_optimal_team_selections
+    selected = get_optimal_team_selections(candidates, slot_caps)
+
+    _enrich_optimal_team_with_stats(
+        selected, season_year, matchup_period, team_id, points_type,
+    )
+
+    # Mark non-matchup-specific rows so the renderer suppresses the
+    # boxscore URL (boxscore is only meaningful for a single matchup).
+    if matchup_period is None:
+        for row in selected:
+            row['period_label'] = 'Season'
+
+    return selected
 
 
 def get_slot_capacities(season_year, matchup_period):

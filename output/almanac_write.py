@@ -85,7 +85,9 @@ def write_almanac(sheet_id, season_year=None, matchup_period=None):
 
     league_id = os.getenv('LEAGUE_ID')
     weekly_team_rows = get_all_league_team(season_year, matchup_period)
-    season_team_rows = get_all_league_team_season_to_date(season_year)
+    # Tier 2c.5 (v1.1.1): get_all_league_team_season_to_date merged into
+    # get_all_league_team -- matchup_period=None == season-to-date.
+    season_team_rows = get_all_league_team(season_year)
     rows = build_home_tab_rows(
         weekly_team_rows,
         season_team_rows,

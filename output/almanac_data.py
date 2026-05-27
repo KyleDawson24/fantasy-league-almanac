@@ -702,6 +702,10 @@ def get_team_roster_history_stats(season_year):
         ),
 
         roster_totals AS (
+            -- Roster-status counts only. Point totals (active + bench/IL)
+            -- come from active_totals / inactive_totals below, sourced
+            -- from fct_player_season_performance so the calculated lens
+            -- (v1.1.1) is consistent with the optimal-team selection.
             SELECT
                 scope,
                 team_id,
@@ -723,40 +727,39 @@ def get_team_roster_history_stats(season_year):
                 COUNT(DISTINCT CASE
                     WHEN lineup_slot = 'IL'
                         THEN season_year || '-' || scoring_period
-                END) AS il_days,
-                ROUND(SUM(CASE
-                    WHEN roster_status = 'inactive'
-                        THEN COALESCE(platform_points, 0)
-                    ELSE 0
-                END), 1) AS bench_il_points
+                END) AS il_days
             FROM scoped_daily
             GROUP BY 1, 2, 3
         ),
 
         scoped_season AS (
             -- v1.1.1: read season-grain rollup from fct_player_season_performance
-            -- (matchup_period already collapsed); the consumer GROUP BY below
-            -- collapses lineup_slot to player-grain.
+            -- (matchup_period already collapsed). performance_status filter
+            -- pushed down into active_totals / inactive_totals so both lenses
+            -- share one scan of the brick.
             SELECT 'current_season' AS scope, p.*
             FROM fct_player_season_performance p
             WHERE p.season_year = %s
               AND p.team_id IS NOT NULL
-              AND p.performance_status = 'active'
 
             UNION ALL
 
             SELECT 'all_time' AS scope, p.*
             FROM fct_player_season_performance p
             WHERE p.team_id IS NOT NULL
-              AND p.performance_status = 'active'
         ),
 
         active_totals AS (
+            -- Calculated-lens active points (v1.1.1). Was platform_points;
+            -- switched for consistency with the optimal-team primitive,
+            -- which now answers "who would have done well in this league's
+            -- current scoring setting" rather than "who happened to score
+            -- well in the historical platform config."
             SELECT
                 scope,
                 team_id,
                 player_id,
-                ROUND(SUM(platform_points), 1) AS active_points,
+                ROUND(SUM(calculated_points), 1) AS active_points,
                 SUM(h) AS h,
                 SUM(ab) AS ab,
                 SUM(b_bb) AS b_bb,
@@ -774,6 +777,23 @@ def get_team_roster_history_stats(season_year):
                 SUM(p_bb) AS p_bb,
                 SUM(p_h) AS p_h
             FROM scoped_season
+            WHERE performance_status = 'active'
+            GROUP BY 1, 2, 3
+        ),
+
+        inactive_totals AS (
+            -- Calculated-lens bench/IL points (v1.1.1). Was sourced from
+            -- mart_daily_roster_snapshot.platform_points in roster_totals;
+            -- moved to fct_player_season_performance so both lenses match.
+            -- Same Bench-sort framing Approach 1 uses: total rostered
+            -- production = active + inactive, both calculated.
+            SELECT
+                scope,
+                team_id,
+                player_id,
+                ROUND(SUM(calculated_points), 1) AS bench_il_points
+            FROM scoped_season
+            WHERE performance_status = 'inactive'
             GROUP BY 1, 2, 3
         )
 
@@ -791,8 +811,12 @@ def get_team_roster_history_stats(season_year):
             pl.display_name,
             pl.position,
             pl.pro_team,
+            -- v1.1.1: asterisk when the player is still on this tab's
+            -- team (was blank); abbrev when on a different team; blank
+            -- when no longer rostered anywhere. Compact "still here" cue
+            -- without restating the tab's own team abbrev.
             CASE
-                WHEN cpt.current_fantasy_team_id = ct.team_id THEN ''
+                WHEN cpt.current_fantasy_team_id = ct.team_id THEN '*'
                 ELSE COALESCE(cpt.current_fantasy_team, '')
             END AS current_fantasy_team,
             COALESCE(asl.active_slots_played, '') AS active_slots_played,
@@ -801,7 +825,7 @@ def get_team_roster_history_stats(season_year):
             rt.active_games,
             rt.bench_days,
             rt.il_days,
-            rt.bench_il_points,
+            COALESCE(it.bench_il_points, 0) AS bench_il_points,
             COALESCE(at.active_points, 0) AS active_points,
             COALESCE(at.h, 0) AS h,
             COALESCE(at.ab, 0) AS ab,
@@ -835,87 +859,23 @@ def get_team_roster_history_stats(season_year):
             ON rt.scope = at.scope
             AND rt.team_id = at.team_id
             AND rt.player_id = at.player_id
+        LEFT JOIN inactive_totals it
+            ON rt.scope = it.scope
+            AND rt.team_id = it.team_id
+            AND rt.player_id = it.player_id
         ORDER BY ct.team_name, rt.scope, rt.rostered_days DESC, pl.display_name
     """, (season_year, season_year, season_year, season_year))
 
-    active_slot_rows = query_snowflake("""
-        WITH scoped_daily AS (
-            SELECT 'current_season' AS scope, d.*
-            FROM mart_daily_roster_snapshot d
-            WHERE d.season_year = %s
-              AND d.team_id IS NOT NULL
-              AND d.roster_status = 'active'
-
-            UNION ALL
-
-            SELECT 'all_time' AS scope, d.*
-            FROM mart_daily_roster_snapshot d
-            WHERE d.team_id IS NOT NULL
-              AND d.roster_status = 'active'
-        ),
-
-        active_days AS (
-            SELECT
-                scope,
-                team_id,
-                player_id,
-                lineup_slot,
-                COUNT(DISTINCT season_year || '-' || scoring_period) AS active_days_in_slot
-            FROM scoped_daily
-            GROUP BY 1, 2, 3, 4
-        ),
-
-        scoped_season AS (
-            -- v1.1.1: read season-grain rollup from fct_player_season_performance.
-            -- Brick is already at (season, team, player, slot) grain, so the
-            -- consumer-side GROUP BY just dedupes the row format below.
-            SELECT 'current_season' AS scope, p.*
-            FROM fct_player_season_performance p
-            WHERE p.season_year = %s
-              AND p.team_id IS NOT NULL
-              AND p.performance_status = 'active'
-
-            UNION ALL
-
-            SELECT 'all_time' AS scope, p.*
-            FROM fct_player_season_performance p
-            WHERE p.team_id IS NOT NULL
-              AND p.performance_status = 'active'
-        ),
-
-        active_points AS (
-            SELECT
-                scope,
-                team_id,
-                player_id,
-                lineup_slot,
-                ROUND(SUM(platform_points), 1) AS active_points_in_slot
-            FROM scoped_season
-            GROUP BY 1, 2, 3, 4
-        )
-
-        SELECT
-            ad.scope,
-            ad.team_id,
-            ad.player_id,
-            ad.lineup_slot,
-            ad.active_days_in_slot,
-            COALESCE(ap.active_points_in_slot, 0) AS active_points_in_slot
-        FROM active_days ad
-        LEFT JOIN active_points ap
-            ON ad.scope = ap.scope
-            AND ad.team_id = ap.team_id
-            AND ad.player_id = ap.player_id
-            AND ad.lineup_slot = ap.lineup_slot
-    """, (season_year, season_year))
-
+    # v1.1.1: the days-active-at-slot Starters selection (and its
+    # active_points_in_slot tiebreak query) is gone -- Starters now come
+    # from get_optimal_team via the per-team-tab consumer. The roster
+    # history rows above carry everything Bench / IL / Other rendering
+    # needs (active_points + bench_il_points + il_days + the stat tail),
+    # so a single query is all that's left.
     if not player_rows:
         raise RuntimeError(f"No team roster history rows found for {season_year}.")
 
-    return {
-        'players': player_rows,
-        'active_slots': active_slot_rows,
-    }
+    return {'players': player_rows}
 
 
 
@@ -1069,10 +1029,10 @@ def get_almanac_records(scope):
     )
     collapsed.extend(get_rate_records(scope))
     collapsed.extend(get_lineup_slot_records(scope))
-    # Same lazy-import pattern as get_all_league_team: orchestrates
-    # records.py-driven contributor lookups; lives in almanac_sheets.py
-    # until 2c.3 moves it to almanac_logic.py.
-    from almanac_sheets import _attach_almanac_contributors
+    # Lazy import to dodge module-load circular (data <-> logic).
+    # _attach_almanac_contributors lives in almanac_logic.py post-split;
+    # retargeted away from the almanac_sheets facade in v1.1.1.
+    from almanac_logic import _attach_almanac_contributors
     _attach_almanac_contributors(collapsed)
     return collapsed
 

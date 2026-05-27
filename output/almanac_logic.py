@@ -421,6 +421,13 @@ def get_optimal_team_selections(candidates, slot_caps):
         out['slot_label'] = slot_label(best_slot, rank_counters[best_slot], cap)
         # Renderer expects `platform_points`; surface position_pts under
         # both names so format_all_league_team_row works unchanged.
+        #
+        # Naming caveat: the value here is now calculated-points-sourced
+        # (int_player_position_pts switched from platform_*_pts to
+        # total_*_stat_pts in v1.1.1). The field name is preserved to
+        # avoid churning format_all_league_team_row + every cached
+        # selected_rows shape; a rename to `optimal_team_pts` is
+        # tracked in BRAINTHOUGHTS as a follow-up cleanup.
         out['platform_points'] = best_player.get('position_pts')
         lineup.append(out)
 
@@ -682,11 +689,18 @@ def _blank_roster_row(template, slot, slot_rank, slots_to_fill):
 
 
 def build_team_history_tabs(history_data, season_year, league_id=None, slot_caps=None):
-    """Build side-by-side current-season/all-time roster history tabs."""
+    """Build side-by-side current-season/all-time best-lineup tabs.
+
+    v1.1.1: Starters fill switched from days-active-at-slot greedy to
+    get_optimal_team (calculated-points lens, gap-based selection). Bench
+    fill switched from active_points to total rostered production
+    (active + bench/IL points), so a player can land in Bench "because
+    they were blocked by a better player" -- the missed-opportunity
+    framing the user picked for Approach 1.
+    """
     del league_id
     slot_caps = slot_caps or {}
     players = history_data.get('players') or []
-    active_slots = history_data.get('active_slots') or []
 
     teams = {}
     players_by_team_scope = defaultdict(list)
@@ -698,34 +712,28 @@ def build_team_history_tabs(history_data, season_year, league_id=None, slot_caps
         teams.setdefault(team_id, row)
         players_by_team_scope[(team_id, scope)].append(row)
 
-    active_by_team_scope = defaultdict(list)
-    for row in active_slots:
-        team_id = row.get('team_id')
-        scope = row.get('scope')
-        if team_id is None or not scope:
-            continue
-        active_by_team_scope[(team_id, scope)].append(row)
-
     tabs = []
     for team_id in sorted(teams, key=lambda tid: _team_sort_key(teams[tid])):
         team_meta = teams[team_id]
         current_rows = build_team_history_side(
             players_by_team_scope[(team_id, 'current_season')],
-            active_by_team_scope[(team_id, 'current_season')],
             slot_caps,
+            season_year=season_year,
+            team_id=team_id,
         )
         all_time_rows = build_team_history_side(
             players_by_team_scope[(team_id, 'all_time')],
-            active_by_team_scope[(team_id, 'all_time')],
             slot_caps,
+            season_year=None,
+            team_id=team_id,
         )
         row_labels = _team_history_row_labels(current_rows, all_time_rows)
         period_end_date = _format_sheet_date(team_meta.get('latest_matchup_end_date'))
         rows = [
             [team_meta.get('team_name') or f'Team {team_id}'],
             [
-                f"{season_year} roster history"
-                + (f" through {period_end_date}" if period_end_date else "")
+                f"Best Lineup -- current season + all-time"
+                + (f", through {period_end_date}" if period_end_date else "")
             ],
             [],
             _team_history_scope_header(),
@@ -742,68 +750,84 @@ def build_team_history_tabs(history_data, season_year, league_id=None, slot_caps
     return tabs
 
 
-def build_team_history_side(player_rows, active_slot_rows, slot_caps):
-    """Arrange one scope of team/player history into roster-shaped rows."""
+def build_team_history_side(player_rows, slot_caps, *, season_year, team_id):
+    """Arrange one scope of team/player history into best-lineup rows.
+
+    v1.1.1: Starters come from get_optimal_team (calculated-points lens,
+    gap-based selection); the days-active-at-slot greedy fill that
+    previously drove this is gone. Bench/IL/Other still draw from the
+    leftover-roster pool, but Bench sort is now total rostered production
+    (active + bench/IL points) descending, per the user's Approach 1:
+    "could've maybe made this team but didn't -- either misuse or
+    blocked by a better player."
+
+    Args:
+      player_rows: list of player history rows (calculated-lens active +
+        bench/IL points, rostered_days, il_days, stat tail, etc.) for
+        this scope/team. From get_team_roster_history_stats.
+      slot_caps:   dict {slot_code: starter_count} from
+        get_slot_capacities.
+      season_year: None for the all-time side, season int for the
+        current-season side. Threaded into get_optimal_team.
+      team_id:     this tab's team_id. Threaded into get_optimal_team
+        so the Starters pool is scoped to players this team rostered.
+    """
     players = {
         row.get('player_id'): row
         for row in player_rows
         if row.get('player_id') is not None
     }
 
-    active_by_slot = defaultdict(list)
-    for row in active_slot_rows:
-        player = players.get(row.get('player_id'))
-        if not player:
-            continue
-        candidate = dict(player)
-        candidate.update(row)
-        active_by_slot[row.get('lineup_slot')].append(candidate)
-
-    active_caps = {
-        slot: count
-        for slot, count in slot_caps.items()
-        if slot not in {'BE', 'IL'}
-    }
     selected_ids = set()
     output = {}
 
-    for slot in sorted(active_caps, key=_slot_sort_key):
-        capacity = active_caps[slot]
-        candidates = sorted(
-            active_by_slot.get(slot, []),
-            key=lambda r: (
-                -int(r.get('active_days_in_slot') or 0),
-                -float(r.get('active_points_in_slot') or 0),
-                r.get('display_name') or r.get('player_name') or '',
-            ),
+    # Starters: best lineup this team could have built within
+    # (season_year, team_id). For each picked (slot, player), use the
+    # player's roster-context row from player_rows (active_points,
+    # bench_il_points, rostered_days, active_games, stat tail) so the
+    # display columns stay consistent with Bench/IL/Other and read
+    # "this player's production across the window," not the position-
+    # specific selection criterion.
+    optimal_rows = almanac_data.get_optimal_team(
+        season_year=season_year,
+        team_id=team_id,
+        points_type='active',
+    )
+    for opt_row in optimal_rows:
+        player_id = opt_row.get('player_id')
+        if player_id is None:
+            continue
+        player = players.get(player_id)
+        if not player:
+            # Defensive: optimal-team selection couldn't be matched back
+            # to roster history. Shouldn't happen since both queries scope
+            # to (team_id) -- skip the row rather than fabricate display
+            # context.
+            continue
+        label = opt_row.get('slot_label') or opt_row.get('lineup_slot') or ''
+        if not label:
+            continue
+        output[label] = _team_history_display_row(
+            player,
+            label,
+            display_slot=label,
         )
-        chosen = []
-        for candidate in candidates:
-            player_id = candidate.get('player_id')
-            if player_id in selected_ids:
-                continue
-            chosen.append(candidate)
-            selected_ids.add(player_id)
-            if len(chosen) == capacity:
-                break
-        for slot_rank, row in enumerate(chosen, 1):
-            label = slot_label(slot, slot_rank, capacity)
-            output[label] = _team_history_display_row(
-                row,
-                label,
-                display_slot=label,
-            )
+        selected_ids.add(player_id)
 
     remaining = [
         row for row in players.values()
         if row.get('player_id') not in selected_ids
     ]
 
+    # Approach 1: Bench by total rostered production (active + bench/IL).
+    # Surfaces "could've made the team but didn't -- misuse or blocked
+    # by a better player" -- both lenses live on this team's history,
+    # both are now calculated, so the sum is a coherent ranking.
     bench_count = int(slot_caps.get('BE') or 0)
     bench_candidates = sorted(
         remaining,
         key=lambda r: (
-            -float(r.get('active_points') or 0),
+            -(float(r.get('active_points') or 0) + float(r.get('bench_il_points') or 0)),
             -int(r.get('rostered_days') or 0),
             r.get('display_name') or r.get('player_name') or '',
         ),
@@ -853,9 +877,13 @@ def build_team_history_side(player_rows, active_slot_rows, slot_caps):
         row for row in players.values()
         if row.get('player_id') not in selected_ids
     ]
+    # Other N uses the same total-rostered-production sort as Bench
+    # (Approach 1) so the leftover-pool ordering is coherent across the
+    # two sections -- they're conceptually the same pool with Bench just
+    # the top BE-many rows.
     remaining.sort(
         key=lambda r: (
-            -float(r.get('active_points') or 0),
+            -(float(r.get('active_points') or 0) + float(r.get('bench_il_points') or 0)),
             -int(r.get('rostered_days') or 0),
             r.get('display_name') or r.get('player_name') or '',
         ),

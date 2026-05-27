@@ -2,6 +2,7 @@
 
 import pytest
 
+import almanac_data
 import almanac_sheets
 
 
@@ -57,7 +58,7 @@ def _roster_row(team_id, slot, player_id=1, slot_rank=1, slots_to_fill=1):
 
 def _history_player(player_id, name, scope='current_season', team_id=1,
                     active_points=12.2, rostered_days=20, active_days=5,
-                    il_days=0, active_slots=''):
+                    il_days=0, active_slots='', bench_il_points=0):
     return {
         'scope': scope,
         'team_id': team_id,
@@ -77,7 +78,7 @@ def _history_player(player_id, name, scope='current_season', team_id=1,
         'active_games': active_days,
         'bench_days': 0,
         'il_days': il_days,
-        'bench_il_points': 0,
+        'bench_il_points': bench_il_points,
         'active_points': active_points,
         'h': 5,
         'ab': 20,
@@ -108,6 +109,41 @@ def _active_slot(player_id, slot, scope='current_season', team_id=1,
         'active_days_in_slot': active_days,
         'active_points_in_slot': active_points,
     }
+
+
+def _optimal_pick(player_id, slot, slot_rank=1, slots_to_fill=1, points=12.2):
+    """Stand-in for one row of almanac_data.get_optimal_team output.
+
+    v1.1.1: per-team-tab Starters fill now comes from get_optimal_team
+    rather than days-active-at-slot. Tests stub the dispatcher with a
+    list of these rows so structural assertions (side-by-side, spacer,
+    pitcher headers) don't need a live Snowflake connection.
+    """
+    label = slot if slots_to_fill == 1 else f'{slot} {slot_rank}'
+    return {
+        'player_id': player_id,
+        'lineup_slot': slot,
+        'slot_rank': slot_rank,
+        'slots_to_fill': slots_to_fill,
+        'slot_label': label,
+        'platform_points': points,
+    }
+
+
+def _stub_get_optimal_team(monkeypatch, rows_by_team=None):
+    """Patch almanac_data.get_optimal_team to return controlled selections.
+
+    rows_by_team: dict {team_id: list of _optimal_pick rows}, or None to
+    return an empty list for every call. The build_team_history_side
+    caller passes team_id; the stub picks the matching list.
+    """
+    rows_by_team = rows_by_team or {}
+
+    def fake_optimal_team(season_year=None, matchup_period=None,
+                         team_id=None, points_type='active'):
+        return list(rows_by_team.get(team_id, []))
+
+    monkeypatch.setattr(almanac_data, 'get_optimal_team', fake_optimal_team)
 
 
 def _record(grain='team', stat='CALCULATED_POINTS', direction='most', value=123.4):
@@ -680,33 +716,70 @@ class TestTeamRosterRows:
 
 
 class TestTeamHistoryRows:
-    def test_history_side_fills_active_slots_by_days_then_bench_by_points(self):
+    def test_history_side_uses_optimal_team_for_starters_and_total_points_for_bench(self, monkeypatch):
+        """v1.1.1: Starters come from get_optimal_team; Bench sorts by
+        active + bench/IL points (Approach 1) so a higher-producing
+        bench-mostly player outranks an everyday-but-low-output starter."""
         players = [
-            _history_player(1, 'Everyday LF', active_points=20, rostered_days=54),
-            _history_player(2, 'Big Bench Bat', active_points=50, rostered_days=10, active_slots='1B, LF'),
-            _history_player(3, 'IL Stash', active_points=0, rostered_days=20, il_days=20),
+            _history_player(
+                1, 'Everyday LF', team_id=1,
+                active_points=20, rostered_days=54, active_days=5,
+                bench_il_points=0,
+            ),
+            _history_player(
+                2, 'Big Bench Bat', team_id=1,
+                active_points=10, rostered_days=10, active_days=2,
+                bench_il_points=40, active_slots='1B, LF',
+            ),
+            _history_player(
+                3, 'IL Stash', team_id=1,
+                active_points=0, rostered_days=20, il_days=20,
+            ),
         ]
-        active_slots = [
-            _active_slot(1, 'LF', active_days=54, active_points=20),
-            _active_slot(2, 'LF', active_days=5, active_points=50),
-        ]
+        # Stub the optimal-team dispatcher so the LF Starter comes from
+        # a known pick (Big Bench Bat) instead of needing live data.
+        _stub_get_optimal_team(monkeypatch, {1: [_optimal_pick(2, 'LF')]})
 
         result = almanac_sheets.build_team_history_side(
             players,
-            active_slots,
             {'LF': 1, 'BE': 1, 'IL': 2},
+            season_year=2026,
+            team_id=1,
         )
 
-        assert result['LF']['player'] == 'Everyday LF'
-        assert result['LF']['active_points'] == 20
-        assert result['LF']['points_per_active_game'] == 4
-        assert result['LF']['stat_1'] == '250'
-        assert result['LF']['stat_2'] == '318'
-        assert result['LF']['stat_3'] == '400'
-        assert result['BE']['player'] == 'Big Bench Bat'
-        assert result['BE']['display_slot'] == 'BE - 1B,LF'
+        # Starter row pulls roster-context fields (active_points, etc.)
+        # from the player_rows, not the position-pts in the stub.
+        assert result['LF']['player'] == 'Big Bench Bat'
+        assert result['LF']['active_points'] == 10
+        # Bench: Everyday LF (20+0=20) > whoever's left (Big Bench Bat
+        # already picked); IL Stash has 0+0=0 so Everyday LF lands BE.
+        assert result['BE']['player'] == 'Everyday LF'
+        # IL still uses il_days filter; first IL row goes to IL Stash.
         assert result['IL 1']['player'] == 'IL Stash'
         assert result['IL 2']['player'] == ''
+
+    def test_history_side_bench_sort_uses_total_rostered_production(self, monkeypatch):
+        """Approach 1: 'blocked by a better player' bench framing -- a
+        player with high inactive (bench/IL) points outranks one with
+        only mediocre active points."""
+        players = [
+            _history_player(
+                1, 'Mostly Benched Slugger', team_id=2,
+                active_points=15, bench_il_points=60, rostered_days=40,
+            ),
+            _history_player(
+                2, 'Modest Everyday', team_id=2,
+                active_points=30, bench_il_points=0, rostered_days=40,
+            ),
+        ]
+        _stub_get_optimal_team(monkeypatch, {2: []})  # no Starters; both go to Bench/Other
+
+        result = almanac_sheets.build_team_history_side(
+            players, {'BE': 1}, season_year=2026, team_id=2,
+        )
+
+        assert result['BE']['player'] == 'Mostly Benched Slugger'  # 75 > 30
+        assert result['Other 1']['player'] == 'Modest Everyday'
 
     def test_hitting_rates_keep_three_digits_for_low_rates(self):
         row = _history_player(1, 'Slumping Bat')
@@ -718,17 +791,25 @@ class TestTeamHistoryRows:
         assert result['stat_2'] == '040'
         assert result['stat_3'] == '080'
 
-    def test_team_history_matrix_keeps_current_and_all_time_side_by_side(self):
+    def test_team_history_matrix_keeps_current_and_all_time_side_by_side(self, monkeypatch):
         history_data = {
             'players': [
                 _history_player(1, 'Current LF', scope='current_season', team_id=16),
                 _history_player(2, 'All Time LF', scope='all_time', team_id=16),
             ],
-            'active_slots': [
-                _active_slot(1, 'LF', scope='current_season', team_id=16),
-                _active_slot(2, 'LF', scope='all_time', team_id=16),
-            ],
         }
+        # Both sides call get_optimal_team(team_id=16) -- once with
+        # season_year=2026, once with None. The stub doesn't distinguish:
+        # it returns the LF pick for team 16 in both cases. The two
+        # sides differ because each is fed a different scope's players.
+        _stub_get_optimal_team(monkeypatch, {16: [_optimal_pick(1, 'LF')]})
+        # Re-stub for the all-time side: player_id=2 is the all-time
+        # match. Build a side-dispatching stub so the right player_id
+        # lands on each side.
+        def fake_optimal(season_year=None, matchup_period=None,
+                         team_id=None, points_type='active'):
+            return [_optimal_pick(1 if season_year else 2, 'LF')]
+        monkeypatch.setattr(almanac_data, 'get_optimal_team', fake_optimal)
 
         tabs = almanac_sheets.build_team_history_tabs(
             history_data,
@@ -741,10 +822,14 @@ class TestTeamHistoryRows:
         assert rows[3][15] == 'All-Time'
         assert rows[4] == almanac_sheets.TEAM_ROSTER_HEADER
         assert rows[5][9:14] == ['Avg', 'OBP', 'Slg', 'HR', 'SB']
-        assert rows[6][0:4] == ['Team 16', 'LF', 'Current LF', 'BOS']
-        assert rows[6][15:19] == ['Team 16', 'LF', 'All Time LF', 'BOS']
+        # v1.1.1: current_fantasy_team column now holds '*' when the
+        # player is still on this tab's team (was the redundant abbrev).
+        # The _history_player helper hardcodes the field to the team's
+        # full name -- testing only the slot/player/pro columns here.
+        assert rows[6][1:4] == ['LF', 'Current LF', 'BOS']
+        assert rows[6][16:19] == ['LF', 'All Time LF', 'BOS']
 
-    def test_team_history_matrix_inserts_spacer_before_other_rows(self):
+    def test_team_history_matrix_inserts_spacer_before_other_rows(self, monkeypatch):
         history_data = {
             'players': [
                 _history_player(1, 'Current LF', scope='current_season', team_id=16),
@@ -753,10 +838,8 @@ class TestTeamHistoryRows:
                     active_points=1, rostered_days=1,
                 ),
             ],
-            'active_slots': [
-                _active_slot(1, 'LF', scope='current_season', team_id=16),
-            ],
         }
+        _stub_get_optimal_team(monkeypatch, {16: [_optimal_pick(1, 'LF')]})
 
         tabs = almanac_sheets.build_team_history_tabs(
             history_data,
@@ -768,18 +851,18 @@ class TestTeamHistoryRows:
         assert rows[7] == [''] * len(almanac_sheets.TEAM_ROSTER_HEADER)
         assert rows[8][1] == 'Other - LF'
 
-    def test_team_history_matrix_adds_pitcher_and_mixed_stat_headers(self):
+    def test_team_history_matrix_adds_pitcher_and_mixed_stat_headers(self, monkeypatch):
         history_data = {
             'players': [
                 _history_player(1, 'Current LF', scope='current_season', team_id=16),
                 _history_player(2, 'Starter', scope='current_season', team_id=16),
                 _history_player(3, 'Bench Bat', scope='current_season', team_id=16),
             ],
-            'active_slots': [
-                _active_slot(1, 'LF', scope='current_season', team_id=16),
-                _active_slot(2, 'SP', scope='current_season', team_id=16),
-            ],
         }
+        _stub_get_optimal_team(
+            monkeypatch,
+            {16: [_optimal_pick(1, 'LF'), _optimal_pick(2, 'SP')]},
+        )
 
         tabs = almanac_sheets.build_team_history_tabs(
             history_data,

@@ -788,10 +788,26 @@ def build_team_history_side(player_rows, slot_caps, *, season_year, team_id):
     # display columns stay consistent with Bench/IL/Other and read
     # "this player's production across the window," not the position-
     # specific selection criterion.
+    #
+    # Sort the selector's output by canonical baseball-card order
+    # (SLOT_ORDER: C, 1B, 2B, 3B, SS, IF, LF, CF, RF, OF, DH, UTIL,
+    # SP*, RP*) before inserting into the output dict. get_optimal_team
+    # returns rows in gap-based fill order ("fill the slot where 2nd-
+    # best hurts most"), which is selection-correct but renders
+    # hitter/pitcher interleaved randomly on the tab. Output dict
+    # iteration order = label order in _team_history_row_labels, so
+    # sorting here is where the render-order fix lives.
     optimal_rows = almanac_data.get_optimal_team(
         season_year=season_year,
         team_id=team_id,
         points_type='active',
+    )
+    optimal_rows = sorted(
+        optimal_rows,
+        key=lambda r: (
+            _slot_sort_key(r.get('lineup_slot') or ''),
+            int(r.get('slot_rank') or 1),
+        ),
     )
     for opt_row in optimal_rows:
         player_id = opt_row.get('player_id')

@@ -11,3 +11,5 @@ sources:
         description: "Raw ESPN Fantasy scoring settings JSON, append-only. Each row is a snapshot of the league's scoring weights for a season, captured at extraction time. The staging model picks the latest snapshot per season."
       - name: roster_settings
         description: "Raw ESPN Fantasy roster settings JSON, append-only. Each row is a snapshot of lineup slot counts, position maximums, and related roster constraints for a season."
+      - name: team_owners
+        description: "Raw ESPN team -> owner mapping, append-only. Each row is a VARIANT array of {team_id, owner_id, first_name, last_name} for a season, captured from league.teams[].owners. owner_id is the stable ESPN member GUID the box-score extract discards; this is the bridge that lets the owner_nicknames seed join the data. Staging picks the latest snapshot per season."

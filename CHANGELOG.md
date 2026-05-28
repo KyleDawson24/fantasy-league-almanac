@@ -8,6 +8,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Each entry links to the corresponding `Phase X.Y Documentation.md` in the
 repository root for the architectural detail behind the change.
 
+## [1.1.2] — 2026-05-27
+
+Team-tab polish on the v1.1.1 almanac. No dbt changes and no
+selection-logic changes — just rendering fixes and explanatory copy on
+the per-team "Best Lineup" tabs, after QA'ing them in the live Sheet.
+
+### Fixed
+
+- **Points-per-game formats to two decimals.** `ppg` was rendering raw
+  float precision (`3.232727…`, `1.0214`); now reads `#.##`.
+- **Pitcher decision line shows W-L-Sv.** Was "decisions or saves,
+  whichever is larger," which dropped W-L for closers and saves for
+  swingmen who had both. Now `6-4` when there are no saves, `2-1-15`
+  when the pitcher recorded saves.
+
+### Added
+
+- **Slot-fill explanation + points glossary on every team tab.** A short
+  header note explains that the starting lineup is filled by Active
+  Points at each eligible position and bench / IL / other by Total
+  Points while rostered; a Total / Active / Inactive Points glossary
+  sits over the all-time side; and a callout notes that points use
+  current-season scoring (with an invite to request points as they were
+  awarded at the time).
+
+Verification: dbt unchanged; pytest warehouse green (16 passed,
+including the regenerated almanac byte-diff); pytest default 144 passed
+(5 preexisting `test_almanac_sheets.py` failures unrelated to this
+release).
+
 ## [1.1.1] — 2026-05-27
 
 Almanac refactor + optimal-team reframe. This release was scoped as a

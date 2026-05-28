@@ -218,7 +218,10 @@ fresh Snowflake free-tier account in under 45 minutes.
 
 ## Status
 
-- **v1.1.1** — current. Almanac refactor + optimal-team reframe.
+- **v1.1.2** — current. Team-tab polish: ppg to two decimals, a W-L-Sv
+  pitcher decision line, and a slot-fill explanation + points glossary +
+  current-scoring callout on every "Best Lineup" tab. See `CHANGELOG.md`.
+- **v1.1.1** — 2026-05-27. Almanac refactor + optimal-team reframe.
   `output/almanac_sheets.py` split into data/logic/render/write modules
   behind a facade; reusable analytical SQL moved into dbt contracts
   (`mart_team_matchup`, `fct_player_season_performance`,

@@ -29,11 +29,17 @@
 --   BE and IL are filtered out.
 -- ==========================================================================
 --
--- Materialization: view. Intermediate layer per the project's convention
--- that single-consumer scaffolding lives at int_* until a second consumer
--- materializes. Only consumer today is the Python get_optimal_team
--- dispatcher in output/almanac_data.py (or wherever it ends up landing).
--- Row count is ~65K for two seasons; trivially re-aggregated per query.
+-- Materialization: table (v1.2). Was a view, but the get_optimal_team
+-- selector is gap-based -- it breaks near-equal ties (relievers, mostly)
+-- on calculated points rounded to 1 decimal. As a view, Snowflake
+-- re-summed those points with a slightly different float order on every
+-- query, so a value sitting on a .x5 rounding boundary could flip
+-- between regens and silently reshuffle RP picks across team tabs +
+-- the Home All-League Team. Materializing freezes the rounded points so
+-- the selection is deterministic across regens (the byte-diff then only
+-- moves on real changes). Rebuilds it on new data like any fact.
+-- Only consumer is the Python get_optimal_team dispatcher in
+-- output/almanac_data.py. Row count ~65K for two seasons.
 --
 -- Notes on "position" semantics:
 --   - For this league's roster shape, the position codes that map to
@@ -49,7 +55,7 @@
 -- matching the brick + active fact precedents. Stabilizes downstream
 -- SUMs against float-summation-order drift.
 
-{{ config(materialized='view') }}
+{{ config(materialized='table') }}
 
 with daily_eligible as (
     select

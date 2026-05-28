@@ -875,17 +875,19 @@ class TestTeamHistoryRows:
         assert rows[7][9:14] == ['W-L (Sv)', 'ERA', 'WHIP', 'K', 'BB']
         assert rows[9][9:14] == ['Avg|W-L-Sv', 'OBP|ERA', 'Slg|WHIP', 'HR|K', 'SB|BB']
 
-    def test_pitcher_decision_display_uses_record_when_decisions_match_saves(self):
-        row = _history_player(2, 'Decision Guy')
-        row.update({'w': 2, 'l': 1, 'sv': 3})
+    def test_pitcher_decision_display_drops_saves_when_none(self):
+        # v1.1.2: saves == 0 -> plain W-L.
+        row = _history_player(2, 'Starter')
+        row.update({'w': 6, 'l': 4, 'sv': 0})
 
-        assert almanac_sheets._pitching_decision_display(row, 'RP') == '2-1'
+        assert almanac_sheets._pitching_decision_display(row, 'SP') == '6-4'
 
-    def test_pitcher_decision_display_uses_saves_when_saves_exceed_decisions(self):
+    def test_pitcher_decision_display_appends_saves_when_present(self):
+        # v1.1.2: saves > 0 -> W-L-Sv (closers read 2-1-15, not just 15).
         row = _history_player(2, 'Closer')
-        row.update({'w': 0, 'l': 1, 'sv': 7})
+        row.update({'w': 2, 'l': 1, 'sv': 15})
 
-        assert almanac_sheets._pitching_decision_display(row, 'SP') == 7
+        assert almanac_sheets._pitching_decision_display(row, 'RP') == '2-1-15'
 
     def test_display_slot_alignment_helpers_split_pitchers_and_hitters(self):
         assert almanac_sheets._is_pitcher_display_slot('BE - RP')

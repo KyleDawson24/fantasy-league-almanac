@@ -235,7 +235,7 @@ def _team_history_display_row(row, label, display_slot=None, active_games=None,
         'active_points': _round_half_up(active_points),
         'bench_il_points': _round_half_up(float(row.get('bench_il_points') or 0)),
         'points_per_active_game': (
-            active_points / active_games if active_games else ''
+            f"{active_points / active_games:.2f}" if active_games else ''
         ),
         **stat_line,
     }
@@ -320,7 +320,13 @@ def _pitching_decision_display(row, display_slot):
     wins = int(row.get('w') or 0)
     losses = int(row.get('l') or 0)
     saves = int(row.get('sv') or 0)
-    return f"{wins}-{losses}" if wins + losses >= saves else saves
+    # v1.1.2: W-L when the pitcher logged no saves (6-4); W-L-Sv when
+    # they did (2-1-15). Replaces the "decisions vs. saves, show whichever
+    # is larger" rule, which dropped W-L for closers and saves for
+    # swingmen who had both.
+    if saves > 0:
+        return f"{wins}-{losses}-{saves}"
+    return f"{wins}-{losses}"
 
 
 def _hitting_rate(row, stat_name):

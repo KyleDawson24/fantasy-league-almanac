@@ -706,6 +706,24 @@ def _blank_roster_row(template, slot, slot_rank, slots_to_fill):
     }
 
 
+# Column anchors for the team-tab header text (v1.1.2). Indices into a
+# TEAM_ROSTER_MATRIX_WIDTH-wide row: the slot-fill explanation sits in
+# the current-season side (col F), the points glossary over the all-time
+# side (col Q). Both overflow rightward into the empty header cells.
+_EXPLAIN_COL = 5
+_GLOSSARY_COL = 16
+
+
+def _team_history_header_row(placements):
+    """Build one TEAM_ROSTER_MATRIX_WIDTH-wide header row with text placed
+    at specific column indices (everything else blank)."""
+    row = [''] * TEAM_ROSTER_MATRIX_WIDTH
+    for idx, text in placements.items():
+        if 0 <= idx < TEAM_ROSTER_MATRIX_WIDTH:
+            row[idx] = text
+    return row
+
+
 def build_team_history_tabs(history_data, season_year, league_id=None, slot_caps=None):
     """Build side-by-side current-season/all-time best-lineup tabs.
 
@@ -747,13 +765,30 @@ def build_team_history_tabs(history_data, season_year, league_id=None, slot_caps
         )
         row_labels = _team_history_row_labels(current_rows, all_time_rows)
         period_end_date = _format_sheet_date(team_meta.get('latest_matchup_end_date'))
+        subtitle = (
+            f"Best Lineup -- current season + all-time"
+            + (f", through {period_end_date}" if period_end_date else "")
+        )
         rows = [
-            [team_meta.get('team_name') or f'Team {team_id}'],
-            [
-                f"Best Lineup -- current season + all-time"
-                + (f", through {period_end_date}" if period_end_date else "")
-            ],
-            [],
+            _team_history_header_row({
+                0: team_meta.get('team_name') or f'Team {team_id}',
+                _GLOSSARY_COL: ('Total Points -- all points a player produced '
+                                'while rostered by this team (active + bench/IL).'),
+            }),
+            _team_history_header_row({
+                0: subtitle,
+                _EXPLAIN_COL: ('Starting lineup: best Active Points at each '
+                               'eligible position. Bench / IL / Other: most '
+                               'Total Points while rostered.'),
+                _GLOSSARY_COL: ('Active Points -- produced while in an active '
+                                'lineup slot (not bench or IL).'),
+            }),
+            _team_history_header_row({
+                _EXPLAIN_COL: ('Points use current-season scoring -- tell us if '
+                               "you'd rather see them as awarded at the time."),
+                _GLOSSARY_COL: ('Inactive Points -- produced while on this '
+                                "team's bench or IL."),
+            }),
             _team_history_scope_header(),
             TEAM_ROSTER_HEADER,
         ]

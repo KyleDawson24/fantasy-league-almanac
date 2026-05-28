@@ -699,6 +699,64 @@ def load_roster_settings_to_snowflake(conn, roster_settings, year):
         cursor.close()
 
 
+def fetch_team_owners(year):
+    """Return the season's team -> owner mapping as a list of dicts:
+    {team_id, owner_id, first_name, last_name}.
+
+    The box-score extract keeps only a formatted owner *name* string
+    (format_owners) and discards the stable ESPN member GUID. This
+    captures (team_id, owner_id) so dbt can join the owner_nicknames
+    seed on the GUID instead of fuzzy-matching display strings.
+
+    Co-owned teams emit one row per owner. owner_id is read defensively
+    via .get('id') since the espn-api owner dict is not contract-locked.
+    """
+    league = connect_espn(year)
+    rows = []
+    for team in league.teams:
+        for owner in (getattr(team, "owners", None) or []):
+            rows.append({
+                "team_id": team.team_id,
+                "owner_id": owner.get("id"),
+                "first_name": owner.get("firstName"),
+                "last_name": owner.get("lastName"),
+            })
+    return rows
+
+
+def load_team_owners_to_snowflake(conn, team_owners, year):
+    """Append the season's team -> owner mapping as a row in RAW.TEAM_OWNERS.
+
+    Append-only snapshot (mirrors SCORING_SETTINGS / ROSTER_SETTINGS); the
+    staging model picks the latest row per season via extracted_at. The
+    full list is stored as one VARIANT payload per (season, extract).
+    """
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS TEAM_OWNERS (
+                season_year     INTEGER,
+                raw_json        VARIANT,
+                extracted_at    TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()
+            )
+        """)
+
+        cursor.execute(
+            """
+            INSERT INTO TEAM_OWNERS (season_year, raw_json)
+            SELECT %s, PARSE_JSON(%s)
+            """,
+            (year, json.dumps(team_owners)),
+        )
+
+        conn.commit()
+        print(f"  Loaded {len(team_owners)} team-owner rows for {year} into Snowflake.")
+
+    finally:
+        cursor.close()
+
+
 def extract_scoring_settings(conn, year):
     """Pull scoring settings from ESPN and load to Snowflake."""
     print(f"\nScoring settings for {year}:")
@@ -719,6 +777,10 @@ def extract_league_settings(conn, year):
     slot_count = len(roster_settings.get("lineupSlotCounts", {}) or {})
     print(f"  Retrieved roster settings for {year} ({slot_count} slot counts)")
     load_roster_settings_to_snowflake(conn, roster_settings, year)
+
+    team_owners = fetch_team_owners(year)
+    print(f"  Retrieved {len(team_owners)} team-owner rows for {year}")
+    load_team_owners_to_snowflake(conn, team_owners, year)
 
 
 # ---------------------------------------------------------------------------

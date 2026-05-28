@@ -196,4 +196,13 @@ weekly as (
     group by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11
 )
 
-select * from weekly
+select
+    weekly.*,
+    -- v1.2: owner display name (nickname > "First Last"), resolved off
+    -- the owner_id bridge. NULL for FA rows (no team_id to join); the
+    -- consumer falls back to owner_name when null.
+    tod.owner_display
+from weekly
+left join {{ ref('int_team_owner_display') }} tod
+    on weekly.season_year = tod.season_year
+    and weekly.team_id = tod.team_id

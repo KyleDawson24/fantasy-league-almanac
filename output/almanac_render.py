@@ -39,7 +39,7 @@ TEAM_WEEKS_TAB = 'Team Weeks'
 
 HOME_HEADER = [
     'Slot', 'MLB Team', 'Player', 'Fantasy Team', 'Owner',
-    'Points', 'Stat Line', 'Boxscore',
+    'Points', 'Slash', 'Stat Line',
 ]
 
 
@@ -379,14 +379,38 @@ def _compact_inactive_slot(slot, position):
     return slot
 
 
+def _all_league_slash_line(row):
+    """Compact slash line for the All-League Team. Hitters: AVG/OBP/SLG
+    as no-dot 3-digit (e.g. 294/390/559). Pitchers: W-L-Sv/ERA/WHIP
+    (e.g. 6-4-2/3.00/0.82). Reuses the team-tab rate helpers, so it
+    stays consistent with the per-team pages."""
+    slot = str(row.get('lineup_slot') or row.get('slot_label') or '')
+    if slot.startswith(('SP', 'RP', 'P')):
+        return (
+            f"{_pitching_decision_display(row, slot)}"
+            f"/{_pitching_rate(row, 'era')}"
+            f"/{_pitching_rate(row, 'whip')}"
+        )
+    return (
+        f"{_hitting_rate(row, 'avg')}"
+        f"/{_hitting_rate(row, 'obp')}"
+        f"/{_hitting_rate(row, 'slg')}"
+    )
+
+
 def format_all_league_team_row(row, league_id=None):
     """Project one selected slot row into the Home tab table shape."""
     season = row.get('season_year')
     matchup_period = row.get('matchup_period')
     team_id = row.get('team_id')
     is_season_row = row.get('period_label') == 'Season'
-    boxscore = '' if is_season_row else boxscore_formula(
-        league_id, season, matchup_period, team_id,
+    points = _one_decimal(row.get('platform_points'))
+    # v1.2: embed the boxscore as a hyperlink on the Points cell (week
+    # rows only) so we keep both Slash and the verbose Stat Line without
+    # a separate Boxscore column. Season / all-time rows span multiple
+    # matchups, so there's no single boxscore to link.
+    points_cell = points if is_season_row else _period_boxscore_formula(
+        points, league_id, season, matchup_period, team_id,
     )
     return [
         row.get('slot_label') or row.get('lineup_slot') or '',
@@ -394,9 +418,9 @@ def format_all_league_team_row(row, league_id=None):
         row.get('display_name') or row.get('player_name') or '',
         row.get('team_name') or '',
         row.get('owner_name') or '',
-        _one_decimal(row.get('platform_points')),
+        points_cell,
+        _all_league_slash_line(row),
         format_top_scorer_stats_line(row),
-        boxscore,
     ]
 
 

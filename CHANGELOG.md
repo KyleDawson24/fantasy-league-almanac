@@ -8,6 +8,92 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Each entry links to the corresponding `Phase X.Y Documentation.md` in the
 repository root for the architectural detail behind the change.
 
+## [1.1.1] — 2026-05-27
+
+Almanac refactor + optimal-team reframe. This release was scoped as a
+refactor-only pass against the v1.1.0 golden TSV snapshot, and the first
+half delivered exactly that: reusable analytical SQL moved into dbt
+contracts, `output/almanac_sheets.py` split along data/logic/rendering
+lines, output held byte-identical. The second half intentionally broke
+byte-identity — a new optimal-team primitive reframes the All-League
+Team and the per-team tabs from "who was actually slotted" to "the best
+lineup the team could have fielded," scored on the calculated
+(cross-season-normalized) points lens.
+
+So this is the rare patch release that intentionally shifts product
+output. The shift was reviewed tab-by-tab against the live Sheet before
+the fixtures were re-baselined.
+
+### Added
+
+- **`get_optimal_team` primitive.** Parameterized "best lineup for any
+  (timespan, scope, points_type)" dispatcher over the new
+  `int_player_position_pts` model (per-position points via
+  `LATERAL FLATTEN` of `eligible_slots`). Gap-based selection — fill the
+  slot where the second-best option hurts most — with a disjoint-stat-
+  categories rule so two-way players (Shohei) can fill one hitting and
+  one pitching slot without double-counting.
+- **`int_player_position_pts`** — per-position points accumulation at
+  matchup grain, calculated-points lens.
+- **`mart_team_matchup`** — wide matchup-grain view carrying opponent
+  line, head-to-head margin, combined totals, and league-wide per-week
+  averages. First consumer: the Team Weeks tab.
+- **`fct_player_season_performance`** — slot-bearing season-grain rollup
+  of the weekly player fact; foundation brick of the player-profile
+  layer, carrying both calculated and platform point lenses.
+- **Almanac byte-diff regression.** `tests/test_almanac_byte_diff.py`
+  diffs generated TSVs against `tests/fixtures/almanac_v1_1_0/`,
+  refreshable via `REGENERATE_BASELINES=1`.
+
+### Changed
+
+- **All-League Team + per-team Starters are now optimal-team selected.**
+  The Home tab and every per-team tab fill their lineups by best-possible
+  production at each position rather than by who was actually slotted
+  there most often.
+- **Per-team tabs reframed as "Best Lineup — current season + all-time."**
+  Side-by-side current-season and franchise-history best lineups; Bench /
+  IL / Other ranked by total rostered production (active + bench/IL
+  points) to surface "could have helped but was blocked or benched"; an
+  asterisk in the team column marks players still on the franchise.
+- **Optimal teams scored on the calculated points lens** rather than
+  platform points, so historical lineups answer "who would have done
+  well under the league's current scoring" instead of "who scored well
+  under whatever ESPN config was live at the time."
+- **Rate-record qualifiers are seed-driven.** `mart_stat_leaderboard`
+  rate-stat thresholds (`qualifier_stat` / `qualifier_min`) moved from
+  hardcoded Python constants into `stat_classification.csv` / `dim_stat`.
+
+### Fixed
+
+- **Live-write crashes masked by the `--no-sheets` preview path.** Two
+  separate breakages in `output/almanac_write.py` — missing
+  `os`/`re`/`records` imports, and a dangling
+  `get_all_league_team_season_to_date` call left behind by the
+  dispatcher consolidation — surfaced only on the live Sheets write,
+  which the byte-diff regression doesn't exercise. Both fixed.
+- **Optimal-team rows render in canonical slot order.** The gap-based
+  selector returns picks in fill order; it now sorts to baseball-card
+  order (C, 1B, 2B, 3B, SS, IF, LF, CF, RF, OF, DH, UTIL, SP\*, RP\*)
+  before returning, so hitters and pitchers no longer interleave on any
+  tab.
+
+### Internal
+
+- **`output/almanac_sheets.py` split** into `almanac_data` (SQL + data
+  shaping), `almanac_logic` (selection + tab-row building),
+  `almanac_render` (formatters), and `almanac_write` (Sheets API).
+  `almanac_sheets.py` is now a thin facade re-exporting every public
+  name, so existing import sites keep working unchanged.
+- **New dbt contracts route the almanac through the mart layer** instead
+  of reaching past it into intermediates.
+
+Verification: dbt build clean (PASS=161 / WARN=0 / ERROR=0 / NO-OP=4);
+pytest warehouse green (16 passed, including the almanac byte-diff and
+the records + recap BBCode goldens); pytest default 144 passed (5
+preexisting `test_almanac_sheets.py` failures unrelated to this release).
+Per-team and Home tabs visually QA'd against the live Sheet.
+
 ## [1.1.0] — 2026-05-22
 
 League almanac release. This is the first v1.x product expansion after

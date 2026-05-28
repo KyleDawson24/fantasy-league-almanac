@@ -218,11 +218,17 @@ fresh Snowflake free-tier account in under 45 minutes.
 
 ## Status
 
-- **v1.1.0** — current. Product-facing almanac release: a browsable
+- **v1.1.1** — current. Almanac refactor + optimal-team reframe.
+  `output/almanac_sheets.py` split into data/logic/render/write modules
+  behind a facade; reusable analytical SQL moved into dbt contracts
+  (`mart_team_matchup`, `fct_player_season_performance`,
+  `int_player_position_pts`). New `get_optimal_team` primitive reframes
+  the All-League Team and per-team tabs as "the best lineup you could
+  have built," scored on the calculated points lens. See `CHANGELOG.md`.
+- **v1.1.0** — 2026-05-22. Product-facing almanac release: a browsable
   Google Sheets workbook with Home, Records, Team Weeks, and per-team
   active-stats tabs, backed by roster-settings extraction and roster
-  history marts. Ships with a golden TSV snapshot for the planned
-  v1.1.1 refactor. See `CHANGELOG.md`.
+  history marts. See `CHANGELOG.md`.
 - **v1.0.2** — 2026-05-19. DAG hygiene + dbt-architecture cleanup. New
   `dim_stat` / `dim_matchup_period` / `fct_player_daily_performance`
   contract layer; `int_player_weekly_performance` promoted to

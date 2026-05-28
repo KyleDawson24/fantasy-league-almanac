@@ -99,3 +99,12 @@ seeds:
         player_id: integer
         player_name: varchar
         nickname: varchar
+    owner_nicknames:
+      +column_types:
+        # All varchar so the optional preferred_name (often blank) isn't
+        # type-inferred as numeric -- which breaks the load the moment a
+        # text value is added. owner_id is an ESPN member GUID string.
+        owner_id: varchar
+        first_name: varchar
+        last_name: varchar
+        preferred_name: varchar

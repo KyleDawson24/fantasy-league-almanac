@@ -469,7 +469,9 @@ def _enrich_optimal_team_with_stats(selected_rows, season_year, matchup_period,
             MAX(team_id)        AS team_id,
             MAX(team_name)      AS team_name,
             MAX(team_abbrev)    AS team_abbrev,
-            MAX(owner_name)     AS owner_name,
+            -- v1.2: prefer the owner display name (nickname > "First Last")
+            -- carried on the fact; fall back to the raw owner_name.
+            MAX(COALESCE(owner_display, owner_name)) AS owner_name,
             {stat_select}
         FROM fct_weekly_player_performance
         WHERE {where_sql}
@@ -1012,7 +1014,9 @@ def get_almanac_records(scope):
             team_id,
             team_name,
             team_abbrev,
-            owner_name,
+            -- v1.2: owner display name (nickname > "First Last") off the
+            -- leaderboard's owner_display column; fall back to owner_name.
+            COALESCE(owner_display, owner_name) AS owner_name,
             player_id,
             player_name,
             display_name,

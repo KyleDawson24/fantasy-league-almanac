@@ -49,9 +49,15 @@ select
     o.first_name,
     o.last_name,
     n.preferred_name,
+    -- Fallback (no preferred_name set) matches the extract's title-cased
+    -- owner_name so unset owners don't regress: ESPN stores some names
+    -- lowercase ("luke baker") or with stray whitespace ("Jonathan ");
+    -- INITCAP + TRIM normalizes to "Lance Barrett" / "Jonathan Evans", same
+    -- as format_owners()'s .title(). preferred_name (when set) wins
+    -- verbatim, so nicknames + intentional casing (McAvery) come through.
     coalesce(
         n.preferred_name,
-        trim(o.first_name || ' ' || o.last_name)
+        initcap(trim(o.first_name)) || ' ' || initcap(trim(o.last_name))
     ) as owner_display
 from owners o
 left join nicknames n

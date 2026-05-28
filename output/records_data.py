@@ -50,7 +50,8 @@ def get_current_season_records():
 def _fetch_rank1_records(scope):
     return query_snowflake("""
         SELECT entity_grain, stat_name, record_direction,
-               team_id, team_name, team_abbrev, owner_name,
+               team_id, team_name, team_abbrev,
+               COALESCE(owner_display, owner_name) AS owner_name,
                player_id, player_name, display_name,
                season_year, matchup_period, stat_value
         FROM mart_stat_leaderboard
@@ -73,7 +74,7 @@ def get_record_top_n(stat_name, grain='team', direction='most',
     """
     return query_snowflake("""
         SELECT rank, season_year, matchup_period, team_id, team_name,
-               owner_name, stat_value
+               COALESCE(owner_display, owner_name) AS owner_name, stat_value
         FROM mart_stat_leaderboard
         WHERE entity_grain = %s
           AND record_scope = %s

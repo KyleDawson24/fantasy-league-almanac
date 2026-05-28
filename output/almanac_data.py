@@ -764,6 +764,13 @@ def get_team_roster_history_stats(season_year):
                 team_id,
                 player_id,
                 ROUND(SUM(calculated_points), 1) AS active_points,
+                -- v1.2: per-category active points so the per-team tab can
+                -- show slot-decomposed points for two-way players (Ohtani
+                -- gets hitting pts at his DH slot, pitching pts at SP).
+                -- Single-discipline players: one equals active_points, the
+                -- other is 0 -- so their displayed points don't move.
+                ROUND(SUM(calculated_hitting_pts), 1) AS active_hitting_points,
+                ROUND(SUM(calculated_pitching_pts), 1) AS active_pitching_points,
                 SUM(h) AS h,
                 SUM(ab) AS ab,
                 SUM(b_bb) AS b_bb,
@@ -831,6 +838,8 @@ def get_team_roster_history_stats(season_year):
             rt.il_days,
             COALESCE(it.bench_il_points, 0) AS bench_il_points,
             COALESCE(at.active_points, 0) AS active_points,
+            COALESCE(at.active_hitting_points, 0) AS active_hitting_points,
+            COALESCE(at.active_pitching_points, 0) AS active_pitching_points,
             COALESCE(at.h, 0) AS h,
             COALESCE(at.ab, 0) AS ab,
             COALESCE(at.b_bb, 0) AS b_bb,

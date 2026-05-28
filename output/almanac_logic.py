@@ -862,13 +862,28 @@ def build_team_history_side(player_rows, slot_caps, *, season_year, team_id):
             # to (team_id) -- skip the row rather than fabricate display
             # context.
             continue
-        label = opt_row.get('slot_label') or opt_row.get('lineup_slot') or ''
+        slot_code = opt_row.get('lineup_slot') or ''
+        label = opt_row.get('slot_label') or slot_code or ''
         if not label:
             continue
+        # v1.2 fix: slot-decomposed active points. A two-way player
+        # (Ohtani) otherwise shows his combined hitting+pitching total at
+        # BOTH his DH and pitcher rows. Pull the player's own per-category
+        # active points (from fct_player_season_performance, same source as
+        # active_points) -- hitting pts at hitting slots, pitching pts at
+        # pitching slots. Single-discipline players: the category total
+        # equals active_points exactly (the other is 0), so their displayed
+        # points don't move. The stat-line tail is already slot-decomposed
+        # via display_slot.
+        if str(slot_code).startswith(('SP', 'RP', 'P')):
+            slot_points = player.get('active_pitching_points')
+        else:
+            slot_points = player.get('active_hitting_points')
         output[label] = _team_history_display_row(
             player,
             label,
             display_slot=label,
+            active_points=slot_points,
         )
         selected_ids.add(player_id)
 

@@ -500,10 +500,12 @@ def get_optimal_team(season_year=None, matchup_period=None,
          the renderer's top-N stat-line tail
 
     Returns the selected lineup as a list of dicts ready for
-    format_all_league_team_row. For non-matchup-specific queries
-    (season-to-date or all-time), each row gets period_label='Season'
-    so the renderer suppresses the per-row boxscore URL (today's
-    season-to-date behavior; carried forward).
+    format_all_league_team_row, sorted in canonical baseball-card
+    SLOT_ORDER (C, 1B, 2B, ..., SP*, RP*) by the selector. For
+    non-matchup-specific queries (season-to-date or all-time), each
+    row gets period_label='Season' so the renderer suppresses the
+    per-row boxscore URL (today's season-to-date behavior; carried
+    forward).
 
     See get_optimal_team_candidates for parameter semantics.
     """

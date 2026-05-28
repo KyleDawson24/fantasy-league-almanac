@@ -329,8 +329,17 @@ def get_optimal_team_selections(candidates, slot_caps):
         codes in candidates (a candidate with position='SP' can fill
         a slot keyed 'SP').
 
-    Returns: list of dicts in fill-order, one per slot instance. Each
-    has the selected candidate's fields (copied through) PLUS:
+    Returns: list of dicts in canonical baseball-card SLOT_ORDER
+    (C, 1B, 2B, 3B, SS, IF, LF, CF, RF, OF, DH, UTIL, SP*, RP*, P*),
+    one per slot instance. Multi-instance slots stay in slot_rank
+    ascending (SP 1 before SP 2). The gap-based selection still drives
+    which player fills which slot; the final sort is purely
+    presentation -- every consumer (Home All-League Team tab,
+    per-team-tab Starters section, future consumers) wants display
+    order, so the selector owns the sort to avoid each consumer
+    duplicating it.
+
+    Each row has the selected candidate's fields (copied through) PLUS:
       - lineup_slot:    the slot type (e.g., 'SP', 'OF')
       - slot_rank:      1, 2, ... for multi-instance slots (e.g., SP 1)
       - slots_to_fill:  total instances of this slot type
@@ -434,6 +443,15 @@ def get_optimal_team_selections(candidates, slot_caps):
         used[best_player['player_id']].add(_slot_category(best_slot))
         pending.remove(best_slot)  # removes one instance
 
+    # Final sort: canonical baseball-card order. The selection above
+    # built `lineup` in gap-fill order (correct for selection, wrong
+    # for display -- hitters and pitchers interleave). Sorting here
+    # means every consumer of get_optimal_team_selections sees
+    # display-ordered rows; no caller has to remember to re-sort.
+    lineup.sort(key=lambda r: (
+        _slot_sort_key(r.get('lineup_slot') or ''),
+        int(r.get('slot_rank') or 1),
+    ))
     return lineup
 
 
@@ -789,25 +807,14 @@ def build_team_history_side(player_rows, slot_caps, *, season_year, team_id):
     # "this player's production across the window," not the position-
     # specific selection criterion.
     #
-    # Sort the selector's output by canonical baseball-card order
-    # (SLOT_ORDER: C, 1B, 2B, 3B, SS, IF, LF, CF, RF, OF, DH, UTIL,
-    # SP*, RP*) before inserting into the output dict. get_optimal_team
-    # returns rows in gap-based fill order ("fill the slot where 2nd-
-    # best hurts most"), which is selection-correct but renders
-    # hitter/pitcher interleaved randomly on the tab. Output dict
-    # iteration order = label order in _team_history_row_labels, so
-    # sorting here is where the render-order fix lives.
+    # get_optimal_team returns rows pre-sorted in canonical SLOT_ORDER
+    # (the selector itself sorts before returning), so the output dict
+    # insertion order below is already correct for _team_history_row_
+    # labels to read off.
     optimal_rows = almanac_data.get_optimal_team(
         season_year=season_year,
         team_id=team_id,
         points_type='active',
-    )
-    optimal_rows = sorted(
-        optimal_rows,
-        key=lambda r: (
-            _slot_sort_key(r.get('lineup_slot') or ''),
-            int(r.get('slot_rank') or 1),
-        ),
     )
     for opt_row in optimal_rows:
         player_id = opt_row.get('player_id')

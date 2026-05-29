@@ -38,7 +38,7 @@ TEAM_WEEKS_TAB = 'Matchup History'
 
 
 HOME_HEADER = [
-    'Slot', 'MLB Team', 'Player', 'Fantasy Team', 'Owner',
+    'Slot', 'Team', 'Player', 'Fantasy Team', 'Owner',
     'Points', 'Slash', 'Stat Line',
 ]
 
@@ -49,7 +49,7 @@ HOME_DEVIATION_LABEL = 'Total-Pts Best (incl. bench & FA)'
 
 
 # v1.2 (#22/#23): thin left-band All-League Team (all-time) header.
-HOME_ALLTIME_HEADER = ['Slot', 'Player', 'Pts', 'ppg']
+HOME_ALLTIME_HEADER = ['Slot', 'Player', 'Points', 'ppg']
 
 
 RECORDS_HEADER = [
@@ -390,9 +390,9 @@ def _compact_inactive_slot(slot, position):
 
 def _all_league_slash_line(row):
     """Compact slash line for the All-League Team. Hitters: AVG/OBP/SLG
-    as no-dot 3-digit (e.g. 294/390/559). Pitchers: W-L-Sv/ERA/WHIP
-    (e.g. 6-4-2/3.00/0.82). Reuses the team-tab rate helpers, so it
-    stays consistent with the per-team pages."""
+    as leading-dot 3-digit (e.g. .294/.390/.559). Pitchers: W-L-Sv/ERA/WHIP
+    (e.g. 6-4-2/3.00/0.82). Reuses the team-tab rate helpers, so the
+    underlying values stay consistent with the per-team pages."""
     slot = str(row.get('lineup_slot') or row.get('slot_label') or '')
     if slot.startswith(('SP', 'RP', 'P')):
         return (
@@ -401,10 +401,16 @@ def _all_league_slash_line(row):
             f"/{_pitching_rate(row, 'whip')}"
         )
     return (
-        f"{_hitting_rate(row, 'avg')}"
-        f"/{_hitting_rate(row, 'obp')}"
-        f"/{_hitting_rate(row, 'slg')}"
+        f"{_dotted_rate(_hitting_rate(row, 'avg'))}"
+        f"/{_dotted_rate(_hitting_rate(row, 'obp'))}"
+        f"/{_dotted_rate(_hitting_rate(row, 'slg'))}"
     )
+
+
+def _dotted_rate(rate):
+    """Prefix a leading dot to a no-dot 3-digit rate ('294' -> '.294').
+    Empty stays empty so a no-AB hitter still renders '//', not './/.'."""
+    return f".{rate}" if rate else ''
 
 
 def format_all_league_team_row(row, league_id=None):
@@ -425,7 +431,7 @@ def format_all_league_team_row(row, league_id=None):
         row.get('slot_label') or row.get('lineup_slot') or '',
         row.get('pro_team') or '',
         row.get('display_name') or row.get('player_name') or '',
-        row.get('team_name') or '',
+        row.get('team_abbrev') or row.get('team_name') or '',
         row.get('owner_name') or '',
         points_cell,
         _all_league_slash_line(row),
@@ -447,9 +453,11 @@ def format_all_league_thin_row(row):
     player = row.get('display_name') or row.get('player_name') or ''
     if not player:
         return [slot, '', '', '']
-    points = _one_decimal(row.get('platform_points'))
+    pts_raw = row.get('platform_points') or 0
+    # Whole number -- 1-decimal precision is overkill at the all-time scale.
+    points = _round_half_up(pts_raw)
     games = int(row.get('games_played') or 0)
-    ppg = f"{(points / games):.2f}" if games else ''
+    ppg = f"{(pts_raw / games):.2f}" if games else ''
     return [slot, player, points, ppg]
 
 

@@ -537,6 +537,8 @@ def _home_left_rows(all_time_rows, team_titles, nav_targets):
     ])
     rows.append(['Team Pages', 'Historic production by team.'])
     rows.extend(_home_team_grid_rows(team_titles, nav_targets))
+    # Planned tabs -- listed but unlinked until they're built.
+    rows.append([home_nav_link('Slot Scoring', None, nav_targets), 'Coming soon.'])
     rows.append([home_nav_link('Draft Recap', None, nav_targets), 'Coming soon.'])
 
     rows.append([])
@@ -544,21 +546,22 @@ def _home_left_rows(all_time_rows, team_titles, nav_targets):
     rows.extend([term, definition] for term, definition in _HOME_GLOSSARY)
 
     rows.append([])
-    rows.append(['All-League Team -- All-Time'])
+    rows.append(['All-League Team: All-Time'])
     rows.append(list(HOME_ALLTIME_HEADER))
     rows.extend(format_all_league_thin_row(row) for row in all_time_rows)
     return rows
 
 
-def _home_team_grid_rows(team_titles, nav_targets, per_row=4):
+def _home_team_grid_rows(team_titles, nav_targets, per_row=2):
     """Per-team link grid: team tab titles laid out `per_row` across the
-    left band, each cell linking to that team's tab (plain text in
-    preview)."""
+    left band, indented one column (col A blank) so the grid reads as a
+    sub-list under the Team Pages nav heading. Each cell links to that
+    team's tab (plain text in preview)."""
     titles = list(team_titles or [])
     grid = []
     for start in range(0, len(titles), per_row):
         chunk = titles[start:start + per_row]
-        grid.append([home_nav_link(title, title, nav_targets) for title in chunk])
+        grid.append(['', *(home_nav_link(title, title, nav_targets) for title in chunk)])
     return grid
 
 

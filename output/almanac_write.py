@@ -167,7 +167,7 @@ def write_almanac(sheet_id, season_year=None, matchup_period=None):
 
 
 _HOME_LEFT_SECTION_LABELS = {
-    'Navigate', 'Points Glossary', 'All-League Team -- All-Time',
+    'Navigate', 'Points Glossary', 'All-League Team: All-Time',
 }
 
 
@@ -196,6 +196,7 @@ def _replace_home_tab(spreadsheet, rows):
     try:
         last_col = _a1_col(width)
         _sheets_call(f'freeze {HOME_TAB}', lambda: worksheet.freeze(rows=3))
+        _apply_home_tab_dimensions(spreadsheet, worksheet)
         formats = [
             {  # title banner
                 'range': f'A1:{last_col}1',
@@ -208,11 +209,12 @@ def _replace_home_tab(spreadsheet, rows):
                     'backgroundColor': {'red': 0.90, 'green': 0.94, 'blue': 0.98},
                 },
             },
-            # One-decimal points: left all-time Pts (C), right Points (K),
-            # deviation total pts (O). Number format only touches numeric
-            # cells, so it's harmless on the text/hyperlink cells those
-            # columns also contain.
-            {'range': 'C:C', 'format': {'numberFormat': {'type': 'NUMBER', 'pattern': '0.0'}}},
+            # Points number formats. Left all-time Points (C) is whole --
+            # 1-decimal is overkill at the all-time scale; right Points (K)
+            # and deviation total pts (O) stay one decimal. Number format
+            # only touches numeric cells, harmless on the text/hyperlink
+            # cells those columns also contain.
+            {'range': 'C:C', 'format': {'numberFormat': {'type': 'NUMBER', 'pattern': '0'}}},
             {'range': 'K:K', 'format': {'numberFormat': {'type': 'NUMBER', 'pattern': '0.0'}}},
             {'range': 'O:O', 'format': {'numberFormat': {'type': 'NUMBER', 'pattern': '0.0'}}},
         ]
@@ -220,6 +222,21 @@ def _replace_home_tab(spreadsheet, rows):
         _batch_format(worksheet, formats)
     except Exception as exc:
         print(f"[almanac] formatting skipped: {exc}")
+
+
+def _apply_home_tab_dimensions(spreadsheet, worksheet):
+    """Set Home column widths (#23 live polish). Cols A-K + N-O are sized
+    to the two-band content; L/M (right Slash / Stat Line) and P+ keep the
+    default. Indices are 0-based: A=0 ... O=14."""
+    sheet_id = worksheet.id
+    widths = [
+        (0, 100), (1, 125), (2, 100), (3, 50), (4, 100), (5, 40), (6, 40),
+        (7, 150), (8, 100), (9, 125), (10, 50), (13, 150), (14, 50),
+    ]
+    requests = [
+        _column_width_request(sheet_id, idx, idx + 1, px) for idx, px in widths
+    ]
+    _sheets_batch_update(spreadsheet, f'home dimensions {worksheet.title}', requests)
 
 
 def _home_label_formats(rows, last_col):

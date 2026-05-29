@@ -382,15 +382,16 @@ class TestHomeRows:
         left_first = [r[0] if r else '' for r in rows]
         assert 'Navigate' in left_first
         assert 'Points Glossary' in left_first
-        assert 'All-League Team -- All-Time' in left_first
-        grid = next(r for r in rows if r and r[0] == 'AAA')
-        assert grid[1] == 'BP'
+        assert 'All-League Team: All-Time' in left_first
+        # Per-team grid is indented (col A blank, teams in B-C).
+        grid = next(r for r in rows if len(r) > 2 and r[1] == 'AAA')
+        assert grid[2] == 'BP'
         alltime_c = next(
             r for r in rows
             if len(r) > 3 and r[0] == 'C' and r[1] == 'All-Time Catcher'
         )
-        assert alltime_c[2] == 600.0
-        assert alltime_c[3] == '3.00'  # 600.0 / 200 games
+        assert alltime_c[2] == 600  # whole number (no decimal at the all-time scale)
+        assert alltime_c[3] == '3.00'  # 600 / 200 games
 
 
 class TestTeamWeeksRows:

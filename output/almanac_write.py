@@ -32,6 +32,7 @@ from almanac_data import (
     get_team_week_record_marks,
     get_team_week_stat_specs,
     get_team_weeks,
+    _fact_stat_column_name,
 )
 from almanac_logic import (
     SCORE_RECORD_SPECS,
@@ -61,8 +62,12 @@ from almanac_render import (
     TEAM_WEEKS_TAB,
     TEAM_WEEKS_WHITE_TO_GREEN_STATS,
     TEAM_WEEKS_WHITE_TO_RED_STATS,
+    _is_active_display_slot,
+    _is_hitter_display_slot,
+    _is_pitcher_display_slot,
     _is_rare_team_week_stat,
     _safe_sheet_title,
+    _team_week_specs_for_category,
 )
 from sheets_writer import _get_authorized_client
 

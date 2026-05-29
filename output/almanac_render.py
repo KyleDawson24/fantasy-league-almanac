@@ -34,13 +34,22 @@ HOME_TAB = 'Home'
 RECORDS_TAB = 'Records'
 
 
-TEAM_WEEKS_TAB = 'Team Weeks'
+TEAM_WEEKS_TAB = 'Matchup History'
 
 
 HOME_HEADER = [
     'Slot', 'MLB Team', 'Player', 'Fantasy Team', 'Owner',
     'Points', 'Slash', 'Stat Line',
 ]
+
+
+# v1.2 (#23): single group label spanning the two Total-Pts deviation
+# columns appended to the right-band All-League rows (alt player + total pts).
+HOME_DEVIATION_LABEL = 'Total-Pts Best (incl. bench & FA)'
+
+
+# v1.2 (#22/#23): thin left-band All-League Team (all-time) header.
+HOME_ALLTIME_HEADER = ['Slot', 'Player', 'Pts', 'ppg']
 
 
 RECORDS_HEADER = [
@@ -422,6 +431,59 @@ def format_all_league_team_row(row, league_id=None):
         _all_league_slash_line(row),
         format_top_scorer_stats_line(row),
     ]
+
+
+def format_all_league_thin_row(row):
+    """Project one optimal-team pick into the thin left-band shape:
+    Slot | Player | Pts | ppg.
+
+    Used by the Home all-time All-League Team (#22). ppg = points /
+    games_played; games_played comes from _enrich_optimal_team_with_stats
+    and is active-games when the team was built points_type='active'
+    (the all-time team is), so ppg reads "points per active game" --
+    the same convention as the per-team tabs' points_per_active_game.
+    """
+    slot = row.get('slot_label') or row.get('lineup_slot') or ''
+    player = row.get('display_name') or row.get('player_name') or ''
+    if not player:
+        return [slot, '', '', '']
+    points = _one_decimal(row.get('platform_points'))
+    games = int(row.get('games_played') or 0)
+    ppg = f"{(points / games):.2f}" if games else ''
+    return [slot, player, points, ppg]
+
+
+def format_all_league_team_row_with_deviation(row, deviation_pick, league_id=None):
+    """Right-band All-League row: the 8 standard columns plus the two
+    Total-Pts deviation columns (#23).
+
+    ``deviation_pick`` is the points_type='all' pick for this slot when it
+    is a DIFFERENT player than the active pick (the caller decides this;
+    a same-player points-only delta passes None). The two appended cells
+    are the alternate player's name and their total (active+inactive+FA)
+    points. Both blank when there's no deviation at this slot.
+    """
+    base = format_all_league_team_row(row, league_id=league_id)
+    if not deviation_pick:
+        return [*base, '', '']
+    dev_player = deviation_pick.get('display_name') or deviation_pick.get('player_name') or ''
+    dev_points = _one_decimal(deviation_pick.get('platform_points'))
+    return [*base, dev_player, dev_points]
+
+
+def home_nav_link(label, tab_title=None, gid_map=None):
+    """Render one Home nav cell (#23/#25).
+
+    With a gid for ``tab_title`` in ``gid_map`` (live write), emit an
+    in-sheet =HYPERLINK to that tab's A1. Otherwise plain text -- the TSV
+    preview (no gids exist) or a not-yet-built target like Draft Recap
+    (tab_title=None).
+    """
+    gid = (gid_map or {}).get(tab_title) if tab_title is not None else None
+    if gid is None:
+        return label
+    safe = str(label).replace('"', '""')
+    return f'=HYPERLINK("#gid={gid}&range=A1", "{safe}")'
 
 
 def format_record_matrix_row(spec, current_record=None, all_time_record=None,

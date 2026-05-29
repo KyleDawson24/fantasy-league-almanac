@@ -24,7 +24,6 @@ import almanac_logic
 import almanac_render
 import records
 from almanac_data import (
-    get_all_league_team,
     get_almanac_records,
     get_current_team_roster_stats,
     get_latest_matchup_period,
@@ -84,17 +83,10 @@ def write_almanac(sheet_id, season_year=None, matchup_period=None):
         season_year, matchup_period = get_latest_matchup_period()
 
     league_id = os.getenv('LEAGUE_ID')
-    weekly_team_rows = get_all_league_team(season_year, matchup_period)
-    # Tier 2c.5 (v1.1.1): get_all_league_team_season_to_date merged into
-    # get_all_league_team -- matchup_period=None == season-to-date.
-    season_team_rows = get_all_league_team(season_year)
-    rows = build_home_tab_rows(
-        weekly_team_rows,
-        season_team_rows,
-        season_year,
-        matchup_period,
-        league_id=league_id,
-    )
+    # Tier 2c.5 (v1.1.1): season-to-date is get_all_league_team(matchup_
+    # period=None). v1.2 (#23): all Home datasets come from one fetch so
+    # this live path can't drift from the preview path.
+    home_data = almanac_data.get_home_tab_data(season_year, matchup_period)
     schedule_lookup = records.load_schedule_lookup()
     records_rows = build_records_tab_rows(
         all_time_records=get_almanac_records('all_time'),
@@ -117,12 +109,18 @@ def write_almanac(sheet_id, season_year=None, matchup_period=None):
         league_id=league_id,
         slot_caps=get_roster_slot_capacities(season_year, include_inactive=True),
     )
-
     client = _get_authorized_client()
     spreadsheet = client.open_by_key(sheet_id)
-    _replace_home_tab(spreadsheet, rows)
-    _replace_records_tab(spreadsheet, records_rows)
-    _replace_team_weeks_tab(
+
+    # Two-pass write (#25). Pass 1: create/write every non-Home tab so
+    # their gids exist; capture each worksheet. Pass 2: read the gids
+    # straight off those worksheets, render the Home nav as in-sheet
+    # =HYPERLINK("#gid=...&range=A1") formulas, and write Home last.
+    # Reading gids at write time -- never hardcoding tab URLs -- keeps this
+    # portable: it works on a brand-new sheet for any league, no manual
+    # copy-paste of tab links.
+    records_ws = _replace_records_tab(spreadsheet, records_rows)
+    matchup_ws = _replace_team_weeks_tab(
         spreadsheet,
         team_weeks_tab_rows,
         team_week_stat_specs,
@@ -130,30 +128,54 @@ def write_almanac(sheet_id, season_year=None, matchup_period=None):
         record_marks=team_week_record_marks,
     )
     _delete_prefixed_team_tabs(spreadsheet, {title for title, _ in team_pages})
-    for title, team_page_rows in team_pages:
+    team_worksheets = [
         _replace_team_tab(spreadsheet, title, team_page_rows)
+        for title, team_page_rows in team_pages
+    ]
+
+    nav_targets = {
+        ws.title: ws.id
+        for ws in (records_ws, matchup_ws, *team_worksheets)
+        if ws is not None
+    }
+    rows = build_home_tab_rows(
+        **home_data,
+        season_year=season_year,
+        matchup_period=matchup_period,
+        team_titles=[title for title, _ in team_pages],
+        league_id=league_id,
+        nav_targets=nav_targets,
+    )
+    _replace_home_tab(spreadsheet, rows)
+
     _sort_almanac_tabs(spreadsheet, [
         HOME_TAB, RECORDS_TAB, TEAM_WEEKS_TAB, *[title for title, _ in team_pages],
     ])
 
     print(
-        f"[almanac] wrote {len(weekly_team_rows)} weekly + "
-        f"{len(season_team_rows)} season-to-date all-league rows "
+        f"[almanac] wrote {len(home_data['weekly_rows'])} weekly + "
+        f"{len(home_data['season_rows'])} season-to-date all-league rows "
         f"{len(records_rows)} records-tab rows, {len(team_week_rows)} team-week rows "
         f"and {len(team_pages)} team roster tabs "
         f"for {season_year} MP{matchup_period} to sheet {sheet_id}"
     )
 
 
+_HOME_LEFT_SECTION_LABELS = {
+    'Navigate', 'Points Glossary', 'All-League Team -- All-Time',
+}
+
+
 def _replace_home_tab(spreadsheet, rows):
-    """Clear/create Home and write the almanac front page."""
+    """Clear/create Home and write the two-band almanac front page (#23)."""
+    width = max((len(row) for row in rows), default=20)
     try:
         worksheet = spreadsheet.worksheet(HOME_TAB)
     except gspread.WorksheetNotFound:
         worksheet = _sheets_call(
             f'create {HOME_TAB}',
             lambda: spreadsheet.add_worksheet(
-                title=HOME_TAB, rows=max(len(rows) + 10, 50), cols=len(HOME_HEADER),
+                title=HOME_TAB, rows=max(len(rows) + 10, 50), cols=max(width, 20),
             ),
         )
 
@@ -163,24 +185,61 @@ def _replace_home_tab(spreadsheet, rows):
         lambda: worksheet.update(rows, 'A1', value_input_option='USER_ENTERED'),
     )
 
-    # Basic first-pass polish. This is deliberately restrained; visual
-    # iteration will happen once the live Sheet can be eyeballed.
+    # First-pass polish for the two-band layout. Deliberately restrained --
+    # the live Sheet gets a hand pass (merges, widths, color). Byte-diff
+    # doesn't cover formatting, so keep this defensive.
     try:
-        _sheets_call(f'freeze {HOME_TAB}', lambda: worksheet.freeze(rows=4))
-        _batch_format(worksheet, [
-            {
-                'range': 'A1:H1',
+        last_col = _a1_col(width)
+        _sheets_call(f'freeze {HOME_TAB}', lambda: worksheet.freeze(rows=3))
+        formats = [
+            {  # title banner
+                'range': f'A1:{last_col}1',
                 'format': {'textFormat': {'bold': True, 'fontSize': 14}},
             },
-            {
-                'range': 'A2:H2',
+            {  # scoring callout
+                'range': f'A2:{last_col}2',
                 'format': {
-                    'textFormat': {'bold': True},
+                    'textFormat': {'italic': True},
                     'backgroundColor': {'red': 0.90, 'green': 0.94, 'blue': 0.98},
                 },
             },
-            {
-                'range': 'A4:H4',
+            # One-decimal points: left all-time Pts (C), right Points (K),
+            # deviation total pts (O). Number format only touches numeric
+            # cells, so it's harmless on the text/hyperlink cells those
+            # columns also contain.
+            {'range': 'C:C', 'format': {'numberFormat': {'type': 'NUMBER', 'pattern': '0.0'}}},
+            {'range': 'K:K', 'format': {'numberFormat': {'type': 'NUMBER', 'pattern': '0.0'}}},
+            {'range': 'O:O', 'format': {'numberFormat': {'type': 'NUMBER', 'pattern': '0.0'}}},
+        ]
+        formats.extend(_home_label_formats(rows, last_col))
+        _batch_format(worksheet, formats)
+    except Exception as exc:
+        print(f"[almanac] formatting skipped: {exc}")
+
+
+def _home_label_formats(rows, last_col):
+    """Bold the two-band Home section labels + table headers. Positions are
+    dynamic, so scan by marker (#23). Best-effort: keep these marker
+    strings in sync with build_home_tab_rows' left-band labels."""
+    formats = []
+    for row_number, row in enumerate(rows, 1):
+        first = row[0] if len(row) > 0 else ''
+        right = row[5] if len(row) > 5 else ''
+        if first in _HOME_LEFT_SECTION_LABELS or (
+            first == 'Slot' and len(row) > 1 and row[1] == 'Player'
+        ):
+            formats.append({
+                'range': f'A{row_number}:D{row_number}',
+                'format': {'textFormat': {'bold': True}},
+            })
+        if isinstance(right, str) and right.startswith('All-League Team'):
+            formats.append({
+                'range': f'F{row_number}:{last_col}{row_number}',
+                'format': {'textFormat': {'bold': True}},
+            })
+        elif right == 'Slot':
+            formats.append({
+                'range': f'F{row_number}:{last_col}{row_number}',
                 'format': {
                     'textFormat': {
                         'bold': True,
@@ -188,14 +247,8 @@ def _replace_home_tab(spreadsheet, rows):
                     },
                     'backgroundColor': {'red': 0.12, 'green': 0.20, 'blue': 0.30},
                 },
-            },
-            {
-                'range': 'F:F',
-                'format': {'numberFormat': {'type': 'NUMBER', 'pattern': '0.0'}},
-            },
-        ])
-    except Exception as exc:
-        print(f"[almanac] formatting skipped: {exc}")
+            })
+    return formats
 
 
 def _replace_team_weeks_tab(spreadsheet, rows, stat_specs, source_rows=None, record_marks=None):
@@ -277,6 +330,8 @@ def _replace_team_weeks_tab(spreadsheet, rows, stat_specs, source_rows=None, rec
     except Exception as exc:
         print(f"[almanac] formatting skipped for {TEAM_WEEKS_TAB}: {exc}")
 
+    return worksheet
+
 
 def _replace_records_tab(spreadsheet, rows):
     """Clear/create Records and write the curated record-book tab."""
@@ -329,6 +384,8 @@ def _replace_records_tab(spreadsheet, rows):
         _batch_format(worksheet, formats)
     except Exception as exc:
         print(f"[almanac] formatting skipped for {RECORDS_TAB}: {exc}")
+
+    return worksheet
 
 
 def _records_header_formats(rows):
@@ -556,6 +613,8 @@ def _replace_team_tab(spreadsheet, title, rows):
         _batch_format(worksheet, formats)
     except Exception as exc:
         print(f"[almanac] formatting skipped for {title}: {exc}")
+
+    return worksheet
 
 
 def _apply_records_tab_dimensions(spreadsheet, worksheet):

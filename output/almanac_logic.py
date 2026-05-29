@@ -34,6 +34,8 @@ from almanac_data import (
     slot_label,
 )
 from almanac_render import (
+    HOME_ALLTIME_HEADER,
+    HOME_DEVIATION_LABEL,
     HOME_HEADER,
     HOME_TAB,
     RECORDS_HEADER,
@@ -55,6 +57,9 @@ from almanac_render import (
     SLOT_ORDER,
     boxscore_formula,
     format_all_league_team_row,
+    format_all_league_team_row_with_deviation,
+    format_all_league_thin_row,
+    home_nav_link,
     format_record_matrix_row,
     format_record_row,
     format_team_history_matrix_row,
@@ -455,30 +460,183 @@ def get_optimal_team_selections(candidates, slot_caps):
     return lineup
 
 
-def build_home_tab_rows(weekly_rows, season_rows, season_year, matchup_period,
-                        league_id=None):
-    """Build the Home tab value matrix."""
-    rows = [
+# v1.2 (#23): Home is a two-band dashboard. Left band (cols A-D) is a
+# navigation hub + points glossary + the all-time All-League Team; right
+# band (cols F+) is the All-League Team of the Week and Season-to-Date,
+# each carrying two Total-Pts deviation columns. A blank spacer column (E)
+# separates the bands.
+_HOME_LEFT_WIDTH = 4
+
+_HOME_SCORING_CALLOUT = (
+    'All points use current-season scoring across every timeframe -- '
+    "tell us if you'd rather see them as awarded at the time."
+)
+
+_HOME_GLOSSARY = [
+    ('Total Points', 'All points a player produced -- active + inactive.'),
+    ('Active Points', 'Produced while in an active lineup slot (not bench or IL).'),
+    ('Inactive Points', 'Produced while on a bench or IL slot.'),
+    (
+        'Wasted Points',
+        'Inactive points + the size of any negative active-game totals '
+        '(points left on the bench, plus points actively lost).',
+    ),
+]
+
+
+def build_home_tab_rows(weekly_rows, season_rows, weekly_all_rows,
+                        season_all_rows, all_time_rows, season_year,
+                        matchup_period, team_titles=None, league_id=None,
+                        nav_targets=None):
+    """Build the Home tab as a two-band dashboard (#23).
+
+    LEFT band (cols A-D): navigation table + per-team link grid + points
+    glossary + the all-time All-League Team. RIGHT band (cols F+):
+    All-League Team of the Week and Season-to-Date, each with two
+    Total-Pts deviation columns. The bands are built independently and
+    zipped row-for-row (the shorter padded) so the spacer + right columns
+    stay aligned.
+
+    Data params arrive pre-fetched (see almanac_data.get_home_tab_data) so
+    the preview path and the live-write path can't drift on what they
+    query.
+
+    nav_targets: optional {tab_title: gid} map. Provided on the live write
+    -> nav cells become in-sheet =HYPERLINK formulas; None on the TSV
+    preview -> plain tab-name text. Draft Recap is always plain (its tab
+    isn't built yet).
+    """
+    banner = [
         ['Fantasy Beat Reporter Almanac'],
+        [_HOME_SCORING_CALLOUT],
+        [],
+    ]
+    left_rows = _home_left_rows(all_time_rows, team_titles, nav_targets)
+    right_rows = _home_right_rows(
+        weekly_rows, weekly_all_rows, season_rows, season_all_rows,
+        season_year, matchup_period, league_id,
+    )
+    right_width = len(HOME_HEADER) + 2
+    return [
+        *banner,
+        *_merge_home_bands(left_rows, right_rows, _HOME_LEFT_WIDTH, right_width),
+    ]
+
+
+def _home_left_rows(all_time_rows, team_titles, nav_targets):
+    """Left band (cols A-D): nav hub + per-team grid + glossary + all-time
+    All-League Team. Rows are padded to _HOME_LEFT_WIDTH by the merge."""
+    rows = [['Navigate']]
+    rows.append([
+        home_nav_link('Records', RECORDS_TAB, nav_targets),
+        'All-time & current-season record book.',
+    ])
+    rows.append([
+        home_nav_link('Matchup History', TEAM_WEEKS_TAB, nav_targets),
+        'Team-by-team week scoring archive.',
+    ])
+    rows.append(['Team Pages', 'Historic production by team.'])
+    rows.extend(_home_team_grid_rows(team_titles, nav_targets))
+    rows.append([home_nav_link('Draft Recap', None, nav_targets), 'Coming soon.'])
+
+    rows.append([])
+    rows.append(['Points Glossary'])
+    rows.extend([term, definition] for term, definition in _HOME_GLOSSARY)
+
+    rows.append([])
+    rows.append(['All-League Team -- All-Time'])
+    rows.append(list(HOME_ALLTIME_HEADER))
+    rows.extend(format_all_league_thin_row(row) for row in all_time_rows)
+    return rows
+
+
+def _home_team_grid_rows(team_titles, nav_targets, per_row=4):
+    """Per-team link grid: team tab titles laid out `per_row` across the
+    left band, each cell linking to that team's tab (plain text in
+    preview)."""
+    titles = list(team_titles or [])
+    grid = []
+    for start in range(0, len(titles), per_row):
+        chunk = titles[start:start + per_row]
+        grid.append([home_nav_link(title, title, nav_targets) for title in chunk])
+    return grid
+
+
+def _home_right_rows(weekly_rows, weekly_all_rows, season_rows,
+                     season_all_rows, season_year, matchup_period, league_id):
+    """Right band (cols F+): week + season All-League Teams, each row
+    carrying the two Total-Pts deviation columns."""
+    header = [*HOME_HEADER, HOME_DEVIATION_LABEL, '']
+    week_dev = _deviation_by_slot(weekly_rows, weekly_all_rows)
+    season_dev = _deviation_by_slot(season_rows, season_all_rows)
+
+    rows = [
         [f'All-League Team of the Week: {season_year} Week {matchup_period}'],
         [],
-        HOME_HEADER,
+        header,
     ]
-    rows.extend([
-        format_all_league_team_row(row, league_id=league_id)
+    rows.extend(
+        format_all_league_team_row_with_deviation(
+            row, week_dev.get(row.get('slot_label')), league_id=league_id,
+        )
         for row in weekly_rows
-    ])
+    )
     rows.extend([
         [],
         [f'All-League Team Season-to-Date: {season_year}'],
         [],
-        HOME_HEADER,
+        header,
     ])
-    rows.extend([
-        format_all_league_team_row(row, league_id=league_id)
+    rows.extend(
+        format_all_league_team_row_with_deviation(
+            row, season_dev.get(row.get('slot_label')), league_id=league_id,
+        )
         for row in season_rows
-    ])
+    )
     return rows
+
+
+def _deviation_by_slot(active_rows, all_rows):
+    """Map slot_label -> the points_type='all' pick when it is a DIFFERENT
+    player than the active pick at that slot (#23). Same player (just sat a
+    game) -> no entry: the locked rule is player-only deltas, not
+    points-only deltas.
+
+    Behavior note (locked v1.2): the all-lens lineup is a full, independent
+    optimal lineup -- gap-based selection re-optimized globally over
+    active+inactive+FA -- and the deviation is read position-by-position
+    against it. So a player can appear as BOTH an active pick at one slot
+    AND another slot's total-pts deviation (e.g. Yordan starts at DH but is
+    also the best LF by total points, because the all-lens lineup shuffles
+    him to LF and someone else to DH). The column means "best at this slot
+    incl. bench & FA," not "untapped value not already started elsewhere."
+    """
+    all_by_slot = {row.get('slot_label'): row for row in all_rows}
+    deviations = {}
+    for row in active_rows:
+        label = row.get('slot_label')
+        alt = all_by_slot.get(label)
+        if (
+            alt
+            and alt.get('player_id') is not None
+            and alt.get('player_id') != row.get('player_id')
+        ):
+            deviations[label] = alt
+    return deviations
+
+
+def _merge_home_bands(left_rows, right_rows, left_width, right_width):
+    """Zip the two bands row-for-row into the full Home matrix. Each output
+    row is [left band (left_width) | spacer | right band (right_width)],
+    padding the shorter band with blank cells so columns stay aligned."""
+    merged = []
+    for index in range(max(len(left_rows), len(right_rows))):
+        left = list(left_rows[index]) if index < len(left_rows) else []
+        right = list(right_rows[index]) if index < len(right_rows) else []
+        left = (left + [''] * left_width)[:left_width]
+        right = (right + [''] * right_width)[:right_width]
+        merged.append([*left, '', *right])
+    return merged
 
 
 def build_team_weeks_tab_rows(team_week_rows, stat_specs, league_id=None,

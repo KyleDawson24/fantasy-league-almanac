@@ -472,6 +472,11 @@ def _enrich_optimal_team_with_stats(selected_rows, season_year, matchup_period,
             -- v1.2: prefer the owner display name (nickname > "First Last")
             -- carried on the fact; fall back to the raw owner_name.
             MAX(COALESCE(owner_display, owner_name)) AS owner_name,
+            -- v1.2 (#22): games_played drives the all-time team's ppg
+            -- column. Scoped by the same performance_status filter as the
+            -- points, so for points_type='active' this is active games and
+            -- ppg reads "points per active game" (per-team-tab convention).
+            SUM(games_played) AS games_played,
             {stat_select}
         FROM fct_weekly_player_performance
         WHERE {where_sql}
@@ -543,6 +548,33 @@ def get_optimal_team(season_year=None, matchup_period=None,
             row['period_label'] = 'Season'
 
     return selected
+
+
+def get_home_tab_data(season_year, matchup_period):
+    """Fetch every dataset the Home tab needs, in one place (#23).
+
+    Centralizing the queries here is the fix for the recurring "preview
+    path vs live-write path drift" bug class: both generate_almanac_sheet
+    (preview) and write_almanac (live) call this, so they can't disagree
+    on what the Home tab is built from. Keys match build_home_tab_rows'
+    data params.
+
+      weekly_rows / season_rows   -- active-lens All-League Team (week, season)
+      weekly_all_rows / season_all_rows
+                                  -- points_type='all' lineups (active +
+                                     inactive + FA) driving the Total-Pts
+                                     deviation columns
+      all_time_rows               -- all-time active All-League Team (left band)
+    """
+    return {
+        'weekly_rows': get_all_league_team(season_year, matchup_period),
+        'season_rows': get_all_league_team(season_year),
+        'weekly_all_rows': get_optimal_team(
+            season_year, matchup_period, points_type='all',
+        ),
+        'season_all_rows': get_optimal_team(season_year, points_type='all'),
+        'all_time_rows': get_optimal_team(season_year=None, points_type='active'),
+    }
 
 
 def get_slot_capacities(season_year, matchup_period):

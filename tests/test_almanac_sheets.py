@@ -319,29 +319,78 @@ class TestBoxscoreFormula:
 
 
 class TestHomeRows:
-    def test_home_rows_include_title_header_and_data(self):
-        selected = almanac_sheets.select_all_league_team(
+    def test_home_rows_two_band_layout_and_deviation(self):
+        # Active picks (week + season-to-date).
+        weekly = almanac_sheets.select_all_league_team(
             [_candidate(1, 'C', 12.2400000001, 'Catcher A', team_id=8)],
             {'C': 1},
         )
-        season_selected = [dict(row, period_label='Season') for row in selected]
+        season = [dict(row, period_label='Season') for row in weekly]
+        # points_type='all' lineups: a DIFFERENT player at C, so the
+        # Total-Pts deviation columns populate.
+        weekly_all = almanac_sheets.select_all_league_team(
+            [_candidate(2, 'C', 30.0, 'Bench Catcher', team_id=9)],
+            {'C': 1},
+        )
+        season_all = [dict(row, period_label='Season') for row in weekly_all]
+        # All-time team (left band, thin Slot|Player|Pts|ppg).
+        all_time = almanac_sheets.select_all_league_team(
+            [_candidate(3, 'C', 600.0, 'All-Time Catcher', team_id=8)],
+            {'C': 1},
+        )
+        for row in all_time:
+            row['games_played'] = 200
 
         rows = almanac_sheets.build_home_tab_rows(
-            selected,
-            season_selected,
+            weekly_rows=weekly,
+            season_rows=season,
+            weekly_all_rows=weekly_all,
+            season_all_rows=season_all,
+            all_time_rows=all_time,
             season_year=2026,
             matchup_period=8,
+            team_titles=['AAA', 'BP'],
             league_id=1156117086,
         )
 
+        # Banner (spans both bands).
         assert rows[0] == ['Fantasy Beat Reporter Almanac']
-        assert rows[1] == ['All-League Team of the Week: 2026 Week 8']
-        assert rows[3] == almanac_sheets.HOME_HEADER
-        assert rows[4][0:6] == ['C', 'BOS', 'Catcher A', 'Team 8', 'Owner 8', 12.2]
-        assert rows[4][7].startswith('=HYPERLINK(')
-        assert rows[6] == ['All-League Team Season-to-Date: 2026']
-        assert rows[8] == almanac_sheets.HOME_HEADER
-        assert rows[9][7] == ''
+        assert 'current-season scoring' in rows[1][0]
+        assert rows[2] == []
+
+        # Right band (cols F+): section labels + header (HOME_HEADER + the
+        # deviation group label).
+        right_first = [r[5] if len(r) > 5 else '' for r in rows]
+        assert 'All-League Team of the Week: 2026 Week 8' in right_first
+        assert 'All-League Team Season-to-Date: 2026' in right_first
+        header = next(r for r in rows if len(r) > 5 and r[5] == 'Slot')
+        assert header[5:13] == almanac_sheets.HOME_HEADER
+        assert header[13] == almanac_sheets.HOME_DEVIATION_LABEL
+
+        # Right-band data rows for slot C: week (boxscore embedded in Points,
+        # col K / idx 10) and season (plain Points). Both carry the deviation
+        # player + total pts (idx 13/14) because the all-lens pick differs.
+        c_rows = [r for r in rows if len(r) > 14 and r[5] == 'C' and r[7] == 'Catcher A']
+        assert len(c_rows) == 2
+        week_c, season_c = c_rows
+        assert str(week_c[10]).startswith('=HYPERLINK(')
+        assert season_c[10] == 12.2
+        assert week_c[13] == 'Bench Catcher' and week_c[14] == 30.0
+        assert season_c[13] == 'Bench Catcher' and season_c[14] == 30.0
+
+        # Left band (cols A-D): nav labels, per-team grid, glossary, all-time.
+        left_first = [r[0] if r else '' for r in rows]
+        assert 'Navigate' in left_first
+        assert 'Points Glossary' in left_first
+        assert 'All-League Team -- All-Time' in left_first
+        grid = next(r for r in rows if r and r[0] == 'AAA')
+        assert grid[1] == 'BP'
+        alltime_c = next(
+            r for r in rows
+            if len(r) > 3 and r[0] == 'C' and r[1] == 'All-Time Catcher'
+        )
+        assert alltime_c[2] == 600.0
+        assert alltime_c[3] == '3.00'  # 600.0 / 200 games
 
 
 class TestTeamWeeksRows:

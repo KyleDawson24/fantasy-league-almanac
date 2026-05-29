@@ -47,38 +47,41 @@ def main():
     if season_year is None:
         season_year, matchup_period = almanac_sheets.get_latest_matchup_period()
 
-    weekly_team_rows = almanac_sheets.get_all_league_team(season_year, matchup_period)
-    season_team_rows = almanac_sheets.get_all_league_team(season_year)
-    home_rows = almanac_sheets.build_home_tab_rows(
-        weekly_team_rows,
-        season_team_rows,
-        season_year,
-        matchup_period,
-        league_id=os.getenv('LEAGUE_ID'),
-    )
+    league_id = os.getenv('LEAGUE_ID')
     records_rows = almanac_sheets.build_records_tab_rows(
         almanac_sheets.get_almanac_records('all_time'),
         almanac_sheets.get_almanac_records('current_season'),
-        league_id=os.getenv('LEAGUE_ID'),
+        league_id=league_id,
     )
     team_week_stat_specs = almanac_sheets.get_team_week_stat_specs()
     team_weeks_rows = almanac_sheets.build_team_weeks_tab_rows(
         almanac_sheets.get_team_weeks(team_week_stat_specs),
         team_week_stat_specs,
-        league_id=os.getenv('LEAGUE_ID'),
+        league_id=league_id,
     )
     team_tabs = almanac_sheets.build_team_history_tabs(
         almanac_sheets.get_team_roster_history_stats(season_year),
         season_year=season_year,
-        league_id=os.getenv('LEAGUE_ID'),
+        league_id=league_id,
         slot_caps=almanac_sheets.get_roster_slot_capacities(
             season_year, include_inactive=True,
         ),
     )
+    # Home is built last among the data tabs: its nav band (#23) lists the
+    # team tabs. Preview has no real gids, so nav_targets stays None ->
+    # nav cells render as plain tab-name text.
+    home_data = almanac_sheets.get_home_tab_data(season_year, matchup_period)
+    home_rows = almanac_sheets.build_home_tab_rows(
+        **home_data,
+        season_year=season_year,
+        matchup_period=matchup_period,
+        team_titles=[title for title, _ in team_tabs],
+        league_id=league_id,
+    )
     preview_tabs = [
         ('Home', home_rows),
         ('Records', records_rows),
-        ('Team Weeks', team_weeks_rows),
+        (almanac_sheets.TEAM_WEEKS_TAB, team_weeks_rows),
         *team_tabs,
     ]
 

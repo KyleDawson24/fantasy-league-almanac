@@ -158,3 +158,40 @@ models:
         description: 'hitting, pitching, fielding, or unknown -- passed through from stat_classification.'
       - name: points_per_unit
         description: 'Fantasy points awarded per unit of this stat under the current season''s scoring rules.'
+
+  - name: stg_draft
+    description: >
+      One row per draft pick, flattened from the append-only RAW.DRAFT_PICKS
+      snapshots (latest per season). Sourced from the espn-api wrapper's
+      league.draft. keeper flags picks retained from the prior season (keeper
+      league). Mirrors stg_team_owners over RAW.TEAM_OWNERS.
+      Grain: one row per (season_year, overall_pick).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - season_year
+              - overall_pick
+    columns:
+      - name: season_year
+        description: 'Season the draft belongs to.'
+        tests:
+          - not_null
+      - name: overall_pick
+        description: 'True overall selection number (1..N), snake order included.'
+        tests:
+          - not_null
+      - name: round_num
+        description: 'Draft round (1-based).'
+      - name: round_pick
+        description: 'Pick number within the round.'
+      - name: player_id
+        description: 'ESPN stable numeric player identifier.'
+        tests:
+          - not_null
+      - name: player_name
+        description: 'Player full name, resolved at extract time via the wrapper.'
+      - name: team_id
+        description: 'ESPN numeric id of the drafting fantasy team.'
+      - name: keeper
+        description: 'True when the pick was a keeper retained from the prior season.'

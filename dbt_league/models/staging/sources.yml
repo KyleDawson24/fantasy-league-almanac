@@ -13,3 +13,5 @@ sources:
         description: "Raw ESPN Fantasy roster settings JSON, append-only. Each row is a snapshot of lineup slot counts, position maximums, and related roster constraints for a season."
       - name: team_owners
         description: "Raw ESPN team -> owner mapping, append-only. Each row is a VARIANT array of {team_id, owner_id, first_name, last_name} for a season, captured from league.teams[].owners. owner_id is the stable ESPN member GUID the box-score extract discards; this is the bridge that lets the owner_nicknames seed join the data. Staging picks the latest snapshot per season."
+      - name: draft_picks
+        description: "Raw ESPN draft board, append-only. Each row is a VARIANT array of pick dicts {overall_pick, round_num, round_pick, player_id, player_name, team_id, keeper} for a season, serialized from the espn-api wrapper's league.draft (player names + drafting team resolved at extract time). keeper flags picks retained from the prior season (keeper league). Staging picks the latest snapshot per season."

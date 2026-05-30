@@ -1237,3 +1237,49 @@ models:
         description: 'Distinct players contributing to this bucket. Diagnostic for "how thin was this bench."'
       - name: negative_points
         description: 'Team rollup of inactive-player negative_points across the matchup_period.'
+
+  - name: mart_draft_board
+    description: >
+      One wide row per draft pick: the pick (round / overall / keeper), the
+      drafting team's labels, and the player's total season production
+      (SUM of calculated_points, COALESCEd to 0 for never-played picks) --
+      the draft-value join. Thin relational view over stg_draft; consumer
+      surface for the Draft Recap tab.
+      Grain: one row per (season_year, overall_pick).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - season_year
+              - overall_pick
+    columns:
+      - name: season_year
+        description: 'Season the draft belongs to.'
+        tests:
+          - not_null
+      - name: overall_pick
+        description: 'True overall selection number; the pick grain.'
+        tests:
+          - not_null
+      - name: round_num
+        description: 'Draft round.'
+      - name: round_pick
+        description: 'Pick within the round.'
+      - name: keeper
+        description: 'True for keeper picks (retained from the prior season).'
+      - name: team_id
+        description: 'Drafting fantasy team id.'
+      - name: team_name
+        description: 'Drafting team name (latest-in-season label).'
+      - name: team_abbrev
+        description: 'Drafting team abbreviation.'
+      - name: owner_display
+        description: 'Drafting team owner display (nickname > proper name), co-owners slash-joined.'
+      - name: player_id
+        description: 'ESPN stable numeric player identifier.'
+      - name: player_name
+        description: 'Display name (nickname-resolved), ESPN draft name as fallback.'
+      - name: season_points
+        description: 'Player total season calculated_points across every team / slot / status; 0 when the player never appeared in box scores.'
+      - name: games_played
+        description: 'Player total MLB games that season (DH days count 2); 0 when never played.'

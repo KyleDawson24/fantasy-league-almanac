@@ -511,10 +511,13 @@ def build_home_tab_rows(weekly_rows, season_rows, weekly_all_rows,
         [_HOME_SCORING_CALLOUT],
         [],
     ]
-    left_rows = _home_left_rows(all_time_rows, team_titles, nav_targets)
-    right_rows = _home_right_rows(
+    right_rows, season_label_idx = _home_right_rows(
         weekly_rows, weekly_all_rows, season_rows, season_all_rows,
         season_year, matchup_period, league_id,
+    )
+    left_rows = _home_left_rows(
+        all_time_rows, team_titles, nav_targets,
+        align_alltime_to=season_label_idx,
     )
     right_width = len(HOME_HEADER) + 2
     return [
@@ -523,9 +526,14 @@ def build_home_tab_rows(weekly_rows, season_rows, weekly_all_rows,
     ]
 
 
-def _home_left_rows(all_time_rows, team_titles, nav_targets):
+def _home_left_rows(all_time_rows, team_titles, nav_targets, align_alltime_to=None):
     """Left band (cols A-D): nav hub + per-team grid + glossary + all-time
-    All-League Team. Rows are padded to _HOME_LEFT_WIDTH by the merge."""
+    All-League Team. Rows are padded to _HOME_LEFT_WIDTH by the merge.
+
+    align_alltime_to: the right band's Season-to-Date label index. The
+    all-time block pads up to it and mirrors the season block's
+    label / blank / header / rows shape, so the two lineups sit inline
+    (#23 QA)."""
     rows = [['Navigate']]
     rows.append([
         home_nav_link('Records', RECORDS_TAB, nav_targets),
@@ -545,8 +553,14 @@ def _home_left_rows(all_time_rows, team_titles, nav_targets):
     rows.append(['Points Glossary'])
     rows.extend([term, definition] for term, definition in _HOME_GLOSSARY)
 
-    rows.append([])
+    # Align the all-time block with the right-band Season-to-Date block so
+    # the lineups sit inline: pad up to the season label's row, then mirror
+    # its label / blank / header / rows shape.
+    if align_alltime_to is not None:
+        while len(rows) < align_alltime_to:
+            rows.append([])
     rows.append(['All-League Team: All-Time'])
+    rows.append([])
     rows.append(list(HOME_ALLTIME_HEADER))
     rows.extend(format_all_league_thin_row(row) for row in all_time_rows)
     return rows
@@ -568,7 +582,11 @@ def _home_team_grid_rows(team_titles, nav_targets, per_row=2):
 def _home_right_rows(weekly_rows, weekly_all_rows, season_rows,
                      season_all_rows, season_year, matchup_period, league_id):
     """Right band (cols F+): week + season All-League Teams, each row
-    carrying the two Total-Pts deviation columns."""
+    carrying the two Total-Pts deviation columns.
+
+    Returns (rows, season_label_index). The index is the row where the
+    Season-to-Date label sits; the left band aligns its all-time block to
+    it so the two lineups sit inline (#23 QA)."""
     header = [*HOME_HEADER, HOME_DEVIATION_LABEL, '']
     week_dev = _deviation_by_slot(weekly_rows, weekly_all_rows)
     season_dev = _deviation_by_slot(season_rows, season_all_rows)
@@ -584,19 +602,18 @@ def _home_right_rows(weekly_rows, weekly_all_rows, season_rows,
         )
         for row in weekly_rows
     )
-    rows.extend([
-        [],
-        [f'All-League Team Season-to-Date: {season_year}'],
-        [],
-        header,
-    ])
+    rows.append([])
+    season_label_idx = len(rows)
+    rows.append([f'All-League Team Season-to-Date: {season_year}'])
+    rows.append([])
+    rows.append(header)
     rows.extend(
         format_all_league_team_row_with_deviation(
             row, season_dev.get(row.get('slot_label')), league_id=league_id,
         )
         for row in season_rows
     )
-    return rows
+    return rows, season_label_idx
 
 
 def _deviation_by_slot(active_rows, all_rows):

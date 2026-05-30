@@ -215,6 +215,10 @@ def _replace_home_tab(spreadsheet, rows):
             # only touches numeric cells, harmless on the text/hyperlink
             # cells those columns also contain.
             {'range': 'C:C', 'format': {'numberFormat': {'type': 'NUMBER', 'pattern': '0'}}},
+            # ppg (D) -- 2 decimals. The value is written as a string but
+            # USER_ENTERED coerces it to a number and would drop a trailing
+            # zero ("4.60" -> 4.6); the format pins it back to 2 places.
+            {'range': 'D:D', 'format': {'numberFormat': {'type': 'NUMBER', 'pattern': '0.00'}}},
             {'range': 'K:K', 'format': {'numberFormat': {'type': 'NUMBER', 'pattern': '0.0'}}},
             {'range': 'O:O', 'format': {'numberFormat': {'type': 'NUMBER', 'pattern': '0.0'}}},
         ]
@@ -544,6 +548,16 @@ def _replace_team_tab(spreadsheet, title, rows):
                         'foregroundColor': {'red': 1, 'green': 1, 'blue': 1},
                     },
                     'backgroundColor': {'red': 0.12, 'green': 0.20, 'blue': 0.30},
+                },
+            },
+            {
+                # Points glossary (Q1:Q3) -- plain, left-aligned, small.
+                # Comes after the A1/A2 row formats so it overrides their
+                # bold/italic on these cells.
+                'range': 'Q1:Q3',
+                'format': {
+                    'horizontalAlignment': 'LEFT',
+                    'textFormat': {'bold': False, 'italic': False, 'fontSize': 10},
                 },
             },
             {

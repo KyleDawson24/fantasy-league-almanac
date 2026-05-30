@@ -757,6 +757,74 @@ def load_team_owners_to_snowflake(conn, team_owners, year):
         cursor.close()
 
 
+def fetch_draft(year):
+    """Return the season's draft board as a list of pick dicts:
+    {overall_pick, round_num, round_pick, player_id, player_name,
+     team_id, keeper}.
+
+    Sourced from the espn-api wrapper's league.draft, which resolves
+    player names and the drafting Team for us (the raw mDraftDetail view
+    carries only ids). overall_pick is the 1-based position in the draft
+    order -- league.draft is built in ESPN's overallPickNumber sequence,
+    so the enumerate index is the true overall selection number (snake
+    order included).
+
+    keeper flags picks retained from the prior season (this is a keeper
+    league): keepers occupy real draft slots but weren't competitively
+    drafted, so consumers can label them.
+
+    Returns [] for a season that hasn't drafted yet (the wrapper leaves
+    league.draft empty), so the caller can skip the load.
+    """
+    league = connect_espn(year)
+    rows = []
+    for overall_pick, pick in enumerate(league.draft, start=1):
+        team = getattr(pick, "team", None)
+        rows.append({
+            "overall_pick": overall_pick,
+            "round_num": pick.round_num,
+            "round_pick": pick.round_pick,
+            "player_id": pick.playerId,
+            "player_name": pick.playerName,
+            "team_id": getattr(team, "team_id", None),
+            "keeper": bool(pick.keeper_status),
+        })
+    return rows
+
+
+def load_draft_to_snowflake(conn, draft_rows, year):
+    """Append the season's draft board as a row in RAW.DRAFT_PICKS.
+
+    Append-only snapshot (mirrors TEAM_OWNERS / SCORING_SETTINGS); the
+    staging model picks the latest row per season via extracted_at. The
+    full pick list is stored as one VARIANT payload per (season, extract).
+    """
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS DRAFT_PICKS (
+                season_year     INTEGER,
+                raw_json        VARIANT,
+                extracted_at    TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()
+            )
+        """)
+
+        cursor.execute(
+            """
+            INSERT INTO DRAFT_PICKS (season_year, raw_json)
+            SELECT %s, PARSE_JSON(%s)
+            """,
+            (year, json.dumps(draft_rows)),
+        )
+
+        conn.commit()
+        print(f"  Loaded {len(draft_rows)} draft picks for {year} into Snowflake.")
+
+    finally:
+        cursor.close()
+
+
 def extract_scoring_settings(conn, year):
     """Pull scoring settings from ESPN and load to Snowflake."""
     print(f"\nScoring settings for {year}:")
@@ -781,6 +849,13 @@ def extract_league_settings(conn, year):
     team_owners = fetch_team_owners(year)
     print(f"  Retrieved {len(team_owners)} team-owner rows for {year}")
     load_team_owners_to_snowflake(conn, team_owners, year)
+
+    draft_rows = fetch_draft(year)
+    if draft_rows:
+        print(f"  Retrieved {len(draft_rows)} draft picks for {year}")
+        load_draft_to_snowflake(conn, draft_rows, year)
+    else:
+        print(f"  No draft found for {year} (not drafted yet) -- skipping draft load")
 
 
 # ---------------------------------------------------------------------------

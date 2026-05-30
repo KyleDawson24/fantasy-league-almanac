@@ -577,6 +577,38 @@ def get_home_tab_data(season_year, matchup_period):
     }
 
 
+def get_draft_board(season_year):
+    """Return the season's draft board from mart_draft_board -- one row per
+    pick -- with the value metric attached (draft tab).
+
+    value_delta = overall_pick - points_rank, where points_rank is the
+    player's rank by season_points within the season's drafted pool. A
+    large positive value_delta is a steal (drafted late, produced like an
+    early pick); a large negative is a bust (drafted early, underproduced).
+    Rows ordered by overall_pick.
+    """
+    return query_snowflake("""
+        SELECT
+            overall_pick,
+            round_num,
+            round_pick,
+            keeper,
+            team_id,
+            team_name,
+            team_abbrev,
+            owner_display,
+            player_id,
+            player_name,
+            season_points,
+            games_played,
+            RANK() OVER (ORDER BY season_points DESC)               AS points_rank,
+            overall_pick - RANK() OVER (ORDER BY season_points DESC) AS value_delta
+        FROM mart_draft_board
+        WHERE season_year = %s
+        ORDER BY overall_pick
+    """, (season_year,))
+
+
 def get_slot_capacities(season_year, matchup_period):
     """Return configured active roster slot counts for one season."""
     rows = query_snowflake("""

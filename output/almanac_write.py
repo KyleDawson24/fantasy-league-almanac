@@ -25,6 +25,7 @@ import almanac_render
 import records
 from almanac_data import (
     get_almanac_records,
+    get_draft_board,
     get_current_team_roster_stats,
     get_latest_matchup_period,
     get_roster_slot_capacities,
@@ -36,6 +37,7 @@ from almanac_data import (
 )
 from almanac_logic import (
     SCORE_RECORD_SPECS,
+    build_draft_tab_rows,
     build_home_tab_rows,
     build_records_tab_rows,
     build_team_history_tabs,
@@ -43,6 +45,7 @@ from almanac_logic import (
     expand_team_roster_rows,
 )
 from almanac_render import (
+    DRAFT_TAB,
     HOME_TAB,
     RECORDS_TAB,
     RECORDS_MATRIX_DETAIL_HEADER,
@@ -114,6 +117,9 @@ def write_almanac(sheet_id, season_year=None, matchup_period=None):
         league_id=league_id,
         slot_caps=get_roster_slot_capacities(season_year, include_inactive=True),
     )
+    draft_tab_rows = build_draft_tab_rows(
+        get_draft_board(season_year), season_year, league_id=league_id,
+    )
     client = _get_authorized_client()
     spreadsheet = client.open_by_key(sheet_id)
 
@@ -137,10 +143,11 @@ def write_almanac(sheet_id, season_year=None, matchup_period=None):
         _replace_team_tab(spreadsheet, title, team_page_rows)
         for title, team_page_rows in team_pages
     ]
+    draft_ws = _replace_draft_tab(spreadsheet, draft_tab_rows)
 
     nav_targets = {
         ws.title: ws.id
-        for ws in (records_ws, matchup_ws, *team_worksheets)
+        for ws in (records_ws, matchup_ws, draft_ws, *team_worksheets)
         if ws is not None
     }
     rows = build_home_tab_rows(
@@ -154,7 +161,8 @@ def write_almanac(sheet_id, season_year=None, matchup_period=None):
     _replace_home_tab(spreadsheet, rows)
 
     _sort_almanac_tabs(spreadsheet, [
-        HOME_TAB, RECORDS_TAB, TEAM_WEEKS_TAB, *[title for title, _ in team_pages],
+        HOME_TAB, RECORDS_TAB, TEAM_WEEKS_TAB,
+        *[title for title, _ in team_pages], DRAFT_TAB,
     ])
 
     print(
@@ -275,6 +283,88 @@ def _home_label_formats(rows, last_col):
                 },
             })
     return formats
+
+
+_DRAFT_SECTION_LABELS = {'Best Value Picks', 'Biggest Busts', 'Draft Board'}
+
+
+def _replace_draft_tab(spreadsheet, rows):
+    """Clear/create the Draft Recap tab and write it. Returns the worksheet
+    so the two-pass write can read its gid for the Home nav link."""
+    width = max((len(row) for row in rows), default=20)
+    try:
+        worksheet = spreadsheet.worksheet(DRAFT_TAB)
+    except gspread.WorksheetNotFound:
+        worksheet = _sheets_call(
+            f'create {DRAFT_TAB}',
+            lambda: spreadsheet.add_worksheet(
+                title=DRAFT_TAB, rows=max(len(rows) + 10, 50), cols=max(width, 20),
+            ),
+        )
+
+    _sheets_call(f'clear {DRAFT_TAB}', worksheet.clear)
+    # RAW so the signed value strings ("+253") keep their '+' -- USER_ENTERED
+    # would coerce them to plain numbers and drop the sign.
+    _sheets_call(
+        f'update {DRAFT_TAB}',
+        lambda: worksheet.update(rows, 'A1', value_input_option='RAW'),
+    )
+
+    try:
+        last_col = _a1_col(width)
+        _apply_draft_tab_dimensions(spreadsheet, worksheet, width)
+        formats = [
+            {'range': 'A1', 'format': {'textFormat': {'bold': True, 'fontSize': 14}}},
+            {'range': f'A2:{last_col}2', 'format': {'textFormat': {'italic': True}}},
+        ]
+        formats.extend(_draft_label_formats(rows, last_col))
+        _batch_format(worksheet, formats)
+    except Exception as exc:
+        print(f"[almanac] formatting skipped for {DRAFT_TAB}: {exc}")
+
+    return worksheet
+
+
+def _draft_label_formats(rows, last_col):
+    """Bold the Draft Recap section labels + the leaderboard / board headers."""
+    formats = []
+    for row_number, row in enumerate(rows, 1):
+        first = row[0] if row else ''
+        if first in _DRAFT_SECTION_LABELS:
+            formats.append({
+                'range': f'A{row_number}:{last_col}{row_number}',
+                'format': {'textFormat': {'bold': True, 'fontSize': 12}},
+            })
+        elif first == 'Player' and len(row) > 1 and row[1] == 'Team':
+            formats.append({
+                'range': f'A{row_number}:E{row_number}',
+                'format': {
+                    'textFormat': {'bold': True},
+                    'backgroundColor': {'red': 0.90, 'green': 0.94, 'blue': 0.98},
+                },
+            })
+        elif first == 'Rd':
+            formats.append({
+                'range': f'A{row_number}:{last_col}{row_number}',
+                'format': {
+                    'textFormat': {
+                        'bold': True,
+                        'foregroundColor': {'red': 1, 'green': 1, 'blue': 1},
+                    },
+                    'backgroundColor': {'red': 0.12, 'green': 0.20, 'blue': 0.30},
+                },
+            })
+    return formats
+
+
+def _apply_draft_tab_dimensions(spreadsheet, worksheet, width):
+    """Col A (Player / Rd) wide-ish; the data + team columns a touch narrower."""
+    sheet_id = worksheet.id
+    requests = [
+        _column_width_request(sheet_id, 0, 1, 130),
+        _column_width_request(sheet_id, 1, max(width, 2), 105),
+    ]
+    _sheets_batch_update(spreadsheet, f'format dimensions {worksheet.title}', requests)
 
 
 def _replace_team_weeks_tab(spreadsheet, rows, stat_specs, source_rows=None, record_marks=None):

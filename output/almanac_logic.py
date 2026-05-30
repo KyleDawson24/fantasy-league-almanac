@@ -38,6 +38,8 @@ from almanac_render import (
     HOME_DEVIATION_LABEL,
     HOME_HEADER,
     HOME_TAB,
+    DRAFT_TAB,
+    DRAFT_VALUE_HEADER,
     RECORDS_HEADER,
     RECORDS_MATRIX_DETAIL_HEADER,
     RECORDS_MATRIX_WIDTH,
@@ -59,6 +61,8 @@ from almanac_render import (
     format_all_league_team_row,
     format_all_league_team_row_with_deviation,
     format_all_league_thin_row,
+    format_draft_board_cell,
+    format_draft_value_row,
     home_nav_link,
     format_record_matrix_row,
     format_record_row,
@@ -545,9 +549,11 @@ def _home_left_rows(all_time_rows, team_titles, nav_targets, align_alltime_to=No
     ])
     rows.append(['Team Pages', 'Historic production by team.'])
     rows.extend(_home_team_grid_rows(team_titles, nav_targets))
-    # Planned tabs -- listed but unlinked until they're built.
+    # Slot Scoring is still a planned tab (unlinked). Draft Recap is built
+    # now, so it links live (gid resolved in the two-pass write).
     rows.append([home_nav_link('Slot Scoring', None, nav_targets), 'Coming soon.'])
-    rows.append([home_nav_link('Draft Recap', None, nav_targets), 'Coming soon.'])
+    rows.append([home_nav_link('Draft Recap', DRAFT_TAB, nav_targets),
+                 'Draft board + best-value / bust picks.'])
 
     rows.append([])
     rows.append(['Points Glossary'])
@@ -657,6 +663,75 @@ def _merge_home_bands(left_rows, right_rows, left_width, right_width):
         right = (right + [''] * right_width)[:right_width]
         merged.append([*left, '', *right])
     return merged
+
+
+def build_draft_tab_rows(board_rows, season_year, league_id=None):
+    """Build the Draft Recap tab: Best Value / Biggest Bust leaderboards
+    above a round x team draft board (draft tab).
+
+    board_rows come from almanac_data.get_draft_board (one row per pick,
+    value_delta attached). league_id is unused for now (no boxscore links on
+    this tab) -- accepted for signature symmetry with the other builders.
+    """
+    del league_id
+    rows = [
+        [f'Draft Recap: {season_year}'],
+        ['Value = where a player was picked vs. how they produced '
+         '(overall pick minus season-points rank). (K) = keeper.'],
+        [],
+    ]
+
+    ranked = [r for r in board_rows if r.get('value_delta') is not None]
+    best_value = sorted(ranked, key=lambda r: (-r['value_delta'], r['overall_pick']))[:10]
+    biggest_bust = sorted(ranked, key=lambda r: (r['value_delta'], r['overall_pick']))[:10]
+
+    rows.append(['Best Value Picks'])
+    rows.append(list(DRAFT_VALUE_HEADER))
+    rows.extend(format_draft_value_row(p) for p in best_value)
+    rows.append([])
+    rows.append(['Biggest Busts'])
+    rows.append(list(DRAFT_VALUE_HEADER))
+    rows.extend(format_draft_value_row(p) for p in biggest_bust)
+
+    rows.append([])
+    rows.append(['Draft Board'])
+    rows.extend(_draft_board_grid(board_rows))
+    return rows
+
+
+def _draft_board_grid(board_rows):
+    """Pivot picks into a round x team grid. Team columns are ordered by each
+    team's round-1 pick (the draft slot order); each cell is the drafted
+    player (keeper-marked). Returns a team-abbrev header row followed by one
+    row per round."""
+    team_ids = {r['team_id'] for r in board_rows if r.get('team_id') is not None}
+    round1_pick = {
+        r['team_id']: r.get('round_pick')
+        for r in board_rows
+        if r.get('round_num') == 1 and r.get('team_id') is not None
+    }
+    team_order = sorted(team_ids, key=lambda tid: (round1_pick.get(tid) or 999, tid))
+
+    team_abbrev = {}
+    for r in board_rows:
+        team_abbrev.setdefault(
+            r['team_id'], r.get('team_abbrev') or str(r.get('team_id') or ''))
+
+    by_round_team = {}
+    rounds = set()
+    for r in board_rows:
+        by_round_team[(r.get('round_num'), r.get('team_id'))] = r
+        if r.get('round_num') is not None:
+            rounds.add(r['round_num'])
+
+    grid = [['Rd', *[team_abbrev[tid] for tid in team_order]]]
+    for rnd in sorted(rounds):
+        grid.append([
+            rnd,
+            *[format_draft_board_cell(by_round_team.get((rnd, tid)))
+              for tid in team_order],
+        ])
+    return grid
 
 
 def build_team_weeks_tab_rows(team_week_rows, stat_specs, league_id=None,

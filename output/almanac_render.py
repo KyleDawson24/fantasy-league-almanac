@@ -37,6 +37,13 @@ RECORDS_TAB = 'Records'
 TEAM_WEEKS_TAB = 'Matchup History'
 
 
+DRAFT_TAB = 'Draft Recap'
+
+
+# v1.2 draft tab: Best Value / Biggest Bust leaderboard columns.
+DRAFT_VALUE_HEADER = ['Player', 'Team', 'Pick', 'Pts', 'Value']
+
+
 HOME_HEADER = [
     'Slot', 'Team', 'Player', 'Fantasy Team', 'Owner',
     'Points', 'Slash', 'Stat Line',
@@ -492,6 +499,43 @@ def home_nav_link(label, tab_title=None, gid_map=None):
         return label
     safe = str(label).replace('"', '""')
     return f'=HYPERLINK("#gid={gid}&range=A1", "{safe}")'
+
+
+# -------------------------------------------------------------------------
+# Draft Recap tab (v1.2): round x team board + Best Value / Biggest Bust
+# leaderboards. value_delta = overall_pick - points_rank (a steal is a high
+# positive; a bust is a large negative). (K) marks keeper picks.
+# -------------------------------------------------------------------------
+
+
+def _draft_pick_label(pick):
+    """Compact draft-position label, e.g. 'R14 #195' (round + overall pick)."""
+    return f"R{pick.get('round_num')} #{pick.get('overall_pick')}"
+
+
+def _draft_player_label(pick):
+    """Player name with a keeper marker."""
+    name = pick.get('player_name') or ''
+    return f"{name} (K)" if pick.get('keeper') else name
+
+
+def format_draft_value_row(pick):
+    """One Best-Value / Biggest-Bust leaderboard row:
+    Player (+K) | Team | Pick | Pts | Value(+/-)."""
+    value = pick.get('value_delta')
+    return [
+        _draft_player_label(pick),
+        pick.get('team_abbrev') or '',
+        _draft_pick_label(pick),
+        _one_decimal(pick.get('season_points')),
+        f"{int(value):+d}" if value is not None else '',
+    ]
+
+
+def format_draft_board_cell(pick):
+    """Round x team grid cell: the drafted player, keeper-marked. Blank for
+    an unfilled (round, team) slot (shouldn't occur in a full keeper draft)."""
+    return _draft_player_label(pick) if pick else ''
 
 
 def format_record_matrix_row(spec, current_record=None, all_time_record=None,

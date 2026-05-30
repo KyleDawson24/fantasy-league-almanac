@@ -15,6 +15,7 @@ lists by calling individual format_* helpers in almanac_render.
 
 import math
 import os
+import statistics
 from collections import defaultdict
 
 import almanac_data
@@ -666,72 +667,119 @@ def _merge_home_bands(left_rows, right_rows, left_width, right_width):
 
 
 def build_draft_tab_rows(board_rows, season_year, league_id=None):
-    """Build the Draft Recap tab: Best Value / Biggest Bust leaderboards
-    above a round x team draft board (draft tab).
+    """Build the Draft Recap tab: side-by-side Best Value / Biggest Bust
+    leaderboards above a keeper-sorted round x team draft board with
+    per-row Min / Median / Max season points (draft tab).
 
     board_rows come from almanac_data.get_draft_board (one row per pick,
-    value_delta attached). league_id is unused for now (no boxscore links on
-    this tab) -- accepted for signature symmetry with the other builders.
+    value_delta attached). league_id is unused (no boxscore links here);
+    accepted for signature symmetry with the other builders.
     """
     del league_id
     rows = [
         [f'Draft Recap: {season_year}'],
-        ['Value = where a player was picked vs. how they produced '
-         '(overall pick minus season-points rank). (K) = keeper.'],
+        ['Value = Overall pick minus Total Points rank. (K) = keeper.'],
         [],
     ]
 
+    # Side-by-side leaderboards: Best Value (cols A-E) | spacer F | Biggest
+    # Busts (cols G-K).
     ranked = [r for r in board_rows if r.get('value_delta') is not None]
     best_value = sorted(ranked, key=lambda r: (-r['value_delta'], r['overall_pick']))[:10]
     biggest_bust = sorted(ranked, key=lambda r: (r['value_delta'], r['overall_pick']))[:10]
 
-    rows.append(['Best Value Picks'])
-    rows.append(list(DRAFT_VALUE_HEADER))
-    rows.extend(format_draft_value_row(p) for p in best_value)
-    rows.append([])
-    rows.append(['Biggest Busts'])
-    rows.append(list(DRAFT_VALUE_HEADER))
-    rows.extend(format_draft_value_row(p) for p in biggest_bust)
+    rows.append(['Best Value Picks', '', '', '', '', '', 'Biggest Busts'])
+    rows.append([*DRAFT_VALUE_HEADER, '', *DRAFT_VALUE_HEADER])
+    blank = [''] * len(DRAFT_VALUE_HEADER)
+    for index in range(max(len(best_value), len(biggest_bust))):
+        left = format_draft_value_row(best_value[index]) if index < len(best_value) else list(blank)
+        right = format_draft_value_row(biggest_bust[index]) if index < len(biggest_bust) else list(blank)
+        rows.append([*left, '', *right])
 
     rows.append([])
-    rows.append(['Draft Board'])
+    rows.append([])
+    rows.append([f'Draft Board - {season_year}'])
     rows.extend(_draft_board_grid(board_rows))
     return rows
 
 
-def _draft_board_grid(board_rows):
-    """Pivot picks into a round x team grid. Team columns are ordered by each
-    team's round-1 pick (the draft slot order); each cell is the drafted
-    player (keeper-marked). Returns a team-abbrev header row followed by one
-    row per round."""
-    team_ids = {r['team_id'] for r in board_rows if r.get('team_id') is not None}
-    round1_pick = {
-        r['team_id']: r.get('round_pick')
-        for r in board_rows
-        if r.get('round_num') == 1 and r.get('team_id') is not None
-    }
-    team_order = sorted(team_ids, key=lambda tid: (round1_pick.get(tid) or 999, tid))
+def _draft_sorted_columns(board_rows):
+    """Return (team_order, team_abbrev, sorted_cols).
 
+    Team columns are ordered by each team's round-1 pick -- the draft order,
+    so the leftmost column is the overall #1 pick and the rightmost is the
+    last. Within each column the picks are re-sorted: keepers first, ordered
+    by season points (keepers are designated all at once, so their assigned
+    round is arbitrary -- production is the meaningful order), then the
+    drafted picks in draft order (overall_pick)."""
+    by_team = defaultdict(list)
+    round1_pick = {}
     team_abbrev = {}
     for r in board_rows:
-        team_abbrev.setdefault(
-            r['team_id'], r.get('team_abbrev') or str(r.get('team_id') or ''))
+        tid = r.get('team_id')
+        if tid is None:
+            continue
+        by_team[tid].append(r)
+        team_abbrev.setdefault(tid, r.get('team_abbrev') or str(tid))
+        if r.get('round_num') == 1:
+            round1_pick[tid] = r.get('round_pick')
 
-    by_round_team = {}
-    rounds = set()
-    for r in board_rows:
-        by_round_team[(r.get('round_num'), r.get('team_id'))] = r
-        if r.get('round_num') is not None:
-            rounds.add(r['round_num'])
+    team_order = sorted(by_team, key=lambda tid: (round1_pick.get(tid) or 999, tid))
+    sorted_cols = {}
+    for tid, picks in by_team.items():
+        keepers = sorted(
+            (p for p in picks if p.get('keeper')),
+            key=lambda p: (-(p.get('season_points') or 0), p.get('overall_pick')),
+        )
+        drafted = sorted(
+            (p for p in picks if not p.get('keeper')),
+            key=lambda p: p.get('overall_pick'),
+        )
+        sorted_cols[tid] = keepers + drafted
+    return team_order, team_abbrev, sorted_cols
 
-    grid = [['Rd', *[team_abbrev[tid] for tid in team_order]]]
-    for rnd in sorted(rounds):
+
+def _draft_board_grid(board_rows):
+    """Keeper-sorted round x team board with per-row Min / Median / Max of
+    season points across the teams. Header row then one row per board slot."""
+    team_order, team_abbrev, sorted_cols = _draft_sorted_columns(board_rows)
+    max_slots = max((len(col) for col in sorted_cols.values()), default=0)
+
+    grid = [['Rd', 'Min', 'Median', 'Max', *[team_abbrev[tid] for tid in team_order]]]
+    for slot in range(max_slots):
+        row_picks = [
+            sorted_cols[tid][slot] if slot < len(sorted_cols[tid]) else None
+            for tid in team_order
+        ]
+        pts = [float(p.get('season_points') or 0) for p in row_picks if p is not None]
+        if pts:
+            summary = [_one_decimal(min(pts)),
+                       _one_decimal(statistics.median(pts)),
+                       _one_decimal(max(pts))]
+        else:
+            summary = ['', '', '']
         grid.append([
-            rnd,
-            *[format_draft_board_cell(by_round_team.get((rnd, tid)))
-              for tid in team_order],
+            slot + 1, *summary,
+            *[format_draft_board_cell(pick) for pick in row_picks],
         ])
     return grid
+
+
+def build_draft_board_color_grid(board_rows):
+    """Per-board-cell season points, aligned to _draft_board_grid's layout
+    (same keeper-sort + team order). One list per board slot, each holding
+    the teams' season points (None for an empty slot). The write layer maps
+    these to the board's red->white->green color scale."""
+    team_order, _, sorted_cols = _draft_sorted_columns(board_rows)
+    max_slots = max((len(col) for col in sorted_cols.values()), default=0)
+    return [
+        [
+            (float(sorted_cols[tid][slot].get('season_points') or 0)
+             if slot < len(sorted_cols[tid]) else None)
+            for tid in team_order
+        ]
+        for slot in range(max_slots)
+    ]
 
 
 def build_team_weeks_tab_rows(team_week_rows, stat_specs, league_id=None,

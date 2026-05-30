@@ -37,6 +37,7 @@ from almanac_data import (
 )
 from almanac_logic import (
     SCORE_RECORD_SPECS,
+    build_draft_board_color_grid,
     build_draft_tab_rows,
     build_home_tab_rows,
     build_records_tab_rows,
@@ -117,9 +118,9 @@ def write_almanac(sheet_id, season_year=None, matchup_period=None):
         league_id=league_id,
         slot_caps=get_roster_slot_capacities(season_year, include_inactive=True),
     )
-    draft_tab_rows = build_draft_tab_rows(
-        get_draft_board(season_year), season_year, league_id=league_id,
-    )
+    draft_board = get_draft_board(season_year)
+    draft_tab_rows = build_draft_tab_rows(draft_board, season_year, league_id=league_id)
+    draft_color_grid = build_draft_board_color_grid(draft_board)
     client = _get_authorized_client()
     spreadsheet = client.open_by_key(sheet_id)
 
@@ -143,7 +144,7 @@ def write_almanac(sheet_id, season_year=None, matchup_period=None):
         _replace_team_tab(spreadsheet, title, team_page_rows)
         for title, team_page_rows in team_pages
     ]
-    draft_ws = _replace_draft_tab(spreadsheet, draft_tab_rows)
+    draft_ws = _replace_draft_tab(spreadsheet, draft_tab_rows, color_grid=draft_color_grid)
 
     nav_targets = {
         ws.title: ws.id
@@ -285,12 +286,18 @@ def _home_label_formats(rows, last_col):
     return formats
 
 
-_DRAFT_SECTION_LABELS = {'Best Value Picks', 'Biggest Busts', 'Draft Board'}
+# Draft board team columns start at index 4 (after Rd / Min / Median / Max).
+_DRAFT_BOARD_TEAM_START = 4
+_DRAFT_HEADER_BG = {'red': 0.90, 'green': 0.94, 'blue': 0.98}
+_DRAFT_BOARD_HEADER_BG = {'red': 0.12, 'green': 0.20, 'blue': 0.30}
 
 
-def _replace_draft_tab(spreadsheet, rows):
+def _replace_draft_tab(spreadsheet, rows, color_grid=None):
     """Clear/create the Draft Recap tab and write it. Returns the worksheet
-    so the two-pass write can read its gid for the Home nav link."""
+    so the two-pass write can read its gid for the Home nav link.
+
+    color_grid (from build_draft_board_color_grid) drives the per-cell
+    red->white->green color scale on the board; None skips it."""
     width = max((len(row) for row in rows), default=20)
     try:
         worksheet = spreadsheet.worksheet(DRAFT_TAB)
@@ -319,6 +326,8 @@ def _replace_draft_tab(spreadsheet, rows):
         ]
         formats.extend(_draft_label_formats(rows, last_col))
         _batch_format(worksheet, formats)
+        if color_grid:
+            _apply_draft_board_colors(spreadsheet, worksheet, rows, color_grid)
     except Exception as exc:
         print(f"[almanac] formatting skipped for {DRAFT_TAB}: {exc}")
 
@@ -326,24 +335,37 @@ def _replace_draft_tab(spreadsheet, rows):
 
 
 def _draft_label_formats(rows, last_col):
-    """Bold the Draft Recap section labels + the leaderboard / board headers."""
+    """Bold the Draft Recap section labels (side-by-side leaderboards + the
+    board), the leaderboard column headers, and the board header row."""
     formats = []
     for row_number, row in enumerate(rows, 1):
         first = row[0] if row else ''
-        if first in _DRAFT_SECTION_LABELS:
+        seventh = row[6] if len(row) > 6 else ''
+        if first == 'Best Value Picks':
+            formats.append({
+                'range': f'A{row_number}:E{row_number}',
+                'format': {'textFormat': {'bold': True, 'fontSize': 12}},
+            })
+        if seventh == 'Biggest Busts':
+            formats.append({
+                'range': f'G{row_number}:K{row_number}',
+                'format': {'textFormat': {'bold': True, 'fontSize': 12}},
+            })
+        if isinstance(first, str) and first.startswith('Draft Board'):
             formats.append({
                 'range': f'A{row_number}:{last_col}{row_number}',
                 'format': {'textFormat': {'bold': True, 'fontSize': 12}},
             })
-        elif first == 'Player' and len(row) > 1 and row[1] == 'Team':
-            formats.append({
-                'range': f'A{row_number}:E{row_number}',
-                'format': {
-                    'textFormat': {'bold': True},
-                    'backgroundColor': {'red': 0.90, 'green': 0.94, 'blue': 0.98},
-                },
-            })
-        elif first == 'Rd':
+        if first == 'Player' and len(row) > 1 and row[1] == 'Team':
+            for cell_range in (f'A{row_number}:E{row_number}', f'G{row_number}:K{row_number}'):
+                formats.append({
+                    'range': cell_range,
+                    'format': {
+                        'textFormat': {'bold': True},
+                        'backgroundColor': _DRAFT_HEADER_BG,
+                    },
+                })
+        if first == 'Rd':
             formats.append({
                 'range': f'A{row_number}:{last_col}{row_number}',
                 'format': {
@@ -351,20 +373,87 @@ def _draft_label_formats(rows, last_col):
                         'bold': True,
                         'foregroundColor': {'red': 1, 'green': 1, 'blue': 1},
                     },
-                    'backgroundColor': {'red': 0.12, 'green': 0.20, 'blue': 0.30},
+                    'backgroundColor': _DRAFT_BOARD_HEADER_BG,
                 },
             })
     return formats
 
 
 def _apply_draft_tab_dimensions(spreadsheet, worksheet, width):
-    """Col A (Player / Rd) wide-ish; the data + team columns a touch narrower."""
+    """Col A (Player / Rd) wide; Min/Median/Max + leaderboard meta narrow;
+    team + Value columns sized for player names."""
     sheet_id = worksheet.id
     requests = [
-        _column_width_request(sheet_id, 0, 1, 130),
-        _column_width_request(sheet_id, 1, max(width, 2), 105),
+        _column_width_request(sheet_id, 0, 1, 120),
+        _column_width_request(sheet_id, 1, 4, 70),
+        _column_width_request(sheet_id, 4, max(width, 5), 95),
     ]
     _sheets_batch_update(spreadsheet, f'format dimensions {worksheet.title}', requests)
+
+
+def _apply_draft_board_colors(spreadsheet, worksheet, rows, color_grid):
+    """Red->white->green per-cell color scale on the board, by player season
+    points. Text cells can't use Sheets' numeric gradient rule, so set the
+    backgrounds directly in one updateCells request (a backgroundColor-only
+    field mask preserves the player-name values)."""
+    rd_index = next(
+        (i for i, row in enumerate(rows) if row and row[0] == 'Rd'), None)
+    if rd_index is None:
+        return
+    all_points = [p for row in color_grid for p in row if p is not None]
+    if not all_points:
+        return
+    low, high = min(all_points), max(all_points)
+    team_count = max((len(row) for row in color_grid), default=0)
+    if not team_count:
+        return
+
+    cell_rows = []
+    for row in color_grid:
+        values = []
+        for col in range(team_count):
+            points = row[col] if col < len(row) else None
+            color = (_draft_gradient_color(points, low, high)
+                     if points is not None
+                     else {'red': 1, 'green': 1, 'blue': 1})
+            values.append({'userEnteredFormat': {'backgroundColor': color}})
+        cell_rows.append({'values': values})
+
+    start_row = rd_index + 1  # board data begins the row after the Rd header
+    request = {
+        'updateCells': {
+            'range': {
+                'sheetId': worksheet.id,
+                'startRowIndex': start_row,
+                'endRowIndex': start_row + len(color_grid),
+                'startColumnIndex': _DRAFT_BOARD_TEAM_START,
+                'endColumnIndex': _DRAFT_BOARD_TEAM_START + team_count,
+            },
+            'rows': cell_rows,
+            'fields': 'userEnteredFormat.backgroundColor',
+        },
+    }
+    _sheets_batch_update(spreadsheet, f'draft board colors {worksheet.title}', [request])
+
+
+def _draft_gradient_color(value, low, high):
+    """Map a season-points value to a red (low) -> white (mid) -> green (high)
+    background, matching the team-weeks palette."""
+    if high <= low:
+        t = 0.5
+    else:
+        t = max(0.0, min(1.0, (value - low) / (high - low)))
+    red = {'red': 0.96, 'green': 0.62, 'blue': 0.60}
+    white = {'red': 1.0, 'green': 1.0, 'blue': 1.0}
+    green = {'red': 0.67, 'green': 0.86, 'blue': 0.64}
+    if t < 0.5:
+        return _lerp_color(red, white, t / 0.5)
+    return _lerp_color(white, green, (t - 0.5) / 0.5)
+
+
+def _lerp_color(c1, c2, t):
+    return {channel: c1[channel] + (c2[channel] - c1[channel]) * t
+            for channel in ('red', 'green', 'blue')}
 
 
 def _replace_team_weeks_tab(spreadsheet, rows, stat_specs, source_rows=None, record_marks=None):

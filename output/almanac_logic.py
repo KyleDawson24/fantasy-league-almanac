@@ -683,8 +683,10 @@ def build_draft_tab_rows(board_rows, season_year, league_id=None):
     ]
 
     # Side-by-side leaderboards: Best Value (cols A-E) | spacer F | Biggest
-    # Busts (cols G-K).
-    ranked = [r for r in board_rows if r.get('value_delta') is not None]
+    # Busts (cols G-K). Keepers' draft cost is re-ranked by the keeper-sort
+    # so a team's 5th-best keeper counts as a late keeper, not a round-1 pick.
+    ranked = [r for r in _draft_with_effective_picks(board_rows)
+              if r.get('value_delta') is not None]
     best_value = sorted(ranked, key=lambda r: (-r['value_delta'], r['overall_pick']))[:10]
     biggest_bust = sorted(ranked, key=lambda r: (r['value_delta'], r['overall_pick']))[:10]
 
@@ -737,6 +739,40 @@ def _draft_sorted_columns(board_rows):
         )
         sorted_cols[tid] = keepers + drafted
     return team_order, team_abbrev, sorted_cols
+
+
+def _draft_with_effective_picks(board_rows):
+    """Re-rank keepers' draft cost by the keeper-sort so leaderboard value is
+    fair. A keeper's ESPN round is arbitrary (keepers are designated all at
+    once), so within each team the keepers are sorted by season points and
+    handed the team's keeper-slot pick numbers in order -- the best keeper
+    gets the earliest keeper slot, the worst the latest. value_delta is then
+    effective_overall_pick - points_rank. Drafted picks pass through
+    unchanged (their pick + value are already meaningful)."""
+    by_team = defaultdict(list)
+    for r in board_rows:
+        by_team[r.get('team_id')].append(r)
+
+    augmented = []
+    for picks in by_team.values():
+        keepers = [p for p in picks if p.get('keeper')]
+        # The (overall, round, round_pick) slots ESPN assigned this team's
+        # keepers, earliest first.
+        slots = sorted(
+            (p.get('overall_pick'), p.get('round_num'), p.get('round_pick'))
+            for p in keepers
+        )
+        keepers_by_points = sorted(
+            keepers,
+            key=lambda p: (-(p.get('season_points') or 0), p.get('overall_pick')),
+        )
+        for keeper, slot in zip(keepers_by_points, slots):
+            effective = dict(keeper)
+            effective['overall_pick'], effective['round_num'], effective['round_pick'] = slot
+            effective['value_delta'] = slot[0] - (keeper.get('points_rank') or 0)
+            augmented.append(effective)
+        augmented.extend(p for p in picks if not p.get('keeper'))
+    return augmented
 
 
 def _draft_board_grid(board_rows):

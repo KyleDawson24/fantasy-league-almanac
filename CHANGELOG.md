@@ -8,6 +8,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Each entry links to the corresponding `Phase X.Y Documentation.md` in the
 repository root for the architectural detail behind the change.
 
+## [1.2.0] — 2026-05-30
+
+First product-feature release after the v1.1.x refactor line. Two surfaces:
+the Home tab becomes a navigation-hub dashboard, and a net-new Draft Recap
+tab adds the draft board + draft-value analysis (a new ESPN extract through
+dbt to the Sheet). Reviewed tab-by-tab against the live Sheet; the almanac
+byte-diff fixtures were re-baselined for both. No separate `Phase X.Y
+Documentation.md` — the retrospective lives in `v1.x Handoff.md` "Status at
+v1.2.0 ship," consistent with the v1.1.x releases.
+
+### Added
+
+- **Home two-band redesign.** Left navigation band (links to Records,
+  Matchup History, the per-team pages, and Draft Recap; a points glossary;
+  an all-time All-League Team) beside a right band with the All-League Team
+  of the Week and Season-to-Date — each carrying two player-only "Total-Pts
+  Best (incl. bench & FA)" deviation columns that surface where a bench / FA
+  player out-produced the active pick at a slot. Nav links are live in-sheet
+  `#gid` hyperlinks resolved at write time (a two-pass write: build the
+  tabs, read their gids, render Home last), so they work on a brand-new
+  sheet with no hardcoded URLs.
+- **Draft Recap tab.** A new ESPN draft extract (`league.draft` →
+  `RAW.DRAFT_PICKS`, folded into `--settings-only`) feeds `stg_draft` →
+  `mart_draft_board`, joining every pick to its drafting team and the
+  player's total season production. Side-by-side Best Value / Biggest Busts
+  leaderboards (value = where a player was drafted vs. how they produced)
+  over a round × team draft board with per-round Min / Median / Max and a
+  production-keyed color scale. Keepers are flagged and ordered / valued by
+  production (this is a keeper snake draft).
+- **Owner display names** propagate through the mart (nickname > proper
+  name), surfaced on the almanac Home, Records, and the recap.
+
+### Changed
+
+- **"Team Weeks" tab renamed to "Matchup History."**
+- **Home All-League slash line** reads `.294/.390/.559`; the boxscore is a
+  hyperlink on the Points cell; fantasy teams show their abbreviation.
+
+### Fixed
+
+- **Live-write formatting that the byte-diff never exercised.** The
+  `--no-sheets` preview path skips the Sheets formatting code, so several
+  bugs there were invisible: a `len(HOME_HEADER)` NameError on the
+  new-Home-tab path; missing `almanac_write` imports that had silently
+  skipped all per-team-tab and Matchup History conditional formatting since
+  the v1.1.1 module split; and team-tab header rows mis-right-aligning the
+  points glossary in column Q.
+
+Verification: dbt build PASS=9 on the new draft models + tests; pytest
+warehouse 16 passed (almanac byte-diff + recap / records goldens); pytest
+default 144 passed (5 preexisting `test_almanac_sheets.py` failures
+unrelated to this release). Open design calls (snake-draft presentation,
+pick trading, a cross-session float-summation follow-up) are in
+`v1.x Handoff.md`.
+
 ## [1.1.2] — 2026-05-27
 
 Team-tab polish on the v1.1.1 almanac. No dbt changes and no

@@ -218,7 +218,12 @@ fresh Snowflake free-tier account in under 45 minutes.
 
 ## Status
 
-- **v1.1.2** — current. Team-tab polish: ppg to two decimals, a W-L-Sv
+- **v1.2.0** — current. Home becomes a navigation-hub dashboard (nav band +
+  points glossary + all-time All-League Team beside the week / season teams
+  with Total-Pts deviation columns) and a net-new Draft Recap tab adds the
+  draft board + draft-value leaderboards (a new ESPN extract through dbt).
+  "Team Weeks" renamed to "Matchup History." See `CHANGELOG.md`.
+- **v1.1.2** — 2026-05-27. Team-tab polish: ppg to two decimals, a W-L-Sv
   pitcher decision line, and a slot-fill explanation + points glossary +
   current-scoring callout on every "Best Lineup" tab. See `CHANGELOG.md`.
 - **v1.1.1** — 2026-05-27. Almanac refactor + optimal-team reframe.

@@ -787,6 +787,12 @@ def _replace_team_tab(spreadsheet, title, rows):
                         'format': {'textFormat': text_format},
                     },
                 ])
+            # Header rows (team name / subtitle / glossary / scope / column
+            # header) carry labels + glossary text in cols B/Q, not slot codes
+            # -- skip the per-row data-cell alignment so the left-aligned
+            # glossary (Q1:Q3) is not clobbered by a spurious RIGHT.
+            if row_number <= 5:
+                continue
             if _is_active_display_slot(row[1] if len(row) > 1 else ''):
                 formats.append({
                     'range': f'B{row_number}:B{row_number}',

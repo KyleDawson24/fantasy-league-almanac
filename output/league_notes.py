@@ -180,21 +180,21 @@ def mismatch(ctx):
     ]
 
 _HERO_TEMPLATES = [
-    "[b]Hero:[/b] {team_name} beat {opp_name} "
-    "({opp_pts:.1f}) by {margin:.1f}, because {hero_name} went off for {hero_pts:.1f} -- {gap:.1f} more than {team_name}'s #2 scorer. "
-    "Baseball is a game of inches and {team_name} needed every inch of {hero_name}'s swinging hog to win this week.",
+    "[b]Hero:[/b] {team_name} ({team_pts:.1f}) beat {opp_name} "
+    "({opp_pts:.1f}) by {margin:.1f}, because {hero_name} went off for {hero_pts:.1f} -- {gap:.1f} more than {team_abbrev}'s #2 scorer. "
+    "Baseball is a game of inches and {team_abbrev} needed every inch of {hero_name}'s swinging hog to win this week.",
 
-    "[b]Hero:[/b] {hero_name} put up {hero_pts:.1f} for {team_name} this week, "
+    "[b]Hero:[/b] {hero_name} put up {hero_pts:.1f} for {team_name} ({team_pts:.1f}) this week, "
     "who only beat {opp_name} by {margin:.1f}. "
-    "'Oh so surely {team_name} would have still won even if {hero_name} had been average' you might say "
-    "but that's a stupid thing to have thought and the science refutes you, fool! {team_name}'s second best player only produced {second_pts:.1f} points! "
-    "had {hero_name} only done what his team's number two had managed, {team_name} would have lost, and we'd all be speaking German!",
+    "'Oh so surely {team_abbrev} would have still won even if {hero_name} had been average' you might say "
+    "but that's a stupid thing to have thought and the science refutes you, fool! {team_abbrev}'s second best player only produced {second_pts:.1f} points! "
+    "had {hero_name} only done what his team's number two had managed, {team_abbrev} would have lost, and we'd all be speaking German!",
 
-    "[b]Hero:[/b] {hero_name} put up {hero_pts:.1f} for {team_name} this week, {gap:.1f} more than {team_name}'s #2 scorer "
+    "[b]Hero:[/b] {hero_name} put up {hero_pts:.1f} for {team_name} ({team_pts:.1f}) this week, {gap:.1f} more than {team_abbrev}'s #2 scorer "
     "'kind of an arbitrary thing to call out' you might find yourself thinking, especially if you're a stupid guy'; "
-    "{team_name} only beat {opp_name} by {margin:.1f}; if {hero_name} had merely been excellent instead of a star, his guys would have lost",
+    "{team_abbrev} only beat {opp_name} by {margin:.1f}; if {hero_name} had merely been excellent instead of a star, his guys would have lost",
 
-    "[b]Hero:[/b] {hero_name} put up {hero_pts:.1f} for {team_name} this week, {gap:.1f} more than {team_name}'s #2 scorer, single handedly accounting for the {margin:.1f} point gap by which {team_name} defeated {opp_name}"
+    "[b]Hero:[/b] {hero_name} put up {hero_pts:.1f} for {team_name} ({team_pts:.1f}) this week, {gap:.1f} more than {team_abbrev}'s #2 scorer, single handedly accounting for the {margin:.1f} point gap by which {team_abbrev} defeated {opp_name}"
 ]
 
 
@@ -226,6 +226,7 @@ def hero(ctx):
         if gap > margin:
             qualifying.append({
                 'team_name':   w['team_name'],
+                'team_abbrev': w['team_abbrev'],
                 'team_pts':    w['platform_points'],
                 'opp_name':    w['opponent_name'],
                 'opp_pts':     w['opponent_points'],
@@ -245,10 +246,45 @@ def hero(ctx):
     # Cycles back to the start if there are more fires than templates.
     shuffled = list(_HERO_TEMPLATES)
     random.shuffle(shuffled)
-    return [
-        shuffled[i % len(shuffled)].format(**d)
-        for i, d in enumerate(qualifying)
-    ]
+    # Cumulative count of hero performances in league history (gap between
+    # winning team's top scorer and #2 exceeded the margin of victory).
+    # Single small query against pre-aggregated fcts -- ~1-2s, comparable
+    # to the other ordinal-providing callouts (scapegoat, baseblunders,
+    # mismatch). Gated behind the "qualifying" check above so we don't
+    # pay the cost on weeks where no hero fires.
+    hist_n = records.query_snowflake("""
+        WITH wins AS (
+          SELECT t.season_year, t.matchup_period, t.team_id,
+                 (t.platform_points - t.opponent_points) AS margin
+          FROM fct_weekly_team_active_performance t
+          JOIN dim_matchup_period s
+            ON t.season_year = s.season_year
+           AND t.matchup_period = s.matchup_period
+          WHERE t.result = 'W' AND s.is_abnormal = false
+        ),
+        ranked AS (
+          SELECT p.season_year, p.matchup_period, p.team_id, p.platform_points,
+                 ROW_NUMBER() OVER (PARTITION BY p.season_year, p.matchup_period, p.team_id
+                                    ORDER BY p.platform_points DESC NULLS LAST) AS rk
+          FROM fct_weekly_player_active_performance p
+        ),
+        top2 AS (
+          SELECT season_year, matchup_period, team_id,
+                 MAX(CASE WHEN rk = 1 THEN platform_points END) AS top_pts,
+                 MAX(CASE WHEN rk = 2 THEN platform_points END) AS top2_pts
+          FROM ranked WHERE rk <= 2 GROUP BY 1, 2, 3
+        )
+        SELECT COUNT(*) AS n
+        FROM wins JOIN top2 USING (season_year, matchup_period, team_id)
+        WHERE (top_pts - top2_pts) > margin
+    """)[0]['n']
+    base_ord = hist_n - len(qualifying) + 1
+    out = []
+    for i, d in enumerate(qualifying):
+        rendered = shuffled[i % len(shuffled)].format(**d).rstrip()
+        nth = records.ordinal(base_ord + i)
+        out.append(f"{rendered} ({nth} such performance in league history.)")
+    return out
 
 
 def _losing_team_scapegoats(ctx):
@@ -288,6 +324,7 @@ def _losing_team_scapegoats(ctx):
         neg_pts = worst_gross_p.get('negative_points') or 0
         out[loss['team_id']] = {
             'team_name':       loss['team_name'],
+            'team_abbrev':     loss['team_abbrev'],
             'opp_name':        loss['opponent_name'],
             'team_pts':        loss['platform_points'],
             'opp_pts':         loss['opponent_points'],
@@ -357,8 +394,8 @@ def scapegoat_net_negative(ctx):
             f"[b]Scapegoat:[/b] {d['team_name']} lost to {d['opp_name']} "
             f"by {d['margin']:.1f} points. {p['display_name']} put up "
             f"{net_pts:.1f} points total, over {games} {game_word}. If "
-            f"{d['team_name']} had just left his lineup slots blank "
-            f"instead of playing his sorry ass, {d['team_name']} would "
+            f"{d['team_abbrev']} had just left his lineup slots blank "
+            f"instead of playing his sorry ass, {d['team_abbrev']} would "
             f"have won and {p['display_name']} would not be the most "
             f"pathetic loser on the face of the earth. The {nth} such "
             f"performance in league history."
@@ -434,7 +471,7 @@ def scapegoat_gross_negative(ctx):
             f"by {d['margin']:.1f} points. {p['display_name']} put up "
             f"{total_pts:.1f} points total, including {neg_pts:.1f} "
             f"[i]negative[/i] points across {n_games} {game_word}. If he had "
-            f"just put up 0 in those outings, {d['team_name']} would "
+            f"just put up 0 in those outings, {d['team_abbrev']} would "
             f"have won, the {nth} such performance in league history."
         )
     return out
@@ -675,7 +712,7 @@ def baseblunders(ctx):
             line += (
                 f", and only the {sb_zero_nth} team to do so with no "
                 f"steals at all. Idk if cool kids still say \"secure the "
-                f"bag\" but it's clear the idiots on {t['team_name']} "
+                f"bag\" but it's clear the idiots on {t['team_abbrev']} "
                 f"don't."
             )
             zero_sb_seen += 1
@@ -950,7 +987,7 @@ def hr_streak_active(ctx):
     return [
         f"[b]Active Homerun Streak:[/b] Much like your local Fox "
         f"Syndicate, {teams_phrase} all homered every day last week. "
-        f"{longest['team_name']}'s got the longest streak in the league "
+        f"{longest['team_abbrev']}'s got the longest streak in the league "
         f"at {longest['streak_len']} games, {record_clause}"
     ]
 

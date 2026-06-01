@@ -231,11 +231,19 @@ select
     -- HBP_P, PK, BLSV, NH, PG). The *_pts columns remain available for per-stat
     -- consumer callouts; calculated_* uses the comprehensive totals.
     --
-    -- v1.x: rounded to 1 decimal at the fact layer to kill the cosmetic
-    -- float-precision wobble (e.g. 126.95 -> 126.9 vs 127.0 across
-    -- --full-refresh rebuilds). ROUND returns a NUMBER, so when the team
-    -- fact does SUM(rounded_player_values) the team total stays exact
-    -- and the team-total = SUM(players) invariant is preserved.
+    -- Two forms are emitted:
+    --   total_*_stat_pts -- UNROUNDED, so the team fact can sum-then-round
+    --     ONCE at team grain. Summing the per-player-rounded calculated_*
+    --     instead overshoots ESPN's platform total by the accumulated
+    --     rounding (~0.1/team) -- the bug that made a team's calculated_
+    --     points read 396.0 where ESPN's authoritative total was 395.86
+    --     (-> 395.9). sum-of-rounds != round-of-sum.
+    --   calculated_* -- rounded 1 decimal, the player-grain display value
+    --     (player records, per-player callouts); per-player rounding also
+    --     damps cosmetic float wobble at the player grain.
+    a.total_hitting_stat_pts,
+    a.total_pitching_stat_pts,
+    a.total_stat_pts,
     round(a.total_hitting_stat_pts,  1) as calculated_hitting_pts,
     round(a.total_pitching_stat_pts, 1) as calculated_pitching_pts,
     round(a.total_stat_pts,          1) as calculated_points,

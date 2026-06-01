@@ -155,10 +155,13 @@ with team_rollup as (
         sum(platform_hitting_pts)   as platform_hitting_pts,
         sum(platform_pitching_pts)  as platform_pitching_pts,
 
-        -- Calculated scoring (rules-normalized derivation, slot-validity-filtered)
-        sum(calculated_hitting_pts)  as calculated_hitting_pts,
-        sum(calculated_pitching_pts) as calculated_pitching_pts,
-        sum(calculated_points)       as calculated_points,
+        -- Calculated scoring (rules-normalized derivation, slot-validity-filtered).
+        -- Round ONCE at team grain from the UNROUNDED player totals. The prior
+        -- SUM(per-player-rounded calculated_*) overshot ESPN's platform total
+        -- by the accumulated rounding (~0.1/team): sum-of-rounds != round-of-sum.
+        round(sum(total_hitting_stat_pts),  1) as calculated_hitting_pts,
+        round(sum(total_pitching_stat_pts), 1) as calculated_pitching_pts,
+        round(sum(total_stat_pts),          1) as calculated_points,
 
         -- Phase 7 Hpre: team-level rollup of gross-negative-production
         -- across active players.
@@ -237,9 +240,10 @@ team_with_platform as (
         -- v1.x: round at fact layer to kill cosmetic float wobble. The
         -- raw API value (wrapper's home_score) is a FLOAT and shouldn't
         -- carry more than 1 decimal of meaningful precision anyway --
-        -- ESPN scores tab displays 1 decimal. Other team-level totals
-        -- (calculated_*, platform_*_pts, negative_points) inherit
-        -- exactness from the player-fact NUMBER rounding upstream.
+        -- ESPN scores tab displays 1 decimal. calculated_* are rounded ONCE
+        -- here at team grain (see team_rollup, from unrounded player totals);
+        -- platform_*_pts and negative_points inherit the player-fact NUMBER
+        -- rounding upstream.
         round(tps.platform_points, 1)            as platform_points,
         tr.platform_hitting_pts + tr.platform_pitching_pts
             as player_rollup_platform_points,

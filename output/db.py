@@ -88,7 +88,7 @@ def init():
       - utf-8 stdout reconfig (Windows cp1252 default crashes on emoji
         team names; safe no-op on platforms where reconfigure is missing
         or fails)
-      - load_dotenv() so SNOWFLAKE_*, SHEETS_OUTPUT_ID etc. are populated
+      - load_dotenv() so SNOWFLAKE_*, SHEETS_DEV_ID etc. are populated
       - warm the Snowflake config dict so the first query call doesn't
         also do the env work
 

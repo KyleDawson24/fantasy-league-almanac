@@ -37,6 +37,7 @@ from formatters import (
     format_contributors,
 )
 import records
+import sheets_target
 import stat_catalog
 
 
@@ -216,15 +217,20 @@ def format_record(stat_name, holders, schedule_lookup):
 def main():
     parser = argparse.ArgumentParser(
         description='Generate the all-time team records BBCode report. '
-                    'Optionally writes to the league Google Sheet when '
-                    'SHEETS_OUTPUT_ID is set in .env (and --no-sheets is not).',
+                    'Optionally writes to a Google Sheet -- the dev sheet '
+                    '(SHEETS_DEV_ID) by default, or production with --prod.',
     )
     parser.add_argument(
         '--no-sheets', action='store_true',
-        help='Suppress the Sheets sink even when SHEETS_OUTPUT_ID is set. '
-             'Useful for verification runs that should not touch the live '
-             'sheet. (load_dotenv repopulates env-var-unsetting attempts, '
-             'so this flag is the canonical suppression mechanism.)',
+        help='Suppress the Sheets sink entirely. Useful for verification '
+             'runs that should not touch any sheet. (load_dotenv '
+             'repopulates env-var-unsetting attempts, so this flag is the '
+             'canonical suppression mechanism.)',
+    )
+    parser.add_argument(
+        '--prod', action='store_true',
+        help='Write to the PRODUCTION sheet (SHEETS_PROD_ID). Default '
+             'writes to the dev/testing sheet (SHEETS_DEV_ID).',
     )
     args = parser.parse_args()
 
@@ -255,25 +261,31 @@ def main():
         f.write(summary)
     print(f"Log saved to: {log_path}")
 
-    # Phase 6.3: optional Sheets sink. Opt-in via SHEETS_OUTPUT_ID env var.
-    # Skipped silently (with an info log) when not configured. The Sheets
-    # writer is its own module so the import only fires when actually used
-    # -- keeps the dependency footprint of the records report minimal for
-    # users who don't enable Sheets.
-    sheets_id = os.getenv("SHEETS_OUTPUT_ID")
+    # Phase 6.3 / v1.3: optional Sheets sink. Default target is the dev
+    # sheet (SHEETS_DEV_ID); --prod selects production (SHEETS_PROD_ID, or
+    # the legacy SHEETS_OUTPUT_ID). Skipped when no target is configured
+    # or --no-sheets is passed. The writer imports lazily so its
+    # dependency footprint only loads when actually writing.
     if args.no_sheets:
-        print("[sheets] --no-sheets flag set; suppressing Sheets sink "
-              "(SHEETS_OUTPUT_ID was set, would have written otherwise)"
-              if sheets_id else
-              "[sheets] --no-sheets flag set; SHEETS_OUTPUT_ID also unset")
-    elif sheets_id:
-        import sheets_writer
-        try:
-            sheets_writer.write_records(sheets_id)
-        except Exception as e:
-            print(f"[sheets] write failed: {e}")
+        print("[sheets] --no-sheets flag set; suppressing Sheets sink")
     else:
-        print("[sheets] SHEETS_OUTPUT_ID not set; skipping Sheets sink")
+        try:
+            sheets_id, target_label = sheets_target.resolve_sheets_target(args.prod)
+        except RuntimeError as exc:
+            parser.error(str(exc))
+        if not sheets_id:
+            print("[sheets] no dev sheet configured (set SHEETS_DEV_ID in "
+                  ".env); skipping Sheets sink")
+        else:
+            if target_label == 'PROD':
+                print(f"[sheets] >>> writing records to PRODUCTION sheet: {sheets_id}")
+            else:
+                print(f"[sheets] writing records to dev sheet: {sheets_id}")
+            import sheets_writer
+            try:
+                sheets_writer.write_records(sheets_id)
+            except Exception as e:
+                print(f"[sheets] write failed: {e}")
 
 
 if __name__ == "__main__":

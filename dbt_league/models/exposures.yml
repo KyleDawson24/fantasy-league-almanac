@@ -73,10 +73,11 @@ exposures:
       workbook for offline analysis (All-Time Records / Current Season
       Records / Leaderboard Dump tabs, auto-created on first write).
 
-      Triggered by setting the SHEETS_OUTPUT_ID environment variable when
-      running output/generate_records_report.py; writer logic lives in
-      output/sheets_writer.py. Runs are no-op when SHEETS_OUTPUT_ID is
-      unset, so the sink is opt-in by design. The url field above points
+      Triggered by running output/generate_records_report.py with a sheet
+      target configured -- the dev sheet (SHEETS_DEV_ID) by default, or
+      production via --prod (SHEETS_PROD_ID); writer logic lives in
+      output/sheets_writer.py. Runs are no-op when no target is set, so the
+      sink is opt-in by design. The url field above points
       at a read-only sample workbook so the dbt docs reader can preview
       what this sink produces.
     depends_on:

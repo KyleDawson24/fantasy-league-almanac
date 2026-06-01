@@ -23,8 +23,9 @@ First run opens a browser tab for consent; the resulting token is cached
 to output/.sheets_oauth_token.json (gitignored) and refreshed transparently
 on subsequent runs.
 
-Opt-in: callers should check os.getenv('SHEETS_OUTPUT_ID') first and skip
-this module entirely when it's unset. write_records() raises if invoked
+Opt-in: callers resolve the target via sheets_target.resolve_sheets_target()
+(the dev sheet by default, production with --prod) and skip this module
+entirely when no target is configured. write_records() raises if invoked
 without the OAuth client config in place.
 """
 

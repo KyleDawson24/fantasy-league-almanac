@@ -15,6 +15,7 @@ import db
 db.init()
 
 import almanac_sheets
+import sheets_target
 
 
 def main():
@@ -25,7 +26,12 @@ def main():
     parser.add_argument('--matchup-period', type=int, default=None)
     parser.add_argument(
         '--no-sheets', action='store_true',
-        help='Print a preview instead of writing to SHEETS_OUTPUT_ID.',
+        help='Print a preview instead of writing to any Sheet.',
+    )
+    parser.add_argument(
+        '--prod', action='store_true',
+        help='Write to the PRODUCTION sheet (SHEETS_PROD_ID). Default '
+             'writes to the dev/testing sheet (SHEETS_DEV_ID).',
     )
     parser.add_argument(
         '--preview-dir',
@@ -92,16 +98,29 @@ def main():
     if args.preview_dir:
         _write_preview_dir(preview_tabs, args.preview_dir)
 
-    if args.no_sheets or not os.getenv('SHEETS_OUTPUT_ID'):
+    if args.no_sheets:
+        sheet_id, target_label = None, None
+    else:
+        try:
+            sheet_id, target_label = sheets_target.resolve_sheets_target(args.prod)
+        except RuntimeError as exc:
+            parser.error(str(exc))
+
+    if not sheet_id:
         print(
-            "[almanac] preview only; not writing Sheets "
-            "(--no-sheets set or SHEETS_OUTPUT_ID unset)"
+            "[almanac] preview only; not writing Sheets (--no-sheets set, "
+            "or no dev sheet configured -- set SHEETS_DEV_ID in .env)"
         )
         _print_preview(preview_tabs, print_all=args.print_all)
         return
 
+    if target_label == 'PROD':
+        print(f"[almanac] >>> writing to PRODUCTION sheet: {sheet_id}")
+    else:
+        print(f"[almanac] writing to dev sheet: {sheet_id}")
+
     almanac_sheets.write_almanac(
-        os.getenv('SHEETS_OUTPUT_ID'),
+        sheet_id,
         season_year=season_year,
         matchup_period=matchup_period,
     )

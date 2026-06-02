@@ -533,6 +533,19 @@ def make_record_label(grain, stat_name, direction):
     return f"{prefix} {stat_catalog.get_display_map().get(stat_name, stat_name)}"
 
 
+def _recap_record_label(grain, stat_name, direction):
+    """Recap variant of make_record_label that drops an all-caps abbreviation
+    suffix -- ' (SV-BLSV)', ' (W-L)', ' (SB-CS)', ' (SHO)' -- for a cleaner
+    recap line, while keeping lowercase disambiguators like ' (Batter)' /
+    ' (Pitcher)' (dropping those would collide batter vs pitcher records)."""
+    label = make_record_label(grain, stat_name, direction)
+    if label.endswith(')'):
+        base, sep, paren = label.rpartition(' (')
+        if sep and not any(c.islower() for c in paren[:-1]):
+            return base
+    return label
+
+
 def _team_contributors(players, team_id, stat_col):
     """Build contributor list for a team's record-setting MP. Each entry
     is {display_name, stat_value} for format_contributors() consumption."""
@@ -545,7 +558,7 @@ def _team_contributors(players, team_id, stat_col):
 def _format_player_score_record(rec, players, schedule_lookup):
     """Player-grain record line + prior + inline stat line via #2 formatter."""
     new = rec['new']
-    label = make_record_label(rec['grain'], rec['stat_name'], rec['direction'])
+    label = _recap_record_label(rec['grain'], rec['stat_name'], rec['direction'])
     new_value = new['stat_value']
 
     # Look up the player's full row in the existing players list to render
@@ -559,24 +572,23 @@ def _format_player_score_record(rec, players, schedule_lookup):
         stat_line = format_top_scorer_stats_line(player_row) if player_row else ''
 
     new_line = (
-        f"[b]New {label}[/b]: {new['display_name']} ({new['team_abbrev']}), "
+        f"[b]{label}[/b]: {new['display_name']} ({new['team_abbrev']}), "
         f"{new_value:.1f} pts"
     )
     if stat_line:
         new_line += f" -- {stat_line}"
 
-    lines = [new_line]
     prior = rec['prior']
     if prior:
         prior_week = records.format_week_label(
             prior['season_year'], prior['matchup_period'], schedule_lookup,
         )
-        lines.append(
-            f"(Prior: {prior['stat_value']:.1f} pts by "
+        new_line += (
+            f" (Prior: {prior['stat_value']:.1f} pts by "
             f"{prior['display_name']} ({prior['team_abbrev']}) "
             f"in {prior_week} of {prior['season_year']})"
         )
-    return lines
+    return [new_line]
 
 
 def _format_team_record(rec, players, schedule_lookup):
@@ -585,11 +597,10 @@ def _format_team_record(rec, players, schedule_lookup):
     user spec: worsts don't get contributors yet).
     """
     new = rec['new']
-    label = make_record_label(rec['grain'], rec['stat_name'], rec['direction'])
+    label = _recap_record_label(rec['grain'], rec['stat_name'], rec['direction'])
     new_value_str = fmt_stat_value_with_unit(rec['stat_name'], new['stat_value'])
 
-    new_line = f"[b]New {label}[/b]: {new['team_name']}, {new_value_str}"
-    lines = [new_line]
+    new_line = f"[b]{label}[/b]: {new['team_name']}, {new_value_str}"
 
     prior = rec['prior']
     if prior:
@@ -597,11 +608,13 @@ def _format_team_record(rec, players, schedule_lookup):
         prior_week = records.format_week_label(
             prior['season_year'], prior['matchup_period'], schedule_lookup,
         )
-        lines.append(
-            f"(Prior: {prior_value_str} by "
+        new_line += (
+            f" (Prior: {prior_value_str} by "
             f"{prior['owner_name']} ({prior['team_abbrev']}) "
             f"in {prior_week} of {prior['season_year']})"
         )
+
+    lines = [new_line]
 
     if rec['direction'] == 'most':
         contribs = _team_contributors(players, new['team_id'], rec['stat_name'].lower())
@@ -618,7 +631,7 @@ def _format_tied_record(rec):
     contributors. The matchup-period context is implicit (this section
     is about what just happened)."""
     new = rec['new']
-    label = make_record_label(rec['grain'], rec['stat_name'], rec['direction'])
+    label = _recap_record_label(rec['grain'], rec['stat_name'], rec['direction'])
     value_str = fmt_stat_value_with_unit(rec['stat_name'], new['stat_value'])
     n = rec['tie_count']
 
@@ -642,13 +655,15 @@ def format_new_records_section(records, players, schedule_lookup):
         return []
 
     lines = ["", "[u][b]New Records[/b][/u]"]
-    for rec in records:
-        if rec['is_tie']:
-            lines.extend(_format_tied_record(rec))
-        elif rec['grain'] == 'player':
+    broken = [rec for rec in records if not rec['is_tie']]
+    ties = [rec for rec in records if rec['is_tie']]
+    for rec in broken:
+        if rec['grain'] == 'player':
             lines.extend(_format_player_score_record(rec, players, schedule_lookup))
         else:
             lines.extend(_format_team_record(rec, players, schedule_lookup))
+    for rec in ties:
+        lines.extend(_format_tied_record(rec))
     return lines
 
 

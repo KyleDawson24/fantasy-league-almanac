@@ -34,6 +34,7 @@ import os
 from pathlib import Path
 
 import gspread
+from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -321,10 +322,32 @@ def _replace_tab(spreadsheet, title, rows):
     worksheet.update([_HEADER] + rows, 'A1')
 
 
+def _run_consent_flow():
+    """Open a browser for a fresh OAuth consent and return new credentials."""
+    client_path = os.getenv('GOOGLE_OAUTH_CLIENT_PATH')
+    if not client_path:
+        raise RuntimeError(
+            "GOOGLE_OAUTH_CLIENT_PATH env var not set. "
+            "Configure GCP OAuth client per the Phase 6.3.1 setup steps."
+        )
+    if not Path(client_path).exists():
+        raise RuntimeError(
+            f"OAuth client config not found at {client_path}. "
+            f"Check GOOGLE_OAUTH_CLIENT_PATH in .env."
+        )
+    flow = InstalledAppFlow.from_client_secrets_file(
+        client_path, _OAUTH_SCOPES,
+    )
+    # port=0 picks an arbitrary free port for the redirect handler.
+    return flow.run_local_server(port=0)
+
+
 def _get_authorized_client():
     """Returns an authorized gspread client. First run opens a browser for
-    consent; subsequent runs use cached credentials and refresh
-    transparently."""
+    consent; subsequent runs use cached credentials and refresh transparently.
+    When the cached refresh token has expired or been revoked (Google expires
+    testing-mode tokens after ~7 days), fall back to a fresh consent flow
+    instead of crashing the weekly run."""
     creds = None
     if _TOKEN_PATH.exists():
         creds = Credentials.from_authorized_user_file(
@@ -333,24 +356,14 @@ def _get_authorized_client():
 
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
+            try:
+                creds.refresh(Request())
+            except RefreshError:
+                # invalid_grant: refresh token expired/revoked -> re-consent
+                # rather than hard-fail the run.
+                creds = _run_consent_flow()
         else:
-            client_path = os.getenv('GOOGLE_OAUTH_CLIENT_PATH')
-            if not client_path:
-                raise RuntimeError(
-                    "GOOGLE_OAUTH_CLIENT_PATH env var not set. "
-                    "Configure GCP OAuth client per the Phase 6.3.1 setup steps."
-                )
-            if not Path(client_path).exists():
-                raise RuntimeError(
-                    f"OAuth client config not found at {client_path}. "
-                    f"Check GOOGLE_OAUTH_CLIENT_PATH in .env."
-                )
-            flow = InstalledAppFlow.from_client_secrets_file(
-                client_path, _OAUTH_SCOPES,
-            )
-            # port=0 picks an arbitrary free port for the redirect handler.
-            creds = flow.run_local_server(port=0)
+            creds = _run_consent_flow()
         with open(_TOKEN_PATH, 'w') as f:
             f.write(creds.to_json())
 

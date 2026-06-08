@@ -668,10 +668,43 @@ def no_negative_days(ctx):
     ]
 
 
+# Baseblunders templates. Each is a complete BBCode line; the SB=0
+# sub-clause is appended separately so it composes with whichever
+# template fires. Original template adjusted from a comma-continuation
+# to a sentence break ("in a matchup." instead of "in a matchup,") so
+# the SB=0 clause reads cleanly after any of the four variants.
+_BASEBLUNDERS_TEMPLATES = [
+    "[b]Baserunners? More like baseblunders![/b] The clumsy fuckers on "
+    "{team_name} became the {nth} team to have more CS ({cs}) than SB "
+    "({sb}) in a matchup.",
+
+    "[b]Baserunners? More like baseblunders![/b] A banana peel plague "
+    "cursed the walkways of the good people at {team_name}, as "
+    "{team_abbrev} had more CS ({cs}) than SB ({sb}). The {nth} such "
+    "week in league history.",
+
+    "[b]Baserunners? More like baseblunders![/b] The slugs got drunk "
+    "and overconfident over in the {team_name} clubhouse. {team_abbrev} "
+    "had more CS ({cs}) than SB ({sb}). The {nth} such week in league "
+    "history.",
+
+    "[b]Baserunners? More like baseblunders![/b] The Mr Bean bumpafucks "
+    "over at {team_name} became the {nth} team in league history with "
+    "more CS ({cs}) than SB ({sb}).",
+]
+
+_BASEBLUNDERS_SB_ZERO_CLAUSE = (
+    " And only the {sb_zero_nth} team to do so with no steals at all. "
+    "Idk if cool kids still say \"secure the bag\" but it's clear the "
+    "idiots on {team_abbrev} don't."
+)
+
+
 def baseblunders(ctx):
-    """Teams with more CS than SB in the MP. Per-team line. Special
-    add-on for the rarer sub-case where SB = 0 (caught stealing >= 1
-    AND zero successful steals).
+    """Teams with more CS than SB in the MP. Per-team line. Pattern 3
+    (varied templates) with shuffle-and-cycle for no-repeat within a
+    single recap. Special add-on appended whenever the rarer sub-case
+    (CS >= 1 AND SB = 0) fires.
 
     Two cumulative ordinals tracked:
       main: count of team-MPs ever where cs > sb
@@ -696,28 +729,29 @@ def baseblunders(ctx):
     n_today_zero_sb = sum(1 for t in teams if (t.get('sb') or 0) == 0)
     base_ord         = hist['cs_gt_sb_n'] - n_today + 1
     base_ord_zero_sb = hist['zero_sb_n']  - n_today_zero_sb + 1
+    # Shuffle templates per recap so multi-team weeks get distinct
+    # phrasings. Cycles back to the start if more teams fire than
+    # templates exist (4) -- "delay repeats" rather than "no repeats".
+    shuffled = list(_BASEBLUNDERS_TEMPLATES)
+    random.shuffle(shuffled)
     out = []
     zero_sb_seen = 0
     for i, t in enumerate(teams):
         cs = int(t.get('cs') or 0)
         sb = int(t.get('sb') or 0)
         nth = records.ordinal(base_ord + i)
-        line = (
-            f"[b]Baserunners? More like baseblunders![/b] The clumsy "
-            f"fuckers on {t['team_name']} became the {nth} team to have "
-            f"more CS ({cs}) than SB ({sb}) in a matchup"
-        )
+        d = {
+            'team_name':   t['team_name'],
+            'team_abbrev': t['team_abbrev'],
+            'cs':          cs,
+            'sb':          sb,
+            'nth':         nth,
+        }
+        line = shuffled[i % len(shuffled)].format(**d)
         if sb == 0:
-            sb_zero_nth = records.ordinal(base_ord_zero_sb + zero_sb_seen)
-            line += (
-                f", and only the {sb_zero_nth} team to do so with no "
-                f"steals at all. Idk if cool kids still say \"secure the "
-                f"bag\" but it's clear the idiots on {t['team_abbrev']} "
-                f"don't."
-            )
+            d['sb_zero_nth'] = records.ordinal(base_ord_zero_sb + zero_sb_seen)
+            line += _BASEBLUNDERS_SB_ZERO_CLAUSE.format(**d)
             zero_sb_seen += 1
-        else:
-            line += "."
         out.append(line)
     return out
 

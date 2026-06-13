@@ -283,7 +283,7 @@ class TestSlotCapacities:
                 {'lineup_slot': 'SP', 'slots_to_fill': 5},
             ]
 
-        monkeypatch.setattr(almanac_sheets, 'query_snowflake', fake_query)
+        monkeypatch.setattr(almanac_data, 'query_snowflake', fake_query)
 
         result = almanac_sheets.get_slot_capacities(2026, 8)
 
@@ -292,7 +292,7 @@ class TestSlotCapacities:
         assert calls[0][1] == (2026,)
 
     def test_missing_configured_counts_raises_helpful_error(self, monkeypatch):
-        monkeypatch.setattr(almanac_sheets, 'query_snowflake', lambda *_: [])
+        monkeypatch.setattr(almanac_data, 'query_snowflake', lambda *_: [])
 
         with pytest.raises(RuntimeError, match='No roster slot counts found'):
             almanac_sheets.get_slot_capacities(2026, 8)
@@ -582,7 +582,7 @@ class TestRecordsRows:
             calls.append((sql, params))
             return [{'n': 14}]
 
-        monkeypatch.setattr(almanac_sheets, 'query_snowflake', fake_query)
+        monkeypatch.setattr(almanac_data, 'query_snowflake', fake_query)
 
         result = almanac_sheets.count_value_occurrences_for_scope(
             'current_season',
@@ -612,7 +612,7 @@ class TestRecordsRows:
             calls.append((sql, params))
             return [_record(stat='WASTED_POINTS', value=88.6)]
 
-        monkeypatch.setattr(almanac_sheets, 'query_snowflake', fake_query)
+        monkeypatch.setattr(almanac_data, 'query_snowflake', fake_query)
 
         result = almanac_sheets.get_wasted_points_records('current_season')
 
@@ -672,7 +672,7 @@ class TestRecordsRows:
         assert 'Week 8: 2026' in data_row[10]
 
     def test_lineup_slot_specs_expand_repeated_roster_slots(self, monkeypatch):
-        monkeypatch.setattr(almanac_sheets, 'query_snowflake', lambda *_: [
+        monkeypatch.setattr(almanac_data, 'query_snowflake', lambda *_: [
             {'lineup_slot': 'C', 'slots_to_fill': 1},
             {'lineup_slot': 'SP', 'slots_to_fill': 3},
         ])

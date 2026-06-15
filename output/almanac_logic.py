@@ -304,10 +304,13 @@ def select_all_league_team(candidates, slot_caps):
 # Disjoint-stat-categories rule: a player can be picked at most twice,
 # and only if the two slot categories are different (hitting vs
 # pitching). This handles two-way players (Shohei) correctly --
-# int_player_position_pts already attributes pitching points to
-# pitching positions and hitting points to hitting positions, so
-# picking Shohei at both SP and DH sums to his real total production
-# without double-counting either component. Same-category double
+# int_player_position_pts attributes (slot-filtered) pitching points to
+# pitching positions and hitting points to hitting positions, so the
+# pitcher-row and hitter-row are day-disjoint and picking Shohei at both
+# SP and DH sums his slot-credited production without double-counting.
+# (A genuine two-way day, slotted in one, zeroes the off-slot discipline
+# upstream and does not recover it here -- by design; see the
+# int_player_position_pts model note.) Same-category double
 # picks (e.g., 1B and DH for a hitter who's eligible at both) WOULD
 # double-count and are blocked.
 # -------------------------------------------------------------------------
@@ -320,7 +323,7 @@ def _slot_category(slot):
     """'pitching' for SP/RP/P, 'hitting' for everything else.
 
     Mirrors the CASE expression in int_player_position_pts that drives
-    position_platform_pts -- keep these two in sync.
+    position_calculated_pts -- keep these two in sync.
     """
     return 'pitching' if slot in _PITCHING_SLOTS else 'hitting'
 

@@ -69,8 +69,11 @@ models:
       For each (season, matchup_period, team, player) day, the player's
       eligible_slots VARIANT array is exploded; each eligible slot code
       (minus BE / IL, which are roster slots not lineup positions) gets
-      attributed the player's platform_points for that day. Points are
-      aggregated to matchup-period grain.
+      attributed the player's position-category-appropriate CALCULATED
+      points for that day (total_pitching_stat_pts for SP/RP/P,
+      total_hitting_stat_pts otherwise -- the cross-season-normalized
+      calculated lens, not platform_points). Points are aggregated to
+      matchup-period grain.
 
       Mental model: "How many points has this player produced while
       eligible at position P, within window W?" The dispatcher fills an
@@ -83,10 +86,14 @@ models:
       Combined codes (CI / MI / P) exist in the data and stay in the
       int even though this league's roster shape doesn't use them.
 
-      Materialization: view. Single consumer today (the optimal-team
-      dispatcher); lives at int per the project convention "promote to
-      mart when 2-3+ consumers materialize." Row count ~65K for two
-      seasons; trivially re-aggregated per query.
+      Materialization: table (v1.2). The get_optimal_team selector is
+      gap-based and breaks near-equal ties on points rounded to 1
+      decimal; as a view, Snowflake re-summed with a slightly different
+      float order each query, so a value on a .x5 boundary could flip
+      between regens and reshuffle RP picks across team tabs + the Home
+      All-League Team. Materializing freezes the rounded points so
+      selection is deterministic across regens. Single consumer today
+      (the optimal-team dispatcher). Row count ~65K for two seasons.
 
       Rounding: per-row points rounded to 1 decimal at this layer,
       matching the v1.0.1 fact-layer precedent. Stabilizes downstream
@@ -131,20 +138,25 @@ models:
         description: 'Display helper, not a grain key. Player MLB team abbreviation for this matchup.'
       - name: active_pts
         description: >
-          SUM of position-category-appropriate platform points on days the
+          SUM of position-category-appropriate CALCULATED points on days the
           player was eligible at this position AND in an active fantasy slot.
-          Pitching positions (SP/RP/P) use platform_pitching_pts; every other
-          position uses platform_hitting_pts. For single-discipline players
-          (~99% of the league) this equals raw platform_points since the
-          "other" component is 0; for two-way players (Shohei) it correctly
-          attributes pitching production to pitching-position rows and
-          hitting production to hitting-position rows so the disjoint-stat-
-          categories selection rule can pick them at one of each without
-          double-counting. Rounded to 1 decimal at fact layer.
+          Pitching positions (SP/RP/P) use total_pitching_stat_pts; every other
+          position uses total_hitting_stat_pts (the cross-season-normalized
+          calculated lens, not platform_points). For single-discipline players
+          (~99% of the league) this equals the player's full daily calculated
+          total since the "other" component is 0; for two-way players (Shohei)
+          each row carries only the discipline he was actually slotted in that
+          day, because total_*_stat_pts is slot-validity-filtered upstream --
+          so "Shohei-pitcher" and "Shohei-hitter" are day-disjoint and the
+          disjoint-stat-categories selector can field both without double-
+          counting. A genuine two-way day (pitched AND hit, slotted in one)
+          credits only the played slot by design; see the model-level note.
+          Rounded to 1 decimal at fact layer.
       - name: inactive_pts
         description: >
           Same construction as active_pts but for inactive-slot days
           (performance_status='inactive' -- BE / IL / FA). Position-
-          category-appropriate platform points, rounded 1 decimal.
+          category-appropriate calculated points (total_*_stat_pts),
+          rounded 1 decimal.
       - name: eligible_days
         description: 'Count of distinct scoring periods (= days) the player was eligible at this position during this matchup period. Useful for per-day rate queries; not strictly required by the optimal-team selector.'

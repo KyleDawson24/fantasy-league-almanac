@@ -84,11 +84,28 @@ with daily_eligible as (
         -- intuition.
         --
         -- For two-way players (Shohei): his SP row gets ONLY his
-        -- pitching contribution; his UTIL/DH rows get ONLY his
-        -- hitting contribution. The disjoint-stat-categories selection
-        -- rule (pick a player at most once per category) then correctly
-        -- credits the team with hitting + pitching = full production
-        -- when picked twice, without double-counting either component.
+        -- pitching contribution; his UTIL/DH rows get ONLY his hitting
+        -- contribution. Because total_*_stat_pts is slot-validity-
+        -- filtered upstream at int_player_daily (a stat survives only
+        -- when its category matches that day's lineup_slot_category),
+        -- each row carries only the production from days he was ACTUALLY
+        -- slotted in that discipline. So "Shohei-pitcher" and "Shohei-
+        -- hitter" behave as two day-disjoint pseudo-players (he occupies
+        -- one slot per day, so the two rows never share a day), and the
+        -- disjoint-stat-categories selection rule (pick a player at most
+        -- once per category) fields both without double-counting.
+        --
+        -- This INTENTIONALLY does not recover his full line on a genuine
+        -- two-way day (pitched AND hit, but slotted in one): the off-slot
+        -- discipline is zeroed upstream and is lost to the optimal team
+        -- too. By design -- this league can't field a player as a hitter
+        -- and a pitcher on the same day, so the best achievable lineup
+        -- can't claim both either; whatever is lost reflects league rules
+        -- or manager slotting, which is exactly what an optimal-deployment
+        -- view should surface. (If the league ever allows same-day two-
+        -- slot two-way players, the fix is to feed this CASE from
+        -- UNFILTERED per-category points -- the same knob as the
+        -- strict_slot_validity var on int_player_daily.)
         case when slot.value::string in ('SP', 'RP', 'P')
              then d.total_pitching_stat_pts
              else d.total_hitting_stat_pts

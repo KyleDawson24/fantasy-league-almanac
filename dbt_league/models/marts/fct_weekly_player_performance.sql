@@ -169,9 +169,12 @@ weekly as (
         -- here -- magnitude semantics aggregate cleanly across days).
         sum(negative_points) as negative_points,
 
-        -- platform_points + slot-based hitting/pitching split pulled
+        -- platform_points + stat-contribution hitting/pitching split pulled
         -- through so the active fact can read them here without needing
-        -- a separate scores-fact join.
+        -- a separate scores-fact join. (Split computed at int_player_daily:
+        -- platform_points apportioned by each day's unfiltered per-category
+        -- stat production; single-role players land all-or-nothing as before,
+        -- two-way days split by what actually earned the points.)
         sum(platform_points)       as platform_points,
         sum(platform_hitting_pts)  as platform_hitting_pts,
         sum(platform_pitching_pts) as platform_pitching_pts,

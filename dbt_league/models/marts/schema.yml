@@ -1147,9 +1147,9 @@ models:
       - name: platform_points
         description: 'SUM of player-level platform_points (kona''s appliedTotal). On active rows this is what the player contributed to the fantasy team''s score; on inactive/FA rows it is the player''s MLB-game fantasy points that were not credited to any team that day.'
       - name: platform_hitting_pts
-        description: 'SUM of platform_hitting_pts (slot-based hitting split passthrough from the weekly fact).'
+        description: 'SUM of platform_hitting_pts (passthrough from the weekly fact). The hitting share of platform_points, apportioned at int_player_daily by each day''s unfiltered per-category stat contribution -- so a two-way player''s hitting and pitching land in the right buckets instead of the whole day collapsing into one.'
       - name: platform_pitching_pts
-        description: 'SUM of platform_pitching_pts.'
+        description: 'SUM of platform_pitching_pts (the pitching share; see platform_hitting_pts).'
       - name: negative_points
         description: 'SUM of per-day net-negative platform_points magnitudes; sum semantics aggregate cleanly across days and weeks.'
       - name: games_played
@@ -1214,7 +1214,7 @@ models:
 
       Carries counting + per-stat *_pts + calculated_* totals + the wasted_bucket dim + inactive_player_count.
 
-      DOES NOT carry platform_points (no ESPN home_score equivalent for "the team's bench"), platform_hitting_pts / platform_pitching_pts (today's slot-driven hitting/pitching split miscategorizes bench pitchers; a position-driven version is a v1.x candidate), or team rates (bench IP isn't pitched -- rate semantics break).
+      DOES NOT carry platform_points (no ESPN home_score equivalent for "the team's bench"), platform_hitting_pts / platform_pitching_pts (omitted as not-yet-needed at bench-team grain; the underlying split is now stat-contribution-based at int_player_daily and categorizes bench pitchers correctly, so they could be surfaced if a consumer needs them), or team rates (bench IP isn't pitched -- rate semantics break).
     tests:
       - dbt_utils.unique_combination_of_columns:
           combination_of_columns:

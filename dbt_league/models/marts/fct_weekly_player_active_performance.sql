@@ -155,9 +155,11 @@ with active as (
 
         -- Platform scoring rolled up across the player's active slots
         -- in the matchup. fct_weekly_player_performance carries
-        -- SUM(platform_points) plus the slot-based hitting/pitching
-        -- split (computed at fct_player_daily_performance); this fact aggregates
-        -- those across surviving slots after the active filter.
+        -- SUM(platform_points) plus the stat-contribution hitting/pitching
+        -- split (computed at int_player_daily: platform_points apportioned
+        -- by each day's unfiltered per-category stat production, so two-way
+        -- days split correctly); this fact aggregates those across surviving
+        -- slots after the active filter.
         sum(platform_points)       as platform_points,
         sum(platform_hitting_pts)  as platform_hitting_pts,
         sum(platform_pitching_pts) as platform_pitching_pts,

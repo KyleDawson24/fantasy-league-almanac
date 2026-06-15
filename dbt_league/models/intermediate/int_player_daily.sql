@@ -190,6 +190,42 @@ daily_wide as (
     group by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11
 ),
 
+platform_split_basis as (
+    -- UNFILTERED per-category stat points, used ONLY to apportion the
+    -- platform total across hitting vs pitching (see `final`). Mirrors
+    -- daily_long's join chain but deliberately OMITS the strict_slot_validity
+    -- filter: a two-way player's off-slot production must survive here so a
+    -- DH-slot pitching start (or an SP-slot at-bat) can be attributed to the
+    -- right bucket. This basis feeds the platform split ONLY -- the
+    -- calculated_* lens still reads the slot-validity-filtered totals from
+    -- daily_wide above, so calculated_points continues to reproduce ESPN's
+    -- slot-aware team scoring (platform_calculated_delta stays ~0).
+    --
+    -- For single-role players one category is 0, so the downstream split
+    -- collapses to all-or-nothing into the correct bucket -- byte-identical
+    -- to the prior slot-based behavior. Only genuine two-way days (Ohtani)
+    -- see a real split.
+    select
+        d.season_year,
+        d.scoring_period,
+        d.team_id,
+        d.player_id,
+        d.lineup_slot,
+        sum(case when c.stat_category = 'hitting'
+                 then d.stat_value * coalesce(sc.points_per_unit, 0)
+                 else 0 end) as unfiltered_hitting_pts,
+        sum(case when c.stat_category = 'pitching'
+                 then d.stat_value * coalesce(sc.points_per_unit, 0)
+                 else 0 end) as unfiltered_pitching_pts
+    from {{ ref('stg_player_stat_breakdowns') }} d
+    inner join {{ ref('stat_classification') }} c
+        on d.stat_name = c.stat_name
+    left join {{ ref('stg_scoring_settings') }} sc
+        on d.stat_name = sc.stat_name
+    where c.is_counting = true
+    group by 1, 2, 3, 4, 5
+),
+
 final as (
     -- Join back to stg_box_scores for per-player-day metadata that doesn't
     -- live on stg_player_stat_breakdowns: display_name (nickname-resolved),
@@ -217,14 +253,48 @@ final as (
         b.games_played,
         b.points as platform_points,
 
-        -- Slot-based split of platform_points so the active fact can
-        -- compute weekly platform_hitting_pts / platform_pitching_pts
-        -- directly from this layer. Pitcher slots: SP, RP, and generic P.
-        -- Slot list MUST match stg_box_scores's lineup_slot_category
-        -- derivation -- divergence here silently misclassifies pitcher
-        -- platform points as hitting points.
-        case when w.lineup_slot in ('SP', 'RP', 'P') then 0 else b.points end as platform_hitting_pts,
-        case when w.lineup_slot in ('SP', 'RP', 'P') then b.points else 0 end as platform_pitching_pts,
+        -- Stat-contribution split of platform_points into hitting vs
+        -- pitching, so the active fact can roll up weekly
+        -- platform_hitting_pts / platform_pitching_pts from this layer.
+        --
+        -- platform_points (b.points) is ESPN's slot-BLIND player-card total:
+        -- for a two-way player it includes pitching produced from a hitting
+        -- slot (Ohtani's DH-day start) and vice-versa. The prior logic split
+        -- all-or-nothing by lineup_slot, which dumped a two-way player's whole
+        -- day into ONE bucket (the "Ohtani goof": a DH-slot pitching start
+        -- landed entirely in hitting). We instead apportion b.points by the
+        -- player's UNFILTERED per-category stat contribution that day
+        -- (platform_split_basis), so the total lands in the buckets that
+        -- actually earned it.
+        --
+        -- Single-role players have one category = 0, so the split collapses to
+        -- all-or-nothing into the correct bucket -- identical to the old
+        -- slot-based result. The denominator-zero branch (no scored stats that
+        -- day) falls back to the old slot-based assignment so zero-stat edge
+        -- rows stay byte-identical. The two daily branches always sum to
+        -- b.points, preserving platform_hitting + platform_pitching =
+        -- platform_points.
+        --
+        -- NOTE: this is the slot-blind player-production view (what the recap
+        -- superlatives celebrate). The calculated_* lens stays slot-validity-
+        -- filtered (= ESPN's slot-aware TEAM scoring); the two legitimately
+        -- diverge for a two-way player by the off-slot production ESPN did not
+        -- credit to the team -- the same divergence platform_calculated_delta
+        -- captures at team grain.
+        case
+            when coalesce(u.unfiltered_hitting_pts, 0)
+               + coalesce(u.unfiltered_pitching_pts, 0) = 0
+                then case when w.lineup_slot in ('SP', 'RP', 'P') then 0 else b.points end
+            else b.points * u.unfiltered_hitting_pts
+                 / (u.unfiltered_hitting_pts + u.unfiltered_pitching_pts)
+        end as platform_hitting_pts,
+        case
+            when coalesce(u.unfiltered_hitting_pts, 0)
+               + coalesce(u.unfiltered_pitching_pts, 0) = 0
+                then case when w.lineup_slot in ('SP', 'RP', 'P') then b.points else 0 end
+            else b.points * u.unfiltered_pitching_pts
+                 / (u.unfiltered_hitting_pts + u.unfiltered_pitching_pts)
+        end as platform_pitching_pts,
 
         -- Wide stats (passthrough)
         w.h, w.ab, w.b_bb, w.b_so, w.hbp, w.sf, w.hr, w.r, w.rbi,
@@ -262,6 +332,15 @@ final as (
         and w.team_id is not distinct from b.team_id
         and w.player_id = b.player_id
         and w.lineup_slot = b.lineup_slot
+    -- Unfiltered per-category basis for the platform hitting/pitching split.
+    -- Always matches a daily_wide row 1:1 (same breakdown source, looser
+    -- filter), so the LEFT JOIN never drops or fans out rows.
+    left join platform_split_basis u
+        on w.season_year = u.season_year
+        and w.scoring_period = u.scoring_period
+        and w.team_id is not distinct from u.team_id
+        and w.player_id = u.player_id
+        and w.lineup_slot = u.lineup_slot
 )
 
 select * from final

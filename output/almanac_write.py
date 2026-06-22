@@ -616,6 +616,12 @@ def _is_records_scope_header(row):
     )
 
 
+# Burnt orange / gold background for a brand-new ALL-TIME record set in the
+# MOST RECENT week -- the strongest "you just made league history this week"
+# cue, layered over the italic this-season marker. Tunable.
+_FRESH_ALL_TIME_RECORD_BG = {'red': 0.92, 'green': 0.60, 'blue': 0.20}
+
+
 def _fresh_record_formats(rows):
     """Return batched formats for fresh current-season/all-time records."""
     formats = []
@@ -645,6 +651,21 @@ def _fresh_record_formats(rows):
             formats.append({
                 'range': f'H{row_number}:L{row_number}',
                 'format': {'textFormat': {'italic': True}},
+            })
+        # v1.3: a brand-new all-time record set in the MOST RECENT week (not
+        # just somewhere this season) gets a burnt-orange/gold background --
+        # the "you just set a league all-time record this week" highlight.
+        # latest_period already carries the ": {season}" suffix via the cell,
+        # so match the full "<week>: <season>" to avoid week-substring hits
+        # (e.g. "Week 1" inside "Week 11").
+        if (
+            isinstance(all_time_period, str)
+            and f'{latest_period}: {season_year}' in all_time_period
+            and _record_side_is_small_tie(row[7])
+        ):
+            formats.append({
+                'range': f'H{row_number}:L{row_number}',
+                'format': {'backgroundColor': _FRESH_ALL_TIME_RECORD_BG},
             })
     return formats
 

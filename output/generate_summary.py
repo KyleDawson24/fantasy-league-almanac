@@ -648,6 +648,36 @@ def _format_tied_record(rec):
     ]
 
 
+def _join_names(names):
+    """'A' / 'A and B' / 'A, B, and C'."""
+    names = [n for n in names if n]
+    if len(names) <= 1:
+        return names[0] if names else ''
+    if len(names) == 2:
+        return f"{names[0]} and {names[1]}"
+    return f"{', '.join(names[:-1])}, and {names[-1]}"
+
+
+def _format_shared_new_record(rec):
+    """A brand-new record set by 2+ entities in the SAME week -- new, but
+    shared. Framed as a record (first in league history), naming the
+    simultaneous setters, rather than 'the Nth to do so.'"""
+    label = _recap_record_label(rec['grain'], rec['stat_name'], rec['direction'])
+    value_str = fmt_stat_value_with_unit(rec['stat_name'], rec['new']['stat_value'])
+    holders = rec.get('fresh_holders') or [rec['new']]
+    if rec['grain'] == 'team':
+        names = [h.get('team_name') or h.get('team_abbrev') or '' for h in holders]
+    else:
+        names = [
+            f"{h.get('display_name') or h.get('player_name')} ({h.get('team_abbrev')})"
+            for h in holders
+        ]
+    return [
+        f"[b]New Record for {label}[/b]: {_join_names(names)} at {value_str} "
+        f"-- first in league history."
+    ]
+
+
 def format_new_records_section(records, players, schedule_lookup):
     """Full New Records section. Returns list of lines, OR an empty list
     when no records were broken/tied (the section is skipped entirely)."""
@@ -656,12 +686,19 @@ def format_new_records_section(records, players, schedule_lookup):
 
     lines = ["", "[u][b]New Records[/b][/u]"]
     broken = [rec for rec in records if not rec['is_tie']]
-    ties = [rec for rec in records if rec['is_tie']]
+    # A tie whose value was never reached before this week is a brand-new
+    # record that N entities set at once (e.g. the first-ever cycle, by two
+    # teams) -- it belongs with the new records, not the "matched a standing
+    # mark" ties.
+    shared_new = [rec for rec in records if rec['is_tie'] and rec.get('is_new_record')]
+    ties = [rec for rec in records if rec['is_tie'] and not rec.get('is_new_record')]
     for rec in broken:
         if rec['grain'] == 'player':
             lines.extend(_format_player_score_record(rec, players, schedule_lookup))
         else:
             lines.extend(_format_team_record(rec, players, schedule_lookup))
+    for rec in shared_new:
+        lines.extend(_format_shared_new_record(rec))
     for rec in ties:
         lines.extend(_format_tied_record(rec))
     return lines

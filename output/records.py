@@ -90,6 +90,11 @@ def get_records_set_this_week(season_year, matchup_period):
         'prior': leaderboard row at rank 2 (None if no rank-2 row OR if tied),
         'is_tie': bool (True when rank-2 stat_value equals rank-1),
         'tie_count': int (only present when is_tie; total entities ever at this value),
+        'is_new_record': bool (only when is_tie; True when this value was never
+            reached before this week -- a brand-new record N entities set at
+            once, vs a match of a standing mark),
+        'fresh_holders': list of leaderboard rows at the value (only when
+            is_new_record) -- the simultaneous setters,
       }
     Polarity filter applied. Floor-noise filter: tied records at value=0
     for individual stats (HBP, QS, SV, HLD, CG, etc. perfect-zero ties)
@@ -149,6 +154,28 @@ def get_records_set_this_week(season_year, matchup_period):
         }
         if is_tie:
             rec['tie_count'] = count_value_occurrences(grain, stat, cand['stat_value'])
+            # A tie at the top only MATCHES a standing record if this value was
+            # already reached in an earlier week. If every all-time holder at
+            # this value is from THIS week, it's a brand-new record that N
+            # entities set simultaneously (e.g. the first-ever cycle, by two
+            # teams at once) -- flag it so the recap frames it as a new record
+            # rather than "the Nth to do so."
+            tied = query_snowflake("""
+                SELECT season_year, matchup_period, team_abbrev, team_name,
+                       owner_name, display_name, player_name
+                FROM mart_stat_leaderboard
+                WHERE entity_grain = %s AND stat_name = %s
+                  AND record_direction = %s AND record_scope = 'all_time'
+                  AND performance_status = 'active'
+                  AND stat_value = %s
+                ORDER BY rank
+            """, (grain, stat, direction, cand['stat_value']))
+            this_week = (season_year, matchup_period)
+            rec['is_new_record'] = bool(tied) and all(
+                (r['season_year'], r['matchup_period']) == this_week for r in tied
+            )
+            if rec['is_new_record']:
+                rec['fresh_holders'] = tied
         out.append(rec)
 
     return _sort_new_records(out)

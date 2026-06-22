@@ -459,27 +459,41 @@ def _enrich_optimal_team_with_stats(selected_rows, season_year, matchup_period,
     rows = query_snowflake(f"""
         SELECT
             player_id,
-            -- Roster context fields the renderer reads. For week-
-            -- specific queries these are deterministic per row; for
-            -- broader windows MAX picks the most recent occurrence
-            -- as a fallback (display only -- the renderer suppresses
-            -- the boxscore link for period_label='Season').
-            MAX(season_year)    AS season_year,
-            MAX(matchup_period) AS matchup_period,
-            MAX(team_id)        AS team_id,
-            MAX(team_name)      AS team_name,
-            MAX(team_abbrev)    AS team_abbrev,
-            -- v1.2: prefer the owner display name (nickname > "First Last")
-            -- carried on the fact; fall back to the raw owner_name.
-            MAX(COALESCE(owner_display, owner_name)) AS owner_name,
+            -- Roster-context fields the renderer reads, all taken from the
+            -- player's single most-recent stint via MAX_BY on the shared
+            -- recency_key built below -- so a player who changed fantasy
+            -- teams mid-window can't get team_abbrev / owner / team_id from
+            -- different stints. (These used to be independent column-wise
+            -- MAXes -- alphabetical, not chronological, and not co-varying --
+            -- which mislabeled traded players, e.g. a GPGP pick showing
+            -- CYCL's owner.) For week-specific queries there is one stint, so
+            -- this matches the old per-column MAX.
+            MAX_BY(season_year,    recency_key) AS season_year,
+            MAX_BY(matchup_period, recency_key) AS matchup_period,
+            MAX_BY(team_id,        recency_key) AS team_id,
+            MAX_BY(team_name,      recency_key) AS team_name,
+            MAX_BY(team_abbrev,    recency_key) AS team_abbrev,
+            -- canonical owner_display (resolved upstream), taken from the
+            -- same most-recent stint.
+            MAX_BY(owner_display, recency_key) AS owner_name,
             -- v1.2 (#22): games_played drives the all-time team's ppg
             -- column. Scoped by the same performance_status filter as the
             -- points, so for points_type='active' this is active games and
             -- ppg reads "points per active game" (per-team-tab convention).
             SUM(games_played) AS games_played,
             {stat_select}
-        FROM fct_weekly_player_performance
-        WHERE {where_sql}
+        FROM (
+            SELECT
+                *,
+                -- One monotonic recency key per row: latest season, then
+                -- matchup_period, then team_id to break a same-period trade
+                -- (the data does carry intra-period two-team rows). Lets the
+                -- MAX_BY calls above all resolve to the SAME latest stint.
+                (season_year * 100 + matchup_period) * 100 + team_id
+                    AS recency_key
+            FROM fct_weekly_player_performance
+            WHERE {where_sql}
+        )
         GROUP BY player_id
     """, params)
 
@@ -682,7 +696,7 @@ def get_team_roster_history_stats(season_year):
                 d.team_id,
                 d.team_name,
                 d.team_abbrev,
-                d.owner_name,
+                d.owner_display AS owner_name,
                 d.matchup_period AS latest_matchup_period,
                 d.scoring_period AS latest_scoring_period,
                 m.end_date AS latest_matchup_end_date
@@ -977,7 +991,7 @@ def get_current_team_roster_stats(season_year):
                 d.team_id,
                 d.team_name,
                 d.team_abbrev,
-                d.owner_name,
+                d.owner_display AS owner_name,
                 d.player_id,
                 d.player_name,
                 d.display_name,
@@ -1087,9 +1101,9 @@ def get_almanac_records(scope):
             team_id,
             team_name,
             team_abbrev,
-            -- v1.2: owner display name (nickname > "First Last") off the
-            -- leaderboard's owner_display column; fall back to owner_name.
-            COALESCE(owner_display, owner_name) AS owner_name,
+            -- v1.3: canonical owner_display off the leaderboard mart
+            -- (resolved upstream; no per-query COALESCE).
+            owner_display AS owner_name,
             player_id,
             player_name,
             display_name,
@@ -1215,7 +1229,9 @@ def get_lineup_slot_records(scope):
                 p.team_id,
                 p.team_name,
                 p.team_abbrev,
-                p.owner_name,
+                -- v1.3: read the canonical owner_display (resolved once
+                -- upstream in fct_weekly_player_performance) -- no COALESCE.
+                p.owner_display AS owner_name,
                 p.player_id,
                 p.player_name,
                 p.display_name,
@@ -1278,7 +1294,7 @@ def _get_rate_record_rows(scope, spec):
             l.team_id,
             l.team_name,
             l.team_abbrev,
-            l.owner_name,
+            l.owner_display AS owner_name,
             NULL::integer AS player_id,
             NULL::varchar AS player_name,
             NULL::varchar AS display_name,
@@ -1315,7 +1331,7 @@ def get_wasted_points_records(scope):
             team_id,
             team_name,
             team_abbrev,
-            owner_name,
+            owner_display AS owner_name,
             player_id,
             player_name,
             display_name,

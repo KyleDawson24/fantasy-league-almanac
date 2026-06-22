@@ -201,10 +201,13 @@ weekly as (
 
 select
     weekly.*,
-    -- v1.2: owner display name (nickname > "First Last"), resolved off
-    -- the owner_id bridge. NULL for FA rows (no team_id to join); the
-    -- consumer falls back to owner_name when null.
-    tod.owner_display
+    -- v1.3: CANONICAL owner display, resolved once here so every consumer
+    -- reads owner_display directly with no per-query COALESCE (and no query
+    -- can regress to the raw name). Nickname > "First Last" via the owner_id
+    -- bridge, falling back to the raw box-score owner_name for the defunct
+    -- ownerless team (2025 team 7). NULL only for true FA rows (no team,
+    -- hence no owner at all).
+    coalesce(tod.owner_display, weekly.owner_name) as owner_display
 from weekly
 left join {{ ref('int_team_owner_display') }} tod
     on weekly.season_year = tod.season_year

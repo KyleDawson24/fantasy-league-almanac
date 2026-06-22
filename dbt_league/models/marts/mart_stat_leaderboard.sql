@@ -268,12 +268,14 @@ combined as (
 -- v1.2: attach owner_display via the owner_id bridge BEFORE the unpivot,
 -- so every leaderboard consumer (almanac Records tab, recap records
 -- section, standalone records report) gets a proper owner name from the
--- same single join. NULL for the defunct ownerless team (2025 team 7);
--- consumers COALESCE back to owner_name.
+-- same single join.
+-- v1.3: resolve it to a CANONICAL value here -- COALESCE back to the raw
+-- owner_name for the defunct ownerless team (2025 team 7) -- so consumers
+-- read owner_display directly without their own COALESCE.
 combined_with_owner as (
     select
         c.*,
-        tod.owner_display
+        coalesce(tod.owner_display, c.owner_name) as owner_display
     from combined c
     left join {{ ref('int_team_owner_display') }} tod
         on c.season_year = tod.season_year

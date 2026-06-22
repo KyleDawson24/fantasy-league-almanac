@@ -141,12 +141,13 @@ class TestAutoTracked:
 @pytest.mark.warehouse
 class TestRecordCandidates:
     def test_size_matches_expectation(self):
-        # 62 = leaderboard UNPIVOT list as of v1.1.1: 40 counting (added
-        # CYC in v1.x) + 4 derived + 10 rate (6 pitching pre-existing +
-        # 4 hitting promoted in v1.1.1 to expose them via qualified-rate
-        # records in mart_stat_leaderboard) + 2 totals (WASTED_POINTS,
-        # NEGATIVE_POINTS) + 6 score.
-        assert len(get_record_candidates()) == 62
+        # 59 = leaderboard UNPIVOT list: 40 counting (added CYC in v1.x) + 4
+        # derived + 10 rate (6 pitching pre-existing + 4 hitting promoted in
+        # v1.1.1) + 2 totals (WASTED_POINTS, NEGATIVE_POINTS) + 3 score (the
+        # CALCULATED_*; the 3 PLATFORM_* were untracked as record candidates
+        # in v1.3 -- the recap uses the calculated lens and platform
+        # mis-buckets two-way performances).
+        assert len(get_record_candidates()) == 59
 
     def test_known_record_stats(self):
         rc = get_record_candidates()
@@ -155,9 +156,12 @@ class TestRecordCandidates:
             assert stat in rc
         # CYC promoted in v1.x.
         assert 'CYC' in rc
-        # Score stats.
-        for stat in ('CALCULATED_POINTS', 'PLATFORM_POINTS'):
-            assert stat in rc
+        # Score stats: the calculated lens is a record candidate; the platform
+        # lens was untracked in v1.3 (recap uses calculated; platform
+        # mis-buckets two-way).
+        assert 'CALCULATED_POINTS' in rc
+        assert 'PLATFORM_POINTS' not in rc
+        assert 'PLATFORM_PITCHING_PTS' not in rc
         # Totals (WASTED and NEGATIVE added in v1.x).
         for stat in ('WASTED_POINTS', 'NEGATIVE_POINTS'):
             assert stat in rc

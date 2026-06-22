@@ -94,6 +94,6 @@ NEGATIVE_POINTS,,total,,Negative Points,Neg Pts,false,false,,false,true,negative
 CALCULATED_POINTS,,total,,Total Points,CALCULATED_POINTS,false,false,,false,true,positive,,,Phase 7 B1: rules-normalized total under current scoring weights. Surfaced as records since Phase 5.
 CALCULATED_HITTING_PTS,,hitting,,Hitting Points,CALCULATED_HITTING_PTS,false,false,,false,true,positive,,,Phase 7 B1: calculated hitting points.
 CALCULATED_PITCHING_PTS,,pitching,,Pitching Points,CALCULATED_PITCHING_PTS,false,false,,false,true,positive,,,Phase 7 B1: calculated pitching points.
-PLATFORM_POINTS,,total,,Platform Total Points,PLATFORM_POINTS,false,false,,false,true,positive,,,Phase 7 B1: ESPN platform total. Includes commissioner adjustments + ESPN W/L authority.
-PLATFORM_HITTING_PTS,,hitting,,Platform Hitting Points,PLATFORM_HITTING_PTS,false,false,,false,true,positive,,,Phase 7 B1: ESPN platform hitting points.
-PLATFORM_PITCHING_PTS,,pitching,,Platform Pitching Points,PLATFORM_PITCHING_PTS,false,false,,false,true,positive,,,Phase 7 B1: ESPN platform pitching points.
+PLATFORM_POINTS,,total,,Platform Total Points,PLATFORM_POINTS,false,false,,false,false,positive,,,Phase 7 B1: ESPN platform total. Includes commissioner adjustments + ESPN W/L authority. v1.3: not a record candidate -- records use the calculated lens; platform mis-buckets two-way.
+PLATFORM_HITTING_PTS,,hitting,,Platform Hitting Points,PLATFORM_HITTING_PTS,false,false,,false,false,positive,,,Phase 7 B1: ESPN platform hitting points. v1.3: not a record candidate.
+PLATFORM_PITCHING_PTS,,pitching,,Platform Pitching Points,PLATFORM_PITCHING_PTS,false,false,,false,false,positive,,,Phase 7 B1: ESPN platform pitching points. v1.3: not a record candidate.

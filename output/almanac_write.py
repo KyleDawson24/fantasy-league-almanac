@@ -809,13 +809,14 @@ def _replace_team_tab(spreadsheet, title, rows):
                 'format': {'textFormat': {'fontSize': 5}},
             },
             {
-                # Narrow Roster Days / Games / Active Points columns -- wrap the
-                # multi-word headers instead of overflowing/clipping them.
-                'range': 'E:G',
+                # Wrap only the row-5 stat headers (the multi-word Roster Days /
+                # Games / Active Points labels) so they stack in the 50px
+                # columns; the short numeric data below stays single-line.
+                'range': 'E5:G5',
                 'format': {'wrapStrategy': 'WRAP'},
             },
             {
-                'range': 'T:V',
+                'range': 'T5:V5',
                 'format': {'wrapStrategy': 'WRAP'},
             },
             {

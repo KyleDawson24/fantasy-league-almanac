@@ -515,9 +515,12 @@ def _draft_pick_label(pick):
 
 
 def _draft_player_label(pick):
-    """Player name with a keeper marker."""
+    """Player name with a keeper marker, linked to the player's bref page. The
+    visible label (incl. the keeper mark) keys its link off the official draft
+    name, so a nickname in player_name never breaks the URL."""
     name = pick.get('player_name') or ''
-    return f"{name} (K)" if pick.get('keeper') else name
+    label = f"{name} (K)" if pick.get('keeper') else name
+    return _bref_link(pick.get('official_player_name'), label)
 
 
 def format_draft_value_row(pick):
@@ -847,20 +850,27 @@ def team_tab_title(row):
     return _safe_sheet_title(name)
 
 
-def _bref_player_cell(d):
+def _bref_link(official_name, display_text):
     """A player-name cell linked to the player's Baseball Reference page via
-    bref's name search (which resolves the OFFICIAL name). Visible text stays
-    the almanac's display_name (nickname-or-official); the URL keys off
-    player_name, so a nickname never breaks the link. Plain text when there's
-    no name to link."""
+    bref's name search (which resolves the OFFICIAL name). Visible text is
+    display_text (a nickname-or-official label); the URL keys off official_name,
+    so a nickname never breaks the link. Plain text when there's no official
+    name to key off."""
+    display = '' if display_text is None else str(display_text)
+    if not official_name:
+        return display
+    safe = display.replace('"', '""')
+    url = ('https://www.baseball-reference.com/search/search.fcgi?search='
+           + urllib.parse.quote_plus(str(official_name)))
+    return f'=HYPERLINK("{url}", "{safe}")'
+
+
+def _bref_player_cell(d):
+    """_bref_link for the common row shape: display_name is the visible text
+    (nickname-or-official), player_name is the official key for the URL."""
     display = d.get('display_name') or d.get('player_name') or ''
     official = d.get('player_name') or d.get('display_name') or ''
-    if not official:
-        return display
-    safe = str(display).replace('"', '""')
-    url = ('https://www.baseball-reference.com/search/search.fcgi?search='
-           + urllib.parse.quote_plus(str(official)))
-    return f'=HYPERLINK("{url}", "{safe}")'
+    return _bref_link(official, display)
 
 
 def boxscore_formula(league_id, season_year, matchup_period, team_id):

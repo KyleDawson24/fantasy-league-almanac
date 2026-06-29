@@ -75,6 +75,10 @@ select
     -- the almanac); fall back to the ESPN draft name for players with no
     -- performance row.
     coalesce(ps.display_name, p.player_name) as player_name,
+    -- The official ESPN draft name, kept apart from the display above so the
+    -- almanac can link each pick to the player's Baseball Reference page
+    -- (bref's search resolves the official name) while still showing a nickname.
+    p.player_name                            as official_player_name,
 
     -- Round the re-summed total (per-row calculated_points is already
     -- rounded; SUM reintroduces float drift -- same fix as the facts).

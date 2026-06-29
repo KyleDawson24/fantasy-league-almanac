@@ -613,6 +613,7 @@ def get_draft_board(season_year):
             owner_display,
             player_id,
             player_name,
+            official_player_name,
             season_points,
             games_played,
             RANK() OVER (ORDER BY season_points DESC)               AS points_rank,

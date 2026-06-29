@@ -12,6 +12,7 @@ where the seed-driven stat metadata lives.
 
 import math
 import os
+import urllib.parse
 
 import almanac_data
 from almanac_data import (
@@ -243,7 +244,7 @@ def _team_history_display_row(row, label, display_slot=None, active_games=None,
     return {
         'slot_label': label,
         'display_slot': display_slot or label,
-        'player': row.get('display_name') or row.get('player_name') or '',
+        'player': _bref_player_cell(row),
         'pro_team': row.get('pro_team') or '',
         'current_fantasy_team': row.get('current_fantasy_team') or '',
         'rostered_days': int(row.get('rostered_days') or 0),
@@ -437,7 +438,7 @@ def format_all_league_team_row(row, league_id=None):
     return [
         row.get('slot_label') or row.get('lineup_slot') or '',
         row.get('pro_team') or '',
-        row.get('display_name') or row.get('player_name') or '',
+        _bref_player_cell(row),
         row.get('team_abbrev') or row.get('team_name') or '',
         row.get('owner_name') or '',
         points_cell,
@@ -457,7 +458,7 @@ def format_all_league_thin_row(row):
     the same convention as the per-team tabs' points_per_active_game.
     """
     slot = row.get('slot_label') or row.get('lineup_slot') or ''
-    player = row.get('display_name') or row.get('player_name') or ''
+    player = _bref_player_cell(row)
     if not player:
         return [slot, '', '', '']
     pts_raw = row.get('platform_points') or 0
@@ -481,7 +482,7 @@ def format_all_league_team_row_with_deviation(row, deviation_pick, league_id=Non
     base = format_all_league_team_row(row, league_id=league_id)
     if not deviation_pick:
         return [*base, '', '']
-    dev_player = deviation_pick.get('display_name') or deviation_pick.get('player_name') or ''
+    dev_player = _bref_player_cell(deviation_pick)
     dev_points = _one_decimal(deviation_pick.get('platform_points'))
     return [*base, dev_player, dev_points]
 
@@ -578,7 +579,7 @@ def _format_record_side(record, scope, league_id=None, display_map=None, schedul
         owner = _collapsed_owner(record)
         period = _collapsed_period(record, schedule_lookup, scope=scope)
     elif record.get('entity_grain') == 'player':
-        holder = record.get('display_name') or record.get('player_name') or ''
+        holder = _bref_player_cell(record)
         owner = record.get('owner_name') or ''
         period = (
             records.format_week_label(season, matchup_period, schedule_lookup)
@@ -627,7 +628,7 @@ def format_record_row(record, scope_label, league_id=None, display_map=None,
         owner = ''
         boxscore = ''
     elif grain == 'player':
-        holder = record.get('display_name') or record.get('player_name') or ''
+        holder = _bref_player_cell(record)
         fantasy_team = record.get('team_name') or ''
         owner = record.get('owner_name') or ''
         boxscore = boxscore_formula(league_id, season, matchup_period, record.get('team_id'))
@@ -820,7 +821,7 @@ def format_team_roster_row(row, league_id=None):
     return [
         slot,
         row.get('pro_team') or '',
-        row.get('display_name') or row.get('player_name') or '',
+        _bref_player_cell(row),
         row.get('position') or '',
         _one_decimal(row.get('active_points')),
         int(row.get('active_weeks') or 0),
@@ -844,6 +845,22 @@ def team_tab_title(row):
     team_id = row.get('team_id')
     name = row.get('team_abbrev') or row.get('team_name') or str(team_id or '')
     return _safe_sheet_title(name)
+
+
+def _bref_player_cell(d):
+    """A player-name cell linked to the player's Baseball Reference page via
+    bref's name search (which resolves the OFFICIAL name). Visible text stays
+    the almanac's display_name (nickname-or-official); the URL keys off
+    player_name, so a nickname never breaks the link. Plain text when there's
+    no name to link."""
+    display = d.get('display_name') or d.get('player_name') or ''
+    official = d.get('player_name') or d.get('display_name') or ''
+    if not official:
+        return display
+    safe = str(display).replace('"', '""')
+    url = ('https://www.baseball-reference.com/search/search.fcgi?search='
+           + urllib.parse.quote_plus(str(official)))
+    return f'=HYPERLINK("{url}", "{safe}")'
 
 
 def boxscore_formula(league_id, season_year, matchup_period, team_id):

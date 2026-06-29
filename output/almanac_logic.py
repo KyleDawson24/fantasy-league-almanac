@@ -878,7 +878,11 @@ def build_records_tab_rows(all_time_records, current_season_records, league_id=N
             f'Hitting Rate stats require min {_ab_min} AB. '
             'Boxscore links go to the most recent instance of the record.'
         ],
-        [],
+        [
+            'Current Season records set last week are italicized. '
+            'All-Time records set this year are italicized. '
+            'All-Time records set last week are italicized and highlighted.'
+        ],
     ]
 
     for section_title, specs in _group_record_specs(record_specs):

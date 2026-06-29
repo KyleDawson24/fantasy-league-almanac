@@ -605,6 +605,14 @@ def _replace_records_tab(spreadsheet, rows):
                     'backgroundColor': {'red': 0.95, 'green': 0.97, 'blue': 0.99},
                 },
             },
+            {
+                # Row 3: formatting legend (italic + small, matching the note row).
+                'range': 'A3:L3',
+                'format': {
+                    'textFormat': {'italic': True, 'fontSize': 9},
+                    'backgroundColor': {'red': 0.95, 'green': 0.97, 'blue': 0.99},
+                },
+            },
         ]
         formats.extend(_records_header_formats(rows))
         formats.extend(_fresh_record_formats(rows))
@@ -690,6 +698,14 @@ def _fresh_record_formats(rows):
                 'range': f'H{row_number}:L{row_number}',
                 'format': {'backgroundColor': _FRESH_ALL_TIME_RECORD_BG},
             })
+            # A fresh all-time record IS also the current-season record, so it
+            # appears on the left panel too -- mirror the highlight onto A:F.
+            # (Its italic already fires via the current-season branch above.)
+            if _record_side_is_small_tie(row[1]):
+                formats.append({
+                    'range': f'A{row_number}:F{row_number}',
+                    'format': {'backgroundColor': _FRESH_ALL_TIME_RECORD_BG},
+                })
     return formats
 
 
@@ -793,6 +809,16 @@ def _replace_team_tab(spreadsheet, title, rows):
                 'format': {'textFormat': {'fontSize': 5}},
             },
             {
+                # Narrow Roster Days / Games / Active Points columns -- wrap the
+                # multi-word headers instead of overflowing/clipping them.
+                'range': 'E:G',
+                'format': {'wrapStrategy': 'WRAP'},
+            },
+            {
+                'range': 'T:V',
+                'format': {'wrapStrategy': 'WRAP'},
+            },
+            {
                 'range': 'G:H',
                 'format': {'numberFormat': {'type': 'NUMBER', 'pattern': '0'}},
             },
@@ -887,7 +913,10 @@ def _apply_records_tab_dimensions(spreadsheet, worksheet):
     sheet_id = worksheet.id
     requests = [
         _column_width_request(sheet_id, 0, 1, 175),
+        _column_width_request(sheet_id, 1, 2, 150),   # B: Holder
+        _column_width_request(sheet_id, 2, 3, 125),   # C: Owner
         _column_width_request(sheet_id, 5, 6, 400),
+        _column_width_request(sheet_id, 6, 7, 25),     # G: buffer between panels
         _column_width_request(sheet_id, 11, 12, 400),
     ]
     _sheets_batch_update(spreadsheet, f'format dimensions {worksheet.title}', requests)
@@ -1131,18 +1160,18 @@ def _apply_team_tab_dimensions(spreadsheet, worksheet):
         (0, 25),    # Tm
         (1, 75),    # Slot
         (3, 40),    # Team
-        (4, 75),    # RosterDays
-        (5, 75),    # Games
-        (6, 75),    # Active Points
+        (4, 50),    # RosterDays
+        (5, 50),    # Games
+        (6, 50),    # Active Points
         (7, 75),    # Bench/IL Points
         (8, 40),    # ppg
         (14, 15),   # spacer
         (15, 25),   # Tm
         (16, 75),   # Slot
         (18, 40),   # Team
-        (19, 75),   # RosterDays
-        (20, 75),   # Games
-        (21, 75),   # Active Points
+        (19, 50),   # RosterDays
+        (20, 50),   # Games
+        (21, 50),   # Active Points
         (22, 75),   # Bench/IL Points
         (23, 40),   # ppg
     ]:

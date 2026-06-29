@@ -747,7 +747,8 @@ def _record_details(record, display_map):
     rate_detail = _rate_qualifier_detail(record)
     if record.get('is_collapsed'):
         value = _format_record_value(record.get('stat_name'), record.get('stat_value'))
-        detail = f"Top tier tied at {value}"
+        unit = 'players' if record.get('entity_grain') == 'player' else 'teams'
+        detail = f"{value} recorded by {record.get('tie_count', 0)} {unit}"
         return f"{detail}; {rate_detail}" if rate_detail else detail
 
     if rate_detail:

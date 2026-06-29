@@ -292,6 +292,28 @@ _DRAFT_HEADER_BG = {'red': 0.90, 'green': 0.94, 'blue': 0.98}
 _DRAFT_BOARD_HEADER_BG = {'red': 0.12, 'green': 0.20, 'blue': 0.30}
 
 
+def _reapply_formula_cells(worksheet, rows):
+    """Re-send any formula cells (values starting with '=') with USER_ENTERED.
+
+    The team and draft tabs are bulk-written RAW so signed / zero-padded value
+    strings ("+253", "040", "3.00") survive verbatim -- but RAW also keeps
+    Sheets from parsing a formula, so the bref HYPERLINK player links would
+    show up as literal text. This second pass re-coerces only the '=' cells to
+    parsed formulas in one batched call, leaving every value string untouched."""
+    formula_cells = [
+        {'range': f'{_a1_col(col)}{row_number}', 'values': [[value]]}
+        for row_number, row in enumerate(rows, start=1)
+        for col, value in enumerate(row, start=1)
+        if isinstance(value, str) and value.startswith('=')
+    ]
+    if not formula_cells:
+        return
+    _sheets_call(
+        f'reapply {len(formula_cells)} formula cells {worksheet.title}',
+        lambda: worksheet.batch_update(formula_cells, value_input_option='USER_ENTERED'),
+    )
+
+
 def _replace_draft_tab(spreadsheet, rows, color_grid=None):
     """Clear/create the Draft Recap tab and write it. Returns the worksheet
     so the two-pass write can read its gid for the Home nav link.
@@ -316,6 +338,7 @@ def _replace_draft_tab(spreadsheet, rows, color_grid=None):
         f'update {DRAFT_TAB}',
         lambda: worksheet.update(rows, 'A1', value_input_option='RAW'),
     )
+    _reapply_formula_cells(worksheet, rows)
 
     try:
         last_col = _a1_col(width)
@@ -724,6 +747,7 @@ def _replace_team_tab(spreadsheet, title, rows):
         f'update {title}',
         lambda: worksheet.update(rows, 'A1', value_input_option='RAW'),
     )
+    _reapply_formula_cells(worksheet, rows)
 
     try:
         _sheets_call(f'freeze {title}', lambda: worksheet.freeze(rows=5))

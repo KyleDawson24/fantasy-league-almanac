@@ -1,9 +1,27 @@
 """Pure tests for the v1.1 almanac Sheets helpers."""
 
+import re
+
 import pytest
 
 import almanac_data
 import almanac_sheets
+
+
+def _player_text(cell):
+    """Visible text of a cell, unwrapping a bref =HYPERLINK(url, "text") link
+    to its display text. Non-link cells (and non-strings) pass through, so the
+    helper is safe to map over a whole row of mixed cells."""
+    if isinstance(cell, str):
+        match = re.match(r'^=HYPERLINK\("[^"]*", "(.*)"\)$', cell)
+        if match:
+            return match.group(1).replace('""', '"')
+    return cell
+
+
+def _texts(cells):
+    """_player_text mapped over a list of cells."""
+    return [_player_text(c) for c in cells]
 
 
 def _candidate(player_id, slot, points, name=None, team_id=1):
@@ -370,13 +388,13 @@ class TestHomeRows:
         # Right-band data rows for slot C: week (boxscore embedded in Points,
         # col K / idx 10) and season (plain Points). Both carry the deviation
         # player + total pts (idx 13/14) because the all-lens pick differs.
-        c_rows = [r for r in rows if len(r) > 14 and r[5] == 'C' and r[7] == 'Catcher A']
+        c_rows = [r for r in rows if len(r) > 14 and r[5] == 'C' and _player_text(r[7]) == 'Catcher A']
         assert len(c_rows) == 2
         week_c, season_c = c_rows
         assert str(week_c[10]).startswith('=HYPERLINK(')
         assert season_c[10] == 12.2
-        assert week_c[13] == 'Bench Catcher' and week_c[14] == 30.0
-        assert season_c[13] == 'Bench Catcher' and season_c[14] == 30.0
+        assert _player_text(week_c[13]) == 'Bench Catcher' and week_c[14] == 30.0
+        assert _player_text(season_c[13]) == 'Bench Catcher' and season_c[14] == 30.0
 
         # Left band (cols A-D): nav labels, per-team grid, glossary, all-time.
         left_first = [r[0] if r else '' for r in rows]
@@ -388,7 +406,7 @@ class TestHomeRows:
         assert grid[2] == 'BP'
         alltime_c = next(
             r for r in rows
-            if len(r) > 3 and r[0] == 'C' and r[1] == 'All-Time Catcher'
+            if len(r) > 3 and r[0] == 'C' and _player_text(r[1]) == 'All-Time Catcher'
         )
         assert alltime_c[2] == 600  # whole number (no decimal at the all-time scale)
         assert alltime_c[3] == '3.00'  # 600 / 200 games
@@ -729,7 +747,7 @@ class TestTeamRosterRows:
             league_id=1156117086,
         )
 
-        assert result[0:5] == ['SP 2', 'BOS', 'Player 1', 'SP', 12.2]
+        assert _texts(result[0:5]) == ['SP 2', 'BOS', 'Player 1', 'SP', 12.2]
         assert result[5:9] == [2, 4, 9, 3.2]
         assert result[13:18] == [1, 0, 1, 8, '4.2']
 
@@ -745,7 +763,7 @@ class TestTeamRosterRows:
         assert [title for title, _ in result] == ['T1', 'T2']
         assert result[0][1][0] == ['Team 1']
         assert result[0][1][3] == almanac_sheets.TEAM_ROSTER_HEADER
-        assert [r[2] for r in result[0][1][4:]] == ['Player 10', 'Player 11']
+        assert [_player_text(r[2]) for r in result[0][1][4:]] == ['Player 10', 'Player 11']
 
     def test_build_team_roster_tabs_adds_blank_configured_slots(self):
         rows = [
@@ -799,13 +817,13 @@ class TestTeamHistoryRows:
 
         # Starter row pulls roster-context fields (active_points, etc.)
         # from the player_rows, not the position-pts in the stub.
-        assert result['LF']['player'] == 'Big Bench Bat'
+        assert _player_text(result['LF']['player']) == 'Big Bench Bat'
         assert result['LF']['active_points'] == 10
         # Bench: Everyday LF (20+0=20) > whoever's left (Big Bench Bat
         # already picked); IL Stash has 0+0=0 so Everyday LF lands BE.
-        assert result['BE']['player'] == 'Everyday LF'
+        assert _player_text(result['BE']['player']) == 'Everyday LF'
         # IL still uses il_days filter; first IL row goes to IL Stash.
-        assert result['IL 1']['player'] == 'IL Stash'
+        assert _player_text(result['IL 1']['player']) == 'IL Stash'
         assert result['IL 2']['player'] == ''
 
     def test_history_side_bench_sort_uses_total_rostered_production(self, monkeypatch):
@@ -828,8 +846,8 @@ class TestTeamHistoryRows:
             players, {'BE': 1}, season_year=2026, team_id=2,
         )
 
-        assert result['BE']['player'] == 'Mostly Benched Slugger'  # 75 > 30
-        assert result['Other 1']['player'] == 'Modest Everyday'
+        assert _player_text(result['BE']['player']) == 'Mostly Benched Slugger'  # 75 > 30
+        assert _player_text(result['Other 1']['player']) == 'Modest Everyday'
 
     def test_hitting_rates_keep_three_digits_for_low_rates(self):
         row = _history_player(1, 'Slumping Bat')
@@ -876,8 +894,8 @@ class TestTeamHistoryRows:
         # player is still on this tab's team (was the redundant abbrev).
         # The _history_player helper hardcodes the field to the team's
         # full name -- testing only the slot/player/pro columns here.
-        assert rows[6][1:4] == ['LF', 'Current LF', 'BOS']
-        assert rows[6][16:19] == ['LF', 'All Time LF', 'BOS']
+        assert _texts(rows[6][1:4]) == ['LF', 'Current LF', 'BOS']
+        assert _texts(rows[6][16:19]) == ['LF', 'All Time LF', 'BOS']
 
     def test_team_history_matrix_inserts_spacer_before_other_rows(self, monkeypatch):
         history_data = {

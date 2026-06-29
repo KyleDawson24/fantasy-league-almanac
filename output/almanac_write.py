@@ -26,6 +26,8 @@ import records
 from almanac_data import (
     get_almanac_records,
     get_draft_board,
+    get_team_standings,
+    get_team_slot_points,
     get_current_team_roster_stats,
     get_latest_matchup_period,
     get_roster_slot_capacities,
@@ -37,6 +39,7 @@ from almanac_data import (
 )
 from almanac_logic import (
     SCORE_RECORD_SPECS,
+    build_advanced_standings_tab_rows,
     build_draft_board_color_grid,
     build_draft_tab_rows,
     build_home_tab_rows,
@@ -46,6 +49,7 @@ from almanac_logic import (
     expand_team_roster_rows,
 )
 from almanac_render import (
+    ADVANCED_STANDINGS_TAB,
     DRAFT_TAB,
     HOME_TAB,
     RECORDS_TAB,
@@ -121,6 +125,11 @@ def write_almanac(sheet_id, season_year=None, matchup_period=None):
     draft_board = get_draft_board(season_year)
     draft_tab_rows = build_draft_tab_rows(draft_board, season_year, league_id=league_id)
     draft_color_grid = build_draft_board_color_grid(draft_board)
+    standings_tab_rows = build_advanced_standings_tab_rows(
+        get_team_standings(season_year),
+        get_team_slot_points(season_year),
+        season_year,
+    )
     client = _get_authorized_client()
     spreadsheet = client.open_by_key(sheet_id)
 
@@ -145,10 +154,11 @@ def write_almanac(sheet_id, season_year=None, matchup_period=None):
         for title, team_page_rows in team_pages
     ]
     draft_ws = _replace_draft_tab(spreadsheet, draft_tab_rows, color_grid=draft_color_grid)
+    standings_ws = _replace_advanced_standings_tab(spreadsheet, standings_tab_rows)
 
     nav_targets = {
         ws.title: ws.id
-        for ws in (records_ws, matchup_ws, draft_ws, *team_worksheets)
+        for ws in (records_ws, matchup_ws, draft_ws, standings_ws, *team_worksheets)
         if ws is not None
     }
     rows = build_home_tab_rows(
@@ -162,7 +172,7 @@ def write_almanac(sheet_id, season_year=None, matchup_period=None):
     _replace_home_tab(spreadsheet, rows)
 
     _sort_almanac_tabs(spreadsheet, [
-        HOME_TAB, RECORDS_TAB, TEAM_WEEKS_TAB,
+        HOME_TAB, RECORDS_TAB, TEAM_WEEKS_TAB, ADVANCED_STANDINGS_TAB,
         *[title for title, _ in team_pages], DRAFT_TAB,
     ])
 
@@ -477,6 +487,125 @@ def _draft_gradient_color(value, low, high):
 def _lerp_color(c1, c2, t):
     return {channel: c1[channel] + (c2[channel] - c1[channel]) * t
             for channel in ('red', 'green', 'blue')}
+
+
+def _standings_table_bounds(rows):
+    """Locate the two stacked tables on the Advanced Standings tab. Returns
+    (a_header, a_end, b_header, b_end) as 0-based row indices: the Standings
+    header row and the slot header row, each with the exclusive end of the data
+    block beneath it. None for a table that isn't found."""
+    a_hdr = next((i for i, r in enumerate(rows)
+                  if r and r[0] == 'Rank' and 'Offense' in r), None)
+    b_hdr = next((i for i, r in enumerate(rows)
+                  if a_hdr is not None and i > a_hdr and r and r[0] == 'Team'), None)
+
+    def _data_end(start):
+        end = start
+        while end < len(rows) and rows[end] and rows[end][0] not in ('', None):
+            end += 1
+        return end
+
+    a_end = _data_end(a_hdr + 1) if a_hdr is not None else None
+    b_end = _data_end(b_hdr + 1) if b_hdr is not None else None
+    return a_hdr, a_end, b_hdr, b_end
+
+
+def _apply_standings_gradients(spreadsheet, worksheet, rows):
+    """Red->white->green column gradients: the four point columns over the
+    standings rows (Against inverted -- fewer points conceded is good), and
+    every lineup-slot column over the slot rows."""
+    sheet_id = worksheet.id
+    a_hdr, a_end, b_hdr, b_end = _standings_table_bounds(rows)
+    requests = []
+    if a_hdr is not None:
+        header = rows[a_hdr]
+        a_range = [{'startRowIndex': a_hdr + 1, 'endRowIndex': a_end}]
+        for label, scale in (('Offense', 'three_good_high'),
+                             ('Defense', 'three_good_high'),
+                             ('Total', 'three_good_high'),
+                             ('Against', 'three_good_low')):
+            if label in header:
+                requests.append(_color_scale_request(
+                    sheet_id, header.index(label), a_end,
+                    scale=scale, row_ranges=a_range,
+                ))
+    if b_hdr is not None:
+        b_range = [{'startRowIndex': b_hdr + 1, 'endRowIndex': b_end}]
+        for col in range(1, len(rows[b_hdr])):
+            requests.append(_color_scale_request(
+                sheet_id, col, b_end, scale='three_good_high', row_ranges=b_range,
+            ))
+    if requests:
+        _sheets_batch_update(
+            spreadsheet, f'standings gradients {worksheet.title}', requests,
+        )
+
+
+def _replace_advanced_standings_tab(spreadsheet, rows):
+    """Clear / create the Advanced Standings tab and write it. Returns the
+    worksheet so write_almanac can read its gid for the Home nav band.
+
+    Written RAW so the W-L record strings ("11-2") aren't parsed as dates; the
+    numeric point cells stay numeric, so the column gradients still apply."""
+    width = max((len(row) for row in rows), default=20)
+    try:
+        worksheet = spreadsheet.worksheet(ADVANCED_STANDINGS_TAB)
+    except gspread.WorksheetNotFound:
+        worksheet = _sheets_call(
+            f'create {ADVANCED_STANDINGS_TAB}',
+            lambda: spreadsheet.add_worksheet(
+                title=ADVANCED_STANDINGS_TAB,
+                rows=max(len(rows) + 10, 50),
+                cols=max(width, 20),
+            ),
+        )
+
+    _sheets_call(f'clear {ADVANCED_STANDINGS_TAB}', worksheet.clear)
+    _sheets_call(
+        f'update {ADVANCED_STANDINGS_TAB}',
+        lambda: worksheet.update(rows, 'A1', value_input_option='RAW'),
+    )
+
+    try:
+        sheet_id = worksheet.id
+        last_col = _a1_col(width)
+        _apply_standings_gradients(spreadsheet, worksheet, rows)
+        _sheets_batch_update(
+            spreadsheet, f'standings widths {worksheet.title}',
+            [
+                _column_width_request(sheet_id, 0, 2, 52),      # Rank/Team, Team/C
+                _column_width_request(sheet_id, 2, 3, 130),     # Owner / 1B slot
+                _column_width_request(sheet_id, 3, width, 58),  # W-L, points, slots
+            ],
+        )
+        a_hdr, _, b_hdr, _ = _standings_table_bounds(rows)
+        formats = [
+            {'range': 'A1', 'format': {'textFormat': {'bold': True, 'fontSize': 13}}},
+        ]
+        for header_idx in (a_hdr, b_hdr):
+            if header_idx is None:
+                continue
+            r = header_idx + 1
+            formats.append({
+                'range': f'A{r}:{last_col}{r}',
+                'format': {
+                    'textFormat': {
+                        'bold': True,
+                        'foregroundColor': {'red': 1, 'green': 1, 'blue': 1},
+                    },
+                    'backgroundColor': {'red': 0.12, 'green': 0.20, 'blue': 0.30},
+                },
+            })
+            if header_idx >= 1:  # bold the section label one row above
+                formats.append({
+                    'range': f'A{header_idx}',
+                    'format': {'textFormat': {'bold': True}},
+                })
+        _batch_format(worksheet, formats)
+    except Exception as exc:
+        print(f"[almanac] standings formatting skipped: {exc}")
+
+    return worksheet
 
 
 def _replace_team_weeks_tab(spreadsheet, rows, stat_specs, source_rows=None, record_marks=None):

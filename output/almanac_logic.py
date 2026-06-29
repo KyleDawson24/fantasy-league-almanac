@@ -35,12 +35,14 @@ from almanac_data import (
     slot_label,
 )
 from almanac_render import (
+    ADVANCED_STANDINGS_TAB,
     HOME_ALLTIME_HEADER,
     HOME_DEVIATION_LABEL,
     HOME_HEADER,
     HOME_TAB,
     DRAFT_TAB,
     DRAFT_VALUE_HEADER,
+    STANDINGS_HEADER,
     RECORDS_HEADER,
     RECORDS_MATRIX_DETAIL_HEADER,
     RECORDS_MATRIX_WIDTH,
@@ -64,6 +66,7 @@ from almanac_render import (
     format_all_league_thin_row,
     format_draft_board_cell,
     format_draft_value_row,
+    format_standings_row,
     home_nav_link,
     format_record_matrix_row,
     format_record_row,
@@ -551,11 +554,15 @@ def _home_left_rows(all_time_rows, team_titles, nav_targets, align_alltime_to=No
         home_nav_link('Matchup History', TEAM_WEEKS_TAB, nav_targets),
         'Team-by-team week scoring archive.',
     ])
+    rows.append([
+        home_nav_link('Advanced Standings', ADVANCED_STANDINGS_TAB, nav_targets),
+        'Standings + points by lineup slot.',
+    ])
     rows.append(['Team Pages', 'Historic production by team.'])
     rows.extend(_home_team_grid_rows(team_titles, nav_targets))
-    # Slot Scoring is still a planned tab (unlinked). Draft Recap is built
-    # now, so it links live (gid resolved in the two-pass write).
-    rows.append([home_nav_link('Slot Scoring', None, nav_targets), 'Coming soon.'])
+    # Draft Recap is built, so it links live (gid resolved in the two-pass
+    # write). The old "Slot Scoring -- coming soon" placeholder is now fulfilled
+    # by the Advanced Standings tab linked above.
     rows.append([home_nav_link('Draft Recap', DRAFT_TAB, nav_targets),
                  'Draft board + best-value / bust picks.'])
 
@@ -819,6 +826,55 @@ def build_draft_board_color_grid(board_rows):
         ]
         for slot in range(max_slots)
     ]
+
+
+# Lineup-slot column order for the Advanced Standings slot grid: the playing
+# slots (SLOT_ORDER) first, then the inactive BE / IL buckets last. Any slot
+# not in this map -- e.g. the free-agent-pool 'FA' marker -- is dropped.
+STANDINGS_SLOT_ORDER = {**SLOT_ORDER, 'BE': 200, 'IL': 210}
+
+
+def build_advanced_standings_tab_rows(standings_rows, slot_rows, season_year):
+    """Build the Advanced Standings tab: a season-to-date team standings
+    (Table A) stacked over a team x lineup-slot points grid (Table B).
+
+    standings_rows come from almanac_data.get_team_standings (already ordered
+    as a standings); slot_rows from almanac_data.get_team_slot_points. The
+    write layer paints the column gradients -- this builder only lays out the
+    cells. Both tables share the standings team order.
+    """
+    rows = [
+        [f'Advanced Standings: {season_year}'],
+        ['Season-to-date. Offense / Defense / Total and Against are calculated '
+         'points (Against = points conceded); W-L is the official ESPN record.'],
+        [],
+        ['Standings'],
+        list(STANDINGS_HEADER),
+    ]
+    for rank, team in enumerate(standings_rows, start=1):
+        rows.append(format_standings_row(rank, team))
+
+    # Slot columns: every real lineup slot present in the data, ordered, BE/IL
+    # last; FA and any other non-roster marker are excluded.
+    present = {r['lineup_slot'] for r in slot_rows
+               if r.get('lineup_slot') in STANDINGS_SLOT_ORDER}
+    slot_cols = sorted(present, key=lambda s: STANDINGS_SLOT_ORDER[s])
+
+    by_team = defaultdict(dict)
+    for r in slot_rows:
+        by_team[r['team_id']][r['lineup_slot']] = r['slot_pts']
+
+    rows.append([])
+    rows.append([])
+    rows.append(['Points by Lineup Slot'])
+    rows.append(['Team', *slot_cols])
+    for team in standings_rows:
+        team_slots = by_team.get(team['team_id'], {})
+        rows.append([
+            team.get('team_abbrev') or '',
+            *[team_slots.get(slot, '') for slot in slot_cols],
+        ])
+    return rows
 
 
 def build_team_weeks_tab_rows(team_week_rows, stat_specs, league_id=None,

@@ -41,8 +41,17 @@ TEAM_WEEKS_TAB = 'Matchup History'
 DRAFT_TAB = 'Draft Recap'
 
 
+ADVANCED_STANDINGS_TAB = 'Advanced Standings'
+
+
 # v1.2 draft tab: Best Value / Biggest Bust leaderboard columns.
 DRAFT_VALUE_HEADER = ['Player', 'Team', 'Pick', 'Pts', 'Value']
+
+
+# v1.3 Advanced Standings, Table A (team standings) header. Offense / Defense /
+# Total carry a red->white->green gradient; Against is inverted (fewer points
+# conceded = green) in the write layer.
+STANDINGS_HEADER = ['Rank', 'Team', 'Owner', 'W-L', 'Offense', 'Defense', 'Total', 'Against']
 
 
 HOME_HEADER = [
@@ -540,6 +549,27 @@ def format_draft_board_cell(pick):
     """Round x team grid cell: the drafted player, keeper-marked. Blank for
     an unfilled (round, team) slot (shouldn't occur in a full keeper draft)."""
     return _draft_player_label(pick) if pick else ''
+
+
+def format_standings_row(rank, row):
+    """One Advanced Standings (Table A) data row:
+    Rank | Team | Owner | W-L | Offense | Defense | Total | Against.
+
+    W-L is the official platform record; ties only show when present."""
+    wins = row.get('wins') or 0
+    losses = row.get('losses') or 0
+    ties = row.get('ties') or 0
+    record = f"{wins}-{losses}-{ties}" if ties else f"{wins}-{losses}"
+    return [
+        rank,
+        row.get('team_abbrev') or '',
+        row.get('owner_display') or '',
+        record,
+        row.get('offense_pts'),
+        row.get('defense_pts'),
+        row.get('total_pts'),
+        row.get('against_pts'),
+    ]
 
 
 def format_record_matrix_row(spec, current_record=None, all_time_record=None,

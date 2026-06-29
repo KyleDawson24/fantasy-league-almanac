@@ -35,6 +35,8 @@ from almanac_data import (
     get_team_week_record_marks,
     get_all_league_team,
     get_draft_board,
+    get_team_standings,
+    get_team_slot_points,
     get_home_tab_data,
     get_optimal_team,
     get_slot_capacities,
@@ -63,6 +65,7 @@ from almanac_data import (
 
 # v1.1.1 Tier 2c.2: render surface lives in almanac_render.py now.
 from almanac_render import (
+    ADVANCED_STANDINGS_TAB,
     DRAFT_TAB,
     DRAFT_VALUE_HEADER,
     HOME_ALLTIME_HEADER,
@@ -157,6 +160,7 @@ from almanac_logic import (
     _spec_key,
     _team_history_row_labels,
     _team_sort_key,
+    build_advanced_standings_tab_rows,
     build_draft_tab_rows,
     build_home_tab_rows,
     build_records_tab_rows,

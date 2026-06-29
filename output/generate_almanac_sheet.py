@@ -76,6 +76,11 @@ def main():
     draft_rows = almanac_sheets.build_draft_tab_rows(
         almanac_sheets.get_draft_board(season_year), season_year, league_id=league_id,
     )
+    advanced_standings_rows = almanac_sheets.build_advanced_standings_tab_rows(
+        almanac_sheets.get_team_standings(season_year),
+        almanac_sheets.get_team_slot_points(season_year),
+        season_year,
+    )
     # Home is built last among the data tabs: its nav band (#23) lists the
     # team tabs + Draft Recap. Preview has no real gids, so nav_targets stays
     # None -> nav cells render as plain tab-name text.
@@ -91,6 +96,7 @@ def main():
         ('Home', home_rows),
         ('Records', records_rows),
         (almanac_sheets.TEAM_WEEKS_TAB, team_weeks_rows),
+        (almanac_sheets.ADVANCED_STANDINGS_TAB, advanced_standings_rows),
         *team_tabs,
         (almanac_sheets.DRAFT_TAB, draft_rows),
     ]

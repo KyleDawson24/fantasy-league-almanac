@@ -4,14 +4,41 @@ sources:
   - name: raw
     database: ESPN_FANTASY
     schema: RAW
+    # Freshness: the four settings-style snapshots carry an extracted_at
+    # load timestamp and are re-extracted at least once per season (they're
+    # event-driven, not weekly), so their thresholds are seasonal -- warn at
+    # ~7 months means "a new season started and the settings were never
+    # re-pulled." box_scores is the weekly-cadence table but has no load
+    # timestamp column yet, so it carries no freshness config (adding
+    # extracted_at to the box-score extract is the enabling change).
     tables:
       - name: box_scores
         description: "Raw ESPN Fantasy box score JSON, one row per scoring period. Each row contains all matchups for that day with full player lineups and stat breakdowns."
       - name: scoring_settings
         description: "Raw ESPN Fantasy scoring settings JSON, append-only. Each row is a snapshot of the league's scoring weights for a season, captured at extraction time. The staging model picks the latest snapshot per season."
+        config:
+          loaded_at_field: extracted_at
+          freshness:
+            warn_after: {count: 210, period: day}
+            error_after: {count: 420, period: day}
       - name: roster_settings
         description: "Raw ESPN Fantasy roster settings JSON, append-only. Each row is a snapshot of lineup slot counts, position maximums, and related roster constraints for a season."
+        config:
+          loaded_at_field: extracted_at
+          freshness:
+            warn_after: {count: 210, period: day}
+            error_after: {count: 420, period: day}
       - name: team_owners
         description: "Raw ESPN team -> owner mapping, append-only. Each row is a VARIANT array of {team_id, owner_id, first_name, last_name} for a season, captured from league.teams[].owners. owner_id is the stable ESPN member GUID the box-score extract discards; this is the bridge that lets the owner_nicknames seed join the data. Staging picks the latest snapshot per season."
+        config:
+          loaded_at_field: extracted_at
+          freshness:
+            warn_after: {count: 210, period: day}
+            error_after: {count: 420, period: day}
       - name: draft_picks
         description: "Raw ESPN draft board, append-only. Each row is a VARIANT array of pick dicts {overall_pick, round_num, round_pick, player_id, player_name, team_id, keeper} for a season, serialized from the espn-api wrapper's league.draft (player names + drafting team resolved at extract time). keeper flags picks retained from the prior season (keeper league). Staging picks the latest snapshot per season."
+        config:
+          loaded_at_field: extracted_at
+          freshness:
+            warn_after: {count: 210, period: day}
+            error_after: {count: 420, period: day}

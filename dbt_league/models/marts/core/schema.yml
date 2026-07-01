@@ -19,10 +19,9 @@ models:
 
       Materialized as view. Python consumers reach this dim via
       output/stat_catalog.py's @lru_cache helpers (one fetch per
-      script process). The mart_stat_leaderboard model still iterates
-      stat_classification directly at Jinja compile time via
-      run_query; future cleanup may consolidate to dim_stat as the
-      sole source.
+      script process). mart_stat_leaderboard's compile-time UNPIVOT
+      loop also reads this dim (run_query over leaderboard_name), so
+      the seed-to-leaderboard translation lives in exactly one place.
     columns:
       - name: stat_name
         description: 'Seed-side primary key. Matches the breakdown VARIANT key.'
@@ -547,11 +546,12 @@ models:
       NO platform_* columns -- inactive contributions don't roll up to a team's ESPN home_score, so the symmetry with the active fact stops there.
     tests:
       - dbt_utils.unique_combination_of_columns:
-          combination_of_columns:
-            - season_year
-            - matchup_period
-            - player_id
-            - wasted_bucket
+          arguments:
+            combination_of_columns:
+              - season_year
+              - matchup_period
+              - player_id
+              - wasted_bucket
     columns:
       - name: season_year
         description: 'ESPN season year.'
@@ -833,11 +833,12 @@ models:
       DOES NOT carry platform_points (no ESPN home_score equivalent for "the team's bench"), platform_hitting_pts / platform_pitching_pts (omitted as not-yet-needed at bench-team grain; the underlying split is now stat-contribution-based at int_player_daily and categorizes bench pitchers correctly, so they could be surfaced if a consumer needs them), or team rates (bench IP isn't pitched -- rate semantics break).
     tests:
       - dbt_utils.unique_combination_of_columns:
-          combination_of_columns:
-            - season_year
-            - matchup_period
-            - team_id
-            - wasted_bucket
+          arguments:
+            combination_of_columns:
+              - season_year
+              - matchup_period
+              - team_id
+              - wasted_bucket
     columns:
       - name: season_year
         description: 'ESPN season year.'

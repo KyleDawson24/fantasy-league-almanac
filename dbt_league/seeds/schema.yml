@@ -67,6 +67,10 @@ seeds:
           - accepted_values:
               arguments:
                 values: ['positive', 'negative', 'neutral']
+      - name: qualifier_stat
+        description: 'v1.1.1 rate-stat min-volume qualifier: name of the denominator column (e.g. ''ab'', ''outs'') gating whether a rate stat qualifies as a record. NULL on every non-rate stat.'
+      - name: qualifier_min
+        description: 'Minimum qualifier_stat volume below which the rate doesn''t qualify as a record (e.g. 225 AB for hitting rates, 150 outs = 50 IP for pitching rates). mart_stat_leaderboard skips the threshold filter when NULL.'
       - name: notes
         description: 'Free-text context for unusual rows -- mislabels, scoring-weight discoveries, deprecated stats, ESPN internal flags. Often references the Phase X documentation where the row''s history was hashed out.'
 
@@ -114,10 +118,10 @@ seeds:
       a preferred_name override; defaults to first_name when preferred_name
       is empty. One row per league member.
 
-      Not currently joined into the dbt models (owner_name reaches the
-      mart via stg_box_scores's raw ESPN-side value); this seed is staged
-      for the v1.x dim_player + owner-side modeling work tracked in
-      ROADMAP.
+      Joined into dim_owner (v1.2 owner-display work): owner_display =
+      preferred_name when set, else proper-cased "First Last". The raw
+      ESPN-side owner_name on stg_box_scores still flows through the
+      facts unchanged; owner_display is the curated alternative.
     columns:
       - name: owner_id
         description: 'ESPN GUID for the team owner. Stable across seasons.'

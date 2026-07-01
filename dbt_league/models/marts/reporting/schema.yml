@@ -22,21 +22,27 @@ models:
               - lineup_slot
     columns:
       - name: season_year
+        description: 'ESPN season year.'
         tests:
           - not_null
       - name: matchup_period
+        description: 'Weekly matchup period this scoring period belongs to.'
         tests:
           - not_null
       - name: scoring_period
+        description: 'Daily ESPN scoring period number.'
         tests:
           - not_null
       - name: team_id
+        description: 'ESPN stable numeric team identifier. Never NULL here -- free agents are excluded from the roster snapshot.'
         tests:
           - not_null
       - name: player_id
+        description: 'ESPN stable numeric player identifier.'
         tests:
           - not_null
       - name: lineup_slot
+        description: 'Fantasy lineup slot occupied on this scoring period (1B/SP/BE/IL/etc.). Part of the grain.'
         tests:
           - not_null
       - name: slots_to_fill
@@ -44,9 +50,11 @@ models:
         tests:
           - not_null
       - name: slot_sort_order
+        description: 'Stable roster display ordering, from dim_roster_slot_counts.'
         tests:
           - not_null
       - name: is_active_lineup_slot
+        description: 'True when the slot is a starting slot (not BE/IL), from dim_roster_slot_counts.'
         tests:
           - not_null
       - name: roster_status

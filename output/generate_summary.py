@@ -219,7 +219,7 @@ def get_wasted_points(season_year, matchup_period, limit=5):
     surfaced separately (fa_wasted_pts, bench_wasted_pts) so the formatter
     can attribute "X unowned, Y benched" in the parenthetical.
 
-    Joins int_player_daily for MLB pro_team and eligible-slots metadata
+    Joins fct_player_daily_performance for MLB pro_team and eligible-slots metadata
     (position display uses filtered eligibleSlots so multi-position
     players like Sanoja show as "2B, RP" instead of just a primary
     position), and fct_weekly_player_active_performance to detect
@@ -286,7 +286,7 @@ def get_wasted_points(season_year, matchup_period, limit=5):
             WHERE season_year = %s AND matchup_period = %s
         )
         SELECT
-            -- display_name sourced from player_meta (int_player_daily's
+            -- display_name sourced from player_meta (the daily fact's
             -- nickname-resolved value). Fallback to wasted_combined's
             -- player_name handles the rare case where a player has stats
             -- but no box_scores row (shouldn't happen in practice).

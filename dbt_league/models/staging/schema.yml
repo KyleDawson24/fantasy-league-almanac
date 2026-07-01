@@ -195,3 +195,26 @@ models:
         description: 'ESPN numeric id of the drafting fantasy team.'
       - name: keeper
         description: 'True when the pick was a keeper retained from the prior season.'
+
+  - name: stg_team_owners
+    description: >
+      Per-season team -> owner bridge, flattened from RAW.TEAM_OWNERS
+      (latest snapshot per season). owner_id is the stable ESPN member
+      GUID -- the join key dim_owner and the owner_nicknames seed use.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - season_year
+              - team_id
+              - owner_id
+    columns:
+      - name: season_year
+        tests:
+          - not_null
+      - name: team_id
+        tests:
+          - not_null
+      - name: owner_id
+        tests:
+          - not_null

@@ -160,3 +160,19 @@ models:
           rounded 1 decimal.
       - name: eligible_days
         description: 'Count of distinct scoring periods (= days) the player was eligible at this position during this matchup period. Useful for per-day rate queries; not strictly required by the optimal-team selector.'
+
+  - name: int_team_owner_display
+    description: >
+      (season, team) -> owner_display label. Collapses co-owned teams to
+      "Name / Name". Single join point consumers/marts use to attach
+      owner_display alongside owner_name.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - season_year
+              - team_id
+    columns:
+      - name: owner_display
+        tests:
+          - not_null

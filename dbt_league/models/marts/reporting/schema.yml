@@ -1,0 +1,346 @@
+version: 2
+
+# Reporting layer: consumer-facing marts read by the output scripts
+# (weekly recap, records report, Google Sheets almanac). Built on the
+# core dims + facts in ../core.
+
+models:
+  - name: mart_daily_roster_snapshot
+    description: >
+      Daily roster snapshot mart. One row per rostered fantasy player
+      per scoring period, including zero-stat players who do not survive
+      the stat-breakdown performance path. Excludes free agents. This is
+      the public mart contract for roster pages and rostered-day counts.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - season_year
+              - scoring_period
+              - team_id
+              - player_id
+              - lineup_slot
+    columns:
+      - name: season_year
+        tests:
+          - not_null
+      - name: matchup_period
+        tests:
+          - not_null
+      - name: scoring_period
+        tests:
+          - not_null
+      - name: team_id
+        tests:
+          - not_null
+      - name: player_id
+        tests:
+          - not_null
+      - name: lineup_slot
+        tests:
+          - not_null
+      - name: slots_to_fill
+        description: 'Configured count for this lineup slot, from dim_roster_slot_counts.'
+        tests:
+          - not_null
+      - name: slot_sort_order
+        tests:
+          - not_null
+      - name: is_active_lineup_slot
+        tests:
+          - not_null
+      - name: roster_status
+        description: '''active'' for starter lineup slots, ''inactive'' for BE/IL.'
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['active', 'inactive']
+
+  - name: mart_draft_board
+    description: >
+      One wide row per draft pick: the pick (round / overall / keeper), the
+      drafting team's labels, and the player's total season production
+      (SUM of calculated_points, COALESCEd to 0 for never-played picks) --
+      the draft-value join. Thin relational view over stg_draft; consumer
+      surface for the Draft Recap tab.
+      Grain: one row per (season_year, overall_pick).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - season_year
+              - overall_pick
+    columns:
+      - name: season_year
+        description: 'Season the draft belongs to.'
+        tests:
+          - not_null
+      - name: overall_pick
+        description: 'True overall selection number; the pick grain.'
+        tests:
+          - not_null
+      - name: round_num
+        description: 'Draft round.'
+      - name: round_pick
+        description: 'Pick within the round.'
+      - name: keeper
+        description: 'True for keeper picks (retained from the prior season).'
+      - name: team_id
+        description: 'Drafting fantasy team id.'
+      - name: team_name
+        description: 'Drafting team name (latest-in-season label).'
+      - name: team_abbrev
+        description: 'Drafting team abbreviation.'
+      - name: owner_display
+        description: 'Drafting team owner display (nickname > proper name), co-owners slash-joined.'
+      - name: player_id
+        description: 'ESPN stable numeric player identifier.'
+      - name: player_name
+        description: 'Display name (nickname-resolved), ESPN draft name as fallback.'
+      - name: season_points
+        description: 'Player total season calculated_points across every team / slot / status; 0 when the player never appeared in box scores.'
+      - name: games_played
+        description: 'Player total MLB games that season (DH days count 2); 0 when never played.'
+
+  - name: mart_league_weekly_benchmarks
+    description: >
+      One row per (season_year, matchup_period) with league-wide
+      aggregate score lenses (mean, max, min) plus the percentile rank
+      of each mean within league history.
+
+      Powers "hot week / cold week" callouts in the weekly recap and
+      similar collective-mood content. Three score lenses: total
+      calculated_points, calculated_hitting_pts, calculated_pitching_pts.
+      All three use the calculated_* lens (cross-season comparable
+      under current-season scoring weights) -- the right lens for
+      historical comparison. Platform_* lens not included; cross-season
+      comparison under varying historical weights would be misleading.
+
+      Aggregation includes every active-roster team-week (no bye-team
+      filter; bye-week teams still rostered players and accrued points).
+      Excludes is_abnormal weeks (All-Star break, weather-shortened,
+      etc.) to match the convention every other leaderboard CTE uses.
+
+      Percentile uses PERCENT_RANK over the full history. A value of
+      0.95 means this week's mean is higher than 95% of weeks the
+      league has ever recorded. Consumers typically read it as "Nth
+      percentile" via ROUND(pctile * 100, 0).
+
+      Grain: (season_year, matchup_period). View materialization
+      (small aggregation, source is already a table).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - season_year
+              - matchup_period
+    columns:
+      - name: season_year
+        description: 'Season year.'
+        tests:
+          - not_null
+      - name: matchup_period
+        description: 'Matchup period within the season.'
+        tests:
+          - not_null
+      - name: team_count
+        description: 'Number of team-weeks aggregated. Constant in normal weeks (= league size); informational guardrail in case the upstream filter ever drops a team unexpectedly.'
+        tests:
+          - not_null
+      - name: total_weeks_in_history
+        description: 'Total league-weeks across all loaded seasons (constant per row; denormalized for single-query consumer reads).'
+      - name: calculated_points_mean
+        description: 'League average calculated total points for this week. Rounded to 1 decimal (matches fact-layer rounding).'
+      - name: calculated_points_max
+        description: 'Highest calculated_points by any team this week.'
+      - name: calculated_points_min
+        description: 'Lowest calculated_points by any team this week.'
+      - name: calculated_points_pctile
+        description: 'PERCENT_RANK of calculated_points_mean across all weeks in league history (0..1). 0.95 = higher than 95% of recorded weeks.'
+      - name: calculated_points_rank
+        description: 'Absolute RANK of calculated_points_mean across all weeks (DESC, so 1 = highest mean ever). Powers the always-on League This Week summary line. Ties get the same rank (RANK semantics, not DENSE_RANK).'
+      - name: calculated_hitting_pts_mean
+        description: 'League average calculated hitting points this week. Rounded 1 decimal.'
+      - name: calculated_hitting_pts_max
+        description: 'Highest calculated_hitting_pts by any team this week.'
+      - name: calculated_hitting_pts_min
+        description: 'Lowest calculated_hitting_pts by any team this week.'
+      - name: calculated_hitting_pts_pctile
+        description: 'PERCENT_RANK of calculated_hitting_pts_mean across all weeks in league history.'
+      - name: calculated_hitting_pts_rank
+        description: 'Absolute RANK of calculated_hitting_pts_mean across all weeks (DESC, so 1 = highest mean ever).'
+      - name: calculated_pitching_pts_mean
+        description: 'League average calculated pitching points this week. Rounded 1 decimal.'
+      - name: calculated_pitching_pts_max
+        description: 'Highest calculated_pitching_pts by any team this week.'
+      - name: calculated_pitching_pts_min
+        description: 'Lowest calculated_pitching_pts by any team this week.'
+      - name: calculated_pitching_pts_pctile
+        description: 'PERCENT_RANK of calculated_pitching_pts_mean across all weeks in league history.'
+      - name: calculated_pitching_pts_rank
+        description: 'Absolute RANK of calculated_pitching_pts_mean across all weeks (DESC, so 1 = highest mean ever).'
+
+  - name: mart_stat_leaderboard
+    description: >
+      Top-10 leaderboard across team and player grains, for both stat-level (HR, K, RBI, etc.) and score-level columns.
+      Both platform_* (ESPN's official tally) and calculated_* (rules-normalized under current weights) score columns are included so consumers can choose which lens to rank by.
+
+      Each (entity_grain, performance_status, stat_name, record_scope, record_direction) partition emits 10 ranked rows, ties broken by recency (newer season, then matchup).
+      The top-10 emission is a visibility buffer: consumers display top-5, but the extra 5 ranks let consumer-side tie-collapse logic see whether a tier extends past the display cap (needed for accurate "N teams tied at X" counts when the visible tier saturates).
+      Consumers apply polarity filtering downstream (negative-weighted stats only surface 'most'/most-of; positive stats surface both directions).
+      Direction values are intentionally direction-agnostic ('most'/'fewest' rather than 'best'/'worst') -- 'most' is best for HR but worst for ER allowed; the polarity filter at the consumer side resolves the mapping.
+
+      Built via a seed-driven Jinja UNPIVOT loop over four source CTEs (team_active, team_inactive, player_active, player_inactive) union-all'd into one combined CTE.
+      Snowflake UNPIVOT syntax; porting to DuckDB/BigQuery would require warehouse-specific macro wrapping.
+      The performance_status partition ('active' | 'inactive') segregates rankings; consumers default-filter to active.
+      wasted_bucket is carried as a column on inactive rows but is not part of the ranking partition.
+      View materialization (rankings retroactively mutable; incremental would be fragile).
+      Excludes abnormal matchup periods.
+
+      Grain: (entity_grain, performance_status, stat_name, record_scope, record_direction, rank), rank 1..10.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - entity_grain
+              - performance_status
+              - stat_name
+              - record_scope
+              - record_direction
+              - rank
+    columns:
+      - name: entity_grain
+        description: 'team or player. Determines whether the row is a team-level or player-level record.'
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['team', 'player']
+      - name: performance_status
+        description: 'active or inactive. Rankings are partitioned by this so active-slot records and bench/IL/FA-slot records do not mingle. Consumers default-filter performance_status = ''active''.'
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['active', 'inactive']
+      - name: wasted_bucket
+        description: 'NULL for active rows; ''FA'' or ''ROSTERED_INACTIVE'' for inactive rows. Carried as a column on inactive rows for ad-hoc analysis. Not part of the ranking partition.'
+      - name: stat_name
+        description: 'Column name being ranked. Includes counting stats (H, AB, HR, K, etc.) and score columns (PLATFORM_POINTS, PLATFORM_HITTING_PTS, PLATFORM_PITCHING_PTS, CALCULATED_POINTS, CALCULATED_HITTING_PTS, CALCULATED_PITCHING_PTS). calculated_* lets the records output rank under current-season weights; platform_* is retained for cross-season comparison.'
+        tests:
+          - not_null
+      - name: record_scope
+        description: 'all_time (across every loaded season) or current_season (latest season only).'
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['all_time', 'current_season']
+      - name: record_direction
+        description: >
+          'most' (rank by stat_value DESC) or 'fewest' (rank by stat_value ASC).
+          Direction-agnostic by design -- the same value ('most') means "best" for HR but "worst" for ER allowed; consumer applies polarity-aware filtering when surfacing records.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['most', 'fewest']
+      - name: rank
+        description: '1 to 10. Ties broken by recency (newer season_year, then newer matchup_period) in both directions.'
+        tests:
+          - not_null
+      - name: team_abbrev
+        description: 'Owner-set short fantasy team code. Carried through for compact callout rendering.'
+      - name: season_year
+        description: 'Season when this rank was set.'
+      - name: matchup_period
+        description: 'Matchup period when this rank was set.'
+      - name: team_id
+        description: 'Team identifier of the rank holder.'
+      - name: team_name
+        description: 'Team name of the rank holder.'
+      - name: owner_name
+        description: 'Owner of the team holding this rank.'
+      - name: player_id
+        description: 'Player identifier (entity_grain = player only; NULL for team rows).'
+      - name: player_name
+        description: 'Player name (entity_grain = player only; NULL for team rows).'
+      - name: display_name
+        description: 'Player display name (entity_grain = player only; NULL for team rows).'
+      - name: stat_value
+        description: 'Numeric value at this rank.'
+        tests:
+          - not_null
+
+  - name: mart_team_matchup
+    description: >
+      Wide matchup-grain view over fct_weekly_team_active_performance. Each
+      row carries one team's full active line (passed through from the base
+      fact), the opponent's calculated-lens scores, head-to-head margin
+      and combined matchup totals, and the league-wide per-week averages
+      on the calculated lens.
+
+      Architectural rationale: opponent points, margin, and league
+      averages are properties of the matchup and the league, not the
+      team. They don't belong as columns on the team fact, which holds
+      the team_total = SUM(players) invariant for its own production.
+      Additionally, the league-average window partitions across every
+      team in the period, so it cannot live on the incrementally-merged
+      base fact.
+
+      Grain: one row per (season_year, matchup_period, team_id),
+      filtered to team-weeks with an opponent. Two rows per matchup --
+      consumers ranking a matchup as a single game dedupe via LEAST/
+      GREATEST on team_id or by filtering to team_id < opponent_id.
+
+      First consumer: output/generate_almanac_sheet.py Team Weeks tab.
+      View materialization (pure derivation; window forbids incremental).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - season_year
+              - matchup_period
+              - team_id
+    columns:
+      - name: season_year
+        description: 'Season year.'
+        tests:
+          - not_null
+      - name: matchup_period
+        description: 'Matchup period within the season.'
+        tests:
+          - not_null
+      - name: team_id
+        description: 'ESPN team_id for this side of the matchup.'
+        tests:
+          - not_null
+      - name: opponent_id
+        description: 'ESPN team_id for the opposing side. NOT NULL by construction (the view filters opponent_id IS NOT NULL).'
+        tests:
+          - not_null
+      - name: sort_key
+        description: 'Stable chronological sort key (season_year * 100 + matchup_period). Sorts the full archive without re-deriving in consumers.'
+        tests:
+          - not_null
+      - name: opponent_calculated_hitting_pts
+        description: 'Opponent calculated hitting points (cross-season comparable lens). Pulled from the matched opponent row on the base fact.'
+      - name: opponent_calculated_pitching_pts
+        description: 'Opponent calculated pitching points (cross-season comparable lens).'
+      - name: opponent_calculated_points
+        description: 'Opponent calculated total points (cross-season comparable lens).'
+      - name: calculated_margin
+        description: 'this_team.calculated_points - opponent.calculated_points. May disagree with `result` (platform-derived W/L) when commissioner adjustments exist; that divergence is meaningful, not drift.'
+      - name: matchup_calculated_hitting_pts
+        description: 'this_team + opponent calculated hitting points. Combined matchup output for "highest scoring contest" content and for normalizing a team against the contest it was in.'
+      - name: matchup_calculated_pitching_pts
+        description: 'this_team + opponent calculated pitching points.'
+      - name: matchup_calculated_points
+        description: 'this_team + opponent calculated total points.'
+      - name: league_avg_hitting_points
+        description: 'AVG(calculated_hitting_pts) OVER (PARTITION BY season_year, matchup_period). Constant for every row sharing the same (season, period). Includes every team in the period (this team and its opponent).'
+      - name: league_avg_pitching_points
+        description: 'AVG(calculated_pitching_pts) over the league-week.'
+      - name: league_avg_total_points
+        description: 'AVG(calculated_points) over the league-week.'

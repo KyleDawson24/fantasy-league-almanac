@@ -104,19 +104,17 @@ exposures:
       leaderboards, standings views, and one active-stats tab per
       fantasy team with best-lineup analysis.
 
-      Two dependencies sit below the core contract layer and are declared
-      here deliberately: int_player_position_pts is the optimal-team
-      selector's data contract (single consumer today; promotes to a fact
-      per the 2-3-consumer convention), and stg_scoring_settings supplies
-      points_per_unit for the scoring-glossary callouts (no core surface
-      carries scoring weights yet).
+      One dependency sits below the core contract layer and is declared
+      here deliberately: stg_scoring_settings supplies points_per_unit
+      for the scoring-glossary callouts (no core surface carries scoring
+      weights yet).
     depends_on:
       - ref('fct_weekly_player_performance')
       - ref('fct_weekly_player_active_performance')
       - ref('fct_weekly_team_active_performance')
       - ref('fct_player_season_performance')
-      - ref('int_player_position_pts')
-      - ref('int_team_owner_display')
+      - ref('fct_player_position_pts')
+      - ref('dim_team_owner')
       - ref('stg_scoring_settings')
       - ref('mart_daily_roster_snapshot')
       - ref('mart_draft_board')

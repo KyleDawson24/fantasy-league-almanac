@@ -11,7 +11,7 @@
 -- owner_display = preferred_name when the seed sets one, else the
 -- "First Last" name from the latest settings snapshot. Consumers reach
 -- this via (season, team_id) -> stg_team_owners -> owner_id -> here
--- (collapsed for co-owners in int_team_owner_display).
+-- (collapsed for co-owners in dim_team_owner).
 --
 -- Why spine off stg_team_owners and not the seed: the seed only lists
 -- *current* owners. A 2025 team owned by someone who has since left the

@@ -19,12 +19,12 @@ RAW.* sources (5)          seeds (4)
 staging/        stg_*    1:1 reshapes of RAW; no business logic
    │                          │
    ▼                          │
-intermediate/   int_*    business logic: slot-validity filter,
-   │                     daily wide rollup, owner-display bridge
+intermediate/   int_*    business logic that isn't yet a contract:
+   │                     the slot-validity filter + daily wide rollup
    ▼                          │
-marts/core/     dim_*    the star-schema contract layer: 4 dims
-   │            fct_*    + 7 facts (daily / weekly / season grains,
-   │                     active / inactive lenses)
+marts/core/     dim_*    the star-schema contract layer: 5 dims
+   │            fct_*    + 8 facts (daily / weekly / season grains,
+   │                     active / inactive lenses, position points)
    ▼
 marts/reporting/ mart_*  consumer-facing report shapes: leaderboard,
    │                     benchmarks, matchup view, roster snapshot,
@@ -38,17 +38,18 @@ Layer conventions:
 | Layer | Prefix | Default materialization | What belongs here |
 |---|---|---|---|
 | `staging/` | `stg_` | view | One model per raw table. Pure reshape: flatten VARIANT, type, rename. The only layer that reads `source()`. |
-| `intermediate/` | `int_` | view | Business logic that isn't yet a consumer contract: the slot-validity filter, the wide daily point rollup, the co-owner display collapse. |
+| `intermediate/` | `int_` | view | Business logic that isn't yet a consumer contract: the slot-validity filter and the wide daily point rollup. |
 | `marts/core/` | `dim_` / `fct_` | table (facts override to incremental/view per model) | The contract layer. Grain-documented dimensions and facts that reporting marts and the Python output layer rely on. |
 | `marts/reporting/` | `mart_` | table (most override to view) | Report-shaped derivations over core: rankings, league aggregates, matchup context, snapshot joins. |
 
-Two deliberate exceptions to "consumers read core," both declared on the
-`league_almanac` exposure rather than hidden: `int_player_position_pts` is
-the optimal-team selector's contract (single consumer; promotes to a fact
-once 2–3 consumers accumulate, the same threshold that promoted
-`fct_player_daily_performance` in v1.1.0), and `stg_scoring_settings`
+One deliberate exception to "consumers read core," declared on the
+`league_almanac` exposure rather than hidden: `stg_scoring_settings`
 supplies points-per-unit for glossary callouts (no core surface carries
-scoring weights yet).
+scoring weights yet). Two former exceptions were resolved by promotion —
+`fct_player_position_pts` (born `int_player_position_pts`) and
+`dim_team_owner` (born `int_team_owner_display`) moved into core once
+consumer reads made them de-facto contracts, the same reasoning that
+promoted `fct_player_daily_performance` in v1.1.0.
 
 ## The two scoring lenses
 
@@ -96,7 +97,7 @@ The three weekly facts (`fct_weekly_player_active_performance`,
 are incremental with composite `unique_key`s and `on_schema_change: fail` —
 the weekly extract-then-build cadence merges one matchup period at a time.
 Models where determinism matters more than build cost are plain tables
-(`fct_weekly_player_performance`, `int_player_position_pts` — the latter
+(`fct_weekly_player_performance`, `fct_player_position_pts` — the latter
 frozen so float-summation order can't reshuffle optimal-team tie-breaks).
 Pure derivations with window functions stay views (`mart_team_matchup`,
 `mart_stat_leaderboard`, `fct_player_season_performance`).

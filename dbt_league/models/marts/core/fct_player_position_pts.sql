@@ -1,6 +1,12 @@
--- int_player_position_pts.sql
+-- fct_player_position_pts.sql
 -- v1.1.1: per-position points accumulation for the get_optimal_team
--- consumer. For each (season, matchup_period, team, player) day, the
+-- consumer. Born as int_player_position_pts; promoted to a core fact
+-- once it became a declared exposure dependency -- the almanac's
+-- optimal-team selector reads it directly, and consumer contracts live
+-- in core, not intermediate (the same reasoning that promoted
+-- fct_player_daily_performance in v1.1.0).
+--
+-- For each (season, matchup_period, team, player) day, the
 -- player's eligible_slots VARIANT array is exploded; each eligible
 -- slot code (minus BE / IL, which are roster slots not lineup
 -- positions) gets attributed the player's calculated points (i.e.
@@ -46,7 +52,7 @@
 --     lineup slots are: C, 1B, 2B, 3B, SS, IF, LF, CF, RF, OF, DH,
 --     UTIL, SP, RP. Combined codes (CI=1B/3B, MI=2B/SS, P=any pitcher)
 --     exist in the data but don't map to any current lineup slot; they
---     stay in the int for forward compatibility.
+--     stay in the fact for forward compatibility.
 --   - eligible_slots already enumerates every fillable slot per ESPN;
 --     a 1B-eligible player automatically shows IF and UTIL eligibility
 --     in their array. No derivation needed at this layer.

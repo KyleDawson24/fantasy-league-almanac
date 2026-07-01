@@ -88,7 +88,7 @@ from picks p
 left join team_labels tl
     on p.season_year = tl.season_year
     and p.team_id    = tl.team_id
-left join {{ ref('int_team_owner_display') }} owner
+left join {{ ref('dim_team_owner') }} owner
     on p.season_year = owner.season_year
     and p.team_id    = owner.team_id
 left join player_season ps

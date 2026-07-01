@@ -59,7 +59,7 @@ from {{ ref('stg_box_scores') }} b
 left join {{ ref('dim_roster_slot_counts') }} rs
     on b.season_year = rs.season_year
     and b.lineup_slot = rs.lineup_slot
-left join {{ ref('int_team_owner_display') }} tod
+left join {{ ref('dim_team_owner') }} tod
     on b.season_year = tod.season_year
     and b.team_id = tod.team_id
 where b.team_id is not null

@@ -298,7 +298,7 @@ def get_all_league_team(season_year, matchup_period=None):
 # v1.1.1: generalized optimal-team primitive (Approach 1 per
 # BRAINTHOUGHTS [ARCH] -- per-position points by daily eligibility set).
 #
-# get_optimal_team_candidates: read int_player_position_pts with the
+# get_optimal_team_candidates: read fct_player_position_pts with the
 # right filters, return the (player, position, points) pool.
 #
 # Pairs with get_optimal_team_selections in almanac_logic.py (gap-based
@@ -314,7 +314,7 @@ _VALID_POINTS_TYPES = ('active', 'inactive', 'all')
 
 def get_optimal_team_candidates(season_year=None, matchup_period=None,
                                 team_id=None, points_type='active'):
-    """Read int_player_position_pts and return one row per
+    """Read fct_player_position_pts and return one row per
     (player_id, position) with summed points across the filter window.
 
     All four parameters are filters; pass None to leave that dimension
@@ -377,7 +377,7 @@ def get_optimal_team_candidates(season_year=None, matchup_period=None,
             MAX(pro_team)     AS pro_team,
             position,
             ROUND({points_expr}, 1) AS position_pts
-        FROM int_player_position_pts
+        FROM fct_player_position_pts
         WHERE {where_sql}
         GROUP BY player_id, position
         HAVING {points_expr} > 0
@@ -649,7 +649,7 @@ def get_team_standings(season_year):
             SUM(CASE WHEN m.result = 'L' THEN 1 ELSE 0 END) AS losses,
             SUM(CASE WHEN m.result = 'T' THEN 1 ELSE 0 END) AS ties
         FROM mart_team_matchup m
-        LEFT JOIN int_team_owner_display tod
+        LEFT JOIN dim_team_owner tod
             ON m.season_year = tod.season_year
             AND m.team_id    = tod.team_id
         WHERE m.season_year = %s

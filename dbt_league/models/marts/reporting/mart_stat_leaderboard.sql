@@ -277,7 +277,7 @@ combined_with_owner as (
         c.*,
         coalesce(tod.owner_display, c.owner_name) as owner_display
     from combined c
-    left join {{ ref('int_team_owner_display') }} tod
+    left join {{ ref('dim_team_owner') }} tod
         on c.season_year = tod.season_year
         and c.team_id = tod.team_id
 ),

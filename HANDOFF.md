@@ -300,14 +300,14 @@ Staging (`models/staging/`, one view per raw table):
 Intermediate (`models/intermediate/`):
 
 - `int_player_daily` (view): wide daily row per `(season, scoring_period, team, player, lineup_slot)`. Combines per-stat point contributions with per-player ESPN platform totals and player display metadata. Slot-stat-category-validity filtered (gated on `var('strict_slot_validity', true)`); slot-blind kona stats credited only when `stat_category` matches `lineup_slot_category`.
-- `int_player_position_pts` (table — frozen for float determinism): eligible-slots VARIANT explosion into per-`(season, matchup, team, player, position)` calculated points. The optimal-team selector's data contract.
-- `int_team_owner_display` (view): `(season, team)` → `owner_display`, co-owned teams collapsed to "Name / Name".
 
 Marts — core (`models/marts/core/`, the contract layer):
 
 - `dim_stat` / `dim_matchup_period` (views): thin contract dims over the `stat_classification` / `matchup_schedule` seeds; `dim_stat` adds `leaderboard_name`.
 - `dim_roster_slot_counts` (view): roster-settings reshape — one row per configured lineup slot with starter counts and position maximums.
 - `dim_owner` (view): owner-GUID-grain dimension; `owner_display` = nickname override else proper-cased name.
+- `dim_team_owner` (view, born `int_team_owner_display`): `(season, team)` → `owner_display`, co-owned teams collapsed to "Name / Name". Four marts + the almanac join through it.
+- `fct_player_position_pts` (table — frozen for float determinism; born `int_player_position_pts`): eligible-slots VARIANT explosion into per-`(season, matchup, team, player, position)` calculated points. The optimal-team selector's data contract.
 - `fct_player_daily_performance` (view): thin daily contract over `int_player_daily`, adding `performance_status` + `wasted_bucket`.
 - `fct_weekly_player_performance` (table): slot-preserved weekly rollup (promoted from `int_player_weekly_performance` in v1.0.2). Wide counting + per-stat `_pts` + catch-all totals + `negative_points` + platform totals; `lineup_slot` kept in the grain so the fact layer can filter active/inactive cleanly.
 - `fct_weekly_player_active_performance` (incremental): active-only filter (lineup_slot NOT IN BE/IL/FA). Wide convergence row per `(season_year, matchup_period, team_id, player_id)`.

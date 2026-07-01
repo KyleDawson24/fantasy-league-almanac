@@ -209,6 +209,6 @@ select
     -- hence no owner at all).
     coalesce(tod.owner_display, weekly.owner_name) as owner_display
 from weekly
-left join {{ ref('int_team_owner_display') }} tod
+left join {{ ref('dim_team_owner') }} tod
     on weekly.season_year = tod.season_year
     and weekly.team_id = tod.team_id

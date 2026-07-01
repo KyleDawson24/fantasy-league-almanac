@@ -34,6 +34,19 @@ three output surfaces (recap, records report, almanac).
   `int_team_owner_display`, `stg_scoring_settings`) and drops the unread
   benchmarks mart; the below-core dependencies are documented on the
   exposure instead of hidden.
+- **The two consumer-contract intermediates promoted into core.**
+  `int_player_position_pts` → `fct_player_position_pts` and
+  `int_team_owner_display` → `dim_team_owner`: both were already
+  consumer contracts in practice (the almanac reads them directly; four
+  marts join the owner bridge), which per the v1.1.0
+  `fct_player_daily_performance` precedent means they belong in
+  `marts/core` with layer-correct names. Warehouse relation renames; the
+  almanac's two queries updated in the same commit. The old
+  `INT_PLAYER_POSITION_PTS` / `INT_TEAM_OWNER_DISPLAY` relations are
+  left standing so an un-merged checkout keeps working — after this
+  line merges and a `dbt build` has run from it, drop them:
+  `DROP TABLE ESPN_FANTASY.ANALYTICS.INT_PLAYER_POSITION_PTS;`
+  `DROP VIEW ESPN_FANTASY.ANALYTICS.INT_TEAM_OWNER_DISPLAY;`
 - **Docs refreshed where stale.** dbt project README rewritten as a
   layer-by-layer architecture narrative; `dbt_project.yml` starter
   boilerplate replaced with purposeful comments; stale claims fixed

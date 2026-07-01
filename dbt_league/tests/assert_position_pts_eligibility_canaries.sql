@@ -1,4 +1,4 @@
--- Data canaries for int_player_position_pts, pinned to known 2026 facts:
+-- Data canaries for fct_player_position_pts, pinned to known 2026 facts:
 --   1. Trout carries multi-position eligibility rows (OF/CF/UTIL/DH).
 --   2. Soto picked up DH + LF eligibility mid-season (scoring period 29);
 --      both rows should exist with eligible_days >= 1.
@@ -14,7 +14,7 @@
 
 with trout_multi_position as (
     select count(*) as n
-    from {{ ref('int_player_position_pts') }}
+    from {{ ref('fct_player_position_pts') }}
     where display_name ilike '%Trout%'
       and season_year = 2026
       and position in ('OF', 'CF', 'UTIL', 'DH')
@@ -22,7 +22,7 @@ with trout_multi_position as (
 
 soto_midseason_pickup as (
     select count(*) as n
-    from {{ ref('int_player_position_pts') }}
+    from {{ ref('fct_player_position_pts') }}
     where display_name ilike '%Soto%'
       and season_year = 2026
       and position in ('DH', 'LF')
@@ -31,7 +31,7 @@ soto_midseason_pickup as (
 
 fa_rows_present as (
     select count(*) as n
-    from {{ ref('int_player_position_pts') }}
+    from {{ ref('fct_player_position_pts') }}
     where team_id is null
 )
 

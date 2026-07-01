@@ -89,7 +89,7 @@ flowchart LR
 ```
 
 Four layers, three user-facing consumers. The dbt project alone is 24
-models (5 staging, 3 intermediate, 16 marts — split into a `marts/core`
+models (5 staging, 1 intermediate, 18 marts — split into a `marts/core`
 contract layer of dims + facts and a `marts/reporting` layer of consumer
 marts); the facts split symmetrically into active and inactive
 performance ("active = fantasy reality; inactive = MLB reality"), expose

@@ -48,12 +48,16 @@ espn-league-manager/
 │   │   ├── stat_classification.csv      # Stat ID → name + category + flags
 │   │   ├── matchup_schedule.csv         # Per-MP: dates, is_abnormal, is_playoff,
 │   │   │                                #   playoff_round (Round 1 / Semi-Finals / Finals)
-│   │   ├── owner_nicknames.csv          # 14 owners; only consumed by output (not joined in dbt yet)
+│   │   ├── owner_nicknames.csv          # 14 owners; feeds dim_owner (owner_display resolution)
 │   │   └── player_nicknames.csv         # Tiny; ad-hoc display overrides
+│   ├── tests/                           # Singular tests: cross-model invariants + data canaries
 │   └── models/
 │       ├── staging/                     # 1:1 reshapes of RAW; minimal logic
-│       ├── intermediate/                # Joins, slot-validity filter, daily/weekly rollups
-│       └── marts/                       # Wide convergence facts + leaderboard
+│       ├── intermediate/                # Slot-validity filter, daily rollup, owner bridge
+│       └── marts/
+│           ├── core/                    # Contract layer: dims + facts
+│           └── reporting/               # Consumer marts: leaderboard, benchmarks, matchup,
+│                                        #   roster snapshot, draft board
 ├── output/
 │   ├── records.py                       # Data access layer (1000+ lines; see §6)
 │   ├── formatters.py                    # STAT_DISPLAY/ABBREV maps + rendering helpers
@@ -285,16 +289,40 @@ else:
 
 ### dbt models — the layered story
 
+Staging (`models/staging/`, one view per raw table):
+
 - `stg_box_scores` (view): 1:1 reshape of `RAW.BOX_SCORES` per `(season_year, scoring_period, team_id, player_id, lineup_slot)`. Adds `team_abbrev`, `eligible_slots`, `lineup_slot_category` (pitching/hitting/inactive), `games_played` (0/1/2 — DH support).
 - `stg_player_stat_breakdowns` (view): per-stat rows from RAW; joins `stat_classification` for `stat_category`.
 - `stg_scoring_settings` (view): latest snapshot from append-only RAW; per-stat `points_per_unit`.
+- `stg_team_owners` (view): per-season team → owner bridge from `RAW.TEAM_OWNERS` (latest snapshot). `owner_id` is the stable ESPN member GUID the `owner_nicknames` seed joins on.
+- `stg_draft` (view): one row per draft pick from `RAW.DRAFT_PICKS` (latest snapshot per season); `keeper` flagged.
+
+Intermediate (`models/intermediate/`):
+
 - `int_player_daily` (view): wide daily row per `(season, scoring_period, team, player, lineup_slot)`. Combines per-stat point contributions with per-player ESPN platform totals and player display metadata. Slot-stat-category-validity filtered (gated on `var('strict_slot_validity', true)`); slot-blind kona stats credited only when `stat_category` matches `lineup_slot_category`.
-- `int_player_weekly_performance` (view): weekly rollup of `int_player_daily` with wide counting + per-stat `_pts` + catch-all totals (`total_hitting_stat_pts`, `total_pitching_stat_pts`, `total_stat_pts`) + `negative_points` + platform totals. `lineup_slot` preserved as a grain dimension so the fact layer can filter active/inactive cleanly.
-- `fct_weekly_player_active_performance` (incremental table): active-only filter (lineup_slot NOT IN BE/IL/FA). Wide convergence row per `(season_year, matchup_period, team_id, player_id)`.
-- `fct_weekly_player_inactive_performance` (incremental table): symmetric counterpart for inactive slots, with `wasted_bucket` ('FA' or 'ROSTERED_INACTIVE') in the grain.
-- `fct_weekly_team_active_performance` (incremental table): team-grain rollup of the player active fact. The team_total = SUM(players) invariant holds for all columns except `platform_points` (sourced directly from the wrapper's `home_score` to honor commissioner adjustments; divergence captured in `platform_calculated_delta`).
-- `fct_weekly_team_inactive_performance` (incremental table): team-grain rollup of the player inactive fact, plus a single FA pool row per matchup (team_id NULL).
+- `int_player_position_pts` (table — frozen for float determinism): eligible-slots VARIANT explosion into per-`(season, matchup, team, player, position)` calculated points. The optimal-team selector's data contract.
+- `int_team_owner_display` (view): `(season, team)` → `owner_display`, co-owned teams collapsed to "Name / Name".
+
+Marts — core (`models/marts/core/`, the contract layer):
+
+- `dim_stat` / `dim_matchup_period` (views): thin contract dims over the `stat_classification` / `matchup_schedule` seeds; `dim_stat` adds `leaderboard_name`.
+- `dim_roster_slot_counts` (view): roster-settings reshape — one row per configured lineup slot with starter counts and position maximums.
+- `dim_owner` (view): owner-GUID-grain dimension; `owner_display` = nickname override else proper-cased name.
+- `fct_player_daily_performance` (view): thin daily contract over `int_player_daily`, adding `performance_status` + `wasted_bucket`.
+- `fct_weekly_player_performance` (table): slot-preserved weekly rollup (promoted from `int_player_weekly_performance` in v1.0.2). Wide counting + per-stat `_pts` + catch-all totals + `negative_points` + platform totals; `lineup_slot` kept in the grain so the fact layer can filter active/inactive cleanly.
+- `fct_weekly_player_active_performance` (incremental): active-only filter (lineup_slot NOT IN BE/IL/FA). Wide convergence row per `(season_year, matchup_period, team_id, player_id)`.
+- `fct_weekly_player_inactive_performance` (incremental): symmetric counterpart for inactive slots, with `wasted_bucket` ('FA' or 'ROSTERED_INACTIVE') in the grain.
+- `fct_weekly_team_active_performance` (incremental): team-grain rollup of the player active fact. The team_total = SUM(players) invariant holds for all columns except `platform_points` (sourced directly from the wrapper's `home_score` to honor commissioner adjustments; divergence captured in `platform_calculated_delta`).
+- `fct_weekly_team_inactive_performance` (table): team-grain rollup of the player inactive fact, plus a single FA pool row per matchup (team_id NULL).
+- `fct_player_season_performance` (view): season-grain brick per `(season, team, player, slot)`; points columns rounded once per row for cross-session determinism.
+
+Marts — reporting (`models/marts/reporting/`, consumer surfaces):
+
 - `mart_stat_leaderboard` (view): seed-driven Jinja UNPIVOT over all four facts (team_active, team_inactive, player_active, player_inactive) union'd into one combined CTE. Ranked top-10 per `(entity_grain, performance_status, stat_name, record_scope, record_direction)`. `performance_status` partition segregates active/inactive rankings; consumers default-filter to active.
+- `mart_league_weekly_benchmarks` (view): league-wide per-week mean/max/min on the calculated lens + percentile/rank within history.
+- `mart_team_matchup` (view): each team-week plus opponent line, margin, combined totals, league averages.
+- `mart_daily_roster_snapshot` (view): full roster shell per day (includes zero-stat bench/IL days); joins the slot dim + owner display.
+- `mart_draft_board` (view): each draft pick joined to the player's season production — the draft-value surface.
 
 The mart is direction-agnostic (`most`/`fewest`); polarity-aware Best/Worst label belongs at consumer side via `records_logic.best_or_worst_label`.
 

@@ -8,6 +8,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Each entry links to the corresponding `Phase X.Y Documentation.md` in the
 repository root for the architectural detail behind the change.
 
+## [Unreleased]
+
+Portfolio-readability pass over the dbt project: a layered DAG, enforced
+data-quality tests, and accurate exposures — all byte-neutral for the
+three output surfaces (recap, records report, almanac).
+
+### Changed
+
+- **marts/ re-layered into `marts/core` + `marts/reporting`.** The 4 dims
+  and 7 facts (the contract layer) now live under `marts/core/`; the five
+  consumer `mart_*` models under `marts/reporting/`. Pure file moves — no
+  relation names, configs, or compiled SQL changed. The v1.2-era
+  `_owner_models.yml` is folded into the per-directory schema files.
+- **`analyses/check_*.sql` converted to singular tests.** The three
+  assertion-shaped checks now run on every `dbt build` as
+  `tests/assert_*` (season-rollup fidelity, full-partition, BE/IL
+  eligibility leak) plus a severity-warn data-canary test (Trout / Soto /
+  FA presence). The exploratory eligible-slots profile was deleted. The
+  season-rollup check needed rewriting when enforced: the old analysis
+  predated the season fact's round-once-per-row float freeze and no
+  longer described the model's contract.
+- **Exposures trued up.** `league_almanac` now declares its real reads
+  (`mart_draft_board`, `int_player_position_pts`,
+  `int_team_owner_display`, `stg_scoring_settings`) and drops the unread
+  benchmarks mart; the below-core dependencies are documented on the
+  exposure instead of hidden.
+- **Docs refreshed where stale.** dbt project README rewritten as a
+  layer-by-layer architecture narrative; `dbt_project.yml` starter
+  boilerplate replaced with purposeful comments; stale claims fixed
+  (dim_stat's UNPIVOT-source note, owner_nicknames' "not joined yet",
+  int_player_daily references in `generate_summary.py` comments); model
+  counts corrected in the root README / docs overview; HANDOFF's model
+  catalog brought current.
+
+### Added
+
+- **Source freshness** on the four settings-style raw tables (seasonal
+  thresholds over `extracted_at`); `box_scores` documented as pending an
+  extract-side load timestamp.
+- **Missing column docs**: `stat_classification.qualifier_stat` /
+  `qualifier_min` seed columns, `mart_daily_roster_snapshot` grain
+  columns.
+
+Verification: dbt parse with zero deprecation warnings (the three
+top-level test-arg blocks now use `arguments:`); dbt build green; all
+four singular tests pass; almanac byte-diff + recap / records goldens
+unchanged.
+
 ## [1.2.0] — 2026-05-30
 
 First product-feature release after the v1.1.x refactor line. Two surfaces:

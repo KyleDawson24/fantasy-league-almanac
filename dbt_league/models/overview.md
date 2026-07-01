@@ -18,17 +18,23 @@ formally-declared consumers.
 
     ESPN Fantasy API (espn-api wrapper)
         -> Python extractor
-        -> Snowflake RAW.BOX_SCORES / RAW.ROSTER_SETTINGS (append-only JSON)
-        -> dbt staging       (1:1 reshape, no business logic)
-        -> dbt intermediate  (slot-validity filter; daily + weekly wide rollups)
-        -> dbt marts         (active/inactive symmetric facts;
-                              roster settings/history contracts;
-                              seed-driven leaderboard)
+        -> Snowflake RAW (append-only JSON: box scores, scoring/roster
+           settings, team owners, draft picks)
+        -> dbt staging          (1:1 reshape, no business logic)
+        -> dbt intermediate     (slot-validity filter; daily wide rollup;
+                                 owner-display bridge)
+        -> dbt marts/core       (the contract layer: 4 dims + 7 facts --
+                                 daily/weekly/season grains,
+                                 active/inactive lenses)
+        -> dbt marts/reporting  (consumer marts: seed-driven leaderboard,
+                                 league benchmarks, matchup view,
+                                 roster snapshot, draft board)
         -> Python output scripts (BBCode + Google Sheets almanac)
 
-The dbt project has 16 models total: 3 staging, 1 intermediate, 12 marts.
-Browse the **Models** section in the sidebar for full lineage and
-column-level docs.
+The dbt project has 24 models: 5 staging, 3 intermediate, and 16 marts
+(11 core dims + facts, 5 reporting marts). Browse the **Models** section
+in the sidebar for full lineage and column-level docs; cross-model
+invariants live as singular tests in `tests/`.
 
 ## Key concepts
 

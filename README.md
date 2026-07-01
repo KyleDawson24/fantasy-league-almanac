@@ -82,18 +82,19 @@ Logan Gilbert: 29.6, Nathan Eovaldi: 25.6, Rico Garcia: 20.7
 flowchart LR
     A[ESPN Fantasy API<br/>espn-api wrapper] -->|JSON| B[Python extractor]
     B -->|append-only| C[(Snowflake RAW)]
-    C --> D[dbt staging<br/>→ intermediate<br/>→ marts]
+    C --> D[dbt staging<br/>→ intermediate<br/>→ marts/core<br/>→ marts/reporting]
     D --> E1[Weekly recap<br/>BBCode]
     D --> E2[Records report<br/>BBCode + Sheets]
     D --> E3[League almanac<br/>Google Sheets]
 ```
 
-Three layers, three user-facing consumers. The dbt project alone is 16
-models (3 staging, 1 intermediate, 12 marts); the marts split
-symmetrically into active and inactive performance facts ("active =
-fantasy reality; inactive = MLB reality"), expose roster-settings /
-roster-history contracts for the almanac, and feed a seed-driven
-leaderboard that ranks both lenses.
+Four layers, three user-facing consumers. The dbt project alone is 24
+models (5 staging, 3 intermediate, 16 marts — split into a `marts/core`
+contract layer of dims + facts and a `marts/reporting` layer of consumer
+marts); the facts split symmetrically into active and inactive
+performance ("active = fantasy reality; inactive = MLB reality"), expose
+roster-settings / roster-history contracts for the almanac, and feed a
+seed-driven leaderboard that ranks both lenses.
 
 Full lineage and column-level docs are in the [hosted dbt catalog](https://kyledawson24.github.io/fantasy-league-front-page/);
 the local source-of-truth is the `dbt_league/` directory.
@@ -152,7 +153,9 @@ For an analytics engineering / dbt-focused reader, the project covers:
 - **dbt patterns at production-shape:** incremental models with composite
   unique keys, seed-as-config-with-tests (`stat_classification` is 97 rows
   with `accepted_values` enforcement), grain-agnostic macros, formally
-  declared exposures, ~70 dbt tests across `schema.yml` files.
+  declared exposures, source-freshness contracts, and 158 dbt tests —
+  grain uniqueness on every model plus singular cross-model invariants
+  in `dbt_league/tests/`.
 - **Real Kimball-style modeling:** wide convergence facts at consumer
   grain, an active/inactive symmetric split, a seed-driven UNPIVOT mart
   that emits 10-row visibility buffers so consumer-side tie-collapse

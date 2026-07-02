@@ -884,11 +884,15 @@ def build_advanced_standings_tab_rows(standings_rows, slot_rows, stat_specs,
     rows.append([])
     rows.append([])
     rows.append(['Points by Lineup Slot (Season Totals)'])
-    rows.append(['Team', *slot_cols])
+    # Indented one cell with Owner added so the grid's Team / Owner columns
+    # sit directly under Table A's (column symmetry between the blocks).
+    rows.append(['', 'Team', 'Owner', *slot_cols])
     for team in standings_rows:
         team_slots = by_team.get(team['team_id'], {})
         rows.append([
+            '',
             team.get('team_abbrev') or '',
+            team.get('owner_display') or '',
             *[team_slots.get(slot, '') for slot in slot_cols],
         ])
     return rows

@@ -40,6 +40,14 @@ output-changing; the almanac goldens were re-anchored under review).
   abbrevs (K / BB / H / HR / R) repeat across the hitting and pitching
   blocks. Both blocks read the new marts; the almanac's two inline
   standings aggregations were deleted from `output/almanac_data.py`.
+  Post-review polish: the slot grid is indented one cell with an Owner
+  column added so its Team / Owner columns sit directly under Table A's;
+  column widths are set by column type derived from the header layout
+  (identity 52px, Owner 125px, value columns 40px, buffers 25px) rather
+  than hardcoded letters; and none of the write-layer requests touch
+  column visibility, so manually hidden columns (a stat the league
+  never records, e.g. NH / PG) survive reruns — the tab is
+  clear-and-rewrite, never delete-and-recreate.
 
 - **marts/ re-layered into `marts/core` + `marts/reporting`.** The 4 dims
   and 7 facts (the contract layer) now live under `marts/core/`; the five

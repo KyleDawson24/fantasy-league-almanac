@@ -1106,10 +1106,11 @@ class TestAdvancedStandingsRows:
         assert rows[5][:2] == [1, 'AAA']
         assert rows[6][:2] == [2, 'BBB']
 
-        # Slot grid: columns in sort_order (C before SP despite input
-        # order); a team missing a slot renders blank. BE/IL never arrive
-        # here -- the data layer filters to active lineup slots.
+        # Slot grid: indented one cell with Owner added so Team / Owner sit
+        # under Table A's columns; slot columns in sort_order (C before SP
+        # despite input order); a team missing a slot renders blank. BE/IL
+        # never arrive here -- the data layer filters to active slots.
         assert rows[9] == ['Points by Lineup Slot (Season Totals)']
-        assert rows[10] == ['Team', 'C', 'SP']
-        assert rows[11] == ['AAA', 5.5, 9.9]
-        assert rows[12] == ['BBB', 4.4, '']
+        assert rows[10] == ['', 'Team', 'Owner', 'C', 'SP']
+        assert rows[11] == ['', 'AAA', 'Owner 1', 5.5, 9.9]
+        assert rows[12] == ['', 'BBB', 'Owner 2', 4.4, '']

@@ -496,20 +496,25 @@ def _standings_table_bounds(rows):
     """Locate the two stacked tables on the Advanced Standings tab. Returns
     (a_header, a_end, b_header, b_end) as 0-based row indices: the Standings
     header row and the slot header row, each with the exclusive end of the data
-    block beneath it. None for a table that isn't found."""
+    block beneath it. None for a table that isn't found.
+
+    Table B is indented one cell (its Team / Owner columns sit under Table
+    A's), so its header and data rows key off column 1, not column 0."""
     a_hdr = next((i for i, r in enumerate(rows)
                   if r and r[0] == 'Rank' and 'Offense' in r), None)
     b_hdr = next((i for i, r in enumerate(rows)
-                  if a_hdr is not None and i > a_hdr and r and r[0] == 'Team'), None)
+                  if a_hdr is not None and i > a_hdr
+                  and len(r) > 1 and r[0] == '' and r[1] == 'Team'), None)
 
-    def _data_end(start):
+    def _data_end(start, col=0):
         end = start
-        while end < len(rows) and rows[end] and rows[end][0] not in ('', None):
+        while (end < len(rows) and rows[end] and len(rows[end]) > col
+               and rows[end][col] not in ('', None)):
             end += 1
         return end
 
     a_end = _data_end(a_hdr + 1) if a_hdr is not None else None
-    b_end = _data_end(b_hdr + 1) if b_hdr is not None else None
+    b_end = _data_end(b_hdr + 1, col=1) if b_hdr is not None else None
     return a_hdr, a_end, b_hdr, b_end
 
 
@@ -539,7 +544,8 @@ def _apply_standings_gradients(spreadsheet, worksheet, rows, stat_specs):
             ))
     if b_hdr is not None:
         b_range = [{'startRowIndex': b_hdr + 1, 'endRowIndex': b_end}]
-        for col in range(1, len(rows[b_hdr])):
+        # Slot values start after the indent + Team + Owner cells.
+        for col in range(3, len(rows[b_hdr])):
             requests.append(_color_scale_request(
                 sheet_id, col, b_end, scale='three_good_high', row_ranges=b_range,
             ))
@@ -577,16 +583,30 @@ def _replace_advanced_standings_tab(spreadsheet, rows, stat_specs):
     try:
         sheet_id = worksheet.id
         last_col = _a1_col(width)
-        _apply_standings_gradients(spreadsheet, worksheet, rows, stat_specs)
-        _sheets_batch_update(
-            spreadsheet, f'standings widths {worksheet.title}',
-            [
-                _column_width_request(sheet_id, 0, 2, 52),      # Rank/Team, Team/C
-                _column_width_request(sheet_id, 2, 3, 130),     # Owner / 1B slot
-                _column_width_request(sheet_id, 3, width, 58),  # W-L, points, slots
-            ],
-        )
         a_hdr, _, b_hdr, _ = _standings_table_bounds(rows)
+        _apply_standings_gradients(spreadsheet, worksheet, rows, stat_specs)
+        # Widths by column TYPE, derived from the Table A header layout
+        # rather than hardcoded letters, so other leagues' stat counts get
+        # the right shape: identity columns wide, value columns narrow,
+        # buffers narrower still. The blanket 40px request lands first;
+        # the per-buffer 25px overrides follow (later requests win within
+        # one batchUpdate). None of these touch hiddenByUser, so manually
+        # hidden columns (e.g. a stat the league never records) stay
+        # hidden across reruns.
+        width_requests = [
+            _column_width_request(sheet_id, 0, 2, 52),      # Rank, Team
+            _column_width_request(sheet_id, 2, 3, 125),     # Owner
+            _column_width_request(sheet_id, 3, width, 40),  # W-L + every value column
+        ]
+        if a_hdr is not None:
+            width_requests.extend(
+                _column_width_request(sheet_id, col, col + 1, 25)
+                for col, cell in enumerate(rows[a_hdr])
+                if col >= 4 and cell == ''
+            )
+        _sheets_batch_update(
+            spreadsheet, f'standings widths {worksheet.title}', width_requests,
+        )
         formats = [
             {'range': 'A1', 'format': {'textFormat': {'bold': True, 'fontSize': 13}}},
         ]

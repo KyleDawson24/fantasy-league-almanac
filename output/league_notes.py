@@ -62,11 +62,11 @@ Built by build_ctx() and passed into every callout. Keys:
   ctx['scope_label']     str    "Week 5" or "Round 1" (already format_week_label-d)
   ctx['scores']          list   One row per team this week. Wide -- has every
                                 counting and pts column from
-                                fct_weekly_team_active_performance, plus team_abbrev,
+                                fct_team_weekly_active_performance, plus team_abbrev,
                                 team_name, owner_name, opponent_*, etc.
   ctx['players']         list   One row per active player this week (slot not in
                                 BE/IL/FA). Wide -- every counting and pts column
-                                from fct_weekly_player_active_performance plus
+                                from fct_player_weekly_active_performance plus
                                 display_name, team_abbrev, etc.
   ctx['schedule_lookup'] dict   Pass to format_week_label if needed.
 """
@@ -155,7 +155,7 @@ def mismatch(ctx):
     hist = records.query_snowflake("""
         WITH all_margins AS (
           SELECT ABS(t.platform_points - t.opponent_points) AS m
-          FROM fct_weekly_team_active_performance t
+          FROM fct_team_weekly_active_performance t
           JOIN dim_matchup_period s
             ON t.season_year = s.season_year
            AND t.matchup_period = s.matchup_period
@@ -256,7 +256,7 @@ def hero(ctx):
         WITH wins AS (
           SELECT t.season_year, t.matchup_period, t.team_id,
                  (t.platform_points - t.opponent_points) AS margin
-          FROM fct_weekly_team_active_performance t
+          FROM fct_team_weekly_active_performance t
           JOIN dim_matchup_period s
             ON t.season_year = s.season_year
            AND t.matchup_period = s.matchup_period
@@ -266,7 +266,7 @@ def hero(ctx):
           SELECT p.season_year, p.matchup_period, p.team_id, p.platform_points,
                  ROW_NUMBER() OVER (PARTITION BY p.season_year, p.matchup_period, p.team_id
                                     ORDER BY p.platform_points DESC NULLS LAST) AS rk
-          FROM fct_weekly_player_active_performance p
+          FROM fct_player_weekly_active_performance p
         ),
         top2 AS (
           SELECT season_year, matchup_period, team_id,
@@ -366,13 +366,13 @@ def scapegoat_net_negative(ctx):
         WITH p AS (
           SELECT season_year, matchup_period, team_id,
                  MIN(platform_points) AS worst_net
-          FROM fct_weekly_player_active_performance
+          FROM fct_player_weekly_active_performance
           GROUP BY 1, 2, 3
         ),
         t AS (
           SELECT t.season_year, t.matchup_period, t.team_id,
                  (t.opponent_points - t.platform_points) AS margin
-          FROM fct_weekly_team_active_performance t
+          FROM fct_team_weekly_active_performance t
           JOIN dim_matchup_period s
             ON t.season_year = s.season_year
            AND t.matchup_period = s.matchup_period
@@ -440,13 +440,13 @@ def scapegoat_gross_negative(ctx):
           SELECT season_year, matchup_period, team_id,
                  MAX(negative_points) AS worst_neg,
                  MIN(platform_points) AS worst_net
-          FROM fct_weekly_player_active_performance
+          FROM fct_player_weekly_active_performance
           GROUP BY 1, 2, 3
         ),
         t AS (
           SELECT t.season_year, t.matchup_period, t.team_id,
                  (t.opponent_points - t.platform_points) AS margin
-          FROM fct_weekly_team_active_performance t
+          FROM fct_team_weekly_active_performance t
           JOIN dim_matchup_period s
             ON t.season_year = s.season_year
            AND t.matchup_period = s.matchup_period
@@ -558,7 +558,7 @@ def cycles(ctx):
     )
     season_total = records.query_snowflake("""
         SELECT COALESCE(SUM(cyc), 0) AS n
-        FROM fct_weekly_player_active_performance
+        FROM fct_player_weekly_active_performance
         WHERE season_year = %s
     """, (ctx['season_year'],))[0]['n']
 
@@ -719,7 +719,7 @@ def baseblunders(ctx):
         SELECT
           SUM(CASE WHEN t.cs > t.sb THEN 1 ELSE 0 END) AS cs_gt_sb_n,
           SUM(CASE WHEN t.cs >= 1 AND t.sb = 0 THEN 1 ELSE 0 END) AS zero_sb_n
-        FROM fct_weekly_team_active_performance t
+        FROM fct_team_weekly_active_performance t
         JOIN dim_matchup_period s
           ON t.season_year = s.season_year
          AND t.matchup_period = s.matchup_period
@@ -801,7 +801,7 @@ def no_quality_starts(ctx):
             GROUP BY 1, 2, 3
         )
         SELECT COUNT(*) AS n
-        FROM fct_weekly_team_active_performance t
+        FROM fct_team_weekly_active_performance t
         JOIN dim_matchup_period s
             ON t.season_year = s.season_year
            AND t.matchup_period = s.matchup_period
@@ -1155,17 +1155,17 @@ def build_ctx(season_year, matchup_period, schedule_lookup):
 
     scores = records.query_snowflake("""
         SELECT *
-        FROM fct_weekly_team_active_performance
+        FROM fct_team_weekly_active_performance
         WHERE season_year = %s AND matchup_period = %s
     """, (season_year, matchup_period))
 
-    # Active players only (slot != BE/IL/FA). Mirrors fct_weekly_player_active_performance's
+    # Active players only (slot != BE/IL/FA). Mirrors fct_player_weekly_active_performance's
     # active-only filter applied during the int -> fct rollup, so this
     # query returns the same player set generate_summary already uses for
     # top-N callouts.
     players = records.query_snowflake("""
         SELECT *
-        FROM fct_weekly_player_active_performance
+        FROM fct_player_weekly_active_performance
         WHERE season_year = %s AND matchup_period = %s
     """, (season_year, matchup_period))
 

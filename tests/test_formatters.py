@@ -248,7 +248,7 @@ class TestFormatContributors:
 # ---------- format_hitter_stats_line ----------
 
 def _hitter_row(**overrides):
-    """Sample wide hitter row from fct_weekly_player_active_performance shape."""
+    """Sample wide hitter row from fct_player_weekly_active_performance shape."""
     base = {
         'avg':  0.391,  'obp': 0.462,  'slg':  1.174,
         'ab':   23,

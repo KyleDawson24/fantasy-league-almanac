@@ -34,6 +34,19 @@ three output surfaces (recap, records report, almanac).
   `int_team_owner_display`, `stg_scoring_settings`) and drops the unread
   benchmarks mart; the below-core dependencies are documented on the
   exposure instead of hidden.
+- **Weekly facts renamed to the entity-first scheme.** Every fact now
+  reads `fct_<entity>_<grain>_...`: `fct_weekly_player_performance` →
+  `fct_player_weekly_slot_performance` (the `_slot_` marker also fixes
+  the long-standing grain-misleading name), `fct_weekly_player_active/
+  inactive_performance` → `fct_player_weekly_active/inactive_performance`,
+  and `fct_weekly_team_active/inactive_performance` →
+  `fct_team_weekly_active/inactive_performance`. Warehouse relation
+  renames; all dbt refs, exposures, singular tests, and ~45 Python query
+  references updated in the same commit.
+- **Season-grain float sums frozen.** `fct_player_season_performance`
+  and `mart_team_matchup` are tables now -- as views their per-query
+  float re-summation could flip .x5-boundary values between two reads
+  with no data change. Regens between builds are now deterministic.
 - **The two consumer-contract intermediates promoted into core.**
   `int_player_position_pts` → `fct_player_position_pts` and
   `int_team_owner_display` → `dim_team_owner`: both were already
@@ -41,12 +54,17 @@ three output surfaces (recap, records report, almanac).
   marts join the owner bridge), which per the v1.1.0
   `fct_player_daily_performance` precedent means they belong in
   `marts/core` with layer-correct names. Warehouse relation renames; the
-  almanac's two queries updated in the same commit. The old
-  `INT_PLAYER_POSITION_PTS` / `INT_TEAM_OWNER_DISPLAY` relations are
-  left standing so an un-merged checkout keeps working — after this
-  line merges and a `dbt build` has run from it, drop them:
+  almanac's two queries updated in the same commit. All renamed
+  relations' predecessors are left standing so an un-merged checkout
+  keeps working — after this line merges and a `dbt build` has run from
+  it, drop the seven orphans:
   `DROP TABLE ESPN_FANTASY.ANALYTICS.INT_PLAYER_POSITION_PTS;`
   `DROP VIEW ESPN_FANTASY.ANALYTICS.INT_TEAM_OWNER_DISPLAY;`
+  `DROP TABLE ESPN_FANTASY.ANALYTICS.FCT_WEEKLY_PLAYER_PERFORMANCE;`
+  `DROP TABLE ESPN_FANTASY.ANALYTICS.FCT_WEEKLY_PLAYER_ACTIVE_PERFORMANCE;`
+  `DROP TABLE ESPN_FANTASY.ANALYTICS.FCT_WEEKLY_PLAYER_INACTIVE_PERFORMANCE;`
+  `DROP TABLE ESPN_FANTASY.ANALYTICS.FCT_WEEKLY_TEAM_ACTIVE_PERFORMANCE;`
+  `DROP TABLE ESPN_FANTASY.ANALYTICS.FCT_WEEKLY_TEAM_INACTIVE_PERFORMANCE;`
 - **Docs refreshed where stale.** dbt project README rewritten as a
   layer-by-layer architecture narrative; `dbt_project.yml` starter
   boilerplate replaced with purposeful comments; stale claims fixed

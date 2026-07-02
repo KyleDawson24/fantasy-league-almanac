@@ -25,9 +25,9 @@ exposures:
       mart), and league-color callouts (no-hitters, milestones,
       streaks, etc.) from output/league_notes.py.
     depends_on:
-      - ref('fct_weekly_team_active_performance')
-      - ref('fct_weekly_player_active_performance')
-      - ref('fct_weekly_player_inactive_performance')
+      - ref('fct_team_weekly_active_performance')
+      - ref('fct_player_weekly_active_performance')
+      - ref('fct_player_weekly_inactive_performance')
       - ref('fct_player_daily_performance')
       - ref('mart_stat_leaderboard')
       - ref('mart_league_weekly_benchmarks')
@@ -54,8 +54,8 @@ exposures:
       can detect saturation accurately.
     depends_on:
       - ref('mart_stat_leaderboard')
-      - ref('fct_weekly_player_active_performance')
-      - ref('fct_weekly_team_active_performance')
+      - ref('fct_player_weekly_active_performance')
+      - ref('fct_team_weekly_active_performance')
       - ref('dim_stat')
       - ref('dim_matchup_period')
     owner:
@@ -82,8 +82,8 @@ exposures:
       what this sink produces.
     depends_on:
       - ref('mart_stat_leaderboard')
-      - ref('fct_weekly_player_active_performance')
-      - ref('fct_weekly_team_active_performance')
+      - ref('fct_player_weekly_active_performance')
+      - ref('fct_team_weekly_active_performance')
       - ref('dim_stat')
       - ref('dim_matchup_period')
     owner:
@@ -109,9 +109,9 @@ exposures:
       for the scoring-glossary callouts (no core surface carries scoring
       weights yet).
     depends_on:
-      - ref('fct_weekly_player_performance')
-      - ref('fct_weekly_player_active_performance')
-      - ref('fct_weekly_team_active_performance')
+      - ref('fct_player_weekly_slot_performance')
+      - ref('fct_player_weekly_active_performance')
+      - ref('fct_team_weekly_active_performance')
       - ref('fct_player_season_performance')
       - ref('fct_player_position_pts')
       - ref('dim_team_owner')

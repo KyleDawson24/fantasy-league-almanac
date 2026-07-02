@@ -1,9 +1,9 @@
--- fct_weekly_player_inactive_performance.sql
+-- fct_player_weekly_inactive_performance.sql
 -- Wide-format player-weekly fact for INACTIVE-slot performance
 -- (lineup_slot IN ('BE', 'IL', 'FA')). Mirror of
--- fct_weekly_player_active_performance for the inactive half of the split;
+-- fct_player_weekly_active_performance for the inactive half of the split;
 -- together they cover the full universe of player-weeks captured at
--- fct_weekly_player_performance.
+-- fct_player_weekly_slot_performance.
 --
 -- Grain: one row per (season_year, matchup_period, player_id, wasted_bucket).
 -- wasted_bucket is in the grain so a player who appeared as both BE/IL on a
@@ -159,7 +159,7 @@ with inactive as (
         -- the player's inactive days in this bucket).
         sum(negative_points)         as negative_points
 
-    from {{ ref('fct_weekly_player_performance') }}
+    from {{ ref('fct_player_weekly_slot_performance') }}
     where performance_status = 'inactive'
     group by 1, 2, 3, 4, 5
 )
@@ -225,7 +225,7 @@ select
     round(negative_points,         1) as negative_points,
 
     -- v1.1.0: schedule attributes denormalized onto the fact. See
-    -- fct_weekly_player_active_performance for the convention rationale.
+    -- fct_player_weekly_active_performance for the convention rationale.
     s.is_abnormal,
     s.is_playoff,
     s.playoff_round

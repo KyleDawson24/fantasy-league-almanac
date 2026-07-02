@@ -38,7 +38,7 @@ team_labels as (
         team_id,
         team_name,
         team_abbrev
-    from {{ ref('fct_weekly_player_performance') }}
+    from {{ ref('fct_player_weekly_slot_performance') }}
     where team_id is not null
     qualify row_number() over (
         partition by season_year, team_id

@@ -117,7 +117,7 @@ def get_team_contributors(season_year, matchup_period, team_id, stat_column):
     # reads as "alphabetical within a tie" to a human.
     return query_snowflake(f"""
         SELECT display_name, {stat_column} AS stat_value
-        FROM fct_weekly_player_active_performance
+        FROM fct_player_weekly_active_performance
         WHERE season_year = %s
           AND matchup_period = %s
           AND team_id = %s
@@ -140,7 +140,7 @@ _NO_PLAYER_BREAKDOWN_STATS = frozenset({
 
 def _player_stat_value(row, stat_name):
     """Compute the player's value for a leaderboard stat_name from their
-    fct_weekly_player_active_performance row. Most stats are direct columns
+    fct_player_weekly_active_performance row. Most stats are direct columns
     (lowercased); derived counting stats are inline expressions. Returns
     None for stats with no per-player contribution story."""
     if stat_name in _NO_PLAYER_BREAKDOWN_STATS:
@@ -159,7 +159,7 @@ def _player_stat_value(row, stat_name):
 
 # Leaderboard stat_name -> uppercase column-key list whose *_pts is the
 # point contribution for player-grain top-N. Mirrors the wide *_pts
-# columns on fct_weekly_player_active_performance. Hitter + pitcher pools both
+# columns on fct_player_weekly_active_performance. Hitter + pitcher pools both
 # included since player records are typically score-level (calculated_*)
 # where contributions can come from either side.
 _PLAYER_CONTRIB_STATS = (
@@ -178,7 +178,7 @@ _PLAYER_CONTRIB_STATS = (
 def get_team_contributors_bulk(tuples, top_n=3):
     """Top-N player contributors per (season, mp, team_id, stat_name).
 
-    Single batched fetch from fct_weekly_player_active_performance keyed by the
+    Single batched fetch from fct_player_weekly_active_performance keyed by the
     distinct team-week tuples; ranking happens in Python. Stats with no
     meaningful per-player breakdown (rate stats, WASTED_POINTS) return
     [] for those input tuples.
@@ -196,7 +196,7 @@ def get_team_contributors_bulk(tuples, top_n=3):
     params = [v for tw in team_weeks for v in tw]
     rows = query_snowflake(f"""
         SELECT *
-        FROM fct_weekly_player_active_performance
+        FROM fct_player_weekly_active_performance
         WHERE (season_year, matchup_period, team_id) IN ({placeholders})
     """, params)
 
@@ -251,7 +251,7 @@ def get_player_contributors_bulk(tuples, top_n=3, positives_only=True):
     params = [v for t in unique for v in t]
     rows = query_snowflake(f"""
         SELECT *
-        FROM fct_weekly_player_active_performance
+        FROM fct_player_weekly_active_performance
         WHERE (season_year, matchup_period, player_id) IN ({placeholders})
     """, params)
 
@@ -343,8 +343,8 @@ def league_history_count(grain, stat_name, value, op='='):
         raise ValueError(f"op must be one of {_VALID_HISTORY_OPS}, got {op!r}")
     if stat_name in _NON_FCT_COUNTABLE:
         return None
-    fct = ('fct_weekly_team_active_performance' if grain == 'team'
-           else 'fct_weekly_player_active_performance')
+    fct = ('fct_team_weekly_active_performance' if grain == 'team'
+           else 'fct_player_weekly_active_performance')
     col_expr = _DERIVED_STAT_FCT_EXPR.get(stat_name, stat_name.lower())
     # v1.1.0: is_abnormal is now denormalized onto the weekly facts, so
     # this filter doesn't need the separate dim/seed JOIN anymore.

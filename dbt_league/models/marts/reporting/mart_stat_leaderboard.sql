@@ -96,7 +96,7 @@ with current_year as (
     -- so the DAG shows mart_stat_leaderboard depending on mart-layer
     -- contracts rather than a raw-source edge. Functionally identical;
     -- the team fact is incrementally built off the same raw rows.
-    select max(season_year) as y from {{ ref('fct_weekly_team_active_performance') }}
+    select max(season_year) as y from {{ ref('fct_team_weekly_active_performance') }}
 ),
 
 team_active_source as (
@@ -132,7 +132,7 @@ team_active_source as (
         t.{{ lc }}                 as {{ lc }}
         {%- endif -%}
         {%- endfor %}
-    from {{ ref('fct_weekly_team_active_performance') }} t
+    from {{ ref('fct_team_weekly_active_performance') }} t
     -- v1.1.0: is_abnormal denormalized onto the weekly facts -- no
     -- need for the dim/seed JOIN to filter abnormal weeks.
     where t.is_abnormal = false
@@ -173,7 +173,7 @@ team_inactive_source as (
         ti.{{ lc }}                as {{ lc }}
         {%- endif -%}
         {%- endfor %}
-    from {{ ref('fct_weekly_team_inactive_performance') }} ti
+    from {{ ref('fct_team_weekly_inactive_performance') }} ti
     where ti.is_abnormal = false
 ),
 
@@ -210,7 +210,7 @@ player_active_source as (
         p.{{ lc }}                 as {{ lc }}
         {%- endif -%}
         {%- endfor %}
-    from {{ ref('fct_weekly_player_active_performance') }} p
+    from {{ ref('fct_player_weekly_active_performance') }} p
     where p.is_abnormal = false
 ),
 
@@ -251,7 +251,7 @@ player_inactive_source as (
         pi.{{ lc }}                as {{ lc }}
         {%- endif -%}
         {%- endfor %}
-    from {{ ref('fct_weekly_player_inactive_performance') }} pi
+    from {{ ref('fct_player_weekly_inactive_performance') }} pi
     where pi.is_abnormal = false
 ),
 

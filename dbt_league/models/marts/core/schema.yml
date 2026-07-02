@@ -273,7 +273,7 @@ models:
       - name: negative_points
         description: 'Magnitude (positive) of net-negative platform_points on this day. Zero when platform_points >= 0.'
 
-  - name: fct_weekly_player_performance
+  - name: fct_player_weekly_slot_performance
     description: >
       Comprehensive player-weekly performance fact. Aggregates from
       fct_player_daily_performance to weekly grain while preserving
@@ -281,13 +281,12 @@ models:
       cleanly.
 
       GRAIN: one row per (season_year, matchup_period, team_id,
-      player_id, lineup_slot). The model name implies one row per
-      player-week, but the actual grain includes lineup_slot -- a
-      player who occupied multiple slots within a single matchup_period
-      produces multiple rows here. Deliberate: the downstream
-      active/inactive facts filter by slot before aggregating the slot
-      dimension away, which is only possible if the slot is preserved
-      here.
+      player_id, lineup_slot). The _slot_ in the name marks the grain --
+      a player who occupied multiple slots within a single
+      matchup_period produces multiple rows here. Deliberate: the
+      downstream active/inactive facts filter by slot before aggregating
+      the slot dimension away, which is only possible if the slot is
+      preserved here.
 
       v1.1.0 DAG cleanup: this model was previously
       int_player_weekly_performance (intermediate-layer view). Promoted
@@ -340,13 +339,13 @@ models:
       - name: games_played
         description: 'MLB games played by this player in this matchup_period and lineup_slot, summed up from int_player_daily (where DH days carry games_played=2). Added v1.1.1 so fct_player_season_performance can roll it up to season grain.'
 
-  - name: fct_weekly_player_active_performance
+  - name: fct_player_weekly_active_performance
     description: >
       Wide-format player-weekly convergence fact for ACTIVE-slot performance (lineup_slot NOT IN BE/IL/FA).
       The consumer-facing entity for "what did this player do this week" -- counting stats, per-stat point contributions, rate stats, and fantasy scoring totals all in one row per player per matchup.
-      See fct_weekly_player_inactive_performance for the symmetric inactive counterpart.
+      See fct_player_weekly_inactive_performance for the symmetric inactive counterpart.
 
-      Pipeline: read fct_weekly_player_performance (the v1.1.0 comprehensive weekly fact), filter to active rows via performance_status, aggregate across slots, compute rates via shared macros, sum *_pts into calculated_* totals. LEFT JOIN dim_matchup_period for schedule attributes denormalized onto fact rows.
+      Pipeline: read fct_player_weekly_slot_performance (the v1.1.0 comprehensive weekly fact), filter to active rows via performance_status, aggregate across slots, compute rates via shared macros, sum *_pts into calculated_* totals. LEFT JOIN dim_matchup_period for schedule attributes denormalized onto fact rows.
       Incremental fact -- merge by unique_key.
       Grain: (season_year, matchup_period, team_id, player_id).
     tests:
@@ -543,7 +542,7 @@ models:
       # the UNROUNDED sources the team fact sums-then-rounds ONCE at team grain
       # (avoids the sum-of-rounds drift fixed in the round-once team-total work).
       - name: total_hitting_stat_pts
-        description: 'UNROUNDED sum of all hitting *_pts. Source for calculated_hitting_pts; exposed so fct_weekly_team_active_performance rounds once at team grain rather than summing per-player-rounded values.'
+        description: 'UNROUNDED sum of all hitting *_pts. Source for calculated_hitting_pts; exposed so fct_team_weekly_active_performance rounds once at team grain rather than summing per-player-rounded values.'
       - name: total_pitching_stat_pts
         description: 'UNROUNDED sum of all pitching *_pts. Source for calculated_pitching_pts; see total_hitting_stat_pts.'
       - name: total_stat_pts
@@ -555,10 +554,10 @@ models:
       - name: calculated_points
         description: 'Sum of all *_pts columns, rounded 1 decimal. What this player''s full stat line scores under current rules. For the current season this should closely match platform_points; for historical seasons it normalizes to a common scale.'
 
-  - name: fct_weekly_player_inactive_performance
+  - name: fct_player_weekly_inactive_performance
     description: >
       Wide-format player-weekly fact for INACTIVE-slot performance (lineup_slot IN BE/IL/FA).
-      Symmetric counterpart to fct_weekly_player_active_performance; together they cover the full universe of player-weeks at fct_weekly_player_performance.
+      Symmetric counterpart to fct_player_weekly_active_performance; together they cover the full universe of player-weeks at fct_player_weekly_slot_performance.
 
       Grain: (season_year, matchup_period, player_id, wasted_bucket).
       wasted_bucket is part of the grain so a player who appears as ROSTERED_INACTIVE on team A AND as FA in the same matchup_period (rare: drop mid-week) gets two distinct rows.
@@ -604,17 +603,17 @@ models:
       - name: negative_points
         description: 'Magnitude (unsigned positive) of net-negative platform_points the player accrued while inactive.'
 
-  - name: fct_weekly_team_active_performance
+  - name: fct_team_weekly_active_performance
     description: >
       Wide-format team-weekly convergence fact for ACTIVE-slot performance.
-      Combines team-level counting stats, per-stat *_pts and calculated_* totals (rolled up from fct_weekly_player_active_performance), and rate stats (recomputed via shared macros from team-level counting sums).
+      Combines team-level counting stats, per-stat *_pts and calculated_* totals (rolled up from fct_player_weekly_active_performance), and rate stats (recomputed via shared macros from team-level counting sums).
 
       platform_points is sourced DIRECTLY from the wrapper's per-team home_score/away_score in raw (taken from the LAST scoring_period of each matchup_period since that field is cumulative-through-SP).
       This is ESPN's authoritative team total -- slot-aware AND inclusive of any commissioner manual adjustments -- and may NOT equal SUM(player platform_points) when slot-mismatched players exist.
       The divergence is captured in platform_calculated_delta.
 
       Adds matchup pairings from raw box scores and joins matchup_schedule for days_in_period metadata.
-      See fct_weekly_team_inactive_performance for the symmetric inactive counterpart.
+      See fct_team_weekly_inactive_performance for the symmetric inactive counterpart.
       Incremental fact -- merge by unique_key.
       Grain: (season_year, matchup_period, team_id).
     tests:
@@ -840,10 +839,10 @@ models:
       - name: calculated_points
         description: 'Team sum of player calculated_points. What the team''s full stat line scores under current rules. Use this for cross-season comparisons (e.g., what would 2025 teams have scored under 2026 rules?).'
 
-  - name: fct_weekly_team_inactive_performance
+  - name: fct_team_weekly_inactive_performance
     description: >
       Team-grain rollup of inactive (BE/IL/FA) player performance.
-      Symmetric counterpart to fct_weekly_team_active_performance for the inactive half of the player-weekly split.
+      Symmetric counterpart to fct_team_weekly_active_performance for the inactive half of the player-weekly split.
 
       Two row flavors per (season_year, matchup_period):
         - N ROSTERED_INACTIVE rows (one per fantasy team; team_id set)
@@ -888,7 +887,7 @@ models:
   - name: fct_player_season_performance
     description: >
       v1.1.1 foundational brick of the player profile layer. Season-grain
-      counterpart to fct_weekly_player_performance: collapses
+      counterpart to fct_player_weekly_slot_performance: collapses
       matchup_period while preserving the (season, team, player, slot)
       decomposition.
 
@@ -896,7 +895,7 @@ models:
       team_id is nullable -- NULL rows represent FA time (lineup_slot 'FA'
       pairs with NULL team_id by construction).
 
-      Slot-bearing all-slots design (mirrors fct_weekly_player_performance,
+      Slot-bearing all-slots design (mirrors fct_player_weekly_slot_performance,
       not the active-only spinoff): rows for active slots carry stat
       contributions credited to a fantasy team; rows for BE/IL/FA carry
       player MLB production NOT credited to a fantasy team that day.
@@ -915,7 +914,7 @@ models:
       player career-by-team = GROUP BY player_id, team_id;
       player season = GROUP BY player_id, season_year;
       player season-by-team = GROUP BY player_id, season_year, team_id.
-      Matchup-grain questions go to fct_weekly_player_performance (already
+      Matchup-grain questions go to fct_player_weekly_slot_performance (already
       at that grain).
 
       Active vs inactive vs total framings are consumer-side filters:
@@ -958,14 +957,14 @@ models:
         tests:
           - not_null
       - name: performance_status
-        description: '''active'' or ''inactive''. Functionally dependent on lineup_slot; inherited via GROUP BY from fct_weekly_player_performance.'
+        description: '''active'' or ''inactive''. Functionally dependent on lineup_slot; inherited via GROUP BY from fct_player_weekly_slot_performance.'
         tests:
           - not_null
           - accepted_values:
               arguments:
                 values: ['active', 'inactive']
       - name: wasted_bucket
-        description: '''FA'', ''ROSTERED_INACTIVE'', or NULL. Inherited from fct_weekly_player_performance. NULL on active rows (where the wasted-bucket concept doesn''t apply).'
+        description: '''FA'', ''ROSTERED_INACTIVE'', or NULL. Inherited from fct_player_weekly_slot_performance. NULL on active rows (where the wasted-bucket concept doesn''t apply).'
         tests:
           - accepted_values:
               arguments:
@@ -983,7 +982,7 @@ models:
       - name: display_name
         description: 'Display helper, not a grain key. Nickname-resolved player name; latest-in-season value.'
       - name: calculated_hitting_pts
-        description: 'SUM of total_hitting_stat_pts from fct_weekly_player_performance. Catch-all hitting points under current-season scoring rules (cross-season comparable).'
+        description: 'SUM of total_hitting_stat_pts from fct_player_weekly_slot_performance. Catch-all hitting points under current-season scoring rules (cross-season comparable).'
       - name: calculated_pitching_pts
         description: 'SUM of total_pitching_stat_pts.'
       - name: calculated_points

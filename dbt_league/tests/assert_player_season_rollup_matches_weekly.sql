@@ -1,5 +1,5 @@
 -- Singular test: fct_player_season_performance is a faithful season-grain
--- rollup of fct_weekly_player_performance.
+-- rollup of fct_player_weekly_slot_performance.
 --
 -- Checked per grain row (season_year, team_id, player_id, lineup_slot):
 --   1. Every weekly grain combination appears in the season fact and vice
@@ -26,7 +26,7 @@ with weekly_rollup as (
         sum(platform_points) as platform_points,
         sum(total_stat_pts)  as calculated_points,
         sum(games_played)    as games_played
-    from {{ ref('fct_weekly_player_performance') }}
+    from {{ ref('fct_player_weekly_slot_performance') }}
     group by 1, 2, 3, 4
 ),
 

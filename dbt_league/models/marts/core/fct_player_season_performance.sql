@@ -1,6 +1,6 @@
 -- fct_player_season_performance.sql
 -- v1.1.1: foundational brick of the player profile layer. Season-grain
--- counterpart to fct_weekly_player_performance: collapses matchup_period
+-- counterpart to fct_player_weekly_slot_performance: collapses matchup_period
 -- while preserving the (season, team, player, slot) decomposition.
 --
 -- ==========================================================================
@@ -23,7 +23,7 @@
 --   - Player career-by-team     : GROUP BY player_id, team_id
 --   - Player season             : GROUP BY player_id, season_year
 --   - Player season-by-team     : GROUP BY player_id, season_year, team_id
---   - Player season-team-matchup: already served by fct_weekly_player_performance
+--   - Player season-team-matchup: already served by fct_player_weekly_slot_performance
 --
 -- Active vs inactive vs total framings -- all consumer-side filters:
 --   - Total IRL production      : (no filter)
@@ -31,7 +31,7 @@
 --   - Fantasy-credited          : performance_status = 'active'
 --   - By fantasy team           : team_id = X (FA naturally absent)
 --
--- Slot-bearing all-slots design (mirrors fct_weekly_player_performance,
+-- Slot-bearing all-slots design (mirrors fct_player_weekly_slot_performance,
 -- not the active-only spinoff): rows for active slots carry stat
 -- contributions credited to the fantasy team; rows for BE/IL/FA carry
 -- player MLB production that was NOT credited to a fantasy team that day.
@@ -57,7 +57,7 @@
 {{ config(materialized='table') }}
 
 with weekly as (
-    select * from {{ ref('fct_weekly_player_performance') }}
+    select * from {{ ref('fct_player_weekly_slot_performance') }}
 ),
 
 season_rollup as (
@@ -69,8 +69,9 @@ season_rollup as (
 
         -- Partition columns. Both are functionally dependent on
         -- lineup_slot (already in the grouping key) and inherit from the
-        -- source fact -- the same propagation pattern fct_weekly_player_
-        -- performance itself uses from the daily layer.
+        -- source fact -- the same propagation pattern
+        -- fct_player_weekly_slot_performance itself uses from the daily
+        -- layer.
         performance_status,
         wasted_bucket,
 
@@ -203,7 +204,7 @@ latest_team_labels as (
         team_name,
         team_abbrev,
         owner_name
-    from {{ ref('fct_weekly_player_performance') }}
+    from {{ ref('fct_player_weekly_slot_performance') }}
     where team_id is not null
     qualify row_number() over (
         partition by season_year, team_id
@@ -217,7 +218,7 @@ latest_player_labels as (
         player_id,
         player_name,
         display_name
-    from {{ ref('fct_weekly_player_performance') }}
+    from {{ ref('fct_player_weekly_slot_performance') }}
     qualify row_number() over (
         partition by season_year, player_id
         order by matchup_period desc
@@ -245,8 +246,8 @@ select
     sr.gdp, sr.b_ibb, sr.cyc,
 
     -- Hitting point contributions. Rounded at the fact layer to kill
-    -- cosmetic float-summation-order drift (per v1.0.1 fct_weekly_player_
-    -- active_performance precedent): consumers re-summing across slot or
+    -- cosmetic float-summation-order drift (per the v1.0.1
+    -- fct_player_weekly_active_performance precedent): consumers re-summing across slot or
     -- across season would otherwise produce values like 65.94999 vs
     -- 65.95001 that land on opposite sides of the next ROUND boundary.
     round(sr.h_pts,       1) as h_pts,

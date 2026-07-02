@@ -15,7 +15,7 @@ Historical context preserved:
 
 Phase 6.2 extraction: data access for league records previously lived
 split across the two consumer scripts. Team records used a direct
-fct_weekly_team_active_performance query with Python max/min; player
+fct_team_weekly_active_performance query with Python max/min; player
 records used the leaderboard. New-record detection had its own
 leaderboard reads + filter logic. This module unified all data access
 on mart_stat_leaderboard as the single source of truth.

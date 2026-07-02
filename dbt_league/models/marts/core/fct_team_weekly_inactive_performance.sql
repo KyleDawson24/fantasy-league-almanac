@@ -1,6 +1,6 @@
--- fct_weekly_team_inactive_performance.sql
+-- fct_team_weekly_inactive_performance.sql
 -- Team-grain rollup of inactive (BE/IL/FA) player performance.
--- Symmetric counterpart to fct_weekly_team_active_performance for the
+-- Symmetric counterpart to fct_team_weekly_active_performance for the
 -- inactive half of the player-weekly split.
 --
 -- Grain: one row per (season_year, matchup_period, team_id, wasted_bucket).
@@ -43,7 +43,7 @@
 ) }}
 
 with player_inactive as (
-    select * from {{ ref('fct_weekly_player_inactive_performance') }}
+    select * from {{ ref('fct_player_weekly_inactive_performance') }}
 ),
 
 team_rollup as (

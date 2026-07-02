@@ -1,7 +1,7 @@
 """
 Generate the weekly front-page summary from the mart tables.
 
-Reads fct_weekly_team_active_performance and fct_weekly_player_active_performance (the wide
+Reads fct_team_weekly_active_performance and fct_player_weekly_active_performance (the wide
 convergence facts shipped in Phase 3.1) to produce a BBCode-formatted
 summary for the ESPN league front page.
 """
@@ -32,7 +32,7 @@ def get_weekly_scores(season_year, matchup_period=None):
     if matchup_period is None:
         result = query_snowflake("""
             SELECT MAX(matchup_period) as mp
-            FROM fct_weekly_team_active_performance
+            FROM fct_team_weekly_active_performance
             WHERE season_year = %s
         """, (season_year,))
         matchup_period = result[0]['mp']
@@ -42,7 +42,7 @@ def get_weekly_scores(season_year, matchup_period=None):
                calculated_points, calculated_hitting_pts, calculated_pitching_pts,
                owner_name, opponent_name,
                opponent_owner, opponent_points, result
-        FROM fct_weekly_team_active_performance
+        FROM fct_team_weekly_active_performance
         WHERE matchup_period = %s
         AND season_year = %s
         ORDER BY calculated_points DESC
@@ -53,7 +53,7 @@ def get_weekly_scores(season_year, matchup_period=None):
 def get_player_contributions(season_year, matchup_period):
     """Fetch weekly player stats for contributor callouts.
 
-    Sources from fct_weekly_player_active_performance (the wide convergence fact) for
+    Sources from fct_player_weekly_active_performance (the wide convergence fact) for
     architectural consistency with team queries -- both go through the
     convergence facts, not the legacy *_scores facts.
 
@@ -65,7 +65,7 @@ def get_player_contributions(season_year, matchup_period):
     """
     return query_snowflake("""
         SELECT *
-        FROM fct_weekly_player_active_performance
+        FROM fct_player_weekly_active_performance
         WHERE matchup_period = %s
         AND season_year = %s
         ORDER BY calculated_points DESC
@@ -222,19 +222,19 @@ def get_wasted_points(season_year, matchup_period, limit=5):
     Joins fct_player_daily_performance for MLB pro_team and eligible-slots metadata
     (position display uses filtered eligibleSlots so multi-position
     players like Sanoja show as "2B, RP" instead of just a primary
-    position), and fct_weekly_player_active_performance to detect
+    position), and fct_player_weekly_active_performance to detect
     partial-active weeks (player who also had active days during the
     same matchup period).
 
-    Wasted-performance source: fct_weekly_player_inactive_performance,
+    Wasted-performance source: fct_player_weekly_inactive_performance,
     summed across the player's inactive buckets (FA + ROSTERED_INACTIVE)
     within the matchup_period. Values use calculated_points (rules-
     normalized under current-season weights).
 
     Team-label priority (in COALESCE order):
-      1. Active team (from fct_weekly_player_active_performance) -- captures the
+      1. Active team (from fct_player_weekly_active_performance) -- captures the
          FA-then-rostered case ("they have since been picked up")
-      2. Bench team (from fct_weekly_player_inactive_performance ROSTERED_INACTIVE row)
+      2. Bench team (from fct_player_weekly_inactive_performance ROSTERED_INACTIVE row)
       3. 'Free Agent' fallback when neither active nor bench association
     """
     return query_snowflake("""
@@ -249,7 +249,7 @@ def get_wasted_points(season_year, matchup_period, limit=5):
                 SUM(calculated_points) AS wasted_points_total,
                 MAX(CASE WHEN wasted_bucket = 'ROSTERED_INACTIVE'
                          THEN team_name END) AS bench_team_name
-            FROM fct_weekly_player_inactive_performance
+            FROM fct_player_weekly_inactive_performance
             WHERE season_year = %s AND matchup_period = %s
             GROUP BY player_id
         ),
@@ -282,7 +282,7 @@ def get_wasted_points(season_year, matchup_period, limit=5):
             SELECT player_id,
                    team_name AS active_team_name,
                    platform_points
-            FROM fct_weekly_player_active_performance
+            FROM fct_player_weekly_active_performance
             WHERE season_year = %s AND matchup_period = %s
         )
         SELECT
@@ -407,7 +407,7 @@ def format_wasted_points(wasted):
 # / find_new_records / count_value_occurrences) moved to output/records.py.
 # This section only does formatting now -- it consumes the leaderboard rows
 # the records module returns. The team-records pattern also migrated from a
-# direct fct_weekly_team_active_performance query to leaderboard rank-1 reads (the
+# direct fct_team_weekly_active_performance query to leaderboard rank-1 reads (the
 # "migrate team records to leaderboard" backlog item folded in here).
 
 
@@ -870,7 +870,7 @@ def generate_summary(matchup_period, scores, contributions, wasted_points,
 
 if __name__ == "__main__":
     active_season = query_snowflake(
-        "SELECT MAX(season_year) as sy FROM fct_weekly_team_active_performance"
+        "SELECT MAX(season_year) as sy FROM fct_team_weekly_active_performance"
     )[0]['sy']
 
     matchup_period, scores = get_weekly_scores(active_season)

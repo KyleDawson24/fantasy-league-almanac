@@ -136,7 +136,7 @@ def get_latest_matchup_period():
     """Return latest loaded (season_year, matchup_period)."""
     rows = query_snowflake("""
         SELECT season_year, matchup_period
-        FROM fct_weekly_team_active_performance
+        FROM fct_team_weekly_active_performance
         QUALIFY ROW_NUMBER() OVER (
             ORDER BY season_year DESC, matchup_period DESC
         ) = 1
@@ -251,7 +251,7 @@ def get_team_week_record_marks(stat_specs):
                 SELECT
                     {column} AS stat_value,
                     {aggregate}({column}) OVER () AS record_value
-                FROM fct_weekly_team_active_performance
+                FROM fct_team_weekly_active_performance
                 WHERE opponent_id IS NOT NULL
                   AND is_abnormal = false
                   AND {column} IS NOT NULL
@@ -276,7 +276,7 @@ def get_all_league_team(season_year, matchup_period=None):
     """Thin wrapper around the generalized get_optimal_team primitive.
 
     Pre-v1.1.1 this was its own bespoke pipeline (USED-SLOT-based
-    candidates from fct_weekly_player_performance + a simpler fill-by-
+    candidates from fct_player_weekly_slot_performance + a simpler fill-by-
     slot selection). v1.1.1 reframed All-League Team as a special case
     of "pick the highest-scoring possible lineup given filters" --
     league-wide pool (team_id=None), active-fantasy-credited points
@@ -408,7 +408,7 @@ def _enrich_optimal_team_with_stats(selected_rows, season_year, matchup_period,
     """Merge stat columns into selected rows so the renderer's
     format_top_scorer_stats_line tail renders correctly.
 
-    Runs a single SUM aggregation over fct_weekly_player_performance
+    Runs a single SUM aggregation over fct_player_weekly_slot_performance
     for the selected player ids, scoped to the same filter window as
     the candidates query. Mutates ``selected_rows`` in place AND
     returns it (convenience).
@@ -491,7 +491,7 @@ def _enrich_optimal_team_with_stats(selected_rows, season_year, matchup_period,
                 -- MAX_BY calls above all resolve to the SAME latest stint.
                 (season_year * 100 + matchup_period) * 100 + team_id
                     AS recency_key
-            FROM fct_weekly_player_performance
+            FROM fct_player_weekly_slot_performance
             WHERE {where_sql}
         )
         GROUP BY player_id
@@ -671,7 +671,7 @@ def get_team_slot_points(season_year):
             team_id,
             lineup_slot,
             ROUND(SUM(total_stat_pts), 1) AS slot_pts
-        FROM fct_weekly_player_performance
+        FROM fct_player_weekly_slot_performance
         WHERE season_year = %s
         GROUP BY team_id, lineup_slot
     """, (season_year,))
@@ -1099,7 +1099,7 @@ def get_current_team_roster_stats(season_year):
                 SUM(hld) AS hld,
                 SUM(k) AS k,
                 SUM(outs) AS outs
-            FROM fct_weekly_player_active_performance
+            FROM fct_player_weekly_active_performance
             WHERE season_year = %s
             GROUP BY 1, 2, 3
         )
@@ -1209,15 +1209,15 @@ def count_value_occurrences_for_scope(scope, grain, stat_name, value):
         'W_L': 'w - l',
         'SV_BLSV': 'sv - blsv',
     }.get(stat_name, stat_name.lower())
-    fct = ('fct_weekly_team_active_performance' if grain == 'team'
-           else 'fct_weekly_player_active_performance')
+    fct = ('fct_team_weekly_active_performance' if grain == 'team'
+           else 'fct_player_weekly_active_performance')
     rows = query_snowflake(f"""
         SELECT COUNT(*) AS n
         FROM {fct}
         WHERE is_abnormal = false
           AND season_year = (
               SELECT MAX(season_year)
-              FROM fct_weekly_team_active_performance
+              FROM fct_team_weekly_active_performance
           )
           AND ({col_expr}) = %s
     """, (value,))
@@ -1241,7 +1241,7 @@ def get_lineup_slot_records(scope):
         season_filter = """
           AND p.season_year = (
               SELECT MAX(season_year)
-              FROM fct_weekly_team_active_performance
+              FROM fct_team_weekly_active_performance
           )
         """
     elif scope != 'all_time':
@@ -1284,7 +1284,7 @@ def get_lineup_slot_records(scope):
                 p.team_name,
                 p.team_abbrev,
                 -- v1.3: read the canonical owner_display (resolved once
-                -- upstream in fct_weekly_player_performance) -- no COALESCE.
+                -- upstream in fct_player_weekly_slot_performance) -- no COALESCE.
                 p.owner_display AS owner_name,
                 p.player_id,
                 p.player_name,
@@ -1300,7 +1300,7 @@ def get_lineup_slot_records(scope):
                              p.team_id,
                              p.player_id
                 ) AS rank
-            FROM fct_weekly_player_performance p
+            FROM fct_player_weekly_slot_performance p
             LEFT JOIN dim_matchup_period m
                 ON p.season_year = m.season_year
                 AND p.matchup_period = m.matchup_period
@@ -1324,7 +1324,7 @@ def _get_rate_record_rows(scope, spec):
     """Read rate-stat records from mart_stat_leaderboard.
 
     v1.1.1: previously bypassed the mart and re-ranked off
-    fct_weekly_team_active_performance with a Python-constant threshold
+    fct_team_weekly_active_performance with a Python-constant threshold
     filter. The mart now applies the qualifier_min threshold from dim_stat
     natively, so this function just reads top-10 records and JOINs back
     to the team fact for the qualifier_value display column (AB count,
@@ -1355,7 +1355,7 @@ def _get_rate_record_rows(scope, spec):
             l.stat_value,
             t.{qualifier_col} AS qualifier_value
         FROM mart_stat_leaderboard l
-        LEFT JOIN fct_weekly_team_active_performance t
+        LEFT JOIN fct_team_weekly_active_performance t
             ON l.season_year    = t.season_year
             AND l.matchup_period = t.matchup_period
             AND l.team_id        = t.team_id

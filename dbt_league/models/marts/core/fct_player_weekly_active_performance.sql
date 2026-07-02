@@ -1,4 +1,4 @@
--- fct_weekly_player_active_performance.sql
+-- fct_player_weekly_active_performance.sql
 -- Wide-format player-weekly convergence fact for ACTIVE-slot performance.
 -- The consumer-facing entity for "what did this player do this week" --
 -- counting stats, rate stats, per-stat point contributions, and fantasy
@@ -18,7 +18,7 @@
 --     alongside as the rules-normalized derivation.
 --
 -- Pipeline:
---   1. Read fct_weekly_player_performance (slot-preserved counting + pts +
+--   1. Read fct_player_weekly_slot_performance (slot-preserved counting + pts +
 --      platform totals; v1.1.0 promoted this from the int layer).
 --   2. Filter to active rows (performance_status = 'active').
 --   3. Aggregate counting and pts columns across slots (collapse slot dim).
@@ -154,7 +154,7 @@ with active as (
         sum(negative_points) as negative_points,
 
         -- Platform scoring rolled up across the player's active slots
-        -- in the matchup. fct_weekly_player_performance carries
+        -- in the matchup. fct_player_weekly_slot_performance carries
         -- SUM(platform_points) plus the stat-contribution hitting/pitching
         -- split (computed at int_player_daily: platform_points apportioned
         -- by each day's unfiltered per-category stat production, so two-way
@@ -169,7 +169,7 @@ with active as (
         -- player_id (same value across the player's active slots).
         max(display_name)          as display_name
 
-    from {{ ref('fct_weekly_player_performance') }}
+    from {{ ref('fct_player_weekly_slot_performance') }}
     -- Phase 7 D3: filter switched from the slot-enumeration form to the
     -- seed-aligned performance_status flag (D1 added it). team_id IS NOT
     -- NULL is implied by performance_status = 'active' in current data
@@ -227,7 +227,7 @@ select
     {{ k_per_bb('a.k', 'a.p_bb') }}          as k_per_bb,
 
     -- Calculated scoring (current season's weights applied to stat breakdowns).
-    -- Uses the catch-all totals from fct_weekly_player_performance, which sum
+    -- Uses the catch-all totals from fct_player_weekly_slot_performance, which sum
     -- stat_points across ALL scored stats. This is correct even for stats that
     -- aren't pivoted into dedicated *_pts columns above (e.g. GDP, B_IBB,
     -- HBP_P, PK, BLSV, NH, PG). The *_pts columns remain available for per-stat
@@ -256,7 +256,7 @@ select
     round(a.negative_points, 1)         as negative_points,
 
     -- Platform scoring (ESPN's pre-computed values, the official arbiter for W/L).
-    -- Sourced from fct_weekly_player_performance via the active CTE above.
+    -- Sourced from fct_player_weekly_slot_performance via the active CTE above.
     -- Rounded 1 decimal at fact layer (see calculated_* note above).
     round(a.platform_points,         1) as platform_points,
     round(a.platform_hitting_pts,    1) as platform_hitting_pts,

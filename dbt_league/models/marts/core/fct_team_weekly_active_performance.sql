@@ -1,4 +1,4 @@
--- fct_weekly_team_active_performance.sql
+-- fct_team_weekly_active_performance.sql
 -- Phase 7 E2: renamed from fct_weekly_team_performance. The active half
 -- of the team-weekly active/inactive symmetry. A thin compatibility view
 -- at the old name (fct_weekly_team_performance.sql) lives alongside so
@@ -10,7 +10,7 @@
 -- and adds counting + rate stats.
 --
 -- Phase 3.2 additions: rolls up the per-stat *_pts columns and the
--- calculated_* totals from fct_weekly_player_active_performance, so team-
+-- calculated_* totals from fct_player_weekly_active_performance, so team-
 -- level consumers can ask the same "top N stats by point contribution" and
 -- "what would this team have scored under current rules" questions that
 -- the player fact supports.
@@ -33,7 +33,7 @@
 -- wrapper provides only a single team total, no breakdown).
 --
 -- Pipeline:
---   1. Roll up fct_weekly_player_performance to team grain (SUM counting,
+--   1. Roll up fct_player_weekly_slot_performance to team grain (SUM counting,
 --      SUM *_pts, SUM player platform_*_pts, SUM calculated_*)
 --   2. Pull team_platform_points from raw box_scores wrapper at last SP
 --   3. Recompute rate stats via macros from team-level counting sums
@@ -168,7 +168,7 @@ with team_rollup as (
         sum(negative_points)         as negative_points,
 
         count(distinct player_id) as active_player_count
-    from {{ ref('fct_weekly_player_active_performance') }}
+    from {{ ref('fct_player_weekly_active_performance') }}
     group by 1, 2, 3, 4, 5, 6
 ),
 

@@ -243,7 +243,7 @@ fresh Snowflake free-tier account in under 45 minutes.
 - **v1.0.2** — 2026-05-19. DAG hygiene + dbt-architecture cleanup. New
   `dim_stat` / `dim_matchup_period` / `fct_player_daily_performance`
   contract layer; `int_player_weekly_performance` promoted to
-  `fct_weekly_player_performance`; schedule columns denormalized onto
+  `fct_player_weekly_slot_performance`; schedule columns denormalized onto
   weekly facts. No consumer-visible behavior change (byte-identical
   output).
 - **v1.0.1** — 2026-05-18. Polish release on top of v1.0.0: 8 new

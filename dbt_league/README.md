@@ -92,12 +92,12 @@ stat_classification`; no SQL or Python changes.
 
 ## Incremental strategy
 
-The three weekly facts (`fct_weekly_player_active_performance`,
-`fct_weekly_player_inactive_performance`, `fct_weekly_team_active_performance`)
+The three weekly facts (`fct_player_weekly_active_performance`,
+`fct_player_weekly_inactive_performance`, `fct_team_weekly_active_performance`)
 are incremental with composite `unique_key`s and `on_schema_change: fail` —
 the weekly extract-then-build cadence merges one matchup period at a time.
 Models where determinism matters more than build cost are plain tables
-(`fct_weekly_player_performance`, `fct_player_position_pts`,
+(`fct_player_weekly_slot_performance`, `fct_player_position_pts`,
 `fct_player_season_performance`, `mart_team_matchup` — frozen so
 per-query float re-summation can't flip rounding-boundary values or
 reshuffle optimal-team tie-breaks between reads). `mart_stat_leaderboard`

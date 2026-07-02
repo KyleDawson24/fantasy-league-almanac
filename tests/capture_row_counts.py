@@ -33,18 +33,18 @@ FIXTURE = REPO / "tests" / "fixtures" / "mart_row_counts.json"
 # int_player_daily_stats, fct_weekly_player_scores, mart_wasted_points,
 # and the transitional fct_weekly_team_performance compat view.
 # v1.1.0 DAG cleanup: int_player_weekly_performance promoted to
-# fct_weekly_player_performance. New dim_stat, dim_matchup_period,
+# fct_player_weekly_slot_performance. New dim_stat, dim_matchup_period,
 # fct_player_daily_performance models added.
 MODELS = [
     "int_player_daily",
     "dim_stat",
     "dim_matchup_period",
     "fct_player_daily_performance",
-    "fct_weekly_player_performance",
-    "fct_weekly_player_active_performance",
-    "fct_weekly_player_inactive_performance",
-    "fct_weekly_team_active_performance",
-    "fct_weekly_team_inactive_performance",
+    "fct_player_weekly_slot_performance",
+    "fct_player_weekly_active_performance",
+    "fct_player_weekly_inactive_performance",
+    "fct_team_weekly_active_performance",
+    "fct_team_weekly_inactive_performance",
     "mart_stat_leaderboard",
     "mart_league_weekly_benchmarks",
 ]

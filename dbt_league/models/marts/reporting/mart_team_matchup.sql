@@ -1,5 +1,5 @@
 -- mart_team_matchup.sql
--- v1.1.1: wide matchup-grain view over fct_weekly_team_active_performance.
+-- v1.1.1: wide matchup-grain view over fct_team_weekly_active_performance.
 -- Each row carries one team's full active line, the opponent's calculated
 -- score lens, head-to-head margin and combined totals, and the league-wide
 -- per-week averages on the calculated lens.
@@ -77,8 +77,8 @@ select
         partition by t.season_year, t.matchup_period
     ) as league_avg_total_points
 
-from {{ ref('fct_weekly_team_active_performance') }} t
-left join {{ ref('fct_weekly_team_active_performance') }} opp
+from {{ ref('fct_team_weekly_active_performance') }} t
+left join {{ ref('fct_team_weekly_active_performance') }} opp
     on t.season_year    = opp.season_year
     and t.matchup_period = opp.matchup_period
     and t.opponent_id    = opp.team_id

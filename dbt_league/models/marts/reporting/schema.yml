@@ -283,7 +283,7 @@ models:
 
   - name: mart_team_matchup
     description: >
-      Wide matchup-grain view over fct_weekly_team_active_performance. Each
+      Wide matchup-grain view over fct_team_weekly_active_performance. Each
       row carries one team's full active line (passed through from the base
       fact), the opponent's calculated-lens scores, head-to-head margin
       and combined matchup totals, and the league-wide per-week averages

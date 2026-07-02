@@ -309,11 +309,11 @@ Marts — core (`models/marts/core/`, the contract layer):
 - `dim_team_owner` (view, born `int_team_owner_display`): `(season, team)` → `owner_display`, co-owned teams collapsed to "Name / Name". Four marts + the almanac join through it.
 - `fct_player_position_pts` (table — frozen for float determinism; born `int_player_position_pts`): eligible-slots VARIANT explosion into per-`(season, matchup, team, player, position)` calculated points. The optimal-team selector's data contract.
 - `fct_player_daily_performance` (view): thin daily contract over `int_player_daily`, adding `performance_status` + `wasted_bucket`.
-- `fct_weekly_player_performance` (table): slot-preserved weekly rollup (promoted from `int_player_weekly_performance` in v1.0.2). Wide counting + per-stat `_pts` + catch-all totals + `negative_points` + platform totals; `lineup_slot` kept in the grain so the fact layer can filter active/inactive cleanly.
-- `fct_weekly_player_active_performance` (incremental): active-only filter (lineup_slot NOT IN BE/IL/FA). Wide convergence row per `(season_year, matchup_period, team_id, player_id)`.
-- `fct_weekly_player_inactive_performance` (incremental): symmetric counterpart for inactive slots, with `wasted_bucket` ('FA' or 'ROSTERED_INACTIVE') in the grain.
-- `fct_weekly_team_active_performance` (incremental): team-grain rollup of the player active fact. The team_total = SUM(players) invariant holds for all columns except `platform_points` (sourced directly from the wrapper's `home_score` to honor commissioner adjustments; divergence captured in `platform_calculated_delta`).
-- `fct_weekly_team_inactive_performance` (table): team-grain rollup of the player inactive fact, plus a single FA pool row per matchup (team_id NULL).
+- `fct_player_weekly_slot_performance` (table): slot-preserved weekly rollup (promoted from `int_player_weekly_performance` in v1.0.2). Wide counting + per-stat `_pts` + catch-all totals + `negative_points` + platform totals; `lineup_slot` kept in the grain so the fact layer can filter active/inactive cleanly.
+- `fct_player_weekly_active_performance` (incremental): active-only filter (lineup_slot NOT IN BE/IL/FA). Wide convergence row per `(season_year, matchup_period, team_id, player_id)`.
+- `fct_player_weekly_inactive_performance` (incremental): symmetric counterpart for inactive slots, with `wasted_bucket` ('FA' or 'ROSTERED_INACTIVE') in the grain.
+- `fct_team_weekly_active_performance` (incremental): team-grain rollup of the player active fact. The team_total = SUM(players) invariant holds for all columns except `platform_points` (sourced directly from the wrapper's `home_score` to honor commissioner adjustments; divergence captured in `platform_calculated_delta`).
+- `fct_team_weekly_inactive_performance` (table): team-grain rollup of the player inactive fact, plus a single FA pool row per matchup (team_id NULL).
 - `fct_player_season_performance` (view): season-grain brick per `(season, team, player, slot)`; points columns rounded once per row for cross-session determinism.
 
 Marts — reporting (`models/marts/reporting/`, consumer surfaces):
@@ -395,7 +395,7 @@ These are calls already made; lead with the established pattern rather than re-d
 ### dbt patterns
 
 - **Wide convergence facts at consumer grain**. Counting + rate + `_pts` + scoring totals all in one wide row per (player|team)-week.
-- **`fct_weekly_team_active_performance` reads from `fct_weekly_player_active_performance`**. Team totals are *defined* as `SUM(players)`, eliminating drift (with the `platform_points` exception noted above).
+- **`fct_team_weekly_active_performance` reads from `fct_player_weekly_active_performance`**. Team totals are *defined* as `SUM(players)`, eliminating drift (with the `platform_points` exception noted above).
 - **Macros for grain-agnostic formulas** (`macros/rate_stats.sql`).
 - **Slot-agnostic intermediate, filter at fact**. `int_player_daily` and `int_player_weekly_performance` keep `lineup_slot` in the grain. Active filter (`NOT IN ('BE', 'IL', 'FA')`) at the active fact; inverse filter at the inactive fact.
 - **Disambiguation at intermediate, not staging** (Phase 3.2): when a name collision needs context to resolve (e.g., HBP batter vs HBP pitcher pre-Phase-4), do it at int. Staging stays a pure reshape. **Phase 4 superseded this pattern for HBP** by overriding at extract via `_STAT_ID_TO_NAME` — better still.
@@ -483,7 +483,7 @@ Highlights as of v1.1.0:
 - **Shipped in v1.0.2** (refactor-only; byte-identical output): new
   mart-layer contracts (`dim_stat`, `dim_matchup_period`,
   `fct_player_daily_performance`); `int_player_weekly_performance`
-  promoted to `fct_weekly_player_performance`; schedule columns
+  promoted to `fct_player_weekly_slot_performance`; schedule columns
   denormalized onto the four weekly facts; output scripts repointed
   through the new contract layer; `SEED_TO_LEADERBOARD` and
   `to_leaderboard_name` removed (`dim_stat.leaderboard_name` is the

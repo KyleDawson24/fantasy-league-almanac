@@ -1,21 +1,20 @@
--- fct_weekly_player_performance.sql
+-- fct_player_weekly_slot_performance.sql
 -- Comprehensive player-weekly performance fact. Aggregates the daily
 -- comprehensive fact to weekly grain while preserving lineup_slot in
 -- the grain so downstream active/inactive splits can filter cleanly.
 --
 -- ==========================================================================
--- GRAIN NOTE (read carefully -- the model name is slightly misleading):
--- ==========================================================================
+-- GRAIN:
 --   One row per (season_year, matchup_period, team_id, player_id, lineup_slot).
---
--- The name "weekly_player_performance" implies one row per player per
--- week. The actual grain includes lineup_slot, so a player who occupied
--- multiple slots within a single matchup_period produces multiple rows
--- here -- one per (player, MP, slot). This is deliberate: the
--- downstream active/inactive facts filter by slot before aggregating
--- the slot dimension away, which is only possible if the slot is
--- preserved here.
 -- ==========================================================================
+--
+-- The _slot_ in the name marks the grain: a player who occupied multiple
+-- slots within a single matchup_period produces multiple rows here --
+-- one per (player, MP, slot). This is deliberate: the downstream
+-- active/inactive facts filter by slot before aggregating the slot
+-- dimension away, which is only possible if the slot is preserved here.
+-- (The model carried the confusable name fct_weekly_player_performance
+-- until the entity-first naming pass added the explicit slot marker.)
 --
 -- v1.1.0 DAG cleanup: this model was previously
 -- `int_player_weekly_performance` (intermediate-layer view). Promoted to

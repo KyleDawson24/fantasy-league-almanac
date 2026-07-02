@@ -81,6 +81,16 @@ three output surfaces (recap, records report, almanac).
 - **Missing column docs**: `stat_classification.qualifier_stat` /
   `qualifier_min` seed columns, `mart_daily_roster_snapshot` grain
   columns.
+- **A "Reading the DAG" section** in the dbt README explaining the three
+  deliberate cross-layer edges (raw → team fact, the stat_classification
+  hub, staging → roster snapshot) and the grain-wholesale rule of thumb
+  they follow.
+- **Shared stat-column doc blocks** (`marts/core/_stat_column_docs.md`):
+  the 62 per-stat definitions the two wide active facts repeated
+  verbatim now live once, referenced via `doc()`.
+- **No-warehouse CI** (`.github/workflows/ci.yml`): unit suite + `dbt
+  parse` against a placeholder profile on every push/PR; warehouse
+  goldens stay local by design.
 
 Verification: dbt parse with zero deprecation warnings (the three
 top-level test-arg blocks now use `arguments:`); dbt build green; all

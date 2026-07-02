@@ -12,9 +12,34 @@ repository root for the architectural detail behind the change.
 
 Portfolio-readability pass over the dbt project: a layered DAG, enforced
 data-quality tests, and accurate exposures — all byte-neutral for the
-three output surfaces (recap, records report, almanac).
+three output surfaces (recap, records report, almanac). Plus the first
+v2.0 feature: the almanac's Advanced Standings tab rebuilt as per-stat
+weekly-average standings over two new reporting marts (intentionally
+output-changing; the almanac goldens were re-anchored under review).
 
 ### Changed
+
+- **Advanced Standings tab reworked (v2.0 feature #1).** The standings
+  block now shows each scored stat individually — the same seed-driven
+  stat set and order as Matchup History — plus the Offense / Defense /
+  Total / Against points columns, with every value a per-standard-matchup
+  average: `value * standard_matchup_days / scoring_days_played`, where
+  gameplay days are scoring periods rather than calendar days (the
+  14-calendar-day All-Star week counts its ~11 game days) and the
+  standard matchup length is derived per season (modal regular-week
+  length — 7 here — so a 2-week-matchup league would normalize per-14
+  with no code change). Raw season totals left the block; the weekly
+  shape is how the league actually reads scores. IP renders as a base-10
+  decimal (thirds notation doesn't survive averaging). The Points by
+  Lineup Slot grid keeps season totals but drops BE / IL (a future
+  bench/IL view belongs on the inactive-points lens), and its column
+  order now comes from `dim_roster_slot_counts.sort_order` instead of a
+  hardcoded Python map. Write-layer column gradients are polarity-aware
+  per stat (negative-weighted stats like L / ER / BLSV paint green-low),
+  positioned structurally rather than by header label since several
+  abbrevs (K / BB / H / HR / R) repeat across the hitting and pitching
+  blocks. Both blocks read the new marts; the almanac's two inline
+  standings aggregations were deleted from `output/almanac_data.py`.
 
 - **marts/ re-layered into `marts/core` + `marts/reporting`.** The 4 dims
   and 7 facts (the contract layer) now live under `marts/core/`; the five
@@ -101,11 +126,37 @@ three output surfaces (recap, records report, almanac).
 - **No-warehouse CI** (`.github/workflows/ci.yml`): unit suite + `dbt
   parse` against a placeholder profile on every push/PR; warehouse
   goldens stay local by design.
+- **`mart_team_season_standings`** — season-grain standings contract:
+  one row per (season_year, team_id) with the official W-L-T record,
+  season sums of every scored-stat counting column, the calculated
+  score lenses, points conceded, and the per-week normalization
+  denominators (`scoring_days_played`, `standard_matchup_days`).
+  Regular season only (`is_playoff = false`) — a standings freezes at
+  the end of the regular season — while abnormal weeks stay in and are
+  handled by the gameplay-day denominator. Lifted from the inline
+  standings query in `output/almanac_data.py`, the same move that
+  created `mart_team_matchup` in v1.1.1.
+- **`mart_team_slot_production`** — season-grain lineup-slot production:
+  one row per (season_year, team_id, lineup_slot) of calculated points
+  produced while *deployed* in the slot (box-score slot, not position
+  eligibility), joined to `dim_roster_slot_counts` for display order
+  and the active / BE-IL cut. The mart keeps every deployed slot with
+  an `is_active_lineup_slot` flag so the future bench/IL view reads the
+  same contract; the v2.0 grid filters to active. Both new marts are
+  tables (float sums feeding byte-diff goldens; same determinism
+  rationale as `mart_team_matchup`), grain-tested, and declared on the
+  `league_almanac` exposure.
 
 Verification: dbt parse with zero deprecation warnings (the three
-top-level test-arg blocks now use `arguments:`); dbt build green; all
-four singular tests pass; almanac byte-diff + recap / records goldens
-unchanged.
+top-level test-arg blocks now use `arguments:`); dbt build green
+(PASS=221 including the new marts' grain tests); all four singular
+tests pass; recap / records goldens byte-identical. Almanac goldens
+re-anchored for the Advanced Standings rework after a reviewed diff —
+the only movement beyond that tab was the documented float-summation
+residual (six 0.1-boundary point flips surfacing as ppg cells on four
+team tabs, plus one Matchup History matchup whose Week-13 pitching
+cell moved 148.0 → 148.1 from the latest-MP incremental re-merge —
+the new values are the self-consistent ones).
 
 ## [1.2.0] — 2026-05-30
 

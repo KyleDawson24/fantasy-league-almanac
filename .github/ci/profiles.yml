@@ -1,0 +1,18 @@
+# CI-only dbt profile. `dbt parse` validates the whole project (refs,
+# schema YAML, Jinja, doc() resolution) without ever opening a warehouse
+# connection, so every value here is a placeholder. Anything that DOES
+# connect (build/test/run/docs generate) would fail against this profile
+# -- which is the intended guardrail for CI.
+dbt_league:
+  target: ci
+  outputs:
+    ci:
+      type: snowflake
+      account: placeholder
+      user: placeholder
+      password: placeholder
+      role: placeholder
+      database: ESPN_FANTASY
+      schema: ANALYTICS
+      warehouse: placeholder
+      threads: 1

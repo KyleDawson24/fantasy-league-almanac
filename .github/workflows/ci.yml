@@ -1,0 +1,52 @@
+# CI: everything that can run without a warehouse connection.
+#
+# Two jobs:
+#   unit-tests -- the pure-function pytest suite (pytest.ini already
+#     excludes the warehouse-marked goldens by default).
+#   dbt-parse  -- dbt deps + parse against a placeholder profile
+#     (.github/ci/profiles.yml). Parse never opens a connection but
+#     validates refs, schema YAML, Jinja, doc() resolution, and the
+#     compile-time execute-guards -- most classes of "I broke the dbt
+#     project" fail here.
+#
+# The warehouse-marked goldens (almanac byte-diff, recap/records BBCode)
+# and dbt build stay local by design: promoting them to CI would require
+# putting the Snowflake key-pair in GitHub Actions secrets and paying a
+# warehouse credit per push. If that trade ever looks worth it, add a
+# third job gated on the secret's presence.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Unit tests (warehouse goldens excluded by pytest.ini)
+        run: pytest tests/ -q
+
+  dbt-parse:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: dbt deps + parse (no warehouse connection)
+        env:
+          DBT_PROFILES_DIR: ${{ github.workspace }}/.github/ci
+        run: |
+          dbt deps --project-dir dbt_league
+          dbt parse --project-dir dbt_league --no-partial-parse

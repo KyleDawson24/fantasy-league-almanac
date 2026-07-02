@@ -929,9 +929,11 @@ models:
       entity) partition -- owners and team names can shift mid-season;
       latest-in-season reads naturally for downstream display.
 
-      Materialization: view. Source is already a table; the rollup is
-      small (collapses matchup_period out of a ~30K-row source); no
-      incremental benefit.
+      Materialization: table. Small rollup (~30K rows), but frozen per
+      build: as a view, every consumer query re-summed float points in a
+      nondeterministic order, so .x5-boundary values could flip between
+      reads with no data change. Same determinism reasoning as
+      fct_player_position_pts.
     tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:

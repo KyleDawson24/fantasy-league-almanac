@@ -20,13 +20,17 @@
 -- single game dedupe via LEAST/GREATEST on team_id or by filtering to
 -- team_id < opponent_id.
 --
--- Materialization: view. Pure derivation over an already-materialized
--- fact; the league-average window forbids incrementality regardless.
+-- Materialization: table. The league-average window forbids
+-- incrementality, and as a view the AVG re-summed floats in a
+-- nondeterministic order on every query -- a league-average cell on a
+-- .x5 rounding boundary could flip between two reads with no data
+-- change (observed in Matchup History regen diffs). A plain table
+-- freezes each build's values; it is small and rebuilds with the fact.
 --
 -- First consumer: output/almanac_sheets.py:get_team_weeks (Team Weeks tab).
 -- Lifted verbatim from the inlined query that previously lived there.
 
-{{ config(materialized='view') }}
+{{ config(materialized='table') }}
 
 select
     t.*,

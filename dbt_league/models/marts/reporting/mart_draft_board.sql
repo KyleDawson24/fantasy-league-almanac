@@ -20,8 +20,9 @@
 -- presentation computed in the output layer, not here -- this mart just
 -- supplies the joined facts.
 --
--- Materialization: view. Small (one row per pick); mirrors the other thin
--- mart views (mart_team_matchup, fct_player_season_performance).
+-- Materialization: view. Small (one row per pick); safe as a view because
+-- season_points is rounded at source, so per-query re-summation noise
+-- cannot flip the displayed value except exactly at a .x5 boundary.
 
 {{ config(materialized='view') }}
 

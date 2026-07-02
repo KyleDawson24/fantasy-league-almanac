@@ -303,7 +303,10 @@ models:
       GREATEST on team_id or by filtering to team_id < opponent_id.
 
       First consumer: output/generate_almanac_sheet.py Team Weeks tab.
-      View materialization (pure derivation; window forbids incremental).
+      Materialization: table -- the league-average window forbids
+      incremental, and a view re-summed the averages nondeterministically
+      per query (boundary values could flip between reads); a plain table
+      freezes each build's values.
     tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:

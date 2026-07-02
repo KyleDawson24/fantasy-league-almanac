@@ -44,11 +44,17 @@
 -- latest-in-season convention matches "what should the row label say
 -- when displayed."
 --
--- Materialization: view. Source is already a table; aggregation is small
--- (collapsing matchup_period out of ~30K-row source); no incremental
--- benefit. Mirrors mart_team_matchup and mart_league_weekly_benchmarks.
+-- Materialization: table. Was a view; every consumer query re-ran the
+-- GROUP BY re-summing float points in a nondeterministic order, so a
+-- value sitting on a .x5 rounding boundary could flip between two reads
+-- minutes apart (observed: an almanac team-tab ERA cell flip-flopping
+-- 0.82 -> 0.81 -> 0.82 across consecutive runs with no data change).
+-- Materializing freezes each build's values so the almanac byte-diff
+-- only moves on real changes -- the same reasoning as
+-- fct_player_position_pts. Small table (~30K rows); rebuild cost is
+-- negligible.
 
-{{ config(materialized='view') }}
+{{ config(materialized='table') }}
 
 with weekly as (
     select * from {{ ref('fct_weekly_player_performance') }}

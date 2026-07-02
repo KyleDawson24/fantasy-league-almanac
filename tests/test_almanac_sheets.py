@@ -5,6 +5,7 @@ import re
 import pytest
 
 import almanac_data
+import almanac_render
 import almanac_sheets
 
 
@@ -964,3 +965,151 @@ class TestTeamHistoryRows:
         assert almanac_sheets._is_hitter_display_slot('BE - 1B,LF')
         assert almanac_sheets._is_hitter_display_slot('C')
         assert not almanac_sheets._is_hitter_display_slot('Slot')
+
+
+def _standings_spec(stat_name, category, abbrev=None, points=1):
+    return {
+        'stat_name': stat_name,
+        'display_name': stat_name,
+        'abbrev': abbrev or stat_name,
+        'stat_category': category,
+        'points_per_unit': points,
+    }
+
+
+# Two stats per category, one negative-weighted in each, is enough to
+# exercise the layout, the polarity handling, and the OUTS special case.
+_STANDINGS_SPECS = [
+    _standings_spec('HR', 'hitting', points=2),
+    _standings_spec('B_SO', 'hitting', abbrev='K', points=-1),
+    _standings_spec('OUTS', 'pitching', abbrev='IP', points=1),
+    _standings_spec('L', 'pitching', points=-5),
+]
+
+
+def _standings_team(team_id=1, abbrev='AAA', wins=2, losses=1, ties=0,
+                    **overrides):
+    row = {
+        'team_id': team_id,
+        'team_abbrev': abbrev,
+        'team_name': f'Team {team_id}',
+        'owner_display': f'Owner {team_id}',
+        'wins': wins,
+        'losses': losses,
+        'ties': ties,
+        'matchup_periods_played': 2,
+        'scoring_days_played': 16,
+        'standard_matchup_days': 8,
+        'calculated_hitting_pts': 100.0,
+        'calculated_pitching_pts': 50.0,
+        'calculated_points': 150.0,
+        'against_calculated_points': 120.0,
+        'hr': 10,
+        'b_so': 20,
+        'outs': 60,
+        'l': 4,
+    }
+    row.update(overrides)
+    return row
+
+
+class TestAdvancedStandingsRows:
+    def test_standings_header_layout(self):
+        header = almanac_sheets.standings_header(
+            _STANDINGS_SPECS[:2], _STANDINGS_SPECS[2:],
+        )
+
+        assert header == [
+            'Rank', 'Team', 'Owner', 'W-L',
+            'HR', 'K', 'Offense', '',
+            'IP', 'L', 'Defense', '',
+            'Total', 'Against',
+        ]
+
+    def test_format_standings_row_normalizes_per_standard_matchup(self):
+        # 16 gameplay days at a standard 8-day matchup halves every total.
+        row = almanac_render.format_standings_row(
+            3, _standings_team(), _STANDINGS_SPECS[:2], _STANDINGS_SPECS[2:],
+        )
+
+        assert row == [
+            3, 'AAA', 'Owner 1', '2-1',
+            5.0, 10.0, 50.0, '',
+            10.0, 2.0, 25.0, '',
+            75.0, 60.0,
+        ]
+
+    def test_format_standings_row_outs_render_as_decimal_ip(self):
+        # 61 outs = 20.33 IP over two standard matchups -> 10.2 IP/week as
+        # a base-10 decimal, not baseball .1/.2 thirds notation.
+        row = almanac_render.format_standings_row(
+            1, _standings_team(outs=61),
+            _STANDINGS_SPECS[:2], _STANDINGS_SPECS[2:],
+        )
+
+        assert row[8] == pytest.approx(10.2)
+
+    def test_format_standings_row_shows_ties_when_present(self):
+        row = almanac_render.format_standings_row(
+            1, _standings_team(ties=1),
+            _STANDINGS_SPECS[:2], _STANDINGS_SPECS[2:],
+        )
+
+        assert row[3] == '2-1-1'
+
+    def test_per_week_value_blank_without_denominator(self):
+        assert almanac_render._per_week_value(
+            {'scoring_days_played': None}, 42,
+        ) == ''
+
+    def test_gradient_columns_positions_and_polarity(self):
+        columns = almanac_sheets.standings_gradient_columns(
+            _STANDINGS_SPECS[:2], _STANDINGS_SPECS[2:],
+        )
+
+        assert columns == [
+            (4, 'most'), (5, 'fewest'),    # HR, K (batter strikeouts)
+            (6, 'most'),                   # Offense
+            (8, 'most'), (9, 'fewest'),    # IP, L
+            (10, 'most'),                  # Defense
+            (12, 'most'), (13, 'fewest'),  # Total, Against
+        ]
+
+    def test_gradient_columns_skip_zero_weighted_stats(self):
+        columns = almanac_sheets.standings_gradient_columns(
+            [_standings_spec('AB', 'hitting', points=0)], [],
+        )
+
+        assert columns[0] == (4, None)
+
+    def test_build_advanced_standings_tab_rows_layout(self):
+        standings = [
+            _standings_team(team_id=1, abbrev='AAA', wins=2, losses=1),
+            _standings_team(team_id=2, abbrev='BBB', wins=1, losses=2),
+        ]
+        slot_rows = [
+            {'team_id': 1, 'lineup_slot': 'SP', 'slot_pts': 9.9, 'sort_order': 140},
+            {'team_id': 1, 'lineup_slot': 'C', 'slot_pts': 5.5, 'sort_order': 10},
+            {'team_id': 2, 'lineup_slot': 'C', 'slot_pts': 4.4, 'sort_order': 10},
+        ]
+
+        rows = almanac_sheets.build_advanced_standings_tab_rows(
+            standings, slot_rows, _STANDINGS_SPECS, 2026,
+        )
+
+        assert rows[0] == ['Advanced Standings: 2026']
+        # Subtitle reads the DERIVED standard matchup length (8 here), not
+        # a hardcoded 7.
+        assert 'averages per 8 days of gameplay' in rows[1][0]
+        assert rows[3] == ['Standings (Weekly Averages)']
+        assert rows[4][:4] == ['Rank', 'Team', 'Owner', 'W-L']
+        assert rows[5][:2] == [1, 'AAA']
+        assert rows[6][:2] == [2, 'BBB']
+
+        # Slot grid: columns in sort_order (C before SP despite input
+        # order); a team missing a slot renders blank. BE/IL never arrive
+        # here -- the data layer filters to active lineup slots.
+        assert rows[9] == ['Points by Lineup Slot (Season Totals)']
+        assert rows[10] == ['Team', 'C', 'SP']
+        assert rows[11] == ['AAA', 5.5, 9.9]
+        assert rows[12] == ['BBB', 4.4, '']

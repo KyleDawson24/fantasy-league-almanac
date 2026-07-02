@@ -140,6 +140,8 @@ from almanac_render import (
     format_team_history_matrix_row,
     format_team_roster_row,
     format_team_week_row,
+    standings_gradient_columns,
+    standings_header,
     team_tab_title,
 )
 

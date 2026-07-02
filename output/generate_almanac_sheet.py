@@ -77,8 +77,9 @@ def main():
         almanac_sheets.get_draft_board(season_year), season_year, league_id=league_id,
     )
     advanced_standings_rows = almanac_sheets.build_advanced_standings_tab_rows(
-        almanac_sheets.get_team_standings(season_year),
+        almanac_sheets.get_team_standings(season_year, team_week_stat_specs),
         almanac_sheets.get_team_slot_points(season_year),
+        team_week_stat_specs,
         season_year,
     )
     # Home is built last among the data tabs: its nav band (#23) lists the

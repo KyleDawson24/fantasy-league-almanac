@@ -42,7 +42,6 @@ from almanac_render import (
     HOME_TAB,
     DRAFT_TAB,
     DRAFT_VALUE_HEADER,
-    STANDINGS_HEADER,
     RECORDS_HEADER,
     RECORDS_MATRIX_DETAIL_HEADER,
     RECORDS_MATRIX_WIDTH,
@@ -59,7 +58,6 @@ from almanac_render import (
     TEAM_WEEKS_BASE_HEADER,
     TEAM_WEEKS_SCORE_HEADER,
     TEAM_WEEKS_TAB,
-    SLOT_ORDER,
     boxscore_formula,
     format_all_league_team_row,
     format_all_league_team_row_with_deviation,
@@ -68,6 +66,7 @@ from almanac_render import (
     format_draft_value_row,
     format_standings_row,
     home_nav_link,
+    standings_header,
     format_record_matrix_row,
     format_record_row,
     format_team_history_matrix_row,
@@ -828,37 +827,55 @@ def build_draft_board_color_grid(board_rows):
     ]
 
 
-# Lineup-slot column order for the Advanced Standings slot grid: the playing
-# slots (SLOT_ORDER) first, then the inactive BE / IL buckets last. Any slot
-# not in this map -- e.g. the free-agent-pool 'FA' marker -- is dropped.
-STANDINGS_SLOT_ORDER = {**SLOT_ORDER, 'BE': 200, 'IL': 210}
+def build_advanced_standings_tab_rows(standings_rows, slot_rows, stat_specs,
+                                      season_year):
+    """Build the Advanced Standings tab: the per-stat weekly-average
+    standings (Table A) stacked over a team x active-lineup-slot points
+    grid (Table B).
 
-
-def build_advanced_standings_tab_rows(standings_rows, slot_rows, season_year):
-    """Build the Advanced Standings tab: a season-to-date team standings
-    (Table A) stacked over a team x lineup-slot points grid (Table B).
-
-    standings_rows come from almanac_data.get_team_standings (already ordered
-    as a standings); slot_rows from almanac_data.get_team_slot_points. The
-    write layer paints the column gradients -- this builder only lays out the
-    cells. Both tables share the standings team order.
+    standings_rows come from almanac_data.get_team_standings (already
+    ordered as a standings, with the per-week denominators on every row);
+    slot_rows from almanac_data.get_team_slot_points (active slots only,
+    pre-ordered by the roster dim's sort_order); stat_specs from
+    get_team_week_stat_specs -- the same scored-stat set and order the
+    Matchup History tab uses. The write layer paints the column gradients --
+    this builder only lays out the cells. Both tables share the standings
+    team order.
     """
+    hitting_specs = _team_week_specs_for_category(stat_specs, 'hitting')
+    pitching_specs = _team_week_specs_for_category(stat_specs, 'pitching')
+
+    # The derived standard matchup length (modal regular-week gameplay
+    # days), read off the standings rows for the subtitle; 7 only as the
+    # fallback for an empty season.
+    std_days = next(
+        (int(r['standard_matchup_days']) for r in standings_rows
+         if r.get('standard_matchup_days')),
+        7,
+    )
     rows = [
         [f'Advanced Standings: {season_year}'],
-        ['Season-to-date. Offense / Defense / Total and Against are calculated '
-         'points (Against = points conceded); W-L is the official ESPN record.'],
+        [f'Regular season to date, shown as averages per {std_days} days of '
+         'gameplay (one standard matchup; abnormal-length weeks normalize by '
+         'their actual days with games). Offense / Defense / Total and '
+         'Against are calculated points (Against = points conceded); W-L is '
+         'the official ESPN record.'],
         [],
-        ['Standings'],
-        list(STANDINGS_HEADER),
+        ['Standings (Weekly Averages)'],
+        standings_header(hitting_specs, pitching_specs),
     ]
     for rank, team in enumerate(standings_rows, start=1):
-        rows.append(format_standings_row(rank, team))
+        rows.append(
+            format_standings_row(rank, team, hitting_specs, pitching_specs)
+        )
 
-    # Slot columns: every real lineup slot present in the data, ordered, BE/IL
-    # last; FA and any other non-roster marker are excluded.
-    present = {r['lineup_slot'] for r in slot_rows
-               if r.get('lineup_slot') in STANDINGS_SLOT_ORDER}
-    slot_cols = sorted(present, key=lambda s: STANDINGS_SLOT_ORDER[s])
+    # Slot columns in dim_roster_slot_counts.sort_order, carried on every
+    # slot row -- no hardcoded slot list.
+    slot_order = {}
+    for r in slot_rows:
+        if r.get('lineup_slot') is not None:
+            slot_order.setdefault(r['lineup_slot'], r.get('sort_order') or 999)
+    slot_cols = sorted(slot_order, key=lambda s: (slot_order[s], s))
 
     by_team = defaultdict(dict)
     for r in slot_rows:
@@ -866,7 +883,7 @@ def build_advanced_standings_tab_rows(standings_rows, slot_rows, season_year):
 
     rows.append([])
     rows.append([])
-    rows.append(['Points by Lineup Slot'])
+    rows.append(['Points by Lineup Slot (Season Totals)'])
     rows.append(['Team', *slot_cols])
     for team in standings_rows:
         team_slots = by_team.get(team['team_id'], {})

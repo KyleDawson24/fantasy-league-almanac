@@ -624,56 +624,70 @@ def get_draft_board(season_year):
     """, (season_year,))
 
 
-def get_team_standings(season_year):
-    """Season-to-date team standings -- one row per team.
+def get_team_standings(season_year, stat_specs):
+    """Season team standings from mart_team_season_standings -- one row per
+    team (regular season only; the mart excludes playoff weeks).
 
-    Offense / defense / total are the calculated hitting / pitching / total
-    points; `against_pts` is the calculated points conceded (the opponent's
-    calculated total, summed). The record is the official platform `result`
-    (W-L-T). Team labels come from the team's most-recent week so a mid-season
-    rename can't surface a stale abbrev, and owner_display is the canonical
-    nickname-resolved label. Ordered as a standings: record first, total
-    points as the tiebreak.
+    v2.0: the aggregation moved into the mart; this selects the fixed
+    standings columns (record, calculated score lenses, points conceded,
+    per-week normalization denominators) plus the dynamic per-stat counting
+    columns the scored stat specs request -- the same spec-driven column
+    pattern get_team_weeks uses. Ordered as a standings: record first,
+    total points as the tiebreak.
     """
-    return query_snowflake("""
+    if not stat_specs:
+        raise RuntimeError("No scored standings stat specs found.")
+
+    stat_columns = [_fact_stat_column_name(spec['stat_name']) for spec in stat_specs]
+    for column in stat_columns:
+        if not re.match(r'^[a-z][a-z0-9_]*$', column):
+            raise ValueError(f"Unsafe stat column name: {column!r}")
+
+    stat_select = ',\n            '.join(stat_columns)
+    return query_snowflake(f"""
         SELECT
-            m.team_id,
-            MAX_BY(m.team_abbrev, m.matchup_period)  AS team_abbrev,
-            MAX_BY(m.team_name,   m.matchup_period)  AS team_name,
-            MAX(tod.owner_display)                   AS owner_display,
-            ROUND(SUM(m.calculated_hitting_pts),     1) AS offense_pts,
-            ROUND(SUM(m.calculated_pitching_pts),    1) AS defense_pts,
-            ROUND(SUM(m.calculated_points),          1) AS total_pts,
-            ROUND(SUM(m.opponent_calculated_points), 1) AS against_pts,
-            SUM(CASE WHEN m.result = 'W' THEN 1 ELSE 0 END) AS wins,
-            SUM(CASE WHEN m.result = 'L' THEN 1 ELSE 0 END) AS losses,
-            SUM(CASE WHEN m.result = 'T' THEN 1 ELSE 0 END) AS ties
-        FROM mart_team_matchup m
-        LEFT JOIN dim_team_owner tod
-            ON m.season_year = tod.season_year
-            AND m.team_id    = tod.team_id
-        WHERE m.season_year = %s
-        GROUP BY m.team_id
-        ORDER BY wins DESC, ties DESC, total_pts DESC
+            team_id,
+            team_abbrev,
+            team_name,
+            owner_display,
+            wins,
+            losses,
+            ties,
+            matchup_periods_played,
+            scoring_days_played,
+            standard_matchup_days,
+            calculated_hitting_pts,
+            calculated_pitching_pts,
+            calculated_points,
+            against_calculated_points,
+            {stat_select}
+        FROM mart_team_season_standings
+        WHERE season_year = %s
+        ORDER BY wins DESC, ties DESC, calculated_points DESC
     """, (season_year,))
 
 
 def get_team_slot_points(season_year):
-    """Season-to-date points produced at each lineup slot, per team.
+    """Season points produced at each ACTIVE lineup slot, per team.
 
-    One row per (team_id, lineup_slot): the summed calculated points
-    (total_stat_pts) the team's players generated while occupying that slot --
-    every slot including BE / IL, so bench and injured production surface as
-    their own slots ("how does this part of my lineup stack up to the league?").
+    One row per (team_id, lineup_slot) from mart_team_slot_production: the
+    calculated points the team's players generated while deployed in that
+    slot, regular season only. Filtered to active lineup slots -- BE / IL
+    production is deliberately out of the v2.0 grid (a future bench/IL view
+    belongs on the inactive-points lens; the mart keeps those rows for it).
+    Ordered by the roster dim's sort_order so consumers can lay columns out
+    without a hardcoded slot list.
     """
     return query_snowflake("""
         SELECT
             team_id,
             lineup_slot,
-            ROUND(SUM(total_stat_pts), 1) AS slot_pts
-        FROM fct_player_weekly_slot_performance
+            slot_calculated_points AS slot_pts,
+            sort_order
+        FROM mart_team_slot_production
         WHERE season_year = %s
-        GROUP BY team_id, lineup_slot
+          AND is_active_lineup_slot
+        ORDER BY sort_order, lineup_slot
     """, (season_year,))
 
 

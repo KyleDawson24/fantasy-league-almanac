@@ -48,10 +48,32 @@ ADVANCED_STANDINGS_TAB = 'Advanced Standings'
 DRAFT_VALUE_HEADER = ['Player', 'Team', 'Pick', 'Pts', 'Value']
 
 
-# v1.3 Advanced Standings, Table A (team standings) header. Offense / Defense /
-# Total carry a red->white->green gradient; Against is inverted (fewer points
-# conceded = green) in the write layer.
-STANDINGS_HEADER = ['Rank', 'Team', 'Owner', 'W-L', 'Offense', 'Defense', 'Total', 'Against']
+# v2.0 Advanced Standings, Table A: the identity columns ahead of the
+# per-stat standings grid. The full header is spec-driven -- see
+# standings_header().
+STANDINGS_FIXED_HEADER = ['Rank', 'Team', 'Owner', 'W-L']
+
+
+def standings_header(hitting_specs, pitching_specs):
+    """Advanced Standings (Table A) header: identity columns, each scored
+    hitting stat, the offense total, each scored pitching stat, the
+    pitching total, then total points for / against -- with a buffer
+    column between the groups. Stat set and order come from the scored
+    stat specs (the Matchup History set), so a scoring change flows
+    through with no code edit."""
+    return [
+        *STANDINGS_FIXED_HEADER,
+        *_team_week_stat_headers(hitting_specs),
+        'Offense',
+        '',
+        *_team_week_stat_headers(pitching_specs),
+        'Defense',
+        # Fielding stats would slot into this buffer for leagues that
+        # score fielding categories; this league doesn't.
+        '',
+        'Total',
+        'Against',
+    ]
 
 
 HOME_HEADER = [
@@ -551,11 +573,13 @@ def format_draft_board_cell(pick):
     return _draft_player_label(pick) if pick else ''
 
 
-def format_standings_row(rank, row):
-    """One Advanced Standings (Table A) data row:
-    Rank | Team | Owner | W-L | Offense | Defense | Total | Against.
-
-    W-L is the official platform record; ties only show when present."""
+def format_standings_row(rank, row, hitting_specs, pitching_specs):
+    """One Advanced Standings (Table A) data row, mirroring
+    standings_header's layout. Every stat / points cell is a per-standard-
+    matchup average (value * standard_matchup_days / scoring_days_played),
+    so abnormal-length weeks (opening week, All-Star break) normalize by
+    their actual gameplay days. W-L is the official platform record; ties
+    only show when present."""
     wins = row.get('wins') or 0
     losses = row.get('losses') or 0
     ties = row.get('ties') or 0
@@ -565,11 +589,63 @@ def format_standings_row(rank, row):
         row.get('team_abbrev') or '',
         row.get('owner_display') or '',
         record,
-        row.get('offense_pts'),
-        row.get('defense_pts'),
-        row.get('total_pts'),
-        row.get('against_pts'),
+        *[_per_week_stat(row, spec) for spec in hitting_specs],
+        _per_week_value(row, row.get('calculated_hitting_pts')),
+        '',
+        *[_per_week_stat(row, spec) for spec in pitching_specs],
+        _per_week_value(row, row.get('calculated_pitching_pts')),
+        '',
+        _per_week_value(row, row.get('calculated_points')),
+        _per_week_value(row, row.get('against_calculated_points')),
     ]
+
+
+def _per_week_stat(row, spec):
+    """Per-standard-matchup average for one scored counting stat. OUTS
+    converts to innings pitched first and renders as a plain base-10
+    decimal -- baseball .1/.2 thirds notation doesn't survive averaging."""
+    value = row.get(_fact_stat_column_name(spec.get('stat_name')))
+    if spec.get('stat_name') == 'OUTS':
+        value = (value or 0) / 3.0
+    return _per_week_value(row, value)
+
+
+def _per_week_value(row, value):
+    """Normalize a season total into a per-standard-matchup average using
+    the mart's gameplay-day denominators. standard_matchup_days is derived
+    (the modal regular-week length), so a league playing 2-week matchups
+    would normalize per-14 with no change here; 7 is only the fallback for
+    rows missing the derived value."""
+    days = row.get('scoring_days_played')
+    if not days:
+        return ''
+    std = row.get('standard_matchup_days') or 7
+    return round(float(value or 0) * float(std) / float(days), 1)
+
+
+def standings_gradient_columns(hitting_specs, pitching_specs):
+    """(column_index, direction) pairs for Table A's value columns,
+    matching standings_header's layout. direction is 'most' (more is
+    better -> green high) or 'fewest' (negative-weighted stats like L /
+    ER / BLSV, plus Against -> green low). Zero-weighted stats come back
+    with direction None -- callers skip the gradient for those. Positional
+    on purpose: several abbrevs (K / BB / H / HR / R) appear in both the
+    hitting and pitching blocks, so header-label lookup would misfire."""
+    columns = []
+    col = len(STANDINGS_FIXED_HEADER)
+    for spec in hitting_specs:
+        columns.append((col, almanac_data._team_week_good_record_direction(spec)))
+        col += 1
+    columns.append((col, 'most'))        # Offense
+    col += 2                             # buffer
+    for spec in pitching_specs:
+        columns.append((col, almanac_data._team_week_good_record_direction(spec)))
+        col += 1
+    columns.append((col, 'most'))        # Defense
+    col += 2                             # buffer
+    columns.append((col, 'most'))        # Total
+    columns.append((col + 1, 'fewest'))  # Against
+    return columns
 
 
 def format_record_matrix_row(spec, current_record=None, all_time_record=None,

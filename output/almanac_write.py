@@ -126,8 +126,9 @@ def write_almanac(sheet_id, season_year=None, matchup_period=None):
     draft_tab_rows = build_draft_tab_rows(draft_board, season_year, league_id=league_id)
     draft_color_grid = build_draft_board_color_grid(draft_board)
     standings_tab_rows = build_advanced_standings_tab_rows(
-        get_team_standings(season_year),
+        get_team_standings(season_year, team_week_stat_specs),
         get_team_slot_points(season_year),
+        team_week_stat_specs,
         season_year,
     )
     client = _get_authorized_client()
@@ -154,7 +155,9 @@ def write_almanac(sheet_id, season_year=None, matchup_period=None):
         for title, team_page_rows in team_pages
     ]
     draft_ws = _replace_draft_tab(spreadsheet, draft_tab_rows, color_grid=draft_color_grid)
-    standings_ws = _replace_advanced_standings_tab(spreadsheet, standings_tab_rows)
+    standings_ws = _replace_advanced_standings_tab(
+        spreadsheet, standings_tab_rows, team_week_stat_specs,
+    )
 
     nav_targets = {
         ws.title: ws.id
@@ -510,25 +513,30 @@ def _standings_table_bounds(rows):
     return a_hdr, a_end, b_hdr, b_end
 
 
-def _apply_standings_gradients(spreadsheet, worksheet, rows):
-    """Red->white->green column gradients: the four point columns over the
-    standings rows (Against inverted -- fewer points conceded is good), and
-    every lineup-slot column over the slot rows."""
+def _apply_standings_gradients(spreadsheet, worksheet, rows, stat_specs):
+    """Red->white->green column gradients. Table A: every stat and points
+    column, polarity-aware -- positive-weighted stats and the three score
+    totals paint green-high, negative-weighted stats (L / ER / BLSV / ...)
+    and Against paint green-low, zero-weighted stats get no gradient.
+    Column positions come from standings_gradient_columns (positional, not
+    label lookup -- K / BB / H / HR / R appear in both stat blocks). Table
+    B: every lineup-slot column, green-high."""
     sheet_id = worksheet.id
     a_hdr, a_end, b_hdr, b_end = _standings_table_bounds(rows)
     requests = []
     if a_hdr is not None:
-        header = rows[a_hdr]
         a_range = [{'startRowIndex': a_hdr + 1, 'endRowIndex': a_end}]
-        for label, scale in (('Offense', 'three_good_high'),
-                             ('Defense', 'three_good_high'),
-                             ('Total', 'three_good_high'),
-                             ('Against', 'three_good_low')):
-            if label in header:
-                requests.append(_color_scale_request(
-                    sheet_id, header.index(label), a_end,
-                    scale=scale, row_ranges=a_range,
-                ))
+        gradient_columns = almanac_render.standings_gradient_columns(
+            _team_week_specs_for_category(stat_specs, 'hitting'),
+            _team_week_specs_for_category(stat_specs, 'pitching'),
+        )
+        for col, direction in gradient_columns:
+            if direction is None:
+                continue
+            scale = 'three_good_high' if direction == 'most' else 'three_good_low'
+            requests.append(_color_scale_request(
+                sheet_id, col, a_end, scale=scale, row_ranges=a_range,
+            ))
     if b_hdr is not None:
         b_range = [{'startRowIndex': b_hdr + 1, 'endRowIndex': b_end}]
         for col in range(1, len(rows[b_hdr])):
@@ -541,7 +549,7 @@ def _apply_standings_gradients(spreadsheet, worksheet, rows):
         )
 
 
-def _replace_advanced_standings_tab(spreadsheet, rows):
+def _replace_advanced_standings_tab(spreadsheet, rows, stat_specs):
     """Clear / create the Advanced Standings tab and write it. Returns the
     worksheet so write_almanac can read its gid for the Home nav band.
 
@@ -569,7 +577,7 @@ def _replace_advanced_standings_tab(spreadsheet, rows):
     try:
         sheet_id = worksheet.id
         last_col = _a1_col(width)
-        _apply_standings_gradients(spreadsheet, worksheet, rows)
+        _apply_standings_gradients(spreadsheet, worksheet, rows, stat_specs)
         _sheets_batch_update(
             spreadsheet, f'standings widths {worksheet.title}',
             [

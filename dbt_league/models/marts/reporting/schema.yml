@@ -355,3 +355,220 @@ models:
         description: 'AVG(calculated_pitching_pts) over the league-week.'
       - name: league_avg_total_points
         description: 'AVG(calculated_points) over the league-week.'
+
+  - name: mart_team_season_standings
+    description: >
+      Season-grain standings surface: one row per (season_year, team_id)
+      with the official W-L-T record, season sums of every scored-stat
+      counting column, the calculated score lenses (hitting / pitching /
+      total), points conceded, and gameplay-day denominators for
+      per-matchup normalization. Lifted from the inline standings query
+      that previously lived in output/almanac_data.py (the mart_team_matchup
+      precedent); first consumer is the almanac Advanced Standings tab.
+
+      Regular season only (is_playoff = false) -- a standings is a
+      regular-season object. Abnormal weeks stay in: they are real
+      matchups, and scoring_days_played lets consumers normalize away
+      their odd lengths ("per 7 gameplay days" instead of raw totals).
+
+      scoring_days_played counts gameplay days (COUNT DISTINCT
+      scoring_period per matchup, summed), not calendar days -- the
+      14-calendar-day All-Star week contributes only its days with MLB
+      games. standard_matchup_days is the modal gameplay-day count across
+      the season's normal regular-season weeks (7 here; a 2-week-matchup
+      league would derive 14), so "per-week" = value * standard_matchup_days
+      / scoring_days_played with no hardcoded 7.
+
+      Materialization: table -- float score sums feed the almanac
+      byte-diff goldens (same determinism rationale as mart_team_matchup).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - season_year
+              - team_id
+    columns:
+      - name: season_year
+        description: 'Season year.'
+        tests:
+          - not_null
+      - name: team_id
+        description: 'ESPN stable numeric team identifier.'
+        tests:
+          - not_null
+      - name: team_name
+        description: 'Team name from the team''s latest played week (mid-season renames can''t surface stale labels).'
+      - name: team_abbrev
+        description: 'Owner-set short team code, latest played week.'
+      - name: owner_display
+        description: 'Canonical owner label (nickname > proper name), co-owners slash-joined, via dim_team_owner.'
+      - name: matchup_periods_played
+        description: 'Regular-season matchup periods aggregated into this row.'
+        tests:
+          - not_null
+      - name: scoring_days_played
+        description: 'Total gameplay days across those matchups: SUM of per-matchup COUNT(DISTINCT scoring_period). Excludes no-game calendar days (All-Star break), so it is the honest per-week normalization denominator.'
+        tests:
+          - not_null
+      - name: standard_matchup_days
+        description: 'Modal gameplay-day count across the season''s normal (non-abnormal, non-playoff) weeks -- the season''s typical matchup length. Constant per season; denormalized onto every team row.'
+      - name: wins
+        description: 'Regular-season wins per the official platform result (ESPN team scores, commissioner adjustments included).'
+        tests:
+          - not_null
+      - name: losses
+        description: 'Regular-season losses per the official platform result.'
+        tests:
+          - not_null
+      - name: ties
+        description: 'Regular-season ties per the official platform result.'
+        tests:
+          - not_null
+      - name: h
+        description: '{{ doc("stat_h") }}'
+      - name: ab
+        description: '{{ doc("stat_ab") }}'
+      - name: b_bb
+        description: '{{ doc("stat_b_bb") }}'
+      - name: b_so
+        description: '{{ doc("stat_b_so") }}'
+      - name: hbp
+        description: '{{ doc("stat_hbp") }}'
+      - name: sf
+        description: '{{ doc("stat_sf") }}'
+      - name: hr
+        description: '{{ doc("stat_hr") }}'
+      - name: r
+        description: '{{ doc("stat_r") }}'
+      - name: rbi
+        description: '{{ doc("stat_rbi") }}'
+      - name: sb
+        description: '{{ doc("stat_sb") }}'
+      - name: cs
+        description: '{{ doc("stat_cs") }}'
+      - name: tb
+        description: '{{ doc("stat_tb") }}'
+      - name: singles
+        description: '{{ doc("stat_singles") }}'
+      - name: doubles
+        description: '{{ doc("stat_doubles") }}'
+      - name: triples
+        description: '{{ doc("stat_triples") }}'
+      - name: xbh
+        description: '{{ doc("stat_xbh") }}'
+      - name: gdp
+        description: 'Grounded into double plays.'
+      - name: b_ibb
+        description: 'Batter intentional walks.'
+      - name: cyc
+        description: 'Hits for the cycle.'
+      - name: w
+        description: '{{ doc("stat_w") }}'
+      - name: l
+        description: '{{ doc("stat_l") }}'
+      - name: k
+        description: '{{ doc("stat_k") }}'
+      - name: er
+        description: '{{ doc("stat_er") }}'
+      - name: outs
+        description: '{{ doc("stat_outs") }}'
+      - name: qs
+        description: '{{ doc("stat_qs") }}'
+      - name: sv
+        description: '{{ doc("stat_sv") }}'
+      - name: hld
+        description: '{{ doc("stat_hld") }}'
+      - name: p_h
+        description: '{{ doc("stat_p_h") }}'
+      - name: p_bb
+        description: '{{ doc("stat_p_bb") }}'
+      - name: p_hr
+        description: '{{ doc("stat_p_hr") }}'
+      - name: p_r
+        description: '{{ doc("stat_p_r") }}'
+      - name: cg
+        description: '{{ doc("stat_cg") }}'
+      - name: blk
+        description: '{{ doc("stat_blk") }}'
+      - name: wp
+        description: '{{ doc("stat_wp") }}'
+      - name: hbp_p
+        description: 'Batters hit by pitch (pitcher side).'
+      - name: blsv
+        description: 'Blown saves.'
+      - name: nh
+        description: 'No-hitters thrown.'
+      - name: pg
+        description: 'Perfect games thrown.'
+      - name: pk
+        description: 'Pickoffs.'
+      - name: sho
+        description: 'Shutouts thrown.'
+      - name: calculated_hitting_pts
+        description: 'Season calculated hitting points (current-season scoring weights over the full stat line), rounded once at season grain.'
+      - name: calculated_pitching_pts
+        description: 'Season calculated pitching points, rounded once at season grain.'
+      - name: calculated_points
+        description: 'Season calculated total points, rounded once at season grain.'
+      - name: against_calculated_points
+        description: 'Points conceded: the opponents'' calculated totals summed across the team''s matchups, rounded once at season grain.'
+
+  - name: mart_team_slot_production
+    description: >
+      Season-grain lineup-slot production: one row per (season_year,
+      team_id, lineup_slot) with the calculated points the team's players
+      generated while deployed in that slot -- the slot on the box score,
+      not position eligibility. Aggregated from the slot-preserving weekly
+      fact (the active convergence fact collapses lineup_slot by design).
+      First consumer: the Advanced Standings "Points by Lineup Slot" grid,
+      which previously ran this aggregation inline in Python.
+
+      Every deployed slot is kept, including BE / IL, with
+      is_active_lineup_slot from dim_roster_slot_counts so consumers choose
+      the cut (the v2.0 grid filters to active slots). FA pool rows are
+      excluded. Regular season only (is_playoff = false), matching
+      mart_team_season_standings so the Advanced Standings blocks describe
+      the same universe.
+
+      Materialization: table -- float point sums feed the almanac
+      byte-diff goldens.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - season_year
+              - team_id
+              - lineup_slot
+    columns:
+      - name: season_year
+        description: 'Season year.'
+        tests:
+          - not_null
+      - name: team_id
+        description: 'ESPN stable numeric team identifier. Never NULL -- FA pool rows are excluded.'
+        tests:
+          - not_null
+      - name: lineup_slot
+        description: 'Deployed fantasy lineup slot (C/1B/SP/BE/IL/etc.). Part of the grain.'
+        tests:
+          - not_null
+      - name: team_name
+        description: 'Team name from the team''s latest played week.'
+      - name: team_abbrev
+        description: 'Owner-set short team code, latest played week.'
+      - name: owner_display
+        description: 'Canonical owner label (nickname > proper name) carried from the slot fact.'
+      - name: slot_calculated_points
+        description: 'Season calculated points (catch-all total across every scored stat) produced while deployed in this slot, rounded once at season grain.'
+        tests:
+          - not_null
+      - name: sort_order
+        description: 'Stable display ordering from dim_roster_slot_counts (999 fallback for slots missing from the season''s settings snapshot).'
+        tests:
+          - not_null
+      - name: is_active_lineup_slot
+        description: 'True for starting slots (not BE/IL), from dim_roster_slot_counts; false fallback when the slot is missing from the settings snapshot. The v2.0 Advanced Standings grid filters on this.'
+        tests:
+          - not_null
+      - name: starter_count
+        description: 'Configured number of starting slots of this type, from dim_roster_slot_counts.'

@@ -47,6 +47,16 @@ three output surfaces (recap, records report, almanac).
   and `mart_team_matchup` are tables now -- as views their per-query
   float re-summation could flip .x5-boundary values between two reads
   with no data change. Regens between builds are now deterministic.
+- **"Only staging reads sources" is now absolute.** The matchup-grain
+  extraction that lived inside `fct_team_weekly_active_performance`
+  moved verbatim into `stg_matchup_scores` (final team score per
+  matchup) and `stg_matchup_pairs` (the who-played-whom spine), and
+  `dim_roster_slot_counts`'s raw flatten moved into a long-form
+  `stg_roster_settings`. A multi-grain source now feeds one staging
+  model per grain. Proven equivalent: symmetric EXCEPT between the old
+  inline SQL and the new staging views returned zero rows in both
+  directions, and the team fact's deterministic-field hash and the
+  roster dim's full-row hash are byte-identical pre/post.
 - **The two consumer-contract intermediates promoted into core.**
   `int_player_position_pts` → `fct_player_position_pts` and
   `int_team_owner_display` → `dim_team_owner`: both were already

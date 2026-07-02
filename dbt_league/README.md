@@ -37,7 +37,7 @@ Layer conventions:
 
 | Layer | Prefix | Default materialization | What belongs here |
 |---|---|---|---|
-| `staging/` | `stg_` | view | One model per raw table. Pure reshape: flatten VARIANT, type, rename. The only layer that reads `source()`. |
+| `staging/` | `stg_` | view | One model per raw-table *grain* (a multi-grain source like box_scores feeds several single-grain reshapes). Pure reshape: flatten VARIANT, type, rename. The only layer that reads `source()`. |
 | `intermediate/` | `int_` | view | Business logic that isn't yet a consumer contract: the slot-validity filter and the wide daily point rollup. |
 | `marts/core/` | `dim_` / `fct_` | table (facts override to incremental/view per model) | The contract layer. Grain-documented dimensions and facts that reporting marts and the Python output layer rely on. |
 | `marts/reporting/` | `mart_` | table (most override to view) | Report-shaped derivations over core: rankings, league aggregates, matchup context, snapshot joins. |
@@ -58,18 +58,17 @@ consumes the upstream's **grain wholesale**; it's a smell when it skips a
 layer to fetch a single field that a nearer layer already carries. Three
 edges in this graph deserve the explanation up front:
 
-**`raw.box_scores` → `fct_team_weekly_active_performance`** (a source
-read outside staging). The box-score JSON carries two grains at once:
-per-player rows, and per-matchup `home_score` / `away_score` — ESPN's
-authoritative team totals, slot-aware and inclusive of commissioner
-adjustments. `stg_box_scores` is the player-grain reshape, so the
-matchup-grain fields don't survive it, and the team fact goes back to
-raw for them (they are deliberately NOT derivable as SUM(players) — the
-divergence is the point, captured in `platform_calculated_delta`). The
-queued cleanup is a second staging model over the same raw table at
-matchup grain (`stg_matchup_scores`), which would make "only staging
-reads sources" absolute — one raw table legitimately feeding two
-single-grain staging models.
+**One raw table, three staging models.** The box-score JSON carries
+more than one grain at once: per-player rows, and per-matchup
+`home_score` / `away_score` — ESPN's authoritative team totals,
+slot-aware and inclusive of commissioner adjustments. Each grain gets
+its own single-grain staging reshape: `stg_box_scores` (player rows),
+`stg_matchup_scores` (final team score per matchup), and
+`stg_matchup_pairs` (the who-played-whom spine). The team fact joins
+the matchup-grain reshapes rather than re-deriving team totals as
+SUM(players) — the divergence between the two is the point, captured in
+`platform_calculated_delta`. This is what keeps "only staging reads
+`source()`" absolute without forcing one model to serve two grains.
 
 **`stat_classification` fanning out three ways.** A config seed is a hub
 by design — one file, three layer-appropriate reads:
@@ -147,7 +146,7 @@ round every displayed value at source.
 
 ## Testing
 
-158 dbt data tests plus source-freshness contracts:
+173 dbt data tests plus source-freshness contracts:
 
 - **Generic tests** — every model carries a `dbt_utils.unique_combination_of_columns`
   grain test; keys and partitions carry `not_null` / `accepted_values`;

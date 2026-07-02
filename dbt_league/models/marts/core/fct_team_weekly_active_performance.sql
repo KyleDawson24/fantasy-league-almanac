@@ -35,9 +35,10 @@
 -- Pipeline:
 --   1. Roll up fct_player_weekly_slot_performance to team grain (SUM counting,
 --      SUM *_pts, SUM player platform_*_pts, SUM calculated_*)
---   2. Pull team_platform_points from raw box_scores wrapper at last SP
+--   2. Join team platform scores from stg_matchup_scores (the wrapper's
+--      final per-matchup team totals)
 --   3. Recompute rate stats via macros from team-level counting sums
---   4. Extract matchup pairings from raw box scores
+--   4. Join matchup pairings from stg_matchup_pairs
 --   5. Self-join for opponent context (home + away halves UNIONed)
 --   6. Join matchup_schedule for days_in_period metadata
 --
@@ -172,66 +173,27 @@ with team_rollup as (
     group by 1, 2, 3, 4, 5, 6
 ),
 
--- Phase 4: team-level platform_points sourced directly from the wrapper's
--- home_score/away_score in raw. ESPN's per-team score is cumulative
--- through the queried scoring_period, so we take the LAST SP of each
--- matchup_period to get the final value.
-last_sp_per_matchup as (
-    select
-        season_year,
-        matchup_period,
-        max(scoring_period) as last_sp
-    from {{ source('raw', 'box_scores') }}
-    group by 1, 2
-),
-
-last_sp_matchups as (
-    select
-        b.season_year,
-        b.matchup_period,
-        coalesce(b.raw_json:matchups, b.raw_json) as matchups_json
-    from {{ source('raw', 'box_scores') }} b
-    inner join last_sp_per_matchup ls
-        on b.season_year = ls.season_year
-        and b.matchup_period = ls.matchup_period
-        and b.scoring_period = ls.last_sp
-),
-
+-- Phase 4: team-level platform_points sourced from the wrapper's
+-- home_score/away_score (ESPN's authoritative team total). The
+-- matchup-grain extraction mechanics live in the staging layer --
+-- stg_matchup_scores carries the final score per (matchup, team),
+-- stg_matchup_pairs carries the who-played-whom spine.
 team_platform_scores as (
     select
-        season_year, matchup_period,
-        m.value:home_team_id::integer as team_id,
-        m.value:home_score::float     as platform_points
-    from last_sp_matchups,
-        lateral flatten(input => matchups_json) m
-    union all
-    select
-        season_year, matchup_period,
-        m.value:away_team_id::integer,
-        m.value:away_score::float
-    from last_sp_matchups,
-        lateral flatten(input => matchups_json) m
-),
-
--- Matchup pairings extracted from raw. COALESCE handles both legacy raw
--- shape (bare matchups array) and Phase-4 shape (dict with matchups key).
-matchup_pairs as (
-    select distinct
         season_year,
         matchup_period,
-        m.value:home_team_id::integer as home_team_id,
-        m.value:away_team_id::integer as away_team_id
-    from {{ source('raw', 'box_scores') }},
-        lateral flatten(
-            input => coalesce(raw_json:matchups, raw_json)
-        ) m
-    qualify row_number() over (
-        partition by season_year,
-            matchup_period,
-            m.value:home_team_id::integer,
-            m.value:away_team_id::integer
-        order by scoring_period
-    ) = 1
+        team_id,
+        platform_points
+    from {{ ref('stg_matchup_scores') }}
+),
+
+matchup_pairs as (
+    select
+        season_year,
+        matchup_period,
+        home_team_id,
+        away_team_id
+    from {{ ref('stg_matchup_pairs') }}
 ),
 
 team_with_platform as (

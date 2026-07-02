@@ -30,7 +30,7 @@ formally-declared consumers.
                                  roster snapshot, draft board)
         -> Python output scripts (BBCode + Google Sheets almanac)
 
-The dbt project has 24 models: 5 staging, 1 intermediate, and 18 marts
+The dbt project has 27 models: 8 staging, 1 intermediate, and 18 marts
 (13 core dims + facts, 5 reporting marts). Browse the **Models** section
 in the sidebar for full lineage and column-level docs; cross-model
 invariants live as singular tests in `tests/`.

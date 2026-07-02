@@ -218,3 +218,106 @@ models:
       - name: owner_id
         tests:
           - not_null
+
+  - name: stg_matchup_scores
+    description: >
+      One row per (season_year, matchup_period, team_id): the team's
+      FINAL ESPN platform score for the matchup, read from the wrapper's
+      home_score / away_score fields at the last scoring period of the
+      matchup (the field is cumulative through the queried period).
+      Matchup-grain sibling of stg_box_scores -- the raw box-score JSON
+      carries two grains, and each gets its own staging reshape. This is
+      ESPN's authoritative team total (slot-aware, inclusive of
+      commissioner adjustments); deliberately NOT derivable from player
+      rows.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - season_year
+              - matchup_period
+              - team_id
+    columns:
+      - name: season_year
+        description: 'ESPN season year.'
+        tests:
+          - not_null
+      - name: matchup_period
+        description: 'Weekly matchup period.'
+        tests:
+          - not_null
+      - name: team_id
+        description: 'ESPN stable numeric team identifier for one side of the matchup.'
+        tests:
+          - not_null
+      - name: platform_points
+        description: 'The wrapper''s final team score for the matchup (home_score or away_score). Unrounded float; the team fact rounds to 1 decimal at consumption.'
+
+  - name: stg_matchup_pairs
+    description: >
+      One row per (season_year, matchup_period, home_team_id,
+      away_team_id): the weekly matchup spine (who played whom, with
+      home/away sides) extracted from the raw box-score JSON. Pairs are
+      collected across every scoring period of the matchup -- first
+      appearance wins -- so a capture glitch on any single day cannot
+      drop a pairing.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - season_year
+              - matchup_period
+              - home_team_id
+              - away_team_id
+    columns:
+      - name: season_year
+        tests:
+          - not_null
+      - name: matchup_period
+        tests:
+          - not_null
+      - name: home_team_id
+        description: 'ESPN team id of the home side.'
+        tests:
+          - not_null
+      - name: away_team_id
+        description: 'ESPN team id of the away side.'
+        tests:
+          - not_null
+
+  - name: stg_roster_settings
+    description: >
+      Long-form reshape of the raw rosterSettings payload (latest
+      snapshot per season): one row per (season_year, setting_type,
+      espn_id). setting_type 'lineup_slot_count' rows carry
+      lineupSlotCounts (lineup slot id -> configured starters);
+      'position_limit' rows carry positionLimits (MLB position id -> max
+      rostered, -1 = ESPN "No Limit"). Pure reshape -- the slot-name
+      map, display shaping, and active-slot flag live in
+      dim_roster_slot_counts.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - season_year
+              - setting_type
+              - espn_id
+    columns:
+      - name: season_year
+        tests:
+          - not_null
+      - name: setting_type
+        description: 'Which ESPN dictionary the row came from.'
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['lineup_slot_count', 'position_limit']
+      - name: espn_id
+        description: 'Lineup slot id or MLB position id, per setting_type.'
+        tests:
+          - not_null
+      - name: setting_value
+        description: 'Configured starters, or raw position limit (-1 = No Limit).'
+        tests:
+          - not_null

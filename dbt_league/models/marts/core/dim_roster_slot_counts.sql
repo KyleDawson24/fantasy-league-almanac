@@ -4,7 +4,8 @@
 -- including starter counts and per-position maximums where ESPN exposes
 -- them.
 --
--- Two ESPN dictionaries feed this model:
+-- Two ESPN dictionaries feed this model, both via the long-form
+-- stg_roster_settings reshape:
 --   - lineupSlotCounts: lineup slot IDs used by box score rows
 --     (0=C, 14=SP, 16=BE, etc.)
 --   - positionLimits: default MLB position IDs used for maximum roster
@@ -19,18 +20,7 @@
 
 {{ config(materialized='view') }}
 
-with latest_extraction as (
-    select
-        season_year,
-        raw_json
-    from {{ source('raw', 'roster_settings') }}
-    qualify row_number() over (
-        partition by season_year
-        order by extracted_at desc
-    ) = 1
-),
-
-slot_map as (
+with slot_map as (
     select
         column1::integer as lineup_slot_id,
         column2::varchar as lineup_slot,
@@ -60,20 +50,20 @@ slot_map as (
 
 lineup_slot_counts as (
     select
-        e.season_year,
-        f.key::integer as lineup_slot_id,
-        f.value::integer as starter_count
-    from latest_extraction e,
-        lateral flatten(input => e.raw_json:lineupSlotCounts) f
+        season_year,
+        espn_id       as lineup_slot_id,
+        setting_value as starter_count
+    from {{ ref('stg_roster_settings') }}
+    where setting_type = 'lineup_slot_count'
 ),
 
 position_limits as (
     select
-        e.season_year,
-        f.key::integer as position_limit_id,
-        f.value::integer as raw_position_limit
-    from latest_extraction e,
-        lateral flatten(input => e.raw_json:positionLimits) f
+        season_year,
+        espn_id       as position_limit_id,
+        setting_value as raw_position_limit
+    from {{ ref('stg_roster_settings') }}
+    where setting_type = 'position_limit'
 )
 
 select

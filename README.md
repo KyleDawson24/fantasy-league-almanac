@@ -88,8 +88,8 @@ flowchart LR
     D --> E3[League almanac<br/>Google Sheets]
 ```
 
-Four layers, three user-facing consumers. The dbt project alone is 24
-models (5 staging, 1 intermediate, 18 marts — split into a `marts/core`
+Four layers, three user-facing consumers. The dbt project alone is 27
+models (8 staging, 1 intermediate, 18 marts — split into a `marts/core`
 contract layer of dims + facts and a `marts/reporting` layer of consumer
 marts); the facts split symmetrically into active and inactive
 performance ("active = fantasy reality; inactive = MLB reality"), expose
@@ -153,7 +153,7 @@ For an analytics engineering / dbt-focused reader, the project covers:
 - **dbt patterns at production-shape:** incremental models with composite
   unique keys, seed-as-config-with-tests (`stat_classification` is 97 rows
   with `accepted_values` enforcement), grain-agnostic macros, formally
-  declared exposures, source-freshness contracts, and 158 dbt tests —
+  declared exposures, source-freshness contracts, and 173 dbt tests —
   grain uniqueness on every model plus singular cross-model invariants
   in `dbt_league/tests/`.
 - **Real Kimball-style modeling:** wide convergence facts at consumer

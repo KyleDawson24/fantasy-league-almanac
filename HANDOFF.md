@@ -296,6 +296,9 @@ Staging (`models/staging/`, one view per raw table):
 - `stg_scoring_settings` (view): latest snapshot from append-only RAW; per-stat `points_per_unit`.
 - `stg_team_owners` (view): per-season team → owner bridge from `RAW.TEAM_OWNERS` (latest snapshot). `owner_id` is the stable ESPN member GUID the `owner_nicknames` seed joins on.
 - `stg_draft` (view): one row per draft pick from `RAW.DRAFT_PICKS` (latest snapshot per season); `keeper` flagged.
+- `stg_matchup_scores` (view): final ESPN team score per `(season, matchup, team)`, read from the wrapper's home/away score at the last scoring period (the field is cumulative). The matchup-grain sibling of `stg_box_scores`.
+- `stg_matchup_pairs` (view): the who-played-whom spine per `(season, matchup, home_team, away_team)`, collected across every scoring period so a single-day capture glitch can't drop a pairing.
+- `stg_roster_settings` (view): long-form reshape of the rosterSettings payload — one row per `(season, setting_type, espn_id)` covering both lineupSlotCounts and positionLimits.
 
 Intermediate (`models/intermediate/`):
 

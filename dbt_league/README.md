@@ -51,6 +51,47 @@ scoring weights yet). Two former exceptions were resolved by promotion —
 consumer reads made them de-facto contracts, the same reasoning that
 promoted `fct_player_daily_performance` in v1.1.0.
 
+## Reading the DAG: the edges that look odd
+
+The layering rule of thumb: an edge is healthy when the downstream model
+consumes the upstream's **grain wholesale**; it's a smell when it skips a
+layer to fetch a single field that a nearer layer already carries. Three
+edges in this graph deserve the explanation up front:
+
+**`raw.box_scores` → `fct_team_weekly_active_performance`** (a source
+read outside staging). The box-score JSON carries two grains at once:
+per-player rows, and per-matchup `home_score` / `away_score` — ESPN's
+authoritative team totals, slot-aware and inclusive of commissioner
+adjustments. `stg_box_scores` is the player-grain reshape, so the
+matchup-grain fields don't survive it, and the team fact goes back to
+raw for them (they are deliberately NOT derivable as SUM(players) — the
+divergence is the point, captured in `platform_calculated_delta`). The
+queued cleanup is a second staging model over the same raw table at
+matchup grain (`stg_matchup_scores`), which would make "only staging
+reads sources" absolute — one raw table legitimately feeding two
+single-grain staging models.
+
+**`stat_classification` fanning out three ways.** A config seed is a hub
+by design — one file, three layer-appropriate reads:
+`stg_scoring_settings` joins it as the identity bridge (ESPN's raw
+settings key stats by numeric ID; the seed maps ID → `stat_name`),
+`int_player_daily` joins it for business logic (`is_counting`,
+`stat_category` for the slot-validity filter), and `dim_stat` wraps it
+as the consumer contract (everything downstream of core — including
+`mart_stat_leaderboard`'s compile-time UNPIVOT loop — reads the seed
+only through the dim). Collapsing any of these would invert a layer:
+staging can't read a mart, and the intermediate shouldn't either.
+
+**`stg_box_scores` → `mart_daily_roster_snapshot`** (staging feeding a
+mart directly). The roster snapshot is a roster-*state* product, not a
+performance product. The performance path
+(`stg_player_stat_breakdowns` → `int_player_daily` → facts) inner-joins
+stat breakdowns, which drops rostered players who did nothing that day
+— exactly the rows a roster archive must keep. So the mart branches
+upstream of that filter and consumes the staging grain wholesale (every
+rostered player-day), joining only slot metadata and owner display. An
+intermediate pass-through here would add a node with no logic in it.
+
 ## The two scoring lenses
 
 Every fact carries two parallel scoring columns:

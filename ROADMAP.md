@@ -25,12 +25,13 @@ items ship in the gaps while the platform work runs.
 | Self-Serve Web App | [brief](docs/roadmap/self-serve-web-app.md) | Bring-your-own-credentials app; highest total value, furthest out |
 | Player Profiles | [brief](docs/roadmap/player-profiles.md) | Player cards — parked until a front surface exists |
 | Newsletter & Distribution | [brief](docs/roadmap/newsletter-and-distribution.md) | Email edition + the multi-sink interface |
+| Scheduler & Orchestration | [brief](docs/roadmap/scheduler-and-orchestration.md) | One-command weekly runner → scheduled runs → (stretch) hands-free posting |
 | Ops, Debt & Hardening | [brief](docs/roadmap/ops-debt-and-hardening.md) | Rolling lane: known debt, operability practice, performance |
 | Docs & Portfolio | [brief](docs/roadmap/docs-and-portfolio.md) | Continuous review + the post-multi-platform deep-clean capstone |
 
-One project-less quick win sits in the team backlog: **Points by MLB team**
-(MLB-22) — production sliced by real MLB clubs; likely one small mart + one
-almanac block.
+Project-less items in the team backlog: **Points by MLB team** (MLB-22) — a
+likely quick win (one small mart + one almanac block) — and **wasted-points
+provenance display** (MLB-30, filed 2026-07-06).
 
 ## Sequencing and dependencies
 
@@ -40,8 +41,9 @@ Platform Abstraction ──→ Multi-Platform (CBS → Yahoo → #3) ──→ D
         └──────────────┐                                           └──→ Player Profiles
 Clone & Run Demo Mode ─┴──→ Self-Serve Web App
 
-Independent / gap-fillers: Season Milestone Recaps (now), Transaction
-Records, Newsletter, Points by MLB team.
+Independent / gap-fillers: Season Milestone Recaps (now), Scheduler &
+Orchestration tiers 1-2 (runner + local schedule), Transaction Records,
+Newsletter, Points by MLB team.
 Rolling lanes: Ops/Debt/Hardening, Docs & Portfolio.
 ```
 

@@ -155,6 +155,21 @@ output-changing; the almanac goldens were re-anchored under review).
   rationale as `mart_team_matchup`), grain-tested, and declared on the
   `league_almanac` exposure.
 
+### Fixed
+
+- **Quota retry during formula reapply turned into a hard 400.** gspread's
+  `Worksheet.batch_update` rewrites each payload entry's `range` in place
+  to `'<tab>'!<range>` before posting, so when a live write hit the Sheets
+  per-minute quota mid-`_reapply_formula_cells`, the `_sheets_call` retry
+  resent the already-prefixed list and the title doubled
+  (`'HH'!'HH'!C7` → 400 "Unable to parse range"), killing the run a
+  70-second wait should have saved. The reapply now hands gspread fresh
+  dicts on every attempt; regression-tested with a fake worksheet that
+  mimics the in-place mutation and a first-call 429. Latent since the
+  v1.2 bref-links pass — it needed a quota hit to land exactly on a
+  formula-reapply call (audited: the only values-API `batch_update` call
+  site; the formatting-request batches don't get mutated).
+
 Verification: dbt parse with zero deprecation warnings (the three
 top-level test-arg blocks now use `arguments:`); dbt build green
 (PASS=221 including the new marts' grain tests); all four singular

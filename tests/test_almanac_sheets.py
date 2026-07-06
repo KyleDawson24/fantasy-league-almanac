@@ -1114,3 +1114,51 @@ class TestAdvancedStandingsRows:
         assert rows[10] == ['', 'Team', 'Owner', 'C', 'SP']
         assert rows[11] == ['', 'AAA', 'Owner 1', 5.5, 9.9]
         assert rows[12] == ['', 'BBB', 'Owner 2', 4.4, '']
+
+
+class TestReapplyFormulaCellsRetry:
+    def test_quota_retry_rebuilds_payload_instead_of_reusing_mutated_dicts(
+            self, monkeypatch):
+        """gspread's Worksheet.batch_update rewrites each entry's 'range' in
+        place to "'<title>'!<range>" before posting. A quota retry that
+        resends the same list therefore double-prefixes the title
+        ("'HH'!'HH'!C7" -> 400 Unable to parse range) -- the live failure
+        from the 2026-07-06 weekly run. The fix hands gspread fresh dicts
+        on every attempt; this fake mimics the in-place mutation and the
+        first-call 429."""
+        import almanac_write
+
+        monkeypatch.setattr(almanac_write.time, 'sleep', lambda seconds: None)
+
+        class FakeQuotaError(almanac_write.gspread.exceptions.APIError):
+            def __init__(self):
+                Exception.__init__(self, '[429]: Quota exceeded')
+
+            def __str__(self):
+                return '[429]: Quota exceeded'
+
+        class FakeWorksheet:
+            title = 'HH'
+
+            def __init__(self):
+                self.calls = []
+
+            def batch_update(self, data, value_input_option=None):
+                for entry in data:
+                    entry['range'] = f"'{self.title}'!{entry['range']}"
+                self.calls.append([entry['range'] for entry in data])
+                if len(self.calls) == 1:
+                    raise FakeQuotaError()
+
+        worksheet = FakeWorksheet()
+        rows = [
+            ['plain', '=HYPERLINK("https://x", "link")'],
+            ['also plain'],
+        ]
+
+        almanac_write._reapply_formula_cells(worksheet, rows)
+
+        assert worksheet.calls[0] == ["'HH'!B1"]
+        # The retry must send the SAME single-prefixed range, not a
+        # double-prefixed one built from the mutated first payload.
+        assert worksheet.calls[1] == ["'HH'!B1"]

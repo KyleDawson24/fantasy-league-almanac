@@ -323,7 +323,15 @@ def _reapply_formula_cells(worksheet, rows):
         return
     _sheets_call(
         f'reapply {len(formula_cells)} formula cells {worksheet.title}',
-        lambda: worksheet.batch_update(formula_cells, value_input_option='USER_ENTERED'),
+        # Fresh dicts on every attempt: gspread's Worksheet.batch_update
+        # rewrites each entry's 'range' IN PLACE to "'<title>'!<range>"
+        # before posting, so retrying the same list after a quota hit would
+        # prefix the title a second time ("'HH'!'HH'!C7" -> 400 Unable to
+        # parse range) and turn a recoverable 429 into a hard failure.
+        lambda: worksheet.batch_update(
+            [dict(cell) for cell in formula_cells],
+            value_input_option='USER_ENTERED',
+        ),
     )
 
 

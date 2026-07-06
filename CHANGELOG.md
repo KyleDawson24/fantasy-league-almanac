@@ -155,6 +155,28 @@ output-changing; the almanac goldens were re-anchored under review).
   rationale as `mart_team_matchup`), grain-tested, and declared on the
   `league_almanac` exposure.
 
+- **Season-to-date report** (`output/generate_season_report.py`, MLB-1) —
+  the milestone-summary entry point, built for the All-Star break post
+  and extendable to the end-of-season edition. Deliberately
+  calendar-agnostic: run any week, it reports through the latest loaded
+  matchup period ("Through Week N"); occasion flavor comes from the note
+  files below, not break-aware code. Sections mirror the weekly recap's
+  BBCode idiom: best/worst team callouts on the per-gameplay-week lens
+  (with top-3 season contributors on the bests), season Top
+  Scorer/Hitter/Pitcher cards, Season Superlatives (best team and
+  individual weeks, most points by a hero on the league_notes platform
+  convention, biggest blowout, most points in a loss, fewest in a win —
+  abnormal weeks excluded per the records convention), the season-to-date
+  All-League Team (the almanac's optimal-lineup rows rendered as text
+  with stat + slash lines), all-time records set or tied this season, and
+  season Top Wasted Performances plus per-team wasted totals.
+- **Optional summary header/footer note files**
+  (`output/leagueNoteHeader.txt` / `leagueNoteFooter.txt`, gitignored;
+  `output/note_files.py`) — printed verbatim as the first/last lines of
+  every summary, weekly recap included; blank or missing files contribute
+  nothing, so output is byte-identical until the commissioner writes one.
+  LeagueNote.txt / Additional Notes keeps its locked behavior unchanged.
+
 ### Fixed
 
 - **Quota retry during formula reapply turned into a hard 400.** gspread's

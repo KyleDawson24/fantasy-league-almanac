@@ -24,6 +24,7 @@ from formatters import (
     fmt_ip,
     fmt_value,
 )
+import note_files
 import records
 import stat_catalog
 
@@ -734,6 +735,10 @@ def generate_summary(matchup_period, scores, contributions, wasted_points,
         active_season, matchup_period, schedule_lookup,
     )
     lines = [
+        # Optional commissioner header note -- verbatim first lines of
+        # every summary; contributes nothing when the file is blank or
+        # missing (so goldens hold until one is written).
+        *note_files.header_lines(),
         f"[u][b]{active_week_label} Recap[/b][/u]",
         f"",
     ]
@@ -855,6 +860,11 @@ def generate_summary(matchup_period, scores, contributions, wasted_points,
                 f"[u][b]Additional Notes[/b][/u]",
                 note_content,
             ])
+
+    # Optional commissioner footer note -- verbatim last lines of every
+    # summary (LeagueNote.txt / Additional Notes keeps its locked
+    # behavior above; the footer is a separate, also-optional file).
+    lines.extend(note_files.footer_lines())
 
     # Write to timestamped log file
     from datetime import datetime

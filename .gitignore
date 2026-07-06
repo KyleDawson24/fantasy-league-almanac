@@ -68,3 +68,5 @@ Thumbs.db
 !archive/*.json
 !tests/fixtures/*.json
 !dbt_league/seeds/*.csv
+output/leagueNoteHeader.txt
+output/leagueNoteFooter.txt

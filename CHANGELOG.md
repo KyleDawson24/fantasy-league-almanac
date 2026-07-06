@@ -166,7 +166,9 @@ output-changing; the almanac goldens were re-anchored under review).
   Scorer/Hitter/Pitcher cards, Season Superlatives (best team and
   individual weeks, most points by a hero on the league_notes platform
   convention, biggest blowout, most points in a loss, fewest in a win —
-  abnormal weeks excluded per the records convention), the season-to-date
+  abnormal weeks excluded per the records convention — plus Game/Loss of
+  the Week: the season's highest/lowest combined matchup totals and
+  per-team weekly GotW/LotW appearance tallies), the season-to-date
   All-League Team (the almanac's optimal-lineup rows rendered as text
   with stat + slash lines), all-time records set or tied this season, and
   season Top Wasted Performances plus per-team wasted totals.

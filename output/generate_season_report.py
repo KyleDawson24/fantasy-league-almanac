@@ -198,6 +198,57 @@ def get_result_extreme(season_year, result, best):
     return rows[0] if rows else None
 
 
+def get_matchup_extreme(season_year, highest):
+    """Game of the Week (season) / Loss of the Week (season): the highest
+    or lowest COMBINED matchup total of the year -- the matchup is the
+    unit here, unlike the per-team superlatives above it. One row per
+    matchup via the team_id < opponent_id dedupe; abnormal weeks excluded
+    (a 12-gameplay-day opening week would own the combined-total record
+    for length alone). `result` orders the display (winner first)."""
+    rows = query_snowflake(f"""
+        SELECT matchup_period, team_name, opponent_name, result,
+               calculated_points, opponent_calculated_points,
+               matchup_calculated_points
+        FROM mart_team_matchup
+        WHERE season_year = %s AND is_abnormal = false AND NOT is_playoff
+          AND team_id < opponent_id
+        QUALIFY ROW_NUMBER() OVER (
+            ORDER BY matchup_calculated_points {'DESC' if highest else 'ASC'}
+        ) = 1
+    """, (season_year,))
+    return rows[0] if rows else None
+
+
+def get_gotw_lotw_counts(season_year):
+    """Per-team appearance tallies for the weekly Game of the Week (that
+    week's highest-combined matchup) and Loss of the Week (lowest). Both
+    teams in the matchup get the appearance. Abnormal weeks count here --
+    within a week every matchup shares the same length, so the comparison
+    is fair even when the week itself is odd. DENSE_RANK so a tied
+    combined total credits both matchups."""
+    return query_snowflake("""
+        SELECT team_abbrev,
+               SUM(CASE WHEN hi_rk = 1 THEN 1 ELSE 0 END) AS gotw_n,
+               SUM(CASE WHEN lo_rk = 1 THEN 1 ELSE 0 END) AS lotw_n
+        FROM (
+            SELECT team_abbrev,
+                   DENSE_RANK() OVER (
+                       PARTITION BY matchup_period
+                       ORDER BY matchup_calculated_points DESC
+                   ) AS hi_rk,
+                   DENSE_RANK() OVER (
+                       PARTITION BY matchup_period
+                       ORDER BY matchup_calculated_points ASC
+                   ) AS lo_rk
+            FROM mart_team_matchup
+            WHERE season_year = %s AND NOT is_playoff
+        )
+        GROUP BY team_abbrev
+        HAVING gotw_n > 0 OR lotw_n > 0
+        ORDER BY gotw_n DESC, lotw_n DESC, team_abbrev
+    """, (season_year,))
+
+
 def get_team_wasted_totals(season_year):
     """Season wasted points per team: bench/IL production plus the
     negative-active magnitude, on the same player-week net convention the
@@ -392,8 +443,23 @@ def format_top_player_callouts(players):
     return lines
 
 
+def _format_matchup_extreme(label, row, week):
+    """One GotW/LotW (season) line, winner listed first."""
+    won = (row.get('result') == 'W')
+    first, second = (row['team_name'], row['opponent_name']) if won else \
+                    (row['opponent_name'], row['team_name'])
+    first_pts = row['calculated_points'] if won else row['opponent_calculated_points']
+    second_pts = row['opponent_calculated_points'] if won else row['calculated_points']
+    return (
+        f"[b]{label}[/b]: {first} def. {second} -- "
+        f"{row['matchup_calculated_points']:.1f} combined pts "
+        f"({first_pts:.1f} - {second_pts:.1f}), {week(row['matchup_period'])}"
+    )
+
+
 def format_superlatives(season_records, season_player_records, hero,
                         blowout, most_in_loss, fewest_in_win,
+                        gotw, lotw, gotw_lotw_counts,
                         schedule_lookup, season_year):
     """Season Superlatives: best team/player single weeks (the current-
     season record book, best directions only per the maintainer's cut),
@@ -441,6 +507,26 @@ def format_superlatives(season_records, season_player_records, hero,
             f"({fewest_in_win['owner_name']}) -- "
             f"{fewest_in_win['calculated_points']:.1f} pts, "
             f"{week(fewest_in_win['matchup_period'])}"
+        )
+    # Game/Loss of the Week: the MATCHUP as the unit (combined totals),
+    # per the maintainer's definitions -- season extremes plus per-team
+    # appearance tallies for the weekly versions.
+    if gotw:
+        lines.append(_format_matchup_extreme('Game of the Week (Season)', gotw, week))
+    if lotw:
+        lines.append(_format_matchup_extreme('Loss of the Week (Season)', lotw, week))
+    gotw_counts = [c for c in gotw_lotw_counts if c['gotw_n']]
+    lotw_counts = [c for c in gotw_lotw_counts if c['lotw_n']]
+    if gotw_counts:
+        lines.append(
+            "[b]GotW Appearances[/b]: " + ", ".join(
+                f"{c['team_abbrev']} {int(c['gotw_n'])}" for c in gotw_counts)
+        )
+    if lotw_counts:
+        lotw_counts.sort(key=lambda c: (-c['lotw_n'], c['team_abbrev']))
+        lines.append(
+            "[b]LotW Appearances[/b]: " + ", ".join(
+                f"{c['team_abbrev']} {int(c['lotw_n'])}" for c in lotw_counts)
         )
     return lines
 
@@ -552,6 +638,9 @@ def generate_season_report(season_year):
             get_biggest_blowout(season_year),
             get_result_extreme(season_year, 'L', best=True),
             get_result_extreme(season_year, 'W', best=False),
+            get_matchup_extreme(season_year, highest=True),
+            get_matchup_extreme(season_year, highest=False),
+            get_gotw_lotw_counts(season_year),
             schedule_lookup, season_year,
         ),
         *format_all_league_team(almanac_data.get_all_league_team(season_year)),

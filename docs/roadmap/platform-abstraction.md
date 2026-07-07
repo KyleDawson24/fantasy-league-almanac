@@ -7,6 +7,11 @@ the place the dbt investment earns its keep: sources with nothing in common
 but the sport, converging at the staging boundary into identical readable
 outputs.
 
+Contract draft v1 (PROPOSED, 2026-07-07):
+[docs/platform-adapter-contract.md](../platform-adapter-contract.md) —
+ten feeds with grains, format-conditional rules, and per-adapter
+conformance requirements; maintainer review gates acceptance (MLB-3).
+
 Four workstreams (Linear milestones):
 
 1. **Adapter contract v1** — what any platform extract must deliver

@@ -29,11 +29,17 @@ standard) and Ottoneu before committing the #3 slot.
 Decided (2026-07-07): Sleeper off the board; integration order is
 **CBS → Yahoo → Fantrax** (milestone renamed), mainstream first, with
 each go/no-go still made individually at its access spike. Ottoneu only
-on user demand. CBS login resolved same day; first look at the 20-year
-league found meaningful history, substantial offline bookkeeping (so
-on-platform data is partial), and a non-H2H format — which spawned the
-league-format abstraction workstream (MLB-43) without blocking the
-CBS spike itself.
+on user demand.
+
+**CBS spike: DONE, verdict GO** (MLB-13). The reference league ("Box
+Score Baseball", 16 teams, pure points, no keepers, fielding scored)
+exposes real season-grain player history (sparse 2004–2010, full
+2020+), while daily stats / rosters / standings / transactions are
+current-season only — so the adapter backfills season grain and
+forward-captures daily from 2026-07 on. Auth is a browser-extracted
+token (login is reCAPTCHA-walled). The non-H2H format spawned the
+league-format abstraction workstream (MLB-43); full capability manifest
+on the ticket and in the adapter contract's living notes.
 
 **Depends on:** Platform Abstraction (the contract); access spikes can run
 anytime.

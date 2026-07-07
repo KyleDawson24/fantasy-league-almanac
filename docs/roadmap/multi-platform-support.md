@@ -26,13 +26,15 @@ standard) and Ottoneu before committing the #3 slot.
 | Sleeper | **✗ — DFS picks only; no season-long MLB** | n/a for baseball | — |
 | Ottoneu | ✓ (salary-cap niche) | limited/exports | — |
 
-Recommended: Sleeper off the board; **Platform #3 milestone → Fantrax**
-(pending maintainer sign-off); #2 stays CBS-vs-Yahoo, decided by the
-access spikes — CBS holds the data asset (the 20-year league), Yahoo the
-cleanest official API. Ottoneu only on user demand.
+Decided (2026-07-07): Sleeper off the board; integration order is
+**CBS → Yahoo → Fantrax** (milestone renamed), mainstream first, with
+each go/no-go still made individually at its access spike. Ottoneu only
+on user demand. Active blocker: the CBS spike is credential-gated
+(trouble with the 20-year league's login; resolution in progress).
 
 **Depends on:** Platform Abstraction (the contract); access spikes can run
 anytime.
 
-**Seeded issues:** MLB-12 platform recon (findings above) · MLB-13 CBS
-access spike · MLB-14 Yahoo access spike
+**Seeded issues:** MLB-12 platform recon (done — findings above) ·
+MLB-13 CBS access spike (blocked on login) · MLB-14 Yahoo access spike ·
+MLB-42 Fantrax access spike (needs a dummy league)

@@ -30,8 +30,9 @@ items ship in the gaps while the platform work runs.
 | Docs & Portfolio | [brief](docs/roadmap/docs-and-portfolio.md) | Continuous review + the post-multi-platform deep-clean capstone |
 
 Project-less items in the team backlog: **Points by MLB team** (MLB-22) — a
-likely quick win (one small mart + one almanac block) — and **wasted-points
-provenance display** (MLB-30, filed 2026-07-06).
+likely quick win (one small mart + one almanac block) — **wasted-points
+provenance display** (MLB-30, filed 2026-07-06), and **playoff contention
+identification** (MLB-38, promoted from the parked list 2026-07-07).
 
 ## Sequencing and dependencies
 

@@ -29,6 +29,13 @@ carry ESPN assumptions. Stretch goal parked here: cross-platform league
 stitching (an ESPN league that migrated to Yahoo reads as one franchise
 history — needs a player-ID crosswalk and franchise mapping).
 
+A fifth axis surfaced 2026-07-07 by the CBS access findings: **league
+format** (MLB-43). The 20-year CBS league is not head-to-head, and the
+pipeline assumes H2H everywhere (matchup grain, opponents, W/L, the
+recap's narrative). Format becomes a settings-derived dimension with
+format-conditional models; the player-day production core is already
+format-agnostic and is the sensible first slice.
+
 **Depends on:** nothing — it is the foundation for Multi-Platform Support and
 the Self-Serve Web App.
 

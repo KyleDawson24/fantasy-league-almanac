@@ -29,8 +29,11 @@ standard) and Ottoneu before committing the #3 slot.
 Decided (2026-07-07): Sleeper off the board; integration order is
 **CBS → Yahoo → Fantrax** (milestone renamed), mainstream first, with
 each go/no-go still made individually at its access spike. Ottoneu only
-on user demand. Active blocker: the CBS spike is credential-gated
-(trouble with the 20-year league's login; resolution in progress).
+on user demand. CBS login resolved same day; first look at the 20-year
+league found meaningful history, substantial offline bookkeeping (so
+on-platform data is partial), and a non-H2H format — which spawned the
+league-format abstraction workstream (MLB-43) without blocking the
+CBS spike itself.
 
 **Depends on:** Platform Abstraction (the contract); access spikes can run
 anytime.

@@ -113,13 +113,17 @@ serves, verified, not assumed (the CBS archive-depth question).
   ("Box Score Baseball": 16 teams, pure points, no keepers, fielding
   scored): **season-grain player stats have real history** (sparse
   2004–2010, meaningful ~2013+, full 2020+ — the COVID-2020 points dip
-  authenticates it); **daily stats, rosters (which do carry the deployed
-  slot), standings, owners, and transactions are current-season only**
-  (`timeframe` is cosmetically accepted elsewhere but returns
-  current-window data — verify history claims by content, never by
-  HTTP 200). Adapter shape: backfill season grain, forward-capture
-  daily; F7 required and satisfiable; F6 calendar-only (periods with
-  empty matchup arrays); F9 absent; F10 a rolling window.
+  authenticates it), and **per-game player history is real via
+  `players/gamelog?player_id&timeframe`** (Votto's 2015 verified
+  game-by-game — backfillable in ≈4,200 polite calls). Still
+  current-season only: **the fantasy layer** — rosters (which do carry
+  the deployed slot), started/sat, standings, owners, transactions.
+  League-wide daily/period/fantasy-points endpoints cosmetically accept
+  `timeframe` but return current-window data — verify history claims by
+  content, never by HTTP 200. Adapter shape: gamelog + season backfill,
+  forward-capture the fantasy layer before rollover; F7 required and
+  satisfiable; F6 calendar-only (periods with empty matchup arrays);
+  F9 absent; F10 a rolling window.
 - **Yahoo** (MLB-14): official OAuth2; expected to satisfy F1–F8;
   archive depth TBD.
 - **Fantrax** (MLB-42): league-ID access; deployed-slot availability at

@@ -120,17 +120,45 @@ output-changing; the almanac goldens were re-anchored under review).
 
 - **CBS 2026 fantasy-layer capture** (`extract/cbs_capture.py`, MLB-44):
   read-only preservation of the perishable owner layer of the CBS
-  points league before season rollover — daily rosters with the
-  deployed slot (`roster_pos`) from season start, plus transaction-log,
-  standings, and league/scoring-config snapshots. GET-only endpoint
-  whitelist enforced in code (the museum rule), polite pacing with
-  backoff, token never logged, and content-based verification
-  throughout: the roster date parameter is accepted only if it actually
-  changes payloads (CBS returns HTTP 200 with current-window data for
-  several "historical" queries), and the post-sweep verdict checks
-  distinct-payload counts rather than status codes. Lands raw
-  append-only JSON envelopes under gitignored `data/cbs_raw/`;
-  adapter-shaped staging comes later with the format-abstraction work.
+  points league before season rollover — rosters for every season date
+  with the deployed slot (`roster_pos`) and the started/sat split
+  (`roster_status` A/RS), period-end standings, transaction-log and
+  league/scoring-config snapshots. GET-only endpoint whitelist enforced
+  in code (the museum rule), polite pacing with backoff, token never
+  logged — and content-based verification that caught two decoys on the
+  first runs. Rosters: the obvious `date` parameter answers HTTP 200
+  with the *current* roster dressed in date-varying news headlines —
+  byte-distinct payloads, zero history (105 dates, 2 distinct payloads,
+  0 membership changes) — real history runs on `point=YYYYMMDD`, which
+  maps dates to scoring periods; discovery accepts a parameter only
+  when roster *membership* changes across two past dates, and the
+  landed sweep cross-checks clean against transaction-log ground truth
+  (624/624 adds/drops/trades consistent with day-before/day-of
+  membership). Standings: `point` is the decoy there (echoes a period
+  label over current totals; 105 dates, 1 distinct state) — real
+  history uses the scoring-period NUMBER `period=N`, and every landed
+  file must echo the period it was asked for (16/16 periods, mutually
+  distinct, totals growing 94→4,795-style with first≤last asserted;
+  strict monotonicity deliberately not — negative-scoring stats can
+  shrink a total across one bad period). Full 16-team coverage asserted
+  everywhere (`league/rosters` silently scopes to the token's own team
+  without `team_id=all` — 1 team / 30 `roster_pos` vs 16 / 480).
+  Transactions read from `league/transaction-list/log` (plain
+  `league/transactions` 404s here); the first snapshot caught the full
+  20260325→20260706 window (197 entries) before the rolling cap starts
+  eating it. Lands raw append-only JSON envelopes under gitignored
+  `data/cbs_raw/`; adapter-shaped staging comes later with the
+  format-abstraction work.
+- **CBS historical backfill** (`extract/cbs_backfill.py`, MLB-45): the
+  real half of the 20-year archive — per-season player universes from
+  `league/stats?timeframe` and authentic per-game lines from
+  `players/gamelog` (shape re-verified 2026-07-07: Votto 2015 = 159
+  games, `game_date` YYYYMMDD, `.ytd` running counters), landed as raw
+  envelopes under `data/cbs_raw/<league>/history/`. A gamelog is landed
+  only when every entry's `game_date` falls inside the requested season
+  — an other-year date means fake history and the file is rejected.
+  Idempotent per player-season; rerun to resume. Reuses the capture's
+  GET-only whitelisted client (museum rule).
 - **Source freshness** on the four settings-style raw tables (seasonal
   thresholds over `extracted_at`); `box_scores` documented as pending an
   extract-side load timestamp.

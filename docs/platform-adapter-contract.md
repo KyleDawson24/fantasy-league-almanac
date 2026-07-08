@@ -120,10 +120,23 @@ serves, verified, not assumed (the CBS archive-depth question).
   the deployed slot), started/sat, standings, owners, transactions.
   League-wide daily/period/fantasy-points endpoints cosmetically accept
   `timeframe` but return current-window data — verify history claims by
-  content, never by HTTP 200. Adapter shape: gamelog + season backfill,
-  forward-capture the fantasy layer before rollover; F7 required and
-  satisfiable; F6 calendar-only (periods with empty matchup arrays);
-  F9 absent; F10 a rolling window.
+  content, never by HTTP 200. Capture mechanics (MLB-44 first run,
+  2026-07-07 — every endpoint has its own history key and its own
+  decoy): rosters serve per-date history via `point=YYYYMMDD` (maps the
+  date to its scoring period; period-grain content; `roster_status`
+  A/RS carries started/sat), while the obvious `date` param answers
+  with the current roster dressed in date-varying news headlines —
+  judge by membership fingerprints, not bytes; standings serve
+  period-end history via the period NUMBER `period=N` (responses echo
+  the period served — assert it), while `point` there echoes a period
+  label over current totals. `league/rosters` needs `team_id=all` (else
+  it silently scopes to the token's own team), transactions live at
+  `league/transaction-list/log` (plain `league/transactions` 404s), and
+  cross-season `point` 400s or clamps to current — rollover still
+  destroys the layer, so the capture cadence still matters. Adapter
+  shape: gamelog + season backfill, forward-capture the fantasy layer
+  before rollover; F7 required and satisfiable; F6 calendar-only
+  (periods with empty matchup arrays); F9 absent; F10 a rolling window.
 - **Yahoo** (MLB-14): official OAuth2; expected to satisfy F1–F8;
   archive depth TBD.
 - **Fantrax** (MLB-42): league-ID access; deployed-slot availability at

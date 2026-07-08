@@ -49,7 +49,10 @@ gitignored raw JSON at `data/cbs_raw/` in the main checkout; Snowflake
 can load the files later) → **(2)** MLB-45 gamelog+season backfill →
 **(3)** MLB-43 first slice on 2026 data (points standings, weekly
 movement, bench efficiency — computable for 2026+ only, since deployed
-slots are captured daily) → **(4)** the "20 Years of Box Score
+slots are captured in-season; upgraded 2026-07-07: CBS's own
+period-end standings history turned out to be servable via
+`period=N` and is captured outright, so movement views can read
+official standings instead of recomputing) → **(4)** the "20 Years of Box Score
 Baseball" retrospective (MLB-46), an end-of-season league deliverable
 built from the backfill (player-division records under the league's own
 scoring; owner history only via a manually-seeded league-lore file,
@@ -63,7 +66,9 @@ anytime.
 
 **Seeded issues:** MLB-12 platform recon (done — findings above) ·
 MLB-13 CBS access spike (done — verdict GO) · MLB-44 2026 fantasy-layer
-capture (in progress; hard deadline = rollover ~2026-09-27) · MLB-45
-gamelog backfill (unhurried) · MLB-46 retrospective (end of season) ·
-MLB-14 Yahoo access spike · MLB-42 Fantrax access spike (needs a dummy
-league)
+capture (season-to-date landed + content-verified 2026-07-07 — 105
+roster dates, 16 standings periods, full 197-entry transaction window;
+forward cadence to rollover ~2026-09-27 still open) · MLB-45
+gamelog backfill (in progress 2026-07-07) · MLB-46 retrospective (end
+of season) · MLB-14 Yahoo access spike · MLB-42 Fantrax access spike
+(needs a dummy league)

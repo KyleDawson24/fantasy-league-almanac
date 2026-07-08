@@ -19,3 +19,9 @@ _OUTPUT_DIR = _REPO_ROOT / 'output'
 
 if str(_OUTPUT_DIR) not in sys.path:
     sys.path.insert(0, str(_OUTPUT_DIR))
+
+# Repo root on the path too, so tests can import the league registry the
+# same way the edge scripts do: `from config.league_registry import ...`
+# (config/ is a namespace package; no __init__.py needed).
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))

@@ -1,0 +1,82 @@
+# leagues.yml -- the league registry (MLB-48 / MLB-57).
+#
+# One entry per fantasy league the warehouse tracks. The entry key is the
+# league_key: the value stamped into every RAW row at extract time and
+# carried as a first-class dimension through staging, intermediate, and
+# marts. Consumers (output scripts, future front-ends) select a league by
+# filtering league_key -- never by platform-specific schemas or tables.
+#
+# Choose keys once and treat them as permanent: renaming a league_key
+# after data lands means restamping RAW and full-refreshing the warehouse.
+# Convention: <platform>-<short-slug>, lowercase, hyphenated.
+#
+# What does NOT belong here:
+#   - League format (H2H points, pure points, roto...). Format is derived
+#     from the platform's own settings payloads at staging, per the
+#     adapter contract. An explicit format_override escape hatch may exist
+#     someday; it is not routine configuration.
+#   - Secrets. League ids double as quasi-private identifiers in this
+#     public repo, so entries reference the .env variable that holds the
+#     id (league_id_env) rather than the id itself. A public league could
+#     use a literal `league_id:` instead; when both are present the
+#     literal wins.
+#
+# Field reference (per entry):
+#   platform        adapter name: espn | cbs (yahoo, fantrax reserved)
+#   display_name    human label for logs and docs; never keyed on
+#   league_id_env   .env variable holding the platform league id/slug
+#   league_id       literal platform league id (public leagues only)
+#   credential_env  every .env variable the platform adapter needs at
+#                   extract time; the loader reports which are missing.
+#                   (The adapter contract sketched this as an env-prefix;
+#                   an explicit list is used instead because the ESPN
+#                   vars predate the registry and aren't uniformly
+#                   prefixed -- renaming them would break the runbook.)
+#   first_season    earliest season the warehouse should ever carry
+#   final_season    null while the league is ongoing
+#   sinks           per-surface output destinations. Parsed and carried
+#                   by the loader today; output scripts start resolving
+#                   destinations from it under MLB-58. Sheets ids stay in
+#                   .env for the same quasi-privacy reason as league ids.
+#
+# default_league names the entry every edge script (extract, output)
+# targets when no --league flag is given -- the ESPN league, preserving
+# the pre-registry weekly runbook unchanged.
+
+default_league: espn-main
+
+leagues:
+  # Entry #1: the 14-team ESPN H2H-points keeper league this project was
+  # built around. Byte-neutral registry adoption: same env vars, same
+  # defaults, zero behavior change to the weekly runbook.
+  espn-main:
+    platform: espn
+    display_name: "ESPN main league"
+    league_id_env: LEAGUE_ID
+    credential_env: [ESPN_S2, SWID, LEAGUE_ID]
+    first_season: 2025
+    final_season: null
+    sinks:
+      bbcode: true
+      sheets_almanac_env: SHEETS_OUTPUT_ID
+      sheets_dev_env: SHEETS_DEV_ID
+
+  # Entry #2: the father-in-law's CBS league ("Box Score Baseball",
+  # running since 2001). Read-only museum: extraction captures history
+  # and the accruing current season, and nothing we build ever writes
+  # back to the platform. 16-team pure-points (non-H2H) -- but that's
+  # settings-derived at staging, which is why no format field exists
+  # here. The CBS raw captures live on disk today (data/cbs_raw/); this
+  # entry activates for the warehouse when the CBS staging work lands
+  # (MLB-59+).
+  cbs-bsb:
+    platform: cbs
+    display_name: "Box Score Baseball (CBS)"
+    league_id_env: CBS_LEAGUE
+    credential_env: [CBS_TOKEN]
+    first_season: 2001
+    final_season: null
+    sinks:
+      bbcode: false
+      sheets_almanac_env: null
+      sheets_dev_env: null

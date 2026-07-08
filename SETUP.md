@@ -501,6 +501,14 @@ Running the pipeline weekly:
 python extract/extract.py        # ~30 seconds for current week
 cd dbt_league && dbt build       # ~60 seconds for full build
 cd .. && python output/generate_summary.py
+python extract/cbs_capture.py --capture   # CBS league (if configured):
+                                 # idempotent — extends the roster
+                                 # sweep to today, lands new standings
+                                 # periods + fresh transaction/config
+                                 # snapshots. Runs LAST on purpose: a
+                                 # CBS token expiry must never block
+                                 # your own league's update. Skip if
+                                 # you have no CBS_TOKEN in .env.
 ```
 
 The full output is in `output/logs/<timestamp>.txt`. Paste into your

@@ -74,12 +74,24 @@ def gamelog_entries(payload) -> list | None:
 
 
 def offyear_entries(entries: list, year: int) -> int:
-    """Count entries whose game_date lies outside the requested year."""
+    """Count entries dated outside the requested year.
+
+    Null-date rows are postponed/cancelled-game placeholders (opponent
+    and scores null too) and validate on `point` instead — 2021 alone
+    has ~145 of them league-wide (the COVID-makeup era), and treating
+    them as off-year rejected 112 authentic 2021 gamelogs on the first
+    sweep. A dated entry from the wrong year is still fake history.
+    """
     prefix = str(year)
     bad = 0
     for e in entries:
-        game_date = str(e.get("game_date", "")) if isinstance(e, dict) else ""
-        if not game_date.startswith(prefix):
+        if not isinstance(e, dict):
+            bad += 1
+            continue
+        stamp = e.get("game_date")
+        if stamp is None:
+            stamp = e.get("point")
+        if not str(stamp or "").startswith(prefix):
             bad += 1
     return bad
 

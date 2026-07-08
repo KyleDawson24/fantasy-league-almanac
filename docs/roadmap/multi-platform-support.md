@@ -68,7 +68,9 @@ anytime.
 MLB-13 CBS access spike (done — verdict GO) · MLB-44 2026 fantasy-layer
 capture (season-to-date landed + content-verified 2026-07-07 — 105
 roster dates, 16 standings periods, full 197-entry transaction window;
-forward cadence to rollover ~2026-09-27 still open) · MLB-45
+cadence decided Per Offline Chat 2026-07-07: rides the ESPN weekly
+runbook as its last step — SETUP.md documents it, and the MLB-31
+runner inherits it as a non-fatal step) · MLB-45
 gamelog backfill (in progress 2026-07-07) · MLB-46 retrospective (end
 of season) · MLB-14 Yahoo access spike · MLB-42 Fantrax access spike
 (needs a dummy league)

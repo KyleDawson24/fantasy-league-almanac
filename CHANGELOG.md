@@ -148,7 +148,9 @@ output-changing; the almanac goldens were re-anchored under review).
   20260325→20260706 window (197 entries) before the rolling cap starts
   eating it. Lands raw append-only JSON envelopes under gitignored
   `data/cbs_raw/`; adapter-shaped staging comes later with the
-  format-abstraction work.
+  format-abstraction work. Weekly cadence: the capture rides the ESPN
+  weekly runbook as its last step (SETUP.md) — idempotent, and
+  positioned so a CBS token expiry can never block the ESPN update.
 - **CBS historical backfill** (`extract/cbs_backfill.py`, MLB-45): the
   real half of the 20-year archive — per-season player universes from
   `league/stats?timeframe` and authentic per-game lines from

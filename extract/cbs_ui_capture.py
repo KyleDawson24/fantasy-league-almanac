@@ -1,0 +1,372 @@
+#!/usr/bin/env python3
+"""CBS site-UI league-history capture (MLB-47).
+
+The site UI serves fantasy-layer history the API denies under every
+probed parameter: standings and transactions back to 2001, year-end
+roster reports from 2003, draft results from 2017. This script lands
+those pages as raw HTML — the owner story of a 26-season league.
+
+MUSEUM RULE (standing): read-only forever. Only the GET URL templates
+below are ever requested; polite pacing with backoff; the session
+cookie comes from CBS_WEB_COOKIES in the repo-root .env and is never
+printed, logged, or landed. Auth is verified BY CONTENT: a response
+that bounces to the login page or lacks the league masthead is
+recorded as auth-failed, never trusted because of an HTTP 200.
+
+Surfaces and coverage (maintainer-verified in the UI, 2026-07-08):
+    standings     /history/year-by-year/{year}          2001+
+    transactions  /transactions/all/{filter}/{year}     2001+  (both the
+                  all_but_lineup and all filters — bench/start moves ride
+                  the log, and in a pure points league the active set is
+                  the scoring lineup)
+    rosters       /teams/roster-report/{team_id}/{year}/ 2003+ (the
+                  Time Period pulldown's own option URLs; per-year team
+                  ids are parsed from that year's standings page, with a
+                  union-of-all-known-ids fallback)
+    drafts        /draft/results/{year}:Pre-season:Pre-season/ 2017+
+    team_overview /history/team-overview/{team_id}  one per franchise id —
+                  the rename-continuity story (Aching Hippos = id 1)
+
+Landing (append-only, idempotent — rerun to resume):
+    <repo-root>/data/cbs_raw/<league>/history/ui/
+        standings/<year>.html
+        transactions/<filter>/<year>[_pN].html
+        rosters/<year>/team_<id>.html
+        drafts/<year>.html
+        ui_manifest.jsonl, verification_<stamp>.json
+
+Usage:
+    python extract/cbs_ui_capture.py --probe     # auth + shape check, lands nothing
+    python extract/cbs_ui_capture.py --capture   # full sweep + verify
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import random
+import re
+import time
+import urllib.error
+import urllib.request
+from datetime import datetime, timezone
+from pathlib import Path
+
+from cbs_capture import find_repo_root, load_env, write_json
+
+BASE = "https://bsb.baseball.cbssports.com"
+FIRST_SEASON = 2001
+ROSTER_FLOOR = 2003          # roster reports render from 2003 per the UI
+DRAFT_FLOOR = 2017
+PACING_SECONDS = 0.75
+RETRY_BACKOFF = [5, 15, 45]
+TIMEOUT_SECONDS = 30
+USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+              "(KHTML, like Gecko) Chrome/126.0 Safari/537.36")
+MASTHEAD = "Box Score Baseball"   # league name; present on every real page
+
+# The GET-only URL templates — the museum rule for the site surface.
+TEMPLATES = {
+    "standings": BASE + "/history/year-by-year/{year}",
+    "transactions": BASE + "/transactions/all/{filter}/{year}",
+    "rosters": BASE + "/teams/roster-report/{team_id}/{year}/",
+    "drafts": BASE + "/draft/results/{year}:Pre-season:Pre-season/",
+    "team_overview": BASE + "/history/team-overview/{team_id}",
+}
+TXN_FILTERS = ("all_but_lineup", "all")
+
+# Per-surface content markers (any-of) — a page lands only if one is
+# present. The roster-report family renders without the league masthead,
+# so it validates on its own table furniture instead.
+SURFACE_MARKERS = {
+    "standings": (MASTHEAD,),
+    "transactions": (MASTHEAD,),
+    "drafts": (MASTHEAD,),
+    "team_overview": (MASTHEAD,),
+    "rosters": ("Own %", "Start %", "TOTALS"),
+}
+
+
+class UiClient:
+    def __init__(self, cookies: str):
+        self._cookies = cookies
+        self.calls = 0
+
+    def get(self, template_key: str, **kwargs):
+        """GET a whitelisted page. Returns (html|None, meta). Never logs cookies."""
+        if template_key not in TEMPLATES:
+            raise ValueError("template %r is not whitelisted — refusing" % template_key)
+        url = TEMPLATES[template_key].format(**kwargs)
+        extra_page = kwargs.get("page")
+        if extra_page:
+            url += "?page=%s" % extra_page
+        meta = {"url": url, "ts": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+        last_err = None
+        for backoff in [0] + RETRY_BACKOFF:
+            if backoff:
+                time.sleep(backoff)
+            req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT,
+                                                       "Cookie": self._cookies})
+            try:
+                with urllib.request.urlopen(req, timeout=TIMEOUT_SECONDS) as resp:
+                    final, status = resp.geturl(), resp.status
+                    body = resp.read().decode("utf-8", errors="replace")
+                self.calls += 1
+                time.sleep(PACING_SECONDS + random.uniform(0, 0.25))
+                meta["http_status"] = status
+                meta["bytes"] = len(body)
+                if "/login" in final or "Sign In - CBSSports" in body:
+                    meta["note"] = "AUTH-BOUNCED to login — cookie expired/invalid"
+                    return None, meta
+                if not any(m in body for m in SURFACE_MARKERS[template_key]):
+                    meta["note"] = "no %s content markers — not landing" % template_key
+                    return None, meta
+                meta["sha256"] = hashlib.sha256(body.encode()).hexdigest()
+                return body, meta
+            except urllib.error.HTTPError as err:
+                meta["http_status"] = err.code
+                if err.code in (429, 500, 502, 503, 504):
+                    last_err = err
+                    continue
+                meta["note"] = "HTTP %d" % err.code
+                self.calls += 1
+                time.sleep(PACING_SECONDS)
+                return None, meta
+            except (urllib.error.URLError, TimeoutError, OSError) as err:
+                last_err = err
+                continue
+        meta["note"] = "gave up after retries: %s" % type(last_err).__name__
+        return None, meta
+
+
+# --------------------------------------------------------------------------
+# Landing
+# --------------------------------------------------------------------------
+
+def land(path: Path, html: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(html, encoding="utf-8")
+    tmp.replace(path)
+
+
+def append_manifest(ui_dir: Path, meta: dict, out_file: str | None) -> None:
+    record = dict(meta)
+    record["out_file"] = out_file
+    ui_dir.mkdir(parents=True, exist_ok=True)
+    with (ui_dir / "ui_manifest.jsonl").open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+# --------------------------------------------------------------------------
+# Content inspection (raw stays raw; these only judge authenticity)
+# --------------------------------------------------------------------------
+
+def team_ids_from_html(html: str) -> set[str]:
+    """Team ids referenced by a page. History pages link each team as
+    /history/team-overview/<id> (single-quoted hrefs); roster pulldowns
+    use /teams/roster-report/<id>/<year>/."""
+    ids = set(re.findall(r"/history/team-overview/(\d+)", html))
+    ids |= set(re.findall(r"/teams/roster-report/(\d+)/", html))
+    return ids
+
+
+def year_marker_count(html: str, year: int) -> int:
+    """Occurrences of the season year in date-ish contexts."""
+    return len(re.findall(r"\b%d\b" % year, html)) + len(re.findall(r"/%02d/" % (year % 100), html))
+
+
+def next_page_exists(html: str, current: int) -> bool:
+    return bool(re.search(r'[?&]page=%d\b' % (current + 1), html))
+
+
+# --------------------------------------------------------------------------
+# Modes
+# --------------------------------------------------------------------------
+
+def run_probe(client: UiClient) -> None:
+    print("PROBE (nothing landed, cookie never shown):", flush=True)
+    html, meta = client.get("standings", year=2021)
+    if html is None:
+        raise SystemExit("standings/2021 failed: %s" % meta.get("note"))
+    ids = team_ids_from_html(html)
+    for marker in ("Aching Hippos", "Dugouts Wild"):
+        print("  standings/2021: %r present=%s" % (marker, marker in html), flush=True)
+    print("  standings/2021: %d team ids parsed: %s" % (len(ids), sorted(ids, key=int)[:20]), flush=True)
+
+    html, meta = client.get("rosters", team_id="4", year=2021)
+    if html is None:
+        print("  roster-report/4/2021 FAILED: %s" % meta.get("note"), flush=True)
+    else:
+        for marker in ("Posey, Buster", "Rizzo, Anthony"):   # maintainer's 2021 paste
+            print("  roster-report/4/2021: %r present=%s" % (marker, marker in html), flush=True)
+
+    sizes = {}
+    for f in TXN_FILTERS:
+        html, meta = client.get("transactions", filter=f, year=2021)
+        sizes[f] = meta.get("bytes") if html is not None else "FAILED:%s" % meta.get("note")
+    print("  transactions/2021 sizes by filter: %s" % sizes, flush=True)
+
+    html, meta = client.get("drafts", year=2017)
+    print("  drafts/2017: %s (%s bytes)" % ("ok" if html else "FAILED", meta.get("bytes")), flush=True)
+
+
+def run_capture(client: UiClient, ui_dir: Path, last_season: int, force: bool) -> None:
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H%M%SZ")
+    results = {}   # (surface, year) -> "landed"|"present"|"failed: note"
+    ids_by_year = {}
+
+    def fetch_and_land(surface, out, **kwargs):
+        if out.is_file() and out.stat().st_size > 0 and not force:
+            return "present", out.read_text(encoding="utf-8", errors="replace")
+        html, meta = client.get(surface, **kwargs)
+        if html is None:
+            append_manifest(ui_dir, meta, None)
+            if "AUTH-BOUNCED" in str(meta.get("note", "")):
+                raise SystemExit("Cookie no longer authenticates (%s) — re-extract "
+                                 "CBS_WEB_COOKIES and rerun; landed pages are kept." % meta["url"])
+            return "failed: %s" % meta.get("note"), None
+        land(out, html)
+        append_manifest(ui_dir, meta, str(out))
+        return "landed", html
+
+    # 1. Standings 2001..last — these also carry each year's team ids.
+    for year in range(FIRST_SEASON, last_season + 1):
+        status, html = fetch_and_land("standings", ui_dir / "standings" / ("%d.html" % year),
+                                      year=year)
+        results[("standings", year)] = status
+        if html:
+            ids_by_year[year] = team_ids_from_html(html)
+    print("  standings: %s" % _tally(results, "standings"), flush=True)
+
+    # 2. Transactions, both filters, with pagination.
+    for f in TXN_FILTERS:
+        for year in range(FIRST_SEASON, last_season + 1):
+            page, status = 1, None
+            while True:
+                suffix = "%d.html" % year if page == 1 else "%d_p%d.html" % (year, page)
+                out = ui_dir / "transactions" / f / suffix
+                kwargs = {"filter": f, "year": year}
+                if page > 1:
+                    kwargs["page"] = page
+                status, html = fetch_and_land("transactions", out, **kwargs)
+                if html is None or not next_page_exists(html, page) or page >= 30:
+                    break
+                page += 1
+            results[("transactions/" + f, year)] = status
+    for f in TXN_FILTERS:
+        print("  transactions/%s: %s" % (f, _tally(results, "transactions/" + f)), flush=True)
+
+    # 3. Roster reports per (year, team id) — ids from that year's standings,
+    # union-of-all-years as fallback for years whose parse came up empty.
+    union_ids = set().union(*ids_by_year.values()) if ids_by_year else set()
+    for year in range(max(ROSTER_FLOOR, FIRST_SEASON), last_season + 1):
+        ids = ids_by_year.get(year) or union_ids
+        landed = present = failed = 0
+        for tid in sorted(ids, key=int):
+            status, _ = fetch_and_land("rosters",
+                                       ui_dir / "rosters" / str(year) / ("team_%s.html" % tid),
+                                       team_id=tid, year=year)
+            landed += status == "landed"
+            present += status == "present"
+            failed += status.startswith("failed")
+        results[("rosters", year)] = "%d landed, %d present, %d failed of %d ids" % (
+            landed, present, failed, len(ids))
+        print("  rosters/%d: %s" % (year, results[("rosters", year)]), flush=True)
+
+    # 4. Drafts.
+    for year in range(DRAFT_FLOOR, last_season + 1):
+        status, _ = fetch_and_land("drafts", ui_dir / "drafts" / ("%d.html" % year), year=year)
+        results[("drafts", year)] = status
+    print("  drafts: %s" % _tally(results, "drafts"), flush=True)
+
+    # 5. Franchise overviews — one page per team id ever seen; these carry
+    # the rename-continuity story (e.g. Aching Hippos = franchise id 1).
+    for tid in sorted(union_ids, key=int):
+        status, _ = fetch_and_land("team_overview",
+                                   ui_dir / "team_overview" / ("team_%s.html" % tid),
+                                   team_id=tid)
+        results[("team_overview", tid)] = status
+    print("  team_overview: %s" % _tally(results, "team_overview"), flush=True)
+
+    verify(ui_dir, stamp, last_season)
+
+
+def _tally(results: dict, surface: str) -> str:
+    rows = [v for (s, _), v in results.items() if s == surface]
+    return "%d landed, %d already present, %d failed of %d" % (
+        sum(v == "landed" for v in rows), sum(v == "present" for v in rows),
+        sum(str(v).startswith("failed") for v in rows), len(rows))
+
+
+def verify(ui_dir: Path, stamp: str, last_season: int) -> None:
+    """Content-based verdict over everything landed so far."""
+    problems, summary = [], {"verified_at": stamp}
+
+    st = sorted((ui_dir / "standings").glob("*.html"))
+    summary["standings_years"] = len(st)
+    if len(st) < last_season - FIRST_SEASON + 1:
+        problems.append("standings: %d/%d years" % (len(st), last_season - FIRST_SEASON + 1))
+
+    for f in TXN_FILTERS:
+        pages = sorted((ui_dir / "transactions" / f).glob("*.html"))
+        years = {p.stem.split("_")[0] for p in pages}
+        summary["transactions_%s" % f] = {"pages": len(pages), "years": len(years)}
+        if len(years) < last_season - FIRST_SEASON + 1:
+            problems.append("transactions/%s: %d/%d years" % (f, len(years),
+                                                              last_season - FIRST_SEASON + 1))
+
+    r_years = sorted(p.name for p in (ui_dir / "rosters").glob("*") if p.is_dir())
+    r_counts = {y: len(list((ui_dir / "rosters" / y).glob("team_*.html"))) for y in r_years}
+    summary["roster_years"] = {y: r_counts[y] for y in r_years}
+    thin = [y for y, n in r_counts.items() if int(y) >= 2003 and n < 8]
+    if thin:
+        problems.append("roster years with <8 teams landed: %s" % thin)
+
+    summary["draft_years"] = len(list((ui_dir / "drafts").glob("*.html")))
+    summary["team_overviews"] = len(list((ui_dir / "team_overview").glob("*.html")))
+
+    # Ground truth from the maintainer's 2021 paste.
+    gt = ui_dir / "rosters" / "2021" / "team_4.html"
+    if gt.is_file():
+        body = gt.read_text(encoding="utf-8", errors="replace")
+        if not ("Posey" in body and "Rizzo" in body):
+            problems.append("2021 team-4 roster fails the maintainer-paste ground truth")
+    else:
+        problems.append("2021 team-4 roster page missing")
+
+    summary["verdict"] = "PASS" if not problems else "FAIL: " + "; ".join(problems)
+    write_json(ui_dir / ("verification_%s.json" % stamp), summary)
+    print("  VERIFY: %s" % json.dumps(summary), flush=True)
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    mode = ap.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--probe", action="store_true", help="auth + shape check; lands nothing")
+    mode.add_argument("--capture", action="store_true", help="full sweep + verify")
+    ap.add_argument("--last-season", type=int, default=2026)
+    ap.add_argument("--force", action="store_true", help="re-fetch pages already landed")
+    args = ap.parse_args()
+
+    root = find_repo_root(Path(__file__).resolve().parent)
+    env = load_env(root / ".env")
+    cookies = env.get("CBS_WEB_COOKIES")
+    if not cookies:
+        raise SystemExit("CBS_WEB_COOKIES missing from .env — copy the browser's cookie "
+                         "request-header value (see MLB-47).")
+    league = env.get("CBS_LEAGUE", "bsb")
+    ui_dir = root / "data" / "cbs_raw" / league / "history" / "ui"
+    client = UiClient(cookies)
+
+    print("cbs_ui_capture: league=%s landing=%s" % (league, ui_dir), flush=True)
+    if args.probe:
+        run_probe(client)
+    else:
+        run_capture(client, ui_dir, args.last_season, args.force)
+    print("done: %d GETs, read-only." % client.calls, flush=True)
+
+
+if __name__ == "__main__":
+    main()

@@ -17,7 +17,7 @@ items ship in the gaps while the platform work runs.
 | Initiative | Brief | One-liner |
 |---|---|---|
 | Season Milestone Recaps | [brief](docs/roadmap/season-milestone-recaps.md) | All-Star break + end-of-season special editions (ASB is now) |
-| Platform Abstraction | [brief](docs/roadmap/platform-abstraction.md) | The adapter contract: stat crosswalk, schedule derivation, settings ingestion |
+| Platform Abstraction | [brief](docs/roadmap/platform-abstraction.md) | The adapter contract: stat crosswalk, schedule derivation, settings ingestion · league_key re-grain landed 2026-07-08 |
 | Clone & Run Demo Mode | [brief](docs/roadmap/clone-and-run-demo-mode.md) | DuckDB target + sample league; runnable by a recruiter in one command |
 | Multi-Platform Support | [brief](docs/roadmap/multi-platform-support.md) | CBS · Yahoo · a recon-chosen third platform |
 | Public Dashboard | [brief](docs/roadmap/public-dashboard.md) | Looker/Tableau public surface; ESPN-first, grows with the platforms |

@@ -71,6 +71,18 @@ re-grain byte-identically. An interview-grade write-up of the
 two-league convergence design follows once the re-grain is stable
 (MLB-67).
 
+The re-grain LANDED 2026-07-08 (MLB-57, in review): `config/leagues.yml`
++ loader (espn-main default, cbs-bsb museum entry; league ids stay in
+.env), extract stamps `league_key` into every RAW row (legacy rows
+migrated), all staging/intermediate/mart grains + uniqueness tests +
+incremental merge keys widened, per-league incremental watermarks, and
+every output query filters the active league with `--league` flags on
+all four render scripts. Gate result: both BBCode goldens byte-identical;
+the almanac TSVs moved on exactly 63 round-boundary cells (verified
+.x5 sums re-rolled by the full-refresh, e.g. a 216.25) and were
+re-anchored under review. Still open in this workstream: MLB-58 sinks;
+seed scoping rides MLB-4/MLB-5.
+
 **Seeded issues:** MLB-3 adapter contract · MLB-4 stat crosswalk · MLB-5
 schedule derivation · MLB-6 settings ingestion · MLB-7 two-way semantics ·
 MLB-8 league stitching (stretch) · MLB-48 league registry + run

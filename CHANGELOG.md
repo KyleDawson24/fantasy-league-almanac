@@ -16,6 +16,58 @@ three output surfaces (recap, records report, almanac). Plus the first
 v2.0 feature: the almanac's Advanced Standings tab rebuilt as per-stat
 weekly-average standings over two new reporting marts (intentionally
 output-changing; the almanac goldens were re-anchored under review).
+And the multi-league foundation (MLB-48/MLB-57): a league registry plus
+the `league_key` re-grain of every warehouse layer, held byte-neutral
+for the ESPN league.
+
+### Added
+
+- **League registry + `league_key` re-grain (multi-league foundation,
+  MLB-48 design / MLB-57 implementation).** One warehouse namespace,
+  `league_key` as a first-class dimension in every grain — the accepted
+  alternative to per-league schemas (consumers say "go to the mart and
+  pull the league's data," never "pull CBS from the CBS mart").
+  - `config/leagues.yml` + `config/league_registry.py`: one entry per
+    league (platform, env-referenced league id, credential list, seasons,
+    sinks — no format fields; format stays settings-derived at staging).
+    `espn-main` is entry #1 and the default everywhere, so the weekly
+    runbook is unchanged; `cbs-bsb` is the read-only museum entry. Loud
+    failures: unknown keys list the known ones, missing credentials name
+    the exact `.env` variables.
+  - Extract stamps `league_key` into every RAW row (payloads stay
+    verbatim — it's load metadata); tables self-heal the column via
+    `ADD COLUMN IF NOT EXISTS`; the box-score idempotency DELETE is
+    league-scoped; `tools/migrate_raw_league_key.py` backfilled the 312
+    pre-registry rows. `--league` flag on the extract, which validates
+    it was pointed at an espn-platform league before touching anything.
+  - dbt: all staging models emit `league_key` (latest-snapshot windows
+    and "current season" resolve per league); every join carrying
+    team/player coordinates widened (team_id 1 in two leagues is two
+    teams; each league's scoring weights apply only to its own rows);
+    every `unique_combination_of_columns` test and incremental
+    `unique_key` widened; the three incremental facts filter through a
+    new `league_period_watermark` macro (per-league watermarks, so one
+    league mid-backfill can't be skipped because another sits at the
+    current week). Leaderboard rankings, league averages, and
+    weeks-in-history percentiles all partition per league. Seed-derived
+    dims (`dim_stat`, `dim_matchup_period`) stay unscoped until the
+    crosswalk/schedule workstreams (MLB-4/MLB-5). One `dbt build` still
+    builds every league — no per-league vars or targets.
+  - Output layer: a process-wide league context in `output/db.py`
+    (`set_league()` / `league_predicate()`); every league-scoped query
+    across the recap, records report, season report, league notes, and
+    almanac filters the active league, including whole-fact CTE legs and
+    MAX(season) bootstraps; joins between scoped surfaces add
+    `league_key` to their join keys. `--league` on all four render
+    scripts (the weekly recap gained its first argparse), defaulting to
+    the registry default.
+  - Migration gate: RAW backfill + full-refresh rebuild, then the golden
+    suite. Both BBCode goldens held **byte-identical**. The almanac TSVs
+    moved on exactly 63 cells, every one a `ROUND(SUM(float),1)`
+    .x5-boundary re-roll from the rebuild's new summation order
+    (verified at the warehouse: e.g. an opponent total sitting at
+    exactly 216.25) — re-anchored under review, same phenomenon that
+    originally pinned the score-sum marts to tables.
 
 ### Changed
 

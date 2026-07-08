@@ -320,6 +320,24 @@ otherwise it falls back to password.
 Skip the Google Sheets vars for now (see section 9 if you want that
 sink later).
 
+**CBS league (optional — only if you archive a second-platform league):**
+
+```bash
+# CBS (all browser-extracted; the login is reCAPTCHA-walled, so there
+# is no scripted credential flow — and these leagues are treated as
+# read-only museums by the capture scripts)
+CBS_LEAGUE=<league slug, e.g. bsb>
+CBS_TOKEN=<fantasy API access_token, extracted from a logged-in league page>
+CBS_WEB_COOKIES=<the whole `cookie:` request-header value from devtools>
+```
+
+`CBS_TOKEN` drives the API captures (`extract/cbs_capture.py`,
+`extract/cbs_backfill.py`); `CBS_WEB_COOKIES` drives the site-page
+archive (`extract/cbs_ui_capture.py`). Both expire eventually;
+re-extract from the browser when a run reports auth failure — the
+scripts refuse to land anything unauthenticated, so expiry can't
+corrupt the archive.
+
 > `.env` is gitignored. Never commit credentials. The .env.example
 > template stays tracked for new-user onboarding.
 

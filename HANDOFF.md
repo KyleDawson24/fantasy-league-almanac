@@ -27,7 +27,7 @@ This is also a **portfolio piece** — the user is targeting Senior Data Analyst
 
 Three stages: **extract** (Python pulls ESPN's API → Snowflake `RAW` schema, append-only), **transform** (dbt builds `staging` views → `intermediate` views → `marts` facts and the leaderboard), **output** (Python reads marts and produces BBCode + Sheets). Each stage is independently runnable. The user's weekly cadence is `extract → dbt build → output/generate_summary.py → output/generate_records_report.py → output/generate_almanac_sheet.py`, then `extract/cbs_capture.py --capture` last (the CBS museum league — ordered so a CBS token expiry never blocks the ESPN chain). Backfills happen when extract logic or seed data changes (`extract --year YYYY --all` then `dbt build --full-refresh`).
 
-A second platform exists as of 2026-07-07: the CBS museum league (read-only forever) lands raw JSON under gitignored `data/cbs_raw/` — `extract/cbs_capture.py` preserves the perishable 2026 fantasy layer (period-grain rosters with deployed slots and started/sat, period standings, transactions, config), `extract/cbs_backfill.py` holds the completed 2004–2025 per-game archive. File-landed only: warehouse load + staging wait on the format-abstraction work (MLB-43); nothing in dbt reads it yet.
+A second platform exists as of 2026-07-07: the CBS museum league (read-only forever) lands raw data under gitignored `data/cbs_raw/` — `extract/cbs_capture.py` preserves the perishable 2026 fantasy layer via the API (period-grain rosters with deployed slots and started/sat, period standings, transactions, config), `extract/cbs_backfill.py` holds the completed 2004–2025 per-game archive, and `extract/cbs_ui_capture.py` holds the site-UI league-history archive the API denies (standings + transactions back to 2001, year-end roster reports 2003–2025, drafts 2017+, franchise-overview pages; cookie-authenticated raw HTML). File-landed only: warehouse load + staging wait on the format-abstraction work (MLB-43); nothing in dbt reads it yet.
 
 **Mental model:**
 - Extract is the only place that talks to ESPN. It's brittle (vendor wrapper has bugs we work around); changes here usually mean a re-extract.
@@ -44,6 +44,7 @@ espn-league-manager/
 │   ├── extract.py                       # ESPN extract entry point
 │   ├── cbs_capture.py                   # CBS 2026 fantasy-layer capture → data/cbs_raw/ (museum rule)
 │   ├── cbs_backfill.py                  # CBS 2004–2025 per-game gamelog archive
+│   ├── cbs_ui_capture.py                # CBS site-UI history archive (standings/txns 2001+, rosters 2003+, drafts)
 │   └── dump_stats_map.py                # Diagnostic for ESPN's stat ID map
 ├── dbt_league/
 │   ├── dbt_project.yml                  # Seed column types declared here

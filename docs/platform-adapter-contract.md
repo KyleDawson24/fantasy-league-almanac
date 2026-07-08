@@ -134,10 +134,17 @@ serves, verified, not assumed (the CBS archive-depth question).
   it silently scopes to the token's own team), transactions live at
   `league/transaction-list/log` (plain `league/transactions` 404s), and
   cross-season `point` 400s or clamps to current — rollover still
-  destroys the layer, so the capture cadence still matters. Adapter
+  destroys the layer, so the capture cadence still matters. The site UI
+  is a separate, richer surface (2026-07-08): cookie-authenticated
+  league-history pages serve standings and transaction logs back to
+  2001 (activate/reserve moves included — the active set for a points
+  league), year-end roster reports 2003+, drafts 2017+, and
+  per-franchise overview pages with rename-stable team ids; all
+  captured as raw HTML, parse layer with the format work. Adapter
   shape: gamelog + season backfill, forward-capture the fantasy layer
   before rollover; F7 required and satisfiable; F6 calendar-only
-  (periods with empty matchup arrays); F9 absent; F10 a rolling window.
+  (periods with empty matchup arrays); F9 absent; F10 a rolling window
+  at the API, full history on the UI surface.
 - **Yahoo** (MLB-14): official OAuth2; expected to satisfy F1–F8;
   archive depth TBD.
 - **Fantrax** (MLB-42): league-ID access; deployed-slot availability at

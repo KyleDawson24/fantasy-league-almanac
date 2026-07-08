@@ -69,6 +69,18 @@ for the ESPN league.
     exactly 216.25) — re-anchored under review, same phenomenon that
     originally pinned the score-sum marts to tables.
 
+- **CBS raw archives loaded into the warehouse (MLB-59, API-JSON
+  half).** `extract/cbs_load.py` lands `data/cbs_raw/bsb/` as six
+  `raw.cbs_*` tables — rosters, standings periods, transaction and
+  config snapshots, season stats, and per-game gamelog rows (556,493
+  verbatim game objects from all 3,809 player-season files, empty
+  captures represented by sentinel rows) — every row carrying
+  `league_key` plus envelope lineage (endpoint, params, captured_at,
+  source_path). Staged-NDJSON `COPY INTO` mechanics, idempotent by
+  source path, `--dry-run`/`--force`/`--families` flags; payloads stay
+  untouched VARIANTs (staging owns interpretation). The parsed-UI half
+  of the loader waits on the HTML parsers.
+
 ### Changed
 
 - **Advanced Standings tab reworked (v2.0 feature #1).** The standings

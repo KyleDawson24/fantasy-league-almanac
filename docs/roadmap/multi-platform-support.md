@@ -119,7 +119,13 @@ render differently and are owned by the MLB-44 API capture; the
 HTML→structured parse layer rides MLB-43) · MLB-49 almanac Sheet
 (maintainer) · MLB-50 recap scope decision (maintainer) · MLB-51 lore
 file (maintainer) · MLB-52 rollover checklist (due ~2026-09-20) ·
-MLB-53..56 UI parsers · MLB-59 warehouse loader · MLB-60 stat
+MLB-53..56 UI parsers · MLB-59 warehouse loader (API-JSON half LANDED
+2026-07-08: `extract/cbs_load.py`, six `raw.cbs_*` tables with
+league_key + envelope lineage — 105 roster dates, 16 periods, 3
+transaction snapshots, 15 config snapshots, 22 season-stat files,
+556,493 verbatim per-game gamelog rows from all 3,809 player-season
+files; idempotency + spot checks proven; UI-rows half blocked on the
+MLB-53..56 parsers) · MLB-60 stat
 crosswalk · MLB-61 staging · MLB-62 FPTS recompute · MLB-63
 reconstruction · MLB-64 dim_franchise · MLB-65 marts · MLB-66 almanac
 v1 · MLB-14 Yahoo access spike ·

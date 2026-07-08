@@ -1,8 +1,9 @@
-# Platform adapter contract — v1 (PROPOSED)
+# Platform adapter contract — v1 (ACCEPTED)
 
-Status: **draft for maintainer review** (MLB-3). Once accepted, the ESPN
-extract is refactored to be adapter #1 of this contract with goldens
-held byte-identical, and every later platform (CBS, Yahoo, Fantrax)
+Status: **v1 accepted as written** (MLB-3, maintainer review 2026-07-07
+per offline chat). Next on the ticket: the ESPN extract refactored to be
+adapter #1 of this contract with goldens held byte-identical, plus
+per-adapter contract tests; every later platform (CBS, Yahoo, Fantrax)
 implements the same surface.
 
 ## The idea

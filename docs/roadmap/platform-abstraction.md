@@ -7,10 +7,12 @@ the place the dbt investment earns its keep: sources with nothing in common
 but the sport, converging at the staging boundary into identical readable
 outputs.
 
-Contract draft v1 (PROPOSED, 2026-07-07):
+Contract v1 (ACCEPTED 2026-07-07, MLB-3):
 [docs/platform-adapter-contract.md](../platform-adapter-contract.md) —
 ten feeds with grains, format-conditional rules, and per-adapter
-conformance requirements; maintainer review gates acceptance (MLB-3).
+conformance requirements. Accepted as written per offline chat; still
+open on the ticket: ESPN refactored as adapter #1 (goldens held
+byte-identical) + per-adapter contract tests.
 
 Four workstreams (Linear milestones):
 
@@ -40,6 +42,13 @@ pipeline assumes H2H everywhere (matchup grain, opponents, W/L, the
 recap's narrative). Format becomes a settings-derived dimension with
 format-conditional models; the player-day production core is already
 format-agnostic and is the sensible first slice.
+
+Scope guardrail (Per Offline Chat, 2026-07-07): non-H2H support is a
+**bounded swing, not a commitment** — descoping it entirely would be
+the PM-correct call; it stays in scope for the CBS league's sake, but
+at the first serious headwinds the default is to stop and re-ask, not
+to dig. Format-conditional complexity must not leak costs into the
+H2H core.
 
 **Depends on:** nothing — it is the foundation for Multi-Platform Support and
 the Self-Serve Web App.

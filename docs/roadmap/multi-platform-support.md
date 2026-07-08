@@ -71,6 +71,8 @@ roster dates, 16 standings periods, full 197-entry transaction window;
 cadence decided Per Offline Chat 2026-07-07: rides the ESPN weekly
 runbook as its last step — SETUP.md documents it, and the MLB-31
 runner inherits it as a non-fatal step) · MLB-45
-gamelog backfill (in progress 2026-07-07) · MLB-46 retrospective (end
+gamelog backfill (2004–2025 COMPLETE + verified 2026-07-07: 3,809
+player-season gamelogs, 237,181 player-games, one evidenced tombstone;
+2026 sweeps at rollover) · MLB-46 retrospective (end
 of season) · MLB-14 Yahoo access spike · MLB-42 Fantrax access spike
 (needs a dummy league)

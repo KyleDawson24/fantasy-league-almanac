@@ -152,3 +152,89 @@ seeds:
         description: 'Player''s real name. Stored for human reference when editing the seed; not actually joined downstream (the join is by player_id).'
       - name: nickname
         description: 'Display override. When set, becomes display_name on stg_box_scores and propagates through all subsequent models.'
+
+  - name: canonical_stats
+    description: >
+      The canonical stat catalog (MLB-4 / MLB-60): platform-neutral stat
+      keys every platform vocabulary maps INTO. Keys are project-owned
+      readable slugs (Per Offline Chat 2026-07-08) -- not any platform's
+      vocabulary and not Baseball-Reference's. bref_key rides as a
+      nullable ALIGNMENT column: populated for stats with a real-world
+      identity (the join surface for external data), NULL for
+      fantasy-layer constructs (quality_starts, holds,
+      inherited_runners_stranded, platform_fantasy_points) -- which is
+      the honest split a bref-primary-key scheme would have papered
+      over. Room for an mlbam_key sibling later. The ESPN vocabulary
+      remaps onto this catalog under MLB-4; CBS maps via cbs_stat_map.
+    columns:
+      - name: canonical_key
+        description: 'Primary key. Project-owned readable slug (doubles, earned_runs, quality_starts).'
+        tests:
+          - not_null
+          - unique
+      - name: display_name
+        description: 'Human label for consumer surfaces.'
+        tests:
+          - not_null
+      - name: stat_category
+        description: 'hitting | pitching | fielding | general | scoring. Fielding is a first-class category here (CBS reports it; ESPN''s league doesn''t) -- the convergence surface widens when a platform needs it.'
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['hitting', 'pitching', 'fielding', 'general', 'scoring']
+      - name: bref_key
+        description: 'Baseball-Reference column abbreviation for stats with a real-world identity; the alignment point for any external-data join. NULL = fantasy-layer construct with no bref counterpart. bref table context disambiguates reused abbreviations (batting SO vs pitching SO) together with stat_category.'
+      - name: is_derived
+        description: 'True for rates/composites computed from other canonical stats rather than accumulated.'
+
+  - name: cbs_stat_map
+    description: >
+      CBS vocabulary -> canonical stat keys (MLB-60): every stat
+      abbreviation observed in the CBS archives (gamelog + season-stats
+      key census over the loaded warehouse rows, 2004-2025) plus every
+      scored category in the 2026 scoring_rules snapshot. Full-vocabulary
+      accounting: keys that are NOT crosswalked stats are still rows,
+      dispositioned as metadata (the GP-by-position family -- staging's
+      era-true position signal), derived_composite (CBS display
+      arithmetic like SDT = H - HR), vestigial (present-but-always-zero
+      keys), or unknown. `.ytd` running-counter keys are excluded by
+      rule: derived, dropped-or-validated at staging, never crosswalked.
+
+      KNOWN GAP (2026-07-08): the captured feeds contain NO pitching
+      stat keys -- the 11 scored pitching categories map from their
+      scoring_rules names with appears_in='scoring_rules' until the
+      pitching capture variant lands (see MLB-45).
+    columns:
+      - name: cbs_key
+        description: 'Primary key. The stat abbreviation exactly as CBS spells it in feeds/rules.'
+        tests:
+          - not_null
+          - unique
+      - name: canonical_key
+        description: 'FK to canonical_stats. Populated iff disposition=mapped.'
+        tests:
+          - relationships:
+              arguments:
+                to: ref('canonical_stats')
+                field: canonical_key
+      - name: stat_category
+        description: 'hitting | pitching | fielding | general | scoring | metadata | unknown.'
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['hitting', 'pitching', 'fielding', 'general', 'scoring', 'metadata', 'unknown']
+      - name: disposition
+        description: 'mapped (crosswalked to a canonical stat) | metadata (position-signal columns staging consumes directly) | derived_composite (CBS display arithmetic; derive in marts if wanted) | vestigial (present but always zero/constant in every captured row) | unknown (undocumented; decode before consuming).'
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['mapped', 'metadata', 'derived_composite', 'vestigial', 'unknown']
+      - name: in_scoring_rules_2026
+        description: 'True for the 16 categories the 2026 scoring_rules snapshot scores. Era rules may differ; MLB-62''s reconciliation residuals are the detector.'
+      - name: points_2026
+        description: 'points-per-unit from the 2026 scoring_rules snapshot; NULL when unscored.'
+      - name: appears_in
+        description: 'Pipe-joined surfaces the key was observed on: gamelog | season | scoring_rules.'
+      - name: needs_confirmation
+        description: 'True where the mapping or formula is a best-effort read of undocumented CBS vocabulary; confirm before a consumer leans on it.'

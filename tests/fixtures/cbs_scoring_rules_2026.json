@@ -1,0 +1,8 @@
+{
+  "_source": "CBS_CONFIG scoring_rules snapshot, captured 2026-07-08 (payload.body.scoring_rules.categories); league bsb, system=points",
+  "categories": {
+    "SB": 1, "BB": 1, "RBI": 1, "TB": 1, "R": 1,
+    "IRSTR": 2, "HD": 6, "ER": -2, "S": 8, "HA": -1,
+    "W": 10, "INN": 3, "CG": 5, "BBI": -1, "K": 1, "QS": 4
+  }
+}

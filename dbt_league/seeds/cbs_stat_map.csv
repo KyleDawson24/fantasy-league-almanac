@@ -1,0 +1,92 @@
+cbs_key,canonical_key,stat_category,disposition,in_scoring_rules_2026,points_2026,appears_in,needs_confirmation,notes
+G,games_played,general,mapped,false,,gamelog|season,false,Max 2 on daily grain (doubleheaders)
+GST,games_started_field,general,mapped,false,,gamelog|season,false,
+FPTS,platform_fantasy_points,scoring,mapped,false,,season,false,Season grain only -- CBS serves no per-game FPTS; MLB-62 recomputes and reconciles to this anchor
+AB,at_bats,hitting,mapped,false,,gamelog|season,false,
+H,hits,hitting,mapped,false,,gamelog|season,false,
+1B,singles,hitting,mapped,false,,gamelog|season,false,
+2B,doubles,hitting,mapped,false,,gamelog|season,false,
+3B,triples,hitting,mapped,false,,gamelog|season,false,
+HR,home_runs,hitting,mapped,false,,gamelog|season,false,
+GSHR,grand_slams,hitting,mapped,false,,gamelog|season,false,
+R,runs,hitting,mapped,true,1,gamelog|season|scoring_rules,false,Scored +1
+RBI,rbi,hitting,mapped,true,1,gamelog|season|scoring_rules,false,Scored +1
+BB,walks,hitting,mapped,true,1,gamelog|season|scoring_rules,false,Scored +1 (batter walks; the rules' BB is batting-group)
+IB,intentional_walks,hitting,mapped,false,,gamelog|season,false,
+KO,strikeouts_batting,hitting,mapped,false,,gamelog|season,false,Batter strikeouts (max 5/game in census); the scored pitching K is a separate rules key
+HP,hit_by_pitch,hitting,mapped,false,,gamelog|season,false,
+SF,sac_flies,hitting,mapped,false,,gamelog|season,false,
+SH,sac_bunts,hitting,mapped,false,,gamelog|season,false,
+SB,stolen_bases,hitting,mapped,true,1,gamelog|season|scoring_rules,false,Scored +1
+CS,caught_stealing,hitting,mapped,false,,gamelog|season,false,
+SBA,sb_attempts,hitting,mapped,false,,gamelog|season,false,SB + CS (feed-reported)
+GDP,gidp,hitting,mapped,false,,gamelog|season,false,
+TB,total_bases,hitting,mapped,true,1,gamelog|season|scoring_rules,false,Scored +1
+XBH,extra_base_hits,hitting,mapped,false,,gamelog|season,false,
+LOB,left_on_base,hitting,mapped,false,,gamelog|season,false,
+CI,catcher_interference_drawn,hitting,mapped,false,,gamelog|season,false,29 games in 2025 census -- batter-drawn CI
+ABRISP,at_bats_risp,hitting,mapped,false,,gamelog|season,false,
+HRISP,hits_risp,hitting,mapped,false,,gamelog|season,false,Hits with RISP (NOT HR-related; census avg 1.09 tracks hit counts)
+BA,batting_avg,hitting,mapped,false,,gamelog|season,false,Derived rate; staging recomputes and may validate against the feed value
+BARISP,batting_avg_risp,hitting,mapped,false,,gamelog|season,false,Derived rate
+OBP,on_base_pct,hitting,mapped,false,,gamelog|season,false,Derived rate
+SLG,slugging_pct,hitting,mapped,false,,gamelog|season,false,Derived rate
+OPS,ops,hitting,mapped,false,,gamelog|season,false,Derived rate
+SBPCT,sb_pct,hitting,mapped,false,,gamelog|season,false,Derived rate; feed reports 0-100 scale
+W,wins,pitching,mapped,true,10,scoring_rules,false,Scored +10. NO pitching keys exist in the captured feeds -- the capture's pitching variant is an open gap (see MLB-45 2026-07-08 comment)
+S,saves,pitching,mapped,true,8,scoring_rules,false,Scored +8; feed key pending pitching capture
+HD,holds,pitching,mapped,true,6,scoring_rules,false,Scored +6; feed key pending pitching capture
+CG,complete_games,pitching,mapped,true,5,scoring_rules,false,Scored +5; feed key pending pitching capture
+QS,quality_starts,pitching,mapped,true,4,scoring_rules,false,Scored +4; feed key pending pitching capture
+INN,innings_pitched,pitching,mapped,true,3,scoring_rules,false,Scored +3/inning; feed key pending pitching capture
+IRSTR,inherited_runners_stranded,pitching,mapped,true,2,scoring_rules,false,Scored +2; feed key pending pitching capture
+K,strikeouts_pitching,pitching,mapped,true,1,scoring_rules,false,Scored +1; rules-group Pitching disambiguates from batter KO
+HA,hits_allowed,pitching,mapped,true,-1,scoring_rules,false,Scored -1; feed key pending pitching capture
+BBI,walks_issued,pitching,mapped,true,-1,scoring_rules,false,Scored -1; feed key pending pitching capture
+ER,earned_runs,pitching,mapped,true,-2,scoring_rules,false,Scored -2; feed key pending pitching capture
+PO,putouts,fielding,mapped,false,,gamelog|season,false,
+AST,assists_fielding,fielding,mapped,false,,gamelog|season,false,
+E,errors,fielding,mapped,false,,gamelog|season,false,
+FC,fielding_chances,fielding,mapped,false,,gamelog|season,false,PO+AST+E (verified arithmetically in the 2025 census)
+FPCT,fielding_pct,fielding,mapped,false,,gamelog|season,false,Derived rate
+DPT,double_plays_turned,fielding,mapped,false,,gamelog|season,false,
+TPT,triple_plays_turned,fielding,mapped,false,,gamelog|season,false,4 games in 2025 census
+OFAST,outfield_assists,fielding,mapped,false,,gamelog|season,false,
+CSC,catcher_caught_stealing,fielding,mapped,false,,gamelog|season,false,
+PBC,passed_balls,fielding,mapped,false,,gamelog|season,false,
+GP1B,,metadata,metadata,false,,gamelog|season,false,Games-at-position family: era-true position signal consumed by staging for position derivation; not a crosswalked stat
+GP2B,,metadata,metadata,false,,gamelog|season,false,Games at 2B
+GP3B,,metadata,metadata,false,,gamelog|season,false,Games at 3B
+GPSS,,metadata,metadata,false,,gamelog|season,false,Games at SS
+GPC,,metadata,metadata,false,,gamelog|season,false,Games at C
+GPLF,,metadata,metadata,false,,gamelog|season,false,Games at LF
+GPCF,,metadata,metadata,false,,gamelog|season,false,Games at CF
+GPRF,,metadata,metadata,false,,gamelog|season,false,Games at RF
+GPOF,,metadata,metadata,false,,gamelog|season,false,Games at OF (generic)
+GPDH,,metadata,metadata,false,,gamelog|season,false,Games at DH
+GPCI,,metadata,metadata,false,,gamelog|season,false,Games at corner infield
+GPMI,,metadata,metadata,false,,gamelog|season,false,Games at middle infield
+GPPH,,metadata,metadata,false,,gamelog|season,false,Games as pinch hitter
+GPPR,,metadata,metadata,false,,gamelog|season,false,Games as pinch runner
+GPP,,metadata,metadata,false,,gamelog|season,false,Games as pitcher (only 109 rows in 2025 -- two-way appearances; the pitching feed gap rides MLB-45)
+GPRP,,metadata,metadata,false,,gamelog|season,false,Games as relief pitcher
+DT,,hitting,derived_composite,false,,gamelog|season,false,2B + 3B (verified arithmetically); derive in marts if ever wanted
+SDT,,hitting,derived_composite,false,,gamelog|season,false,1B + 2B + 3B = H - HR (verified arithmetically)
+SB-CS,,hitting,derived_composite,false,,gamelog|season,false,Net steals; ESPN-side equivalent already derived at mart layer
+RBI-HR,,hitting,derived_composite,false,,gamelog|season,false,RBI excluding own HR
+TPA,,hitting,derived_composite,false,,gamelog|season,true,Plate-appearance-shaped composite; exact formula unconfirmed (census avg 0.79 does not match AB+BB+HBP+SF)
+BP,,hitting,derived_composite,false,,gamelog|season,true,Bases-produced-shaped composite; formula unconfirmed
+BPA,,hitting,derived_composite,false,,gamelog|season,true,Per-appearance composite; formula unconfirmed
+RP,,hitting,derived_composite,false,,gamelog|season,true,Runs-produced-shaped composite (~R + RBI - HR); formula unconfirmed
+RPA,,hitting,derived_composite,false,,gamelog|season,true,Per-appearance composite; formula unconfirmed
+RdAB,,hitting,derived_composite,false,,gamelog|season,true,Runs-driven-per-AB-shaped composite; formula unconfirmed
+COM,,hitting,derived_composite,false,,gamelog|season,true,Takes negative values (census avg -0.47); plus/minus-shaped composite; formula unconfirmed
+BFP,,pitching,vestigial,false,,gamelog|season,false,Present but all-zero in every captured row (pitching feed gap)
+K-BB,,pitching,vestigial,false,,gamelog|season,false,All-zero in every captured row
+W-L,,pitching,vestigial,false,,gamelog|season,false,All-zero in every captured row
+NW,,pitching,vestigial,false,,gamelog|season,false,All-zero in every captured row
+SHD,,pitching,vestigial,false,,gamelog|season,false,All-zero in every captured row
+SN,,metadata,vestigial,false,,gamelog|season,false,Constant = the season year (a season marker; not a stat)
+MLBST,,metadata,vestigial,false,,gamelog|season,false,Always zero/null in captured rows
+PPos,,metadata,vestigial,false,,gamelog|season,false,Always null in captured rows (primary-position placeholder)
+_,,unknown,unknown,false,,gamelog|season,true,Undocumented key (avg 1.8 / max 4 on played games); decode before any consumer touches it

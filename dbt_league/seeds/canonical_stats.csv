@@ -1,0 +1,56 @@
+canonical_key,display_name,stat_category,bref_key,is_derived,notes
+games_played,Games Played,general,G,false,Doubleheader-aware on daily grains (0/1/2)
+games_started_field,Games Started,general,GS,false,Games started in the field / lineup
+platform_fantasy_points,Platform Fantasy Points,scoring,,false,The platform's own computed fantasy points (ESPN appliedTotal / CBS FPTS) -- the platform_* lens
+at_bats,At Bats,hitting,AB,false,
+hits,Hits,hitting,H,false,
+singles,Singles,hitting,1B,false,bref derives 1B = H-2B-3B-HR; platforms report it directly
+doubles,Doubles,hitting,2B,false,
+triples,Triples,hitting,3B,false,
+home_runs,Home Runs,hitting,HR,false,
+grand_slams,Grand Slams,hitting,,false,bref tabulates grand slams only in splits; no standard-table column
+runs,Runs,hitting,R,false,
+rbi,Runs Batted In,hitting,RBI,false,
+walks,Walks,hitting,BB,false,Batter bases on balls
+intentional_walks,Intentional Walks,hitting,IBB,false,
+strikeouts_batting,Strikeouts (Batting),hitting,SO,false,Batter strikeouts; distinct canonical from strikeouts_pitching
+hit_by_pitch,Hit By Pitch,hitting,HBP,false,Batter HBP; ESPN id 12. Pitcher-side HBP is a separate canonical when needed
+sac_flies,Sacrifice Flies,hitting,SF,false,
+sac_bunts,Sacrifice Bunts,hitting,SH,false,
+stolen_bases,Stolen Bases,hitting,SB,false,
+caught_stealing,Caught Stealing,hitting,CS,false,
+sb_attempts,Stolen Base Attempts,hitting,,true,SB + CS
+gidp,Grounded Into Double Plays,hitting,GDP,false,
+total_bases,Total Bases,hitting,TB,false,
+extra_base_hits,Extra-Base Hits,hitting,,true,2B + 3B + HR; no bref standard-table column
+left_on_base,Left On Base,hitting,LOB,false,
+catcher_interference_drawn,Catcher's Interference (Drawn),hitting,,false,Batter reaches on catcher's interference
+at_bats_risp,At Bats w/ RISP,hitting,,false,Split stat; bref carries RISP only in splits pages
+hits_risp,Hits w/ RISP,hitting,,false,Split stat
+batting_avg,Batting Average,hitting,BA,true,H / AB
+batting_avg_risp,Batting Average w/ RISP,hitting,,true,hits_risp / at_bats_risp
+on_base_pct,On-Base Percentage,hitting,OBP,true,
+slugging_pct,Slugging Percentage,hitting,SLG,true,
+ops,On-Base Plus Slugging,hitting,OPS,true,
+sb_pct,Stolen Base Percentage,hitting,,true,SB / (SB + CS)
+wins,Wins,pitching,W,false,
+saves,Saves,pitching,SV,false,
+holds,Holds,pitching,,false,Semi-standard; bref shows holds only in reliever pages (no standard-table column)
+earned_runs,Earned Runs,pitching,ER,false,
+hits_allowed,Hits Allowed,pitching,H,false,bref pitching-table H; platform vocabularies disambiguate (CBS HA / ESPN P_H)
+walks_issued,Walks Issued,pitching,BB,false,bref pitching-table BB; platform vocabularies disambiguate (CBS BBI / ESPN P_BB)
+strikeouts_pitching,Strikeouts (Pitching),pitching,SO,false,bref pitching-table SO
+quality_starts,Quality Starts,pitching,,false,Fantasy construct; derivable from bref data but not a bref column
+complete_games,Complete Games,pitching,CG,false,
+innings_pitched,Innings Pitched,pitching,IP,false,Platforms score whole innings (CBS INN); thirds handling is a staging concern
+inherited_runners_stranded,Inherited Runners Stranded,pitching,,false,Reliever construct; bref carries inherited-runner data only on reliever pages
+putouts,Putouts,fielding,PO,false,
+assists_fielding,Assists,fielding,A,false,
+errors,Errors,fielding,E,false,
+fielding_chances,Fielding Chances,fielding,Ch,true,PO + A + E
+fielding_pct,Fielding Percentage,fielding,Fld%,true,(PO + A) / chances
+double_plays_turned,Double Plays Turned,fielding,,false,Involvement in DPs turned; bref DP lives on position-specific tables
+triple_plays_turned,Triple Plays Turned,fielding,,false,
+outfield_assists,Outfield Assists,fielding,,false,Position-split of assists
+catcher_caught_stealing,Runners Caught Stealing (Catcher),fielding,CS,false,bref catcher-table CS; category disambiguates from the batter canonical
+passed_balls,Passed Balls,fielding,PB,false,

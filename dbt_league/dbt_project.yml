@@ -92,6 +92,25 @@ seeds:
         player_id: integer
         player_name: varchar
         nickname: varchar
+    canonical_stats:
+      +column_types:
+        canonical_key: varchar
+        display_name: varchar
+        stat_category: varchar
+        bref_key: varchar
+        is_derived: boolean
+        notes: varchar
+    cbs_stat_map:
+      +column_types:
+        cbs_key: varchar
+        canonical_key: varchar
+        stat_category: varchar
+        disposition: varchar
+        in_scoring_rules_2026: boolean
+        points_2026: float
+        appears_in: varchar
+        needs_confirmation: boolean
+        notes: varchar
     owner_nicknames:
       +column_types:
         # All varchar so the optional preferred_name (often blank) isn't

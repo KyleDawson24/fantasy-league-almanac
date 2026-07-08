@@ -24,12 +24,19 @@ import argparse
 import csv
 import json
 import os
+import sys
 from datetime import date, timedelta
+from pathlib import Path
 
 import requests
 from dotenv import load_dotenv
 from espn_api.baseball import League, constant as espn_baseball_constant
 import snowflake.connector
+
+# League registry (MLB-57): repo root on sys.path so the shared
+# config/ namespace package resolves when this runs as a script.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from config.league_registry import LeagueRegistryError, get_league, league_keys
 
 
 # ---------------------------------------------------------------------------
@@ -489,12 +496,25 @@ def serialize_box_scores(league, scoring_period, matchup_period):
     return {"matchups": matchups, "free_agents": free_agents}
 
 
-def load_box_scores_to_snowflake(conn, records, matchup_period, year):
+def ensure_league_key_column(cursor, table):
+    """Idempotent schema self-heal (MLB-57): every RAW table carries a
+    league_key column. Pre-registry installs created these tables without
+    it; ADD COLUMN IF NOT EXISTS upgrades them in place on the next run.
+    Legacy rows are NULL until tools/migrate_raw_league_key.py stamps
+    them (all pre-registry rows are by definition the default ESPN
+    league's). The payload columns stay verbatim -- league_key is load
+    metadata, not a payload mutation."""
+    cursor.execute(
+        f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS league_key VARCHAR"
+    )
+
+
+def load_box_scores_to_snowflake(conn, records, matchup_period, year, league_key):
     """
     Insert raw box score JSON records into Snowflake.
     Creates the target table if it doesn't exist.
-    Deletes existing data for this matchup_period + year before inserting,
-    making re-runs fully idempotent.
+    Deletes existing data for this league + matchup_period + year before
+    inserting, making re-runs fully idempotent.
     """
     cursor = conn.cursor()
 
@@ -505,28 +525,39 @@ def load_box_scores_to_snowflake(conn, records, matchup_period, year):
                 scoring_period  INTEGER,
                 matchup_period  INTEGER,
                 raw_json        VARIANT,
-                loaded_at       TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()
+                loaded_at       TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP(),
+                league_key      VARCHAR
             )
         """)
+        ensure_league_key_column(cursor, "BOX_SCORES")
 
-        # Scoped delete: only remove this matchup period for this season year.
-        # Without the year filter, re-running 2025 MP1 would wipe 2026 MP1.
+        # Scoped delete: only remove this matchup period for this season year
+        # and this league. Without the year filter, re-running 2025 MP1 would
+        # wipe 2026 MP1; without the league filter, one league's re-extract
+        # would wipe another's rows at the same (year, MP) coordinates. The
+        # IS NULL arm self-heals rows that predate the league_key migration
+        # (all such rows belong to the default ESPN league).
         cursor.execute(
-            "DELETE FROM BOX_SCORES WHERE matchup_period = %s AND season_year = %s",
-            (matchup_period, year)
+            """
+            DELETE FROM BOX_SCORES
+            WHERE matchup_period = %s AND season_year = %s
+              AND (league_key = %s OR league_key IS NULL)
+            """,
+            (matchup_period, year, league_key)
         )
 
         for record in records:
             cursor.execute(
                 """
-                INSERT INTO BOX_SCORES (season_year, scoring_period, matchup_period, raw_json)
-                SELECT %s, %s, %s, PARSE_JSON(%s)
+                INSERT INTO BOX_SCORES (season_year, scoring_period, matchup_period, raw_json, league_key)
+                SELECT %s, %s, %s, PARSE_JSON(%s), %s
                 """,
                 (
                     year,
                     record["scoring_period"],
                     record["matchup_period"],
                     json.dumps(record["data"]),
+                    league_key,
                 ),
             )
 
@@ -537,7 +568,7 @@ def load_box_scores_to_snowflake(conn, records, matchup_period, year):
         cursor.close()
 
 
-def extract_matchup_period(conn, league, matchup_period, year):
+def extract_matchup_period(conn, league, matchup_period, year, league_key):
     """
     Extract all scoring periods for a matchup period and load to Snowflake.
     """
@@ -556,7 +587,7 @@ def extract_matchup_period(conn, league, matchup_period, year):
             "data": sp_data,
         })
 
-    load_box_scores_to_snowflake(conn, records, matchup_period, year)
+    load_box_scores_to_snowflake(conn, records, matchup_period, year, league_key)
 
 
 def get_recent_matchup_periods(year, lookback_days=21):
@@ -627,13 +658,14 @@ def fetch_scoring_settings(year):
     return scoring_items
 
 
-def load_scoring_settings_to_snowflake(conn, scoring_items, year):
+def load_scoring_settings_to_snowflake(conn, scoring_items, year, league_key):
     """
     Append scoring settings as a new row in RAW.SCORING_SETTINGS.
 
     Uses append-only pattern (not delete+insert) so historical snapshots
-    are preserved. The staging model picks the latest row per season via
-    ROW_NUMBER() OVER (PARTITION BY season_year ORDER BY extracted_at DESC).
+    are preserved. The staging model picks the latest row per league +
+    season via ROW_NUMBER() OVER (PARTITION BY league_key, season_year
+    ORDER BY extracted_at DESC).
 
     This follows the ELT principle: extraction captures everything,
     transformation decides which version to use.
@@ -645,16 +677,18 @@ def load_scoring_settings_to_snowflake(conn, scoring_items, year):
             CREATE TABLE IF NOT EXISTS SCORING_SETTINGS (
                 season_year     INTEGER,
                 raw_json        VARIANT,
-                extracted_at    TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()
+                extracted_at    TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP(),
+                league_key      VARCHAR
             )
         """)
+        ensure_league_key_column(cursor, "SCORING_SETTINGS")
 
         cursor.execute(
             """
-            INSERT INTO SCORING_SETTINGS (season_year, raw_json)
-            SELECT %s, PARSE_JSON(%s)
+            INSERT INTO SCORING_SETTINGS (season_year, raw_json, league_key)
+            SELECT %s, PARSE_JSON(%s), %s
             """,
-            (year, json.dumps(scoring_items)),
+            (year, json.dumps(scoring_items), league_key),
         )
 
         conn.commit()
@@ -664,7 +698,7 @@ def load_scoring_settings_to_snowflake(conn, scoring_items, year):
         cursor.close()
 
 
-def load_roster_settings_to_snowflake(conn, roster_settings, year):
+def load_roster_settings_to_snowflake(conn, roster_settings, year, league_key):
     """
     Append roster settings as a new row in RAW.ROSTER_SETTINGS.
 
@@ -680,16 +714,18 @@ def load_roster_settings_to_snowflake(conn, roster_settings, year):
             CREATE TABLE IF NOT EXISTS ROSTER_SETTINGS (
                 season_year     INTEGER,
                 raw_json        VARIANT,
-                extracted_at    TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()
+                extracted_at    TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP(),
+                league_key      VARCHAR
             )
         """)
+        ensure_league_key_column(cursor, "ROSTER_SETTINGS")
 
         cursor.execute(
             """
-            INSERT INTO ROSTER_SETTINGS (season_year, raw_json)
-            SELECT %s, PARSE_JSON(%s)
+            INSERT INTO ROSTER_SETTINGS (season_year, raw_json, league_key)
+            SELECT %s, PARSE_JSON(%s), %s
             """,
-            (year, json.dumps(roster_settings)),
+            (year, json.dumps(roster_settings), league_key),
         )
 
         conn.commit()
@@ -724,12 +760,13 @@ def fetch_team_owners(year):
     return rows
 
 
-def load_team_owners_to_snowflake(conn, team_owners, year):
+def load_team_owners_to_snowflake(conn, team_owners, year, league_key):
     """Append the season's team -> owner mapping as a row in RAW.TEAM_OWNERS.
 
     Append-only snapshot (mirrors SCORING_SETTINGS / ROSTER_SETTINGS); the
-    staging model picks the latest row per season via extracted_at. The
-    full list is stored as one VARIANT payload per (season, extract).
+    staging model picks the latest row per league + season via
+    extracted_at. The full list is stored as one VARIANT payload per
+    (league, season, extract).
     """
     cursor = conn.cursor()
 
@@ -738,16 +775,18 @@ def load_team_owners_to_snowflake(conn, team_owners, year):
             CREATE TABLE IF NOT EXISTS TEAM_OWNERS (
                 season_year     INTEGER,
                 raw_json        VARIANT,
-                extracted_at    TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()
+                extracted_at    TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP(),
+                league_key      VARCHAR
             )
         """)
+        ensure_league_key_column(cursor, "TEAM_OWNERS")
 
         cursor.execute(
             """
-            INSERT INTO TEAM_OWNERS (season_year, raw_json)
-            SELECT %s, PARSE_JSON(%s)
+            INSERT INTO TEAM_OWNERS (season_year, raw_json, league_key)
+            SELECT %s, PARSE_JSON(%s), %s
             """,
-            (year, json.dumps(team_owners)),
+            (year, json.dumps(team_owners), league_key),
         )
 
         conn.commit()
@@ -792,12 +831,13 @@ def fetch_draft(year):
     return rows
 
 
-def load_draft_to_snowflake(conn, draft_rows, year):
+def load_draft_to_snowflake(conn, draft_rows, year, league_key):
     """Append the season's draft board as a row in RAW.DRAFT_PICKS.
 
     Append-only snapshot (mirrors TEAM_OWNERS / SCORING_SETTINGS); the
-    staging model picks the latest row per season via extracted_at. The
-    full pick list is stored as one VARIANT payload per (season, extract).
+    staging model picks the latest row per league + season via
+    extracted_at. The full pick list is stored as one VARIANT payload per
+    (league, season, extract).
     """
     cursor = conn.cursor()
 
@@ -806,16 +846,18 @@ def load_draft_to_snowflake(conn, draft_rows, year):
             CREATE TABLE IF NOT EXISTS DRAFT_PICKS (
                 season_year     INTEGER,
                 raw_json        VARIANT,
-                extracted_at    TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()
+                extracted_at    TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP(),
+                league_key      VARCHAR
             )
         """)
+        ensure_league_key_column(cursor, "DRAFT_PICKS")
 
         cursor.execute(
             """
-            INSERT INTO DRAFT_PICKS (season_year, raw_json)
-            SELECT %s, PARSE_JSON(%s)
+            INSERT INTO DRAFT_PICKS (season_year, raw_json, league_key)
+            SELECT %s, PARSE_JSON(%s), %s
             """,
-            (year, json.dumps(draft_rows)),
+            (year, json.dumps(draft_rows), league_key),
         )
 
         conn.commit()
@@ -825,35 +867,35 @@ def load_draft_to_snowflake(conn, draft_rows, year):
         cursor.close()
 
 
-def extract_scoring_settings(conn, year):
+def extract_scoring_settings(conn, year, league_key):
     """Pull scoring settings from ESPN and load to Snowflake."""
     print(f"\nScoring settings for {year}:")
     scoring_items = fetch_scoring_settings(year)
-    load_scoring_settings_to_snowflake(conn, scoring_items, year)
+    load_scoring_settings_to_snowflake(conn, scoring_items, year, league_key)
 
 
-def extract_league_settings(conn, year):
+def extract_league_settings(conn, year, league_key):
     """Pull scoring + roster settings from ESPN and load to Snowflake."""
     print(f"\nLeague settings for {year}:")
     settings = fetch_league_settings(year)
 
     scoring_items = settings["scoringSettings"]["scoringItems"]
     print(f"  Retrieved {len(scoring_items)} scoring items for {year}")
-    load_scoring_settings_to_snowflake(conn, scoring_items, year)
+    load_scoring_settings_to_snowflake(conn, scoring_items, year, league_key)
 
     roster_settings = settings["rosterSettings"]
     slot_count = len(roster_settings.get("lineupSlotCounts", {}) or {})
     print(f"  Retrieved roster settings for {year} ({slot_count} slot counts)")
-    load_roster_settings_to_snowflake(conn, roster_settings, year)
+    load_roster_settings_to_snowflake(conn, roster_settings, year, league_key)
 
     team_owners = fetch_team_owners(year)
     print(f"  Retrieved {len(team_owners)} team-owner rows for {year}")
-    load_team_owners_to_snowflake(conn, team_owners, year)
+    load_team_owners_to_snowflake(conn, team_owners, year, league_key)
 
     draft_rows = fetch_draft(year)
     if draft_rows:
         print(f"  Retrieved {len(draft_rows)} draft picks for {year}")
-        load_draft_to_snowflake(conn, draft_rows, year)
+        load_draft_to_snowflake(conn, draft_rows, year, league_key)
     else:
         print(f"  No draft found for {year} (not drafted yet) -- skipping draft load")
 
@@ -892,9 +934,34 @@ if __name__ == "__main__":
         "--settings-only", action="store_true",
         help="Extract league settings only (skip box scores)",
     )
+    parser.add_argument(
+        "--league", default=None, metavar="LEAGUE_KEY",
+        help="League registry key to extract (config/leagues.yml). "
+             "Default: the registry's default_league (the ESPN league).",
+    )
     args = parser.parse_args()
 
     year = args.year
+
+    # League resolution (MLB-57): --league picks a registry entry; the
+    # default preserves the pre-registry runbook (the ESPN league). This
+    # script IS the espn adapter -- pointing it at another platform's
+    # league is a configuration error, not a fallback.
+    try:
+        target_league = get_league(args.league)
+        if target_league.platform != "espn":
+            raise LeagueRegistryError(
+                f"extract.py implements the espn platform only; league "
+                f"'{target_league.key}' is platform '{target_league.platform}'. "
+                f"Known leagues: {', '.join(league_keys())}."
+            )
+        target_league.require_credentials()
+    except LeagueRegistryError as e:
+        raise SystemExit(f"[league registry] {e}")
+
+    league_key = target_league.key
+    print(f"League: {target_league.display_name} "
+          f"(league_key={league_key}, platform={target_league.platform})")
 
     # Determine what to extract
     do_box_scores = not args.settings_only
@@ -904,7 +971,7 @@ if __name__ == "__main__":
 
         # --- League settings ---
         if do_settings:
-            extract_league_settings(conn, year)
+            extract_league_settings(conn, year, league_key)
 
         # --- Box scores ---
         if do_box_scores:
@@ -934,6 +1001,6 @@ if __name__ == "__main__":
 
             for mp in periods:
                 print(f"\nMatchup period {mp}:")
-                extract_matchup_period(conn, league, mp, year)
+                extract_matchup_period(conn, league, mp, year, league_key)
 
     print("\nDone.")

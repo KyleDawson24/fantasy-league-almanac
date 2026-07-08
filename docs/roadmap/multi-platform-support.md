@@ -60,10 +60,13 @@ since the API cannot recover historical standings). Ruled out by the
 manifest: historical wasted-points/optimal-lineup, owner-attributed
 historical records, draft surfaces, transactions beyond the rolling
 window. (Softened 2026-07-08: the site UI's league-history pages carry
-**year-end rosters for 2021+** — owner names included — that the API
-denies under every probed param; MLB-47 chases the page source and
-capture. Season-end owner attribution for the recent era is back on
-the table.) Decided 2026-07-08: 2026-forward surfaces are ACTIVE-ONLY
+**year-end rosters, transactions, and drafts back to at least 2021**
+— owner names included — that the API denies under every probed param;
+MLB-47 chases the page sources and capture. For 2021+ that means exact
+ownership reconstruction — year-end roster walked backwards through
+the season's transaction log — plus a recent-era draft lens, with
+per-year completeness verified by content. Only deployed slots /
+started-sat stay unknowable pre-2026.) Decided 2026-07-08: 2026-forward surfaces are ACTIVE-ONLY
 (deployed-lineup crediting, as on ESPN) with explainers wherever eras
 mix — the started/sat signal is the value that accrues as seasons
 stack.
@@ -81,7 +84,8 @@ runner inherits it as a non-fatal step) · MLB-45
 gamelog backfill (2004–2025 COMPLETE + verified 2026-07-07: 3,809
 player-season gamelogs, 237,181 player-games, one evidenced tombstone;
 2026 sweeps at rollover) · MLB-46 retrospective (end
-of season) · MLB-47 UI league-history capture (year-end rosters 2021+
-found in the site UI 2026-07-08, API denies them; awaiting page URL +
-section inventory from the maintainer) · MLB-14 Yahoo access spike ·
+of season) · MLB-47 UI league-history capture (year-end rosters + transactions +
+drafts confirmed in the site UI back to ≥2021, 2026-07-08; API denies
+all of it; awaiting page URLs, the year floor, and a
+standings/champions check from the maintainer) · MLB-14 Yahoo access spike ·
 MLB-42 Fantrax access spike (needs a dummy league)

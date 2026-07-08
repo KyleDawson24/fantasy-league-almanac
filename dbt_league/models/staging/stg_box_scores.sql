@@ -31,6 +31,7 @@
 
 with raw as (
     select
+        league_key,
         season_year,
         scoring_period,
         matchup_period,
@@ -46,6 +47,7 @@ with raw as (
 -- but in practice we --full-refresh, so this is defense-in-depth.
 matchups as (
     select
+        league_key,
         season_year,
         scoring_period,
         matchup_period,
@@ -58,6 +60,7 @@ matchups as (
 
 home_players as (
     select
+        league_key,
         season_year,
         scoring_period,
         matchup_period,
@@ -84,6 +87,7 @@ home_players as (
 
 away_players as (
     select
+        league_key,
         season_year,
         scoring_period,
         matchup_period,
@@ -113,6 +117,7 @@ away_players as (
 -- home_away is also NULL — they're not on either side of any matchup.
 free_agents as (
     select
+        league_key,
         season_year,
         scoring_period,
         matchup_period,

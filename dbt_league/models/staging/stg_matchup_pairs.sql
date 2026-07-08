@@ -1,5 +1,5 @@
 -- stg_matchup_pairs.sql
--- One row per (season_year, matchup_period, home_team_id, away_team_id):
+-- One row per (league_key, season_year, matchup_period, home_team_id, away_team_id):
 -- the weekly matchup spine -- who played whom, with home/away sides --
 -- extracted from the raw box-score JSON.
 --
@@ -12,6 +12,7 @@
 {{ config(materialized='view') }}
 
 select distinct
+    league_key,
     season_year,
     matchup_period,
     m.value:home_team_id::integer as home_team_id,
@@ -21,7 +22,8 @@ from {{ source('raw', 'box_scores') }},
         input => coalesce(raw_json:matchups, raw_json)
     ) m
 qualify row_number() over (
-    partition by season_year,
+    partition by league_key,
+        season_year,
         matchup_period,
         m.value:home_team_id::integer,
         m.value:away_team_id::integer

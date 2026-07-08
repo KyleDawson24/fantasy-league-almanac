@@ -42,18 +42,20 @@
 --   5. Self-join for opponent context (home + away halves UNIONed)
 --   6. Join matchup_schedule for days_in_period metadata
 --
--- Grain: one row per (season_year, matchup_period, team_id).
+-- Grain: one row per (league_key, season_year, matchup_period, team_id).
 --
 -- Incremental — merge by unique_key. For historical corrections use --full-refresh.
+-- The incremental watermark is per-league (league_period_watermark macro).
 
 {{ config(
     materialized='incremental',
-    unique_key=['season_year', 'matchup_period', 'team_id'],
+    unique_key=['league_key', 'season_year', 'matchup_period', 'team_id'],
     on_schema_change='fail'
 ) }}
 
 with team_rollup as (
     select
+        league_key,
         season_year,
         matchup_period,
         team_id,
@@ -170,7 +172,7 @@ with team_rollup as (
 
         count(distinct player_id) as active_player_count
     from {{ ref('fct_player_weekly_active_performance') }}
-    group by 1, 2, 3, 4, 5, 6
+    group by 1, 2, 3, 4, 5, 6, 7
 ),
 
 -- Phase 4: team-level platform_points sourced from the wrapper's
@@ -180,6 +182,7 @@ with team_rollup as (
 -- stg_matchup_pairs carries the who-played-whom spine.
 team_platform_scores as (
     select
+        league_key,
         season_year,
         matchup_period,
         team_id,
@@ -189,6 +192,7 @@ team_platform_scores as (
 
 matchup_pairs as (
     select
+        league_key,
         season_year,
         matchup_period,
         home_team_id,
@@ -214,7 +218,8 @@ team_with_platform as (
         ) as platform_calculated_delta
     from team_rollup tr
     left join team_platform_scores tps
-        on tr.season_year = tps.season_year
+        on tr.league_key = tps.league_key
+        and tr.season_year = tps.season_year
         and tr.matchup_period = tps.matchup_period
         and tr.team_id = tps.team_id
 ),
@@ -234,11 +239,13 @@ with_opponents as (
         end as result
     from team_with_platform t
     inner join matchup_pairs mp
-        on t.season_year = mp.season_year
+        on t.league_key = mp.league_key
+        and t.season_year = mp.season_year
         and t.matchup_period = mp.matchup_period
         and t.team_id = mp.home_team_id
     inner join team_with_platform opp
-        on mp.season_year = opp.season_year
+        on mp.league_key = opp.league_key
+        and mp.season_year = opp.season_year
         and mp.matchup_period = opp.matchup_period
         and mp.away_team_id = opp.team_id
 
@@ -258,11 +265,13 @@ with_opponents as (
         end as result
     from team_with_platform t
     inner join matchup_pairs mp
-        on t.season_year = mp.season_year
+        on t.league_key = mp.league_key
+        and t.season_year = mp.season_year
         and t.matchup_period = mp.matchup_period
         and t.team_id = mp.away_team_id
     inner join team_with_platform opp
-        on mp.season_year = opp.season_year
+        on mp.league_key = opp.league_key
+        and mp.season_year = opp.season_year
         and mp.matchup_period = opp.matchup_period
         and mp.home_team_id = opp.team_id
 ),
@@ -302,8 +311,4 @@ left join {{ ref('dim_matchup_period') }} ms
     on wr.season_year = ms.season_year
     and wr.matchup_period = ms.matchup_period
 
-{% if is_incremental() %}
-where (wr.season_year * 100 + wr.matchup_period) >= (
-    select coalesce(max(season_year * 100 + matchup_period), 0) from {{ this }}
-)
-{% endif %}
+{{ league_period_watermark('wr') }}

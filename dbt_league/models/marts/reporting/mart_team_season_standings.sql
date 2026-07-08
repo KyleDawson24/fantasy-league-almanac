@@ -34,7 +34,7 @@
 --     derive 14 with no code change). "Per-week" normalization is
 --     value * standard_matchup_days / scoring_days_played.
 --
--- Grain: one row per (season_year, team_id).
+-- Grain: one row per (league_key, season_year, team_id).
 --
 -- Materialization: table -- score sums are float arithmetic and this mart
 -- feeds the almanac byte-diff goldens; a view's per-query re-summation
@@ -54,11 +54,12 @@ with matchups as (
 -- a period shares the same denominator.
 matchup_scoring_days as (
     select
+        league_key,
         season_year,
         matchup_period,
         count(distinct scoring_period) as scoring_days
     from {{ ref('fct_player_daily_performance') }}
-    group by 1, 2
+    group by 1, 2, 3
 ),
 
 -- The season's standard matchup length in gameplay days, derived from the
@@ -66,6 +67,7 @@ matchup_scoring_days as (
 -- playoff weeks are out of scope for a standings entirely).
 season_standard_days as (
     select
+        sd.league_key,
         sd.season_year,
         mode(sd.scoring_days) as standard_matchup_days
     from matchup_scoring_days sd
@@ -74,11 +76,12 @@ season_standard_days as (
         and sd.matchup_period = mp.matchup_period
     where not mp.is_abnormal
       and not mp.is_playoff
-    group by 1
+    group by 1, 2
 ),
 
 team_season as (
     select
+        m.league_key,
         m.season_year,
         m.team_id,
 
@@ -155,9 +158,10 @@ team_season as (
 
     from matchups m
     left join matchup_scoring_days sd
-        on m.season_year = sd.season_year
+        on m.league_key = sd.league_key
+        and m.season_year = sd.season_year
         and m.matchup_period = sd.matchup_period
-    group by 1, 2
+    group by 1, 2, 3
 )
 
 select
@@ -166,7 +170,9 @@ select
     tod.owner_display
 from team_season ts
 left join season_standard_days ssd
-    on ts.season_year = ssd.season_year
+    on ts.league_key = ssd.league_key
+    and ts.season_year = ssd.season_year
 left join {{ ref('dim_team_owner') }} tod
-    on ts.season_year = tod.season_year
+    on ts.league_key = tod.league_key
+    and ts.season_year = tod.season_year
     and ts.team_id = tod.team_id

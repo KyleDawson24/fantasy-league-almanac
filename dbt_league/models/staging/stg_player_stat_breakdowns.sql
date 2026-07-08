@@ -1,6 +1,6 @@
 -- stg_player_stat_breakdowns.sql
 -- Flatten the breakdown VARIANT from stg_box_scores into one row per
--- (season_year, scoring_period, team_id, player_id, stat_name).
+-- (league_key, season_year, scoring_period, team_id, player_id, stat_name).
 -- Mechanical reshape only -- business filters (active slots, counting stats)
 -- are applied in intermediate.
 --
@@ -23,6 +23,7 @@ with players as (
 
 flattened as (
     select
+        league_key,
         season_year,
         scoring_period,
         matchup_period,

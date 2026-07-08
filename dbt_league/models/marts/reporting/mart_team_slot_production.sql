@@ -23,7 +23,7 @@
 -- the same universe. The slot fact doesn't carry schedule flags (it isn't
 -- one of the four convergence facts), hence the dim_matchup_period join.
 --
--- Grain: one row per (season_year, team_id, lineup_slot).
+-- Grain: one row per (league_key, season_year, team_id, lineup_slot).
 --
 -- Materialization: table -- float point sums feeding byte-diff goldens
 -- (same determinism rationale as mart_team_season_standings).
@@ -42,6 +42,7 @@ with slot_weeks as (
 
 team_slot as (
     select
+        league_key,
         season_year,
         team_id,
         lineup_slot,
@@ -53,7 +54,7 @@ team_slot as (
         -- rounded once at season grain.
         round(sum(total_stat_pts), 1) as slot_calculated_points
     from slot_weeks
-    group by 1, 2, 3
+    group by 1, 2, 3, 4
 )
 
 select
@@ -66,5 +67,6 @@ select
     rsc.starter_count
 from team_slot ts
 left join {{ ref('dim_roster_slot_counts') }} rsc
-    on ts.season_year = rsc.season_year
+    on ts.league_key = rsc.league_key
+    and ts.season_year = rsc.season_year
     and ts.lineup_slot = rsc.lineup_slot

@@ -11,23 +11,32 @@
 -- recent via ROW_NUMBER() on extracted_at. This follows the ELT principle:
 -- extraction captures every snapshot, staging picks the right one.
 --
--- Grain: one row per stat_name (no season_year dimension - it's a
--- single-season reference table representing "the current rules").
+-- Grain: one row per (league_key, stat_name) (no season_year dimension --
+-- it's a per-league single-season reference table representing "the
+-- league's current rules"). "Latest season" resolves independently per
+-- league: one league mid-backfill can't drag another off its current
+-- weights.
 
 with latest_season as (
-    select max(season_year) as season_year
+    select
+        league_key,
+        max(season_year) as season_year
     from {{ source('raw', 'scoring_settings') }}
+    group by league_key
 ),
 
 latest_extraction as (
     select
-        season_year,
-        raw_json
-    from {{ source('raw', 'scoring_settings') }}
-    where season_year = (select season_year from latest_season)
+        s.league_key,
+        s.season_year,
+        s.raw_json
+    from {{ source('raw', 'scoring_settings') }} s
+    inner join latest_season ls
+        on s.league_key = ls.league_key
+        and s.season_year = ls.season_year
     qualify row_number() over (
-        partition by season_year
-        order by extracted_at desc
+        partition by s.league_key, s.season_year
+        order by s.extracted_at desc
     ) = 1
 ),
 
@@ -37,6 +46,7 @@ flattened as (
     -- flips the sign at scoring time. We apply it here so points_per_unit is the
     -- effective weight (negative for penalties, positive for credits).
     select
+        e.league_key,
         e.season_year           as settings_season,
         f.value:statId::integer as espn_stat_id,
         case
@@ -49,6 +59,7 @@ flattened as (
 )
 
 select
+    fl.league_key,
     fl.settings_season,
     fl.espn_stat_id,
     sc.stat_name,

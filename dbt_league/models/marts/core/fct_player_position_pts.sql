@@ -28,7 +28,7 @@
 --
 -- ==========================================================================
 -- GRAIN:
---   One row per (season_year, matchup_period, team_id, player_id, position).
+--   One row per (league_key, season_year, matchup_period, team_id, player_id, position).
 --   team_id is NULLABLE -- NULL rows represent FA time during that period.
 --   "position" is the eligible_slots code (e.g., '1B', 'OF', 'SP', 'UTIL',
 --   plus combined codes like '1B/3B' or '2B/SS' when ESPN expresses them).
@@ -65,6 +65,7 @@
 
 with daily_eligible as (
     select
+        d.league_key,
         d.season_year,
         d.matchup_period,
         d.scoring_period,
@@ -125,6 +126,7 @@ with daily_eligible as (
 
 aggregated as (
     select
+        league_key,
         season_year,
         matchup_period,
         team_id,
@@ -160,7 +162,7 @@ aggregated as (
         count(distinct scoring_period) as eligible_days
 
     from daily_eligible
-    group by 1, 2, 3, 4, 5
+    group by 1, 2, 3, 4, 5, 6
 )
 
 select * from aggregated

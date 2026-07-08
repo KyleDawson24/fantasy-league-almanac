@@ -5,8 +5,8 @@
 -- mirroring the stg pattern over scoring/roster settings.
 --
 -- ==========================================================================
--- GRAIN: one row per (season_year, team_id, owner_id).
---   Co-owned teams yield multiple rows per (season, team).
+-- GRAIN: one row per (league_key, season_year, team_id, owner_id).
+--   Co-owned teams yield multiple rows per (league, season, team).
 -- ==========================================================================
 --
 -- owner_id is the stable ESPN member GUID -- the join key dim_owner and
@@ -18,16 +18,18 @@
 
 with latest_extraction as (
     select
+        league_key,
         season_year,
         raw_json
     from {{ source('raw', 'team_owners') }}
     qualify row_number() over (
-        partition by season_year
+        partition by league_key, season_year
         order by extracted_at desc
     ) = 1
 )
 
 select
+    le.league_key,
     le.season_year,
     t.value:team_id::integer    as team_id,
     t.value:owner_id::string    as owner_id,

@@ -5,7 +5,7 @@
 -- together they cover the full universe of player-weeks captured at
 -- fct_player_weekly_slot_performance.
 --
--- Grain: one row per (season_year, matchup_period, player_id, wasted_bucket).
+-- Grain: one row per (league_key, season_year, matchup_period, player_id, wasted_bucket).
 -- wasted_bucket is in the grain so a player who appeared as both BE/IL on a
 -- team AND as FA in the same matchup_period (rare: drop mid-week) produces
 -- two rows instead of being collapsed.
@@ -38,12 +38,13 @@
 
 {{ config(
     materialized='incremental',
-    unique_key=['season_year', 'matchup_period', 'player_id', 'wasted_bucket'],
+    unique_key=['league_key', 'season_year', 'matchup_period', 'player_id', 'wasted_bucket'],
     on_schema_change='fail'
 ) }}
 
 with inactive as (
     select
+        league_key,
         season_year,
         matchup_period,
         player_id,
@@ -161,10 +162,11 @@ with inactive as (
 
     from {{ ref('fct_player_weekly_slot_performance') }}
     where performance_status = 'inactive'
-    group by 1, 2, 3, 4, 5
+    group by 1, 2, 3, 4, 5, 6
 )
 
 select
+    i.league_key,
     i.season_year,
     i.matchup_period,
     i.team_id,
@@ -235,8 +237,4 @@ left join {{ ref('dim_matchup_period') }} s
     on i.season_year = s.season_year
     and i.matchup_period = s.matchup_period
 
-{% if is_incremental() %}
-where (i.season_year * 100 + i.matchup_period) >= (
-    select coalesce(max(season_year * 100 + matchup_period), 0) from {{ this }}
-)
-{% endif %}
+{{ league_period_watermark('i') }}

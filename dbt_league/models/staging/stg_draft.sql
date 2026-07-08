@@ -4,7 +4,7 @@
 -- Latest snapshot per season, mirroring stg_team_owners over RAW.TEAM_OWNERS.
 --
 -- ==========================================================================
--- GRAIN: one row per (season_year, overall_pick).
+-- GRAIN: one row per (league_key, season_year, overall_pick).
 -- ==========================================================================
 --
 -- Sourced from the espn-api wrapper's league.draft (player names + the
@@ -17,16 +17,18 @@
 
 with latest_extraction as (
     select
+        league_key,
         season_year,
         raw_json
     from {{ source('raw', 'draft_picks') }}
     qualify row_number() over (
-        partition by season_year
+        partition by league_key, season_year
         order by extracted_at desc
     ) = 1
 )
 
 select
+    le.league_key,
     le.season_year,
     p.value:overall_pick::integer as overall_pick,
     p.value:round_num::integer    as round_num,

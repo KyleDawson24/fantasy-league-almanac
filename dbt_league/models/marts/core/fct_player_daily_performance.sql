@@ -4,7 +4,7 @@
 -- (performance_status, wasted_bucket) so all downstream weekly facts
 -- can inherit them without re-deriving.
 --
--- Grain: (season_year, scoring_period, team_id, player_id, lineup_slot).
+-- Grain: (league_key, season_year, scoring_period, team_id, player_id, lineup_slot).
 -- The "comprehensive" framing: every slot, every roster status, the
 -- real-world MLB stat line with fantasy roster context attached. Active
 -- vs. inactive splits happen at the weekly fact layer; this layer
@@ -30,6 +30,7 @@
 
 select
     -- Identifiers
+    league_key,
     season_year,
     matchup_period,
     scoring_period,

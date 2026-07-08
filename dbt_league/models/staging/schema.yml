@@ -3,18 +3,23 @@ version: 2
 models:
   - name: stg_box_scores
     description: >
-      One row per player per scoring period.
+      One row per player per scoring period, per league.
       Includes rostered players (with team_id and owner_name)
       and free agents (NULL team fields, lineup_slot='FA').
-      A player_id is unique within a given (season_year, scoring_period) -- a player cannot simultaneously be on two fantasy rosters or be both rostered and FA.
+      A player_id is unique within a given (league_key, season_year, scoring_period) -- a player cannot simultaneously be on two fantasy rosters or be both rostered and FA within one league (the same MLB player CAN appear in multiple leagues).
     tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns:
+              - league_key
               - season_year
               - player_id
               - scoring_period
     columns:
+      - name: league_key
+        description: 'League registry key (config/leagues.yml), stamped into RAW at extract time. First-class dimension in every grain per the MLB-48 multi-league design.'
+        tests:
+          - not_null
       - name: season_year
         description: 'Year of MLB season opener.'
         tests:
@@ -84,7 +89,7 @@ models:
 
   - name: stg_player_stat_breakdowns
     description: >
-      One row per (season, scoring_period, team, player, stat_name) -- the breakdown VARIANT flattened into relational shape.
+      One row per (league, season, scoring_period, team, player, stat_name) -- the breakdown VARIANT flattened into relational shape.
       No business filters applied here; staging stays a pure reshape.
       Business filters (active slots, counting stats) are applied at int_player_daily.
       Bench/IL rows are preserved so the inactive-performance facts can consume the same staging.
@@ -92,11 +97,16 @@ models:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns:
+              - league_key
               - season_year
               - scoring_period
               - player_id
               - stat_name
     columns:
+      - name: league_key
+        description: 'League registry key, carried from stg_box_scores.'
+        tests:
+          - not_null
       - name: season_year
         description: 'Year of MLB season opener.'
         tests:
@@ -142,14 +152,18 @@ models:
 
   - name: stg_scoring_settings
     description: >
-      Reshape raw scoring settings into one row per scored stat.
-      Surfaces only the CURRENT season's weights (max season_year with data); historical settings remain preserved in RAW.SCORING_SETTINGS but are not surfaced here.
-      The current season's weights are applied universally -- including to historical stat breakdowns -- so cross-season scores are comparable under a common scale.
+      Reshape raw scoring settings into one row per scored stat, per league.
+      Surfaces only each league's CURRENT weights (max season_year with data, resolved per league); historical settings remain preserved in RAW.SCORING_SETTINGS but are not surfaced here.
+      The current season's weights are applied universally -- including to historical stat breakdowns -- so cross-season scores are comparable under a common scale within a league.
       When multiple extractions exist for the same season, picks the most recent via ROW_NUMBER() on extracted_at.
-      Grain: one row per stat_name (no season_year dimension; this is a single-season reference table).
+      Grain: one row per (league_key, stat_name) (no season_year dimension; this is a per-league single-season reference table).
     columns:
+      - name: league_key
+        description: 'League registry key. Scoring weights are each league''s own rules -- every downstream weight join carries this key.'
+        tests:
+          - not_null
       - name: settings_season
-        description: 'Season year these weights came from (always the latest loaded). Carried through for traceability.'
+        description: 'Season year these weights came from (the league''s latest loaded). Carried through for traceability.'
       - name: espn_stat_id
         description: 'ESPN internal numeric stat ID. Bridges raw API to seed-defined stat names.'
       - name: stat_name
@@ -165,14 +179,19 @@ models:
       snapshots (latest per season). Sourced from the espn-api wrapper's
       league.draft. keeper flags picks retained from the prior season (keeper
       league). Mirrors stg_team_owners over RAW.TEAM_OWNERS.
-      Grain: one row per (season_year, overall_pick).
+      Grain: one row per (league_key, season_year, overall_pick).
     tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns:
+              - league_key
               - season_year
               - overall_pick
     columns:
+      - name: league_key
+        description: 'League registry key.'
+        tests:
+          - not_null
       - name: season_year
         description: 'Season the draft belongs to.'
         tests:
@@ -198,17 +217,22 @@ models:
 
   - name: stg_team_owners
     description: >
-      Per-season team -> owner bridge, flattened from RAW.TEAM_OWNERS
-      (latest snapshot per season). owner_id is the stable ESPN member
-      GUID -- the join key dim_owner and the owner_nicknames seed use.
+      Per-league, per-season team -> owner bridge, flattened from
+      RAW.TEAM_OWNERS (latest snapshot per league + season). owner_id is
+      the platform's stable owner key (ESPN member GUID) -- the join key
+      dim_owner and the owner_nicknames seed use.
     tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns:
+              - league_key
               - season_year
               - team_id
               - owner_id
     columns:
+      - name: league_key
+        tests:
+          - not_null
       - name: season_year
         tests:
           - not_null
@@ -221,10 +245,10 @@ models:
 
   - name: stg_matchup_scores
     description: >
-      One row per (season_year, matchup_period, team_id): the team's
-      FINAL ESPN platform score for the matchup, read from the wrapper's
-      home_score / away_score fields at the last scoring period of the
-      matchup (the field is cumulative through the queried period).
+      One row per (league_key, season_year, matchup_period, team_id): the
+      team's FINAL ESPN platform score for the matchup, read from the
+      wrapper's home_score / away_score fields at the last scoring period
+      of the matchup (the field is cumulative through the queried period).
       Matchup-grain sibling of stg_box_scores -- the raw box-score JSON
       carries two grains, and each gets its own staging reshape. This is
       ESPN's authoritative team total (slot-aware, inclusive of
@@ -234,10 +258,14 @@ models:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns:
+              - league_key
               - season_year
               - matchup_period
               - team_id
     columns:
+      - name: league_key
+        tests:
+          - not_null
       - name: season_year
         description: 'ESPN season year.'
         tests:
@@ -255,7 +283,7 @@ models:
 
   - name: stg_matchup_pairs
     description: >
-      One row per (season_year, matchup_period, home_team_id,
+      One row per (league_key, season_year, matchup_period, home_team_id,
       away_team_id): the weekly matchup spine (who played whom, with
       home/away sides) extracted from the raw box-score JSON. Pairs are
       collected across every scoring period of the matchup -- first
@@ -265,11 +293,15 @@ models:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns:
+              - league_key
               - season_year
               - matchup_period
               - home_team_id
               - away_team_id
     columns:
+      - name: league_key
+        tests:
+          - not_null
       - name: season_year
         tests:
           - not_null
@@ -288,21 +320,25 @@ models:
   - name: stg_roster_settings
     description: >
       Long-form reshape of the raw rosterSettings payload (latest
-      snapshot per season): one row per (season_year, setting_type,
-      espn_id). setting_type 'lineup_slot_count' rows carry
-      lineupSlotCounts (lineup slot id -> configured starters);
-      'position_limit' rows carry positionLimits (MLB position id -> max
-      rostered, -1 = ESPN "No Limit"). Pure reshape -- the slot-name
-      map, display shaping, and active-slot flag live in
-      dim_roster_slot_counts.
+      snapshot per league + season): one row per (league_key,
+      season_year, setting_type, espn_id). setting_type
+      'lineup_slot_count' rows carry lineupSlotCounts (lineup slot id ->
+      configured starters); 'position_limit' rows carry positionLimits
+      (MLB position id -> max rostered, -1 = ESPN "No Limit"). Pure
+      reshape -- the slot-name map, display shaping, and active-slot
+      flag live in dim_roster_slot_counts.
     tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns:
+              - league_key
               - season_year
               - setting_type
               - espn_id
     columns:
+      - name: league_key
+        tests:
+          - not_null
       - name: season_year
         tests:
           - not_null

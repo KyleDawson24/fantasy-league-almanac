@@ -3,19 +3,24 @@ version: 2
 models:
   - name: int_player_daily
     description: >
-      Wide daily row per (season, scoring_period, team, player, lineup_slot).
+      Wide daily row per (league, season, scoring_period, team, player, lineup_slot).
       Combines per-stat point contributions (one column per scored stat) with per-player ESPN platform totals.
       View materialization; the table cost lives at the weekly layer one level up.
     tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns:
+              - league_key
               - season_year
               - scoring_period
               - team_id
               - player_id
               - lineup_slot
     columns:
+      - name: league_key
+        description: 'League registry key. Carried from staging; the stg_scoring_settings weight join is league-scoped so each league''s points_per_unit applies only to its own rows.'
+        tests:
+          - not_null
       - name: season_year
         description: 'ESPN season year.'
         tests:

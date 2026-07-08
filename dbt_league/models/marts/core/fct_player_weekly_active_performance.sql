@@ -28,19 +28,22 @@
 --      is_playoff / playoff_round denormalized onto the fact for consumer-
 --      side filter/label use).
 --
--- Grain: one row per (season_year, matchup_period, team_id, player_id).
+-- Grain: one row per (league_key, season_year, matchup_period, team_id, player_id).
 --
 -- Incremental fact -- merge by unique_key. Re-extracted matchup periods
 -- overwrite existing rows. For historical corrections, use --full-refresh.
+-- The incremental watermark is per-league (league_period_watermark macro)
+-- so one league's progress never gates another's.
 
 {{ config(
     materialized='incremental',
-    unique_key=['season_year', 'matchup_period', 'team_id', 'player_id'],
+    unique_key=['league_key', 'season_year', 'matchup_period', 'team_id', 'player_id'],
     on_schema_change='fail'
 ) }}
 
 with active as (
     select
+        league_key,
         season_year,
         matchup_period,
         team_id,
@@ -178,10 +181,11 @@ with active as (
     -- brief's locked spec for the active fact.
     where performance_status = 'active'
       and team_id is not null
-    group by 1, 2, 3, 4, 5, 6, 7, 8
+    group by 1, 2, 3, 4, 5, 6, 7, 8, 9
 )
 
 select
+    a.league_key,
     a.season_year,
     a.matchup_period,
     a.team_id,
@@ -272,12 +276,11 @@ select
     s.playoff_round
 
 from active a
+-- dim_matchup_period is seed-derived and (for now) unscoped: the schedule
+-- seed is the ESPN league's. Platform/league scoping for the schedule
+-- rides MLB-5; non-H2H leagues never reach this H2H fact anyway.
 left join {{ ref('dim_matchup_period') }} s
     on a.season_year = s.season_year
     and a.matchup_period = s.matchup_period
 
-{% if is_incremental() %}
-where (a.season_year * 100 + a.matchup_period) >= (
-    select coalesce(max(season_year * 100 + matchup_period), 0) from {{ this }}
-)
-{% endif %}
+{{ league_period_watermark('a') }}

@@ -50,6 +50,7 @@ with slot_map as (
 
 lineup_slot_counts as (
     select
+        league_key,
         season_year,
         espn_id       as lineup_slot_id,
         setting_value as starter_count
@@ -59,6 +60,7 @@ lineup_slot_counts as (
 
 position_limits as (
     select
+        league_key,
         season_year,
         espn_id       as position_limit_id,
         setting_value as raw_position_limit
@@ -67,6 +69,7 @@ position_limits as (
 )
 
 select
+    lsc.league_key,
     lsc.season_year,
     lsc.lineup_slot_id,
     coalesce(sm.lineup_slot, 'SLOT_' || lsc.lineup_slot_id::varchar) as lineup_slot,
@@ -95,5 +98,6 @@ from lineup_slot_counts lsc
 left join slot_map sm
     on lsc.lineup_slot_id = sm.lineup_slot_id
 left join position_limits pl
-    on lsc.season_year = pl.season_year
+    on lsc.league_key = pl.league_key
+    and lsc.season_year = pl.season_year
     and sm.position_limit_id = pl.position_limit_id

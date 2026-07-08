@@ -3,7 +3,7 @@
 -- Symmetric counterpart to fct_team_weekly_active_performance for the
 -- inactive half of the player-weekly split.
 --
--- Grain: one row per (season_year, matchup_period, team_id, wasted_bucket).
+-- Grain: one row per (league_key, season_year, matchup_period, team_id, wasted_bucket).
 -- Two row flavors per matchup:
 --   - N ROSTERED_INACTIVE rows (one per fantasy team; team_id set)
 --   - 1 FA row (league-wide aggregate; team_id NULL). The FA pool is not
@@ -48,6 +48,7 @@ with player_inactive as (
 
 team_rollup as (
     select
+        league_key,
         season_year,
         matchup_period,
         team_id,
@@ -164,7 +165,7 @@ team_rollup as (
         count(distinct player_id) as inactive_player_count
 
     from player_inactive
-    group by 1, 2, 3, 4
+    group by 1, 2, 3, 4, 5
 )
 
 select

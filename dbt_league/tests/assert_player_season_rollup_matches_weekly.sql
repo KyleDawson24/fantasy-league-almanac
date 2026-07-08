@@ -19,6 +19,7 @@
 
 with weekly_rollup as (
     select
+        league_key,
         season_year,
         team_id,
         player_id,
@@ -27,11 +28,12 @@ with weekly_rollup as (
         sum(total_stat_pts)  as calculated_points,
         sum(games_played)    as games_played
     from {{ ref('fct_player_weekly_slot_performance') }}
-    group by 1, 2, 3, 4
+    group by 1, 2, 3, 4, 5
 ),
 
 season as (
     select
+        league_key,
         season_year,
         team_id,
         player_id,
@@ -43,6 +45,7 @@ season as (
 )
 
 select
+    coalesce(s.league_key, w.league_key)     as league_key,
     coalesce(s.season_year, w.season_year)   as season_year,
     coalesce(s.team_id, w.team_id)           as team_id,
     coalesce(s.player_id, w.player_id)       as player_id,
@@ -55,7 +58,8 @@ select
     w.games_played                           as weekly_games_played
 from season s
 full outer join weekly_rollup w
-    on  s.season_year = w.season_year
+    on  s.league_key = w.league_key
+    and s.season_year = w.season_year
     and coalesce(to_varchar(s.team_id), 'FA') = coalesce(to_varchar(w.team_id), 'FA')
     and s.player_id = w.player_id
     and s.lineup_slot = w.lineup_slot

@@ -129,9 +129,14 @@ models:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns:
+              - league_key
               - season_year
               - lineup_slot_id
     columns:
+      - name: league_key
+        description: 'League registry key. Roster settings are per-league configuration.'
+        tests:
+          - not_null
       - name: season_year
         description: 'ESPN season year.'
         tests:
@@ -176,16 +181,27 @@ models:
 
   - name: dim_owner
     description: >
-      Owner dimension. One row per owner_id, spined off stg_team_owners
-      (every owner ever seen) LEFT JOIN the owner_nicknames seed for an
-      optional preferred_name override. owner_display = preferred_name
-      when set, else "First Last".
+      Owner dimension. One row per (league_key, owner_id), spined off
+      stg_team_owners (every owner ever seen) LEFT JOIN the
+      owner_nicknames seed for an optional preferred_name override.
+      owner_display = preferred_name when set, else "First Last".
+      Owner ids are platform-issued and league-scoped; cross-league
+      identity stitching is MLB-8's job, not this dim's.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - owner_id
     columns:
-      - name: owner_id
-        description: 'Stable ESPN member GUID. Grain key.'
+      - name: league_key
+        description: 'League registry key. Part of the grain.'
         tests:
           - not_null
-          - unique
+      - name: owner_id
+        description: 'Platform-stable owner key (ESPN member GUID). Grain key together with league_key.'
+        tests:
+          - not_null
       - name: owner_display
         description: 'Nickname if set, else proper-cased "First Last".'
         tests:
@@ -193,9 +209,9 @@ models:
 
   - name: dim_team_owner
     description: >
-      (season, team) -> owner_display label. Collapses co-owned teams to
-      "Name / Name". Single join point consumers/marts use to attach
-      owner_display alongside owner_name.
+      (league, season, team) -> owner_display label. Collapses co-owned
+      teams to "Name / Name". Single join point consumers/marts use to
+      attach owner_display alongside owner_name.
 
       Born as int_team_owner_display; renamed when it moved to core.
       Four marts and the almanac's Matchup History tab all join through
@@ -205,9 +221,13 @@ models:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns:
+              - league_key
               - season_year
               - team_id
     columns:
+      - name: league_key
+        tests:
+          - not_null
       - name: owner_display
         tests:
           - not_null
@@ -233,12 +253,17 @@ models:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns:
+              - league_key
               - season_year
               - scoring_period
               - team_id
               - player_id
               - lineup_slot
     columns:
+      - name: league_key
+        description: 'League registry key (config/leagues.yml). First-class dimension in every fact grain per the MLB-48 multi-league design.'
+        tests:
+          - not_null
       - name: season_year
         tests:
           - not_null
@@ -280,8 +305,8 @@ models:
       lineup_slot so the downstream active/inactive splits can filter
       cleanly.
 
-      GRAIN: one row per (season_year, matchup_period, team_id,
-      player_id, lineup_slot). The _slot_ in the name marks the grain --
+      GRAIN: one row per (league_key, season_year, matchup_period,
+      team_id, player_id, lineup_slot). The _slot_ in the name marks the grain --
       a player who occupied multiple slots within a single
       matchup_period produces multiple rows here. Deliberate: the
       downstream active/inactive facts filter by slot before aggregating
@@ -308,12 +333,17 @@ models:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns:
+              - league_key
               - season_year
               - matchup_period
               - team_id
               - player_id
               - lineup_slot
     columns:
+      - name: league_key
+        description: 'League registry key. Part of the grain.'
+        tests:
+          - not_null
       - name: season_year
         tests:
           - not_null
@@ -346,17 +376,22 @@ models:
       See fct_player_weekly_inactive_performance for the symmetric inactive counterpart.
 
       Pipeline: read fct_player_weekly_slot_performance (the v1.1.0 comprehensive weekly fact), filter to active rows via performance_status, aggregate across slots, compute rates via shared macros, sum *_pts into calculated_* totals. LEFT JOIN dim_matchup_period for schedule attributes denormalized onto fact rows.
-      Incremental fact -- merge by unique_key.
-      Grain: (season_year, matchup_period, team_id, player_id).
+      Incremental fact -- merge by unique_key (per-league watermark).
+      Grain: (league_key, season_year, matchup_period, team_id, player_id).
     tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns:
+              - league_key
               - season_year
               - matchup_period
               - team_id
               - player_id
     columns:
+      - name: league_key
+        description: 'League registry key. Part of the grain and the incremental merge key.'
+        tests:
+          - not_null
       - name: season_year
         description: 'ESPN season year.'
         tests:
@@ -559,7 +594,7 @@ models:
       Wide-format player-weekly fact for INACTIVE-slot performance (lineup_slot IN BE/IL/FA).
       Symmetric counterpart to fct_player_weekly_active_performance; together they cover the full universe of player-weeks at fct_player_weekly_slot_performance.
 
-      Grain: (season_year, matchup_period, player_id, wasted_bucket).
+      Grain: (league_key, season_year, matchup_period, player_id, wasted_bucket).
       wasted_bucket is part of the grain so a player who appears as ROSTERED_INACTIVE on team A AND as FA in the same matchup_period (rare: drop mid-week) gets two distinct rows.
 
       Carries counting + per-stat *_pts + calculated_* totals + player rate stats (informational).
@@ -568,11 +603,16 @@ models:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns:
+              - league_key
               - season_year
               - matchup_period
               - player_id
               - wasted_bucket
     columns:
+      - name: league_key
+        description: 'League registry key. Part of the grain and the incremental merge key.'
+        tests:
+          - not_null
       - name: season_year
         description: 'ESPN season year.'
         tests:
@@ -614,16 +654,21 @@ models:
 
       Adds matchup pairings from raw box scores and joins matchup_schedule for days_in_period metadata.
       See fct_team_weekly_inactive_performance for the symmetric inactive counterpart.
-      Incremental fact -- merge by unique_key.
-      Grain: (season_year, matchup_period, team_id).
+      Incremental fact -- merge by unique_key (per-league watermark).
+      Grain: (league_key, season_year, matchup_period, team_id).
     tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns:
+              - league_key
               - season_year
               - matchup_period
               - team_id
     columns:
+      - name: league_key
+        description: 'League registry key. Part of the grain and the incremental merge key.'
+        tests:
+          - not_null
       - name: season_year
         description: 'ESPN season year.'
         tests:
@@ -855,11 +900,16 @@ models:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns:
+              - league_key
               - season_year
               - matchup_period
               - team_id
               - wasted_bucket
     columns:
+      - name: league_key
+        description: 'League registry key. Part of the grain.'
+        tests:
+          - not_null
       - name: season_year
         description: 'ESPN season year.'
         tests:
@@ -891,7 +941,7 @@ models:
       matchup_period while preserving the (season, team, player, slot)
       decomposition.
 
-      Grain: one row per (season_year, team_id, player_id, lineup_slot).
+      Grain: one row per (league_key, season_year, team_id, player_id, lineup_slot).
       team_id is nullable -- NULL rows represent FA time (lineup_slot 'FA'
       pairs with NULL team_id by construction).
 
@@ -937,11 +987,16 @@ models:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns:
+              - league_key
               - season_year
               - team_id
               - player_id
               - lineup_slot
     columns:
+      - name: league_key
+        description: 'League registry key. Part of the grain.'
+        tests:
+          - not_null
       - name: season_year
         description: 'Season year. Part of the grain.'
         tests:
@@ -1043,12 +1098,17 @@ models:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns:
+              - league_key
               - season_year
               - matchup_period
               - team_id
               - player_id
               - position
     columns:
+      - name: league_key
+        description: 'League registry key. Part of the grain.'
+        tests:
+          - not_null
       - name: season_year
         description: 'ESPN season year. Part of the grain.'
         tests:

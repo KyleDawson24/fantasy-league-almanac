@@ -4,7 +4,7 @@
 -- much that player produced that season (the draft-value join).
 --
 -- ==========================================================================
--- GRAIN: one row per (season_year, overall_pick).
+-- GRAIN: one row per (league_key, season_year, overall_pick).
 -- ==========================================================================
 --
 -- Per BRAINTHOUGHTS [ARCH] "cross-row / relational derivations go in a thin
@@ -34,6 +34,7 @@ with picks as (
 -- fct_player_season_performance.latest_team_labels.
 team_labels as (
     select
+        league_key,
         season_year,
         team_id,
         team_name,
@@ -41,25 +42,27 @@ team_labels as (
     from {{ ref('fct_player_weekly_slot_performance') }}
     where team_id is not null
     qualify row_number() over (
-        partition by season_year, team_id
+        partition by league_key, season_year, team_id
         order by matchup_period desc
     ) = 1
 ),
 
--- (season, player_id) -> total season production. SUM across every
--- team / slot / status row = the player's full IRL output that season.
+-- (league, season, player_id) -> total season production. SUM across
+-- every team / slot / status row = the player's full IRL output that season.
 player_season as (
     select
+        league_key,
         season_year,
         player_id,
         max(display_name)      as display_name,
         sum(calculated_points) as season_points,
         sum(games_played)      as games_played
     from {{ ref('fct_player_season_performance') }}
-    group by 1, 2
+    group by 1, 2, 3
 )
 
 select
+    p.league_key,
     p.season_year,
     p.overall_pick,
     p.round_num,
@@ -87,11 +90,14 @@ select
     coalesce(ps.games_played, 0)            as games_played
 from picks p
 left join team_labels tl
-    on p.season_year = tl.season_year
+    on p.league_key  = tl.league_key
+    and p.season_year = tl.season_year
     and p.team_id    = tl.team_id
 left join {{ ref('dim_team_owner') }} owner
-    on p.season_year = owner.season_year
+    on p.league_key  = owner.league_key
+    and p.season_year = owner.season_year
     and p.team_id    = owner.team_id
 left join player_season ps
-    on p.season_year = ps.season_year
+    on p.league_key  = ps.league_key
+    and p.season_year = ps.season_year
     and p.player_id  = ps.player_id

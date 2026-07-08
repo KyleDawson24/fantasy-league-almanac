@@ -8,7 +8,7 @@
 -- survive that path. Roster pages need the full ESPN lineup shell from
 -- stg_box_scores, including bench, IL, off-day pitchers, and quiet bats.
 --
--- Grain: (season_year, scoring_period, team_id, player_id, lineup_slot).
+-- Grain: (league_key, season_year, scoring_period, team_id, player_id, lineup_slot).
 -- Excludes FA rows; this is a rostered-player snapshot only.
 --
 -- Materialization: view. This is a thin mart contract over staging plus
@@ -20,6 +20,7 @@
 {{ config(materialized='view') }}
 
 select
+    b.league_key,
     b.season_year,
     b.matchup_period,
     b.scoring_period,
@@ -57,10 +58,12 @@ select
     end as roster_status
 from {{ ref('stg_box_scores') }} b
 left join {{ ref('dim_roster_slot_counts') }} rs
-    on b.season_year = rs.season_year
+    on b.league_key = rs.league_key
+    and b.season_year = rs.season_year
     and b.lineup_slot = rs.lineup_slot
 left join {{ ref('dim_team_owner') }} tod
-    on b.season_year = tod.season_year
+    on b.league_key = tod.league_key
+    and b.season_year = tod.season_year
     and b.team_id = tod.team_id
 where b.team_id is not null
   and b.lineup_slot <> 'FA'

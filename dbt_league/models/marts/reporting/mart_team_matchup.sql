@@ -13,7 +13,7 @@
 -- partitions across every team in a period, so it cannot sit on an
 -- incrementally-built base.
 --
--- Grain: one row per (season_year, matchup_period, team_id), filtered to
+-- Grain: one row per (league_key, season_year, matchup_period, team_id), filtered to
 -- team-weeks with an opponent (so the FA-pool team row and any unpaired
 -- bye-week rows are excluded; matchup view by definition needs an
 -- opponent). Two rows per matchup -- consumers ranking a matchup as a
@@ -65,21 +65,23 @@ select
     -- League-wide per-week averages on the calculated lens. Partitioned
     -- across every team in the period (including this team and its
     -- opponent) so the value is constant for all rows sharing
-    -- (season_year, matchup_period). This window is the reason the model
-    -- can't live on the incrementally-merged base fact.
+    -- (league_key, season_year, matchup_period) -- "league-wide" means
+    -- THIS league's teams, never a cross-league blend. This window is the
+    -- reason the model can't live on the incrementally-merged base fact.
     avg(t.calculated_hitting_pts) over (
-        partition by t.season_year, t.matchup_period
+        partition by t.league_key, t.season_year, t.matchup_period
     ) as league_avg_hitting_points,
     avg(t.calculated_pitching_pts) over (
-        partition by t.season_year, t.matchup_period
+        partition by t.league_key, t.season_year, t.matchup_period
     ) as league_avg_pitching_points,
     avg(t.calculated_points) over (
-        partition by t.season_year, t.matchup_period
+        partition by t.league_key, t.season_year, t.matchup_period
     ) as league_avg_total_points
 
 from {{ ref('fct_team_weekly_active_performance') }} t
 left join {{ ref('fct_team_weekly_active_performance') }} opp
-    on t.season_year    = opp.season_year
+    on t.league_key      = opp.league_key
+    and t.season_year    = opp.season_year
     and t.matchup_period = opp.matchup_period
     and t.opponent_id    = opp.team_id
     and t.team_id        = opp.opponent_id

@@ -42,8 +42,8 @@
 -- warehouse, this can be rewritten as explicit UNION ALL per stat
 -- column -- tedious but portable.
 --
--- Grain: (entity_grain, performance_status, stat_name, record_scope,
--- record_direction, rank). entity_grain in {'team', 'player'};
+-- Grain: (league_key, entity_grain, performance_status, stat_name,
+-- record_scope, record_direction, rank). entity_grain in {'team', 'player'};
 -- performance_status in {'active', 'inactive'}; record_scope in
 -- {'all_time', 'current_season'}; record_direction in {'most', 'fewest'}.
 -- Rank 1..10 per partition.
@@ -96,11 +96,17 @@ with current_year as (
     -- so the DAG shows mart_stat_leaderboard depending on mart-layer
     -- contracts rather than a raw-source edge. Functionally identical;
     -- the team fact is incrementally built off the same raw rows.
-    select max(season_year) as y from {{ ref('fct_team_weekly_active_performance') }}
+    -- MLB-57: per-league -- each league's "current season" is its own
+    -- latest loaded year (a mid-backfill league must not inherit another
+    -- league's current season).
+    select league_key, max(season_year) as y
+    from {{ ref('fct_team_weekly_active_performance') }}
+    group by league_key
 ),
 
 team_active_source as (
     select
+        t.league_key,
         'team'::varchar     as entity_grain,
         'active'::varchar   as performance_status,
         null::varchar       as wasted_bucket,
@@ -140,6 +146,7 @@ team_active_source as (
 
 team_inactive_source as (
     select
+        ti.league_key,
         'team'::varchar     as entity_grain,
         'inactive'::varchar as performance_status,
         ti.wasted_bucket,
@@ -179,6 +186,7 @@ team_inactive_source as (
 
 player_active_source as (
     select
+        p.league_key,
         'player'::varchar   as entity_grain,
         'active'::varchar   as performance_status,
         null::varchar       as wasted_bucket,
@@ -220,6 +228,7 @@ player_inactive_source as (
     -- don't surface as output in v1.0). Use player_name as the display
     -- so the column aligns with the other 3 sources.
     select
+        pi.league_key,
         'player'::varchar   as entity_grain,
         'inactive'::varchar as performance_status,
         pi.wasted_bucket,
@@ -278,12 +287,14 @@ combined_with_owner as (
         coalesce(tod.owner_display, c.owner_name) as owner_display
     from combined c
     left join {{ ref('dim_team_owner') }} tod
-        on c.season_year = tod.season_year
+        on c.league_key = tod.league_key
+        and c.season_year = tod.season_year
         and c.team_id = tod.team_id
 ),
 
 unpivoted as (
     select
+        league_key,
         entity_grain,
         performance_status,
         wasted_bucket,
@@ -312,8 +323,10 @@ unpivoted as (
 -- record_scope and record_direction columns distinguishing.
 --
 -- Partition includes performance_status now (Phase 7 F) so active and
--- inactive rankings don't intermingle. B1's deterministic tiebreak
--- (team_id, player_id) carries through for stable golden-test output.
+-- inactive rankings don't intermingle, and league_key (MLB-57) so each
+-- league's record book ranks only its own history. B1's deterministic
+-- tiebreak (team_id, player_id) carries through for stable golden-test
+-- output. The current_season scopes join current_year per league.
 
 all_time_most as (
     select
@@ -321,7 +334,7 @@ all_time_most as (
         'most'::varchar     as record_direction,
         u.*,
         row_number() over (
-            partition by entity_grain, performance_status, stat_name
+            partition by u.league_key, entity_grain, performance_status, stat_name
             order by stat_value desc, season_year desc, matchup_period desc, team_id, player_id
         ) as rank
     from unpivoted u
@@ -333,7 +346,7 @@ all_time_fewest as (
         'fewest'::varchar   as record_direction,
         u.*,
         row_number() over (
-            partition by entity_grain, performance_status, stat_name
+            partition by u.league_key, entity_grain, performance_status, stat_name
             order by stat_value asc, season_year desc, matchup_period desc, team_id, player_id
         ) as rank
     from unpivoted u
@@ -345,11 +358,13 @@ current_season_most as (
         'most'::varchar           as record_direction,
         u.*,
         row_number() over (
-            partition by entity_grain, performance_status, stat_name
+            partition by u.league_key, entity_grain, performance_status, stat_name
             order by stat_value desc, season_year desc, matchup_period desc, team_id, player_id
         ) as rank
     from unpivoted u
-    where u.season_year = (select y from current_year)
+    inner join current_year cy
+        on u.league_key = cy.league_key
+        and u.season_year = cy.y
 ),
 
 current_season_fewest as (
@@ -358,11 +373,13 @@ current_season_fewest as (
         'fewest'::varchar         as record_direction,
         u.*,
         row_number() over (
-            partition by entity_grain, performance_status, stat_name
+            partition by u.league_key, entity_grain, performance_status, stat_name
             order by stat_value asc, season_year desc, matchup_period desc, team_id, player_id
         ) as rank
     from unpivoted u
-    where u.season_year = (select y from current_year)
+    inner join current_year cy
+        on u.league_key = cy.league_key
+        and u.season_year = cy.y
 )
 
 select * from all_time_most         where rank <= 10

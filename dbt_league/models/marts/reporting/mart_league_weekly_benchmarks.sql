@@ -4,7 +4,7 @@
 -- mean. Powers "hot week / cold week" callouts and similar
 -- collective-mood content in the weekly recap.
 --
--- Grain: (season_year, matchup_period). Excludes is_abnormal weeks
+-- Grain: (league_key, season_year, matchup_period). Excludes is_abnormal weeks
 -- (All-Star break, weather-shortened, etc.) to match the convention
 -- every other leaderboard CTE uses.
 --
@@ -26,6 +26,7 @@
 
 with per_week as (
     select
+        t.league_key,
         t.season_year,
         t.matchup_period,
         count(*)                            as team_count,
@@ -49,40 +50,49 @@ with per_week as (
     -- fct_team_weekly_active_performance, so the dim join is no longer
     -- needed for this filter.
     where t.is_abnormal = false
-    group by 1, 2
+    group by 1, 2, 3
 )
 
 select
+    league_key,
     season_year,
     matchup_period,
     team_count,
 
-    -- Total league-weeks in history (constant per row; denormalized
-    -- here so the always-on consumer can read it in a single query
-    -- without needing a separate COUNT(*) round-trip).
-    count(*) over () as total_weeks_in_history,
+    -- Total league-weeks in THIS league's history (constant per league;
+    -- denormalized here so the always-on consumer can read it in a
+    -- single query without needing a separate COUNT(*) round-trip).
+    -- Percentile/rank windows partition per league for the same reason:
+    -- "Nth percentile week in league history" is a within-league claim.
+    count(*) over (partition by league_key) as total_weeks_in_history,
 
     -- Calculated total points (cross-season lens).
     round(calculated_points_mean,         1)                       as calculated_points_mean,
     calculated_points_max,
     calculated_points_min,
-    percent_rank() over (order by calculated_points_mean)          as calculated_points_pctile,
+    percent_rank() over (partition by league_key
+                         order by calculated_points_mean)          as calculated_points_pctile,
     -- 1 = highest mean ever (DESC ordering). Convention: 1st = "best"
     -- in sports-stat speak. Ties get the same rank (RANK, not DENSE).
-    rank()         over (order by calculated_points_mean desc)     as calculated_points_rank,
+    rank()         over (partition by league_key
+                         order by calculated_points_mean desc)     as calculated_points_rank,
 
     -- Calculated hitting points.
     round(calculated_hitting_pts_mean,    1)                       as calculated_hitting_pts_mean,
     calculated_hitting_pts_max,
     calculated_hitting_pts_min,
-    percent_rank() over (order by calculated_hitting_pts_mean)     as calculated_hitting_pts_pctile,
-    rank()         over (order by calculated_hitting_pts_mean desc) as calculated_hitting_pts_rank,
+    percent_rank() over (partition by league_key
+                         order by calculated_hitting_pts_mean)     as calculated_hitting_pts_pctile,
+    rank()         over (partition by league_key
+                         order by calculated_hitting_pts_mean desc) as calculated_hitting_pts_rank,
 
     -- Calculated pitching points.
     round(calculated_pitching_pts_mean,   1)                       as calculated_pitching_pts_mean,
     calculated_pitching_pts_max,
     calculated_pitching_pts_min,
-    percent_rank() over (order by calculated_pitching_pts_mean)    as calculated_pitching_pts_pctile,
-    rank()         over (order by calculated_pitching_pts_mean desc) as calculated_pitching_pts_rank
+    percent_rank() over (partition by league_key
+                         order by calculated_pitching_pts_mean)    as calculated_pitching_pts_pctile,
+    rank()         over (partition by league_key
+                         order by calculated_pitching_pts_mean desc) as calculated_pitching_pts_rank
 
 from per_week

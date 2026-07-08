@@ -5,7 +5,8 @@
 --
 -- ==========================================================================
 -- GRAIN:
---   One row per (season_year, matchup_period, team_id, player_id, lineup_slot).
+--   One row per (league_key, season_year, matchup_period, team_id,
+--   player_id, lineup_slot).
 -- ==========================================================================
 --
 -- The _slot_ in the name marks the grain: a player who occupied multiple
@@ -49,6 +50,7 @@ with daily as (
 
 weekly as (
     select
+        league_key,
         season_year,
         matchup_period,
         team_id,
@@ -190,12 +192,12 @@ weekly as (
         max(display_name) as display_name
 
     from daily
-    -- Group by the 9 identifier columns + 2 derived flag columns.
+    -- Group by the 10 identifier columns + 2 derived flag columns.
     -- The flag columns are deterministic functions of lineup_slot
     -- (already in the grouping key), so they don't change uniqueness.
     -- Snowflake requires non-aggregated SELECT columns to appear in
     -- GROUP BY regardless.
-    group by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11
+    group by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12
 )
 
 select
@@ -209,5 +211,6 @@ select
     coalesce(tod.owner_display, weekly.owner_name) as owner_display
 from weekly
 left join {{ ref('dim_team_owner') }} tod
-    on weekly.season_year = tod.season_year
+    on weekly.league_key = tod.league_key
+    and weekly.season_year = tod.season_year
     and weekly.team_id = tod.team_id

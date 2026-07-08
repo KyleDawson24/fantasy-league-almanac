@@ -11,6 +11,12 @@ sources:
     # re-pulled." box_scores is the weekly-cadence table but has no load
     # timestamp column yet, so it carries no freshness config (adding
     # extracted_at to the box-score extract is the enabling change).
+    #
+    # MLB-57: every raw table carries league_key -- the registry key
+    # (config/leagues.yml) the extract stamps on each row it loads.
+    # Payloads stay platform-shaped and verbatim; league_key is load
+    # metadata. Legacy rows were backfilled to the default ESPN league by
+    # tools/migrate_raw_league_key.py.
     tables:
       - name: box_scores
         description: "Raw ESPN Fantasy box score JSON, one row per scoring period. Each row contains all matchups for that day with full player lineups and stat breakdowns."

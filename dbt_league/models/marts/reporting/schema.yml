@@ -15,12 +15,17 @@ models:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns:
+              - league_key
               - season_year
               - scoring_period
               - team_id
               - player_id
               - lineup_slot
     columns:
+      - name: league_key
+        description: 'League registry key (config/leagues.yml). First-class dimension in every mart grain; consumers filter on it.'
+        tests:
+          - not_null
       - name: season_year
         description: 'ESPN season year.'
         tests:
@@ -72,14 +77,19 @@ models:
       (SUM of calculated_points, COALESCEd to 0 for never-played picks) --
       the draft-value join. Thin relational view over stg_draft; consumer
       surface for the Draft Recap tab.
-      Grain: one row per (season_year, overall_pick).
+      Grain: one row per (league_key, season_year, overall_pick).
     tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns:
+              - league_key
               - season_year
               - overall_pick
     columns:
+      - name: league_key
+        description: 'League registry key.'
+        tests:
+          - not_null
       - name: season_year
         description: 'Season the draft belongs to.'
         tests:
@@ -141,9 +151,14 @@ models:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns:
+              - league_key
               - season_year
               - matchup_period
     columns:
+      - name: league_key
+        description: 'League registry key. Percentile/rank windows and total_weeks_in_history are computed within this league''s own history.'
+        tests:
+          - not_null
       - name: season_year
         description: 'Season year.'
         tests:
@@ -211,6 +226,7 @@ models:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns:
+              - league_key
               - entity_grain
               - performance_status
               - stat_name
@@ -218,6 +234,10 @@ models:
               - record_direction
               - rank
     columns:
+      - name: league_key
+        description: 'League registry key. Rankings partition per league -- each league''s record book ranks only its own history, and current_season resolves per league.'
+        tests:
+          - not_null
       - name: entity_grain
         description: 'team or player. Determines whether the row is a team-level or player-level record.'
         tests:
@@ -311,10 +331,15 @@ models:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns:
+              - league_key
               - season_year
               - matchup_period
               - team_id
     columns:
+      - name: league_key
+        description: 'League registry key. The league_avg_* windows average within this league only.'
+        tests:
+          - not_null
       - name: season_year
         description: 'Season year.'
         tests:
@@ -385,9 +410,14 @@ models:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns:
+              - league_key
               - season_year
               - team_id
     columns:
+      - name: league_key
+        description: 'League registry key.'
+        tests:
+          - not_null
       - name: season_year
         description: 'Season year.'
         tests:
@@ -536,10 +566,15 @@ models:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns:
+              - league_key
               - season_year
               - team_id
               - lineup_slot
     columns:
+      - name: league_key
+        description: 'League registry key.'
+        tests:
+          - not_null
       - name: season_year
         description: 'Season year.'
         tests:

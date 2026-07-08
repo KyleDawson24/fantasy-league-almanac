@@ -5,7 +5,7 @@
 --
 -- ==========================================================================
 -- GRAIN:
---   One row per (season_year, team_id, player_id, lineup_slot).
+--   One row per (league_key, season_year, team_id, player_id, lineup_slot).
 --   team_id is NULLABLE -- NULL rows represent FA time. lineup_slot 'FA'
 --   pairs with NULL team_id by construction (FA players have no team).
 -- ==========================================================================
@@ -62,6 +62,7 @@ with weekly as (
 
 season_rollup as (
     select
+        league_key,
         season_year,
         team_id,
         player_id,
@@ -188,8 +189,8 @@ season_rollup as (
         sum(games_played) as games_played
 
     from weekly
-    -- season + grain dims + functionally-dependent partition columns
-    group by 1, 2, 3, 4, 5, 6
+    -- league + season + grain dims + functionally-dependent partition columns
+    group by 1, 2, 3, 4, 5, 6, 7
 ),
 
 -- Display field convention: latest-in-season per (season, entity_key).
@@ -199,6 +200,7 @@ season_rollup as (
 -- display ("Team Hybrid as of the end of 2026").
 latest_team_labels as (
     select
+        league_key,
         season_year,
         team_id,
         team_name,
@@ -207,25 +209,27 @@ latest_team_labels as (
     from {{ ref('fct_player_weekly_slot_performance') }}
     where team_id is not null
     qualify row_number() over (
-        partition by season_year, team_id
+        partition by league_key, season_year, team_id
         order by matchup_period desc
     ) = 1
 ),
 
 latest_player_labels as (
     select
+        league_key,
         season_year,
         player_id,
         player_name,
         display_name
     from {{ ref('fct_player_weekly_slot_performance') }}
     qualify row_number() over (
-        partition by season_year, player_id
+        partition by league_key, season_year, player_id
         order by matchup_period desc
     ) = 1
 )
 
 select
+    sr.league_key,
     sr.season_year,
     sr.team_id,
     sr.player_id,
@@ -311,8 +315,10 @@ select
 
 from season_rollup sr
 left join latest_team_labels tl
-    on sr.season_year = tl.season_year
+    on sr.league_key  = tl.league_key
+    and sr.season_year = tl.season_year
     and sr.team_id    = tl.team_id
 left join latest_player_labels pl
-    on sr.season_year = pl.season_year
+    on sr.league_key  = pl.league_key
+    and sr.season_year = pl.season_year
     and sr.player_id  = pl.player_id

@@ -3,10 +3,11 @@
 -- Combines per-stat point contributions with per-player ESPN platform totals
 -- and player display metadata in one row.
 --
--- Grain: (season_year, scoring_period, team_id, player_id, lineup_slot).
--- matchup_period travels as a derived column (functionally determined by
--- (season_year, scoring_period) via matchup_schedule). Team and owner names
--- are denormalized for downstream convenience.
+-- Grain: (league_key, season_year, scoring_period, team_id, player_id,
+-- lineup_slot). matchup_period travels as a derived column (functionally
+-- determined by (league_key, season_year, scoring_period) via the
+-- extract-stamped raw rows). Team and owner names are denormalized for
+-- downstream convenience.
 --
 -- Carries:
 --   - Identifier 5-tuple + matchup_period
@@ -46,6 +47,7 @@ with daily_long as (
     -- (current-season weights). Slot-stat compatibility filter ensures
     -- hitter-in-pitching-slot mismatches drop appropriately.
     select
+        d.league_key,
         d.season_year,
         d.matchup_period,
         d.scoring_period,
@@ -65,8 +67,10 @@ with daily_long as (
     from {{ ref('stg_player_stat_breakdowns') }} d
     inner join {{ ref('stat_classification') }} c
         on d.stat_name = c.stat_name
+    -- League-scoped: scoring weights are each league's own rules.
     left join {{ ref('stg_scoring_settings') }} sc
         on d.stat_name = sc.stat_name
+        and d.league_key = sc.league_key
     where c.is_counting = true
         {% if var('strict_slot_validity', true) %}
         and (
@@ -79,6 +83,7 @@ with daily_long as (
 
 daily_wide as (
     select
+        league_key,
         season_year,
         matchup_period,
         scoring_period,
@@ -187,7 +192,7 @@ daily_wide as (
         -- negative_points computed in the `final` CTE below where
         -- platform_points is available via the stg_box_scores join.
     from daily_long
-    group by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11
+    group by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12
 ),
 
 platform_split_basis as (
@@ -206,6 +211,7 @@ platform_split_basis as (
     -- to the prior slot-based behavior. Only genuine two-way days (Ohtani)
     -- see a real split.
     select
+        d.league_key,
         d.season_year,
         d.scoring_period,
         d.team_id,
@@ -222,8 +228,9 @@ platform_split_basis as (
         on d.stat_name = c.stat_name
     left join {{ ref('stg_scoring_settings') }} sc
         on d.stat_name = sc.stat_name
+        and d.league_key = sc.league_key
     where c.is_counting = true
-    group by 1, 2, 3, 4, 5
+    group by 1, 2, 3, 4, 5, 6
 ),
 
 final as (
@@ -234,6 +241,7 @@ final as (
     -- stg_box_scores (zero-stat players don't survive daily_long's INNER
     -- JOIN to classification on a stat_name they don't emit).
     select
+        w.league_key,
         w.season_year,
         w.matchup_period,
         w.scoring_period,
@@ -327,7 +335,8 @@ final as (
         case when b.points < 0 then -b.points else 0 end as negative_points
     from daily_wide w
     left join {{ ref('stg_box_scores') }} b
-        on w.season_year = b.season_year
+        on w.league_key = b.league_key
+        and w.season_year = b.season_year
         and w.scoring_period = b.scoring_period
         and w.team_id is not distinct from b.team_id
         and w.player_id = b.player_id
@@ -336,7 +345,8 @@ final as (
     -- Always matches a daily_wide row 1:1 (same breakdown source, looser
     -- filter), so the LEFT JOIN never drops or fans out rows.
     left join platform_split_basis u
-        on w.season_year = u.season_year
+        on w.league_key = u.league_key
+        and w.season_year = u.season_year
         and w.scoring_period = u.scoring_period
         and w.team_id is not distinct from u.team_id
         and w.player_id = u.player_id

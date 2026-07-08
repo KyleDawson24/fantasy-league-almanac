@@ -71,6 +71,30 @@ started-sat stay unknowable pre-2026.) Decided 2026-07-08: 2026-forward surfaces
 mix — the started/sat signal is the value that accrues as seasons
 stack.
 
+**CBS build-out plan (itemized 2026-07-08):** the full chain from the
+captured raw archives to output equivalent to the ESPN production
+surfaces, decomposed under the MLB-43 epic. Foundation first (Platform
+Abstraction): MLB-48 league registry + run-targeting design (maintainer
+decision — includes the v1 warehouse-strategy fork: league-scoped
+schemas vs league_id re-graining) → MLB-57 league-scoped runs (ESPN
+becomes registry entry #1, byte-neutral) → MLB-58 per-league output
+sinks ("run this league, write to this sheet" — the shareability
+dry-run). Data chain (CBS milestone): MLB-59 warehouse loader →
+MLB-53/54/55/56 UI parsers (standings / transaction verb census /
+year-end rosters / drafts+franchise overviews; synthetic test fixtures
+only — the repo is public) → MLB-60 stat crosswalk (fielding included)
+→ MLB-61 staging onto the accepted contract → MLB-62 per-game FPTS
+recompute reconciled to season anchors (residuals double as era-rule
+detection) → MLB-63 ownership + active-set reconstruction with
+per-season fidelity grades (the owner-story centerpiece) → MLB-64
+dim_franchise (rename-proof continuity; v1 may ship without).
+Surfaces: MLB-65 marts (standings arcs, record book with the
+2026+-active-only era rule, the first-ever champions list) → MLB-66
+almanac v1 (home + team tabs, explainers required) → MLB-46
+retrospective. Maintainer-side: MLB-49 create the almanac Sheet ·
+MLB-50 recap-surface scope decision · MLB-51 lore file · MLB-52
+rollover checklist (due ~2026-09-20).
+
 **Depends on:** Platform Abstraction (the contract); access spikes can run
 anytime.
 
@@ -91,5 +115,11 @@ roster reports 2003–2025 at per-year team counts (12–19 by era),
 drafts 2017+, 34 franchise overviews; franchise ids stable across
 renames so the continuity join works; the live season's roster pages
 render differently and are owned by the MLB-44 API capture; the
-HTML→structured parse layer rides MLB-43) · MLB-14 Yahoo access spike ·
+HTML→structured parse layer rides MLB-43) · MLB-49 almanac Sheet
+(maintainer) · MLB-50 recap scope decision (maintainer) · MLB-51 lore
+file (maintainer) · MLB-52 rollover checklist (due ~2026-09-20) ·
+MLB-53..56 UI parsers · MLB-59 warehouse loader · MLB-60 stat
+crosswalk · MLB-61 staging · MLB-62 FPTS recompute · MLB-63
+reconstruction · MLB-64 dim_franchise · MLB-65 marts · MLB-66 almanac
+v1 · MLB-14 Yahoo access spike ·
 MLB-42 Fantrax access spike (needs a dummy league)

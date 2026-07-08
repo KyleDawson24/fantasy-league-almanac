@@ -53,6 +53,15 @@ H2H core.
 **Depends on:** nothing — it is the foundation for Multi-Platform Support and
 the Self-Serve Web App.
 
+A sixth workstream landed 2026-07-08: **multi-league targeting** — the
+league registry (`config/leagues.yml`-style), league-scoped runs with
+the ESPN league as byte-neutral entry #1, and per-league output sinks
+("run this league, write to this sheet"). Production has only ever
+read one league; this is the first swing at making runs targetable,
+and deliberately a dry-run for shareability.
+
 **Seeded issues:** MLB-3 adapter contract · MLB-4 stat crosswalk · MLB-5
 schedule derivation · MLB-6 settings ingestion · MLB-7 two-way semantics ·
-MLB-8 league stitching (stretch)
+MLB-8 league stitching (stretch) · MLB-48 league registry + run
+targeting (design, maintainer sign-off) · MLB-57 league-scoped runs ·
+MLB-58 per-league output sinks

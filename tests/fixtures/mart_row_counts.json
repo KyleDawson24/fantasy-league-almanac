@@ -1,9 +1,13 @@
 {
-  "int_player_daily": 86507,
-  "int_player_weekly_performance": 29272,
-  "fct_weekly_player_active_performance": 12131,
-  "fct_weekly_player_inactive_performance": 15360,
-  "fct_weekly_team_active_performance": 500,
-  "fct_weekly_team_inactive_performance": 532,
-  "mart_stat_leaderboard": 7880
+  "int_player_daily": 107917,
+  "dim_stat": 98,
+  "dim_matchup_period": 48,
+  "fct_player_daily_performance": 107917,
+  "fct_player_weekly_slot_performance": 36526,
+  "fct_player_weekly_active_performance": 14976,
+  "fct_player_weekly_inactive_performance": 19376,
+  "fct_team_weekly_active_performance": 612,
+  "fct_team_weekly_inactive_performance": 652,
+  "mart_stat_leaderboard": 8120,
+  "mart_league_weekly_benchmarks": 37
 }

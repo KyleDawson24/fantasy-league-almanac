@@ -149,3 +149,41 @@ serves, verified, not assumed (the CBS archive-depth question).
   archive depth TBD.
 - **Fantrax** (MLB-42): league-ID access; deployed-slot availability at
   daily grain is the spike's key question.
+
+## Appendix: multi-league addendum (ACCEPTED 2026-07-08, MLB-48)
+
+One warehouse, league-keyed grains. The alternative — a namespace per
+league — was considered and rejected by the maintainer: consumers must
+never say "pull CBS data from the CBS mart"; they say "go to the mart
+and pull the league's data." Standardization is earned in staging, not
+by running the project N times.
+
+- **League registry** (`config/leagues.yml`): one entry per league —
+  platform, league slug/id, credential env-prefix (`ESPN_*`, `CBS_*`),
+  seasons, output sinks per surface (Sheets spreadsheet id, BBCode
+  on/off). No format fields: format is settings-derived at staging per
+  this contract (an explicit `format_override` may exist someday as an
+  escape hatch; it is not routine).
+- **RAW stays platform-shaped** — `raw.espn_*`, `raw.cbs_*`, payloads
+  verbatim per the museum/raw rule, each row carrying `league_key`.
+- **Staging is the convergence boundary**: `stg_<platform>__*` models
+  emit the contract feeds with `league_key` in every grain. This is
+  where "agnostic of source" becomes true, and nothing downstream may
+  know the platform.
+- **One intermediate + marts surface**: `league_key` is a first-class
+  dimension in every unique key and incremental merge key. A front-end
+  or output script filters `league_key` and nothing else.
+- **One dbt run builds all leagues.** `--league` targeting exists only
+  at the edges: extract (which league to pull) and output (which league
+  to render, and which registry-resolved sink receives it).
+- **Migration gate**: the ESPN outputs' goldens hold byte-identical
+  through the re-grain (numbers don't change; keys widen). Uniqueness
+  tests move to composite keys; ESPN-keyed seeds gain platform scoping
+  via the crosswalk/schedule workstreams (MLB-4, MLB-5); warehouse
+  tables rebuild via full-refresh.
+
+Implementation: MLB-57 (league-scoped runs, ESPN as byte-neutral entry
+#1) and MLB-58 (per-league sinks). A detailed interview-grade write-up
+of the two-league convergence design is deliberately deferred until the
+re-grain reaches a stable state (see the Docs ticket), so it documents
+what IS rather than what's intended.

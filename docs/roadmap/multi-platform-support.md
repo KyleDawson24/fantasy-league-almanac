@@ -74,10 +74,11 @@ stack.
 **CBS build-out plan (itemized 2026-07-08):** the full chain from the
 captured raw archives to output equivalent to the ESPN production
 surfaces, decomposed under the MLB-43 epic. Foundation first (Platform
-Abstraction): MLB-48 league registry + run-targeting design (maintainer
-decision — includes the v1 warehouse-strategy fork: league-scoped
-schemas vs league_id re-graining) → MLB-57 league-scoped runs (ESPN
-becomes registry entry #1, byte-neutral) → MLB-58 per-league output
+Abstraction): MLB-48 league registry + run-targeting design (ACCEPTED
+2026-07-08: one warehouse namespace, `league_key` in every grain —
+per-league schemas rejected; see the contract's multi-league appendix)
+→ MLB-57 league-scoped runs (the `league_key` re-grain, ESPN as
+byte-neutral entry #1, goldens-gated) → MLB-58 per-league output
 sinks ("run this league, write to this sheet" — the shareability
 dry-run). Data chain (CBS milestone): MLB-59 warehouse loader →
 MLB-53/54/55/56 UI parsers (standings / transaction verb census /

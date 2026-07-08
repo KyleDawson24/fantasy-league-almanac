@@ -60,8 +60,20 @@ the ESPN league as byte-neutral entry #1, and per-league output sinks
 read one league; this is the first swing at making runs targetable,
 and deliberately a dry-run for shareability.
 
+Design ACCEPTED same day (MLB-48, per offline chat — full text in the
+adapter contract's multi-league appendix): **one warehouse namespace,
+`league_key` in every grain** — per-league schemas rejected because
+consumers must say "go to the mart and pull the league's data," never
+"pull CBS from the CBS mart." RAW stays platform-shaped; staging is
+the convergence boundary; one dbt run builds all leagues; `--league`
+exists only at the extract/output edges; the ESPN goldens gate the
+re-grain byte-identically. An interview-grade write-up of the
+two-league convergence design follows once the re-grain is stable
+(MLB-67).
+
 **Seeded issues:** MLB-3 adapter contract · MLB-4 stat crosswalk · MLB-5
 schedule derivation · MLB-6 settings ingestion · MLB-7 two-way semantics ·
 MLB-8 league stitching (stretch) · MLB-48 league registry + run
-targeting (design, maintainer sign-off) · MLB-57 league-scoped runs ·
-MLB-58 per-league output sinks
+targeting (design ACCEPTED 2026-07-08) · MLB-57 league-scoped runs
+(league_key re-grain, goldens-gated) · MLB-58 per-league output sinks ·
+MLB-67 two-league design doc (after stable state)

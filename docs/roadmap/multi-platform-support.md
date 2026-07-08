@@ -84,8 +84,10 @@ runner inherits it as a non-fatal step) · MLB-45
 gamelog backfill (2004–2025 COMPLETE + verified 2026-07-07: 3,809
 player-season gamelogs, 237,181 player-games, one evidenced tombstone;
 2026 sweeps at rollover) · MLB-46 retrospective (end
-of season) · MLB-47 UI league-history capture (year-end rosters + transactions +
-drafts confirmed in the site UI back to ≥2021, 2026-07-08; API denies
-all of it; awaiting page URLs, the year floor, and a
-standings/champions check from the maintainer) · MLB-14 Yahoo access spike ·
+of season) · MLB-47 UI league-history capture (inventory complete 2026-07-08: the
+league reaches back to 2001 — standings + transactions 2001+, the
+transactions including bench/start moves, rosters 2003+, drafts 2017+;
+API denies all of it; pages are session-cookie-gated behind the
+reCAPTCHA login, so the capture waits on a browser-extracted cookie
+header in .env, ESPN-style) · MLB-14 Yahoo access spike ·
 MLB-42 Fantrax access spike (needs a dummy league)

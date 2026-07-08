@@ -81,6 +81,21 @@ for the ESPN league.
   untouched VARIANTs (staging owns interpretation). The parsed-UI half
   of the loader waits on the HTML parsers.
 
+- **Canonical stat catalog + CBS crosswalk (MLB-4 design / MLB-60).**
+  `canonical_stats` seed: 56 project-owned stat slugs (fielding
+  first-class) with Baseball-Reference alignment as a nullable
+  `bref_key` column — populated only for stats with a real-world
+  identity, honest NULLs for fantasy constructs (QS, holds, IRSTR).
+  `cbs_stat_map` seed: full-vocabulary accounting of every key in the
+  loaded CBS archives plus all 16 scored categories, dispositioned
+  mapped / metadata / derived_composite / vestigial / unknown, with
+  scored-coverage enforced by dbt + unit tests against a committed
+  scoring-rules fixture. The census behind it surfaced two findings:
+  the current CBS rules score NO fielding (vocabulary ≠ rules), and the
+  captured feeds contain NO pitching stats at all — the capture needs a
+  pitching variant (tracked on the backfill ticket) before the FPTS
+  recompute can exist.
+
 ### Changed
 
 - **Advanced Standings tab reworked (v2.0 feature #1).** The standings

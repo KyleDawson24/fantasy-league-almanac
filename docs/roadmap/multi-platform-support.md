@@ -126,7 +126,12 @@ transaction snapshots, 15 config snapshots, 22 season-stat files,
 556,493 verbatim per-game gamelog rows from all 3,809 player-season
 files; idempotency + spot checks proven; UI-rows half blocked on the
 MLB-53..56 parsers) · MLB-60 stat
-crosswalk · MLB-61 staging · MLB-62 FPTS recompute · MLB-63
+crosswalk (LANDED 2026-07-08, in review: `canonical_stats` +
+`cbs_stat_map` seeds per the accepted MLB-4 design — canonical keys
+project-owned, bref_key as nullable alignment; census findings: 2026
+rules score NO fielding, and **the captured feeds contain NO pitching
+stats — MLB-45 reopened for a pitching-capture variant, gating
+MLB-62**) · MLB-61 staging · MLB-62 FPTS recompute · MLB-63
 reconstruction · MLB-64 dim_franchise · MLB-65 marts · MLB-66 almanac
 v1 · MLB-14 Yahoo access spike ·
 MLB-42 Fantrax access spike (needs a dummy league)

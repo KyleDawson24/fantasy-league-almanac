@@ -27,6 +27,7 @@ cd dbt_league && dbt build
 cd .. && python output/generate_summary.py
 python output/generate_records_report.py
 python output/generate_almanac_sheet.py
+python extract/cbs_capture.py --capture   # second-platform capture, if configured (see SETUP.md)
 ```
 
 The script prints BBCode to stdout and also writes a timestamped file

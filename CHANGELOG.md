@@ -118,6 +118,19 @@ output-changing; the almanac goldens were re-anchored under review).
 
 ### Added
 
+- **CBS 2026 fantasy-layer capture** (`extract/cbs_capture.py`, MLB-44):
+  read-only preservation of the perishable owner layer of the CBS
+  points league before season rollover — daily rosters with the
+  deployed slot (`roster_pos`) from season start, plus transaction-log,
+  standings, and league/scoring-config snapshots. GET-only endpoint
+  whitelist enforced in code (the museum rule), polite pacing with
+  backoff, token never logged, and content-based verification
+  throughout: the roster date parameter is accepted only if it actually
+  changes payloads (CBS returns HTTP 200 with current-window data for
+  several "historical" queries), and the post-sweep verdict checks
+  distinct-payload counts rather than status codes. Lands raw
+  append-only JSON envelopes under gitignored `data/cbs_raw/`;
+  adapter-shaped staging comes later with the format-abstraction work.
 - **Source freshness** on the four settings-style raw tables (seasonal
   thresholds over `extracted_at`); `box_scores` documented as pending an
   extract-side load timestamp.

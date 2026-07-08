@@ -61,6 +61,9 @@ Thumbs.db
 .claude/
 
 # Data
+# CBS raw capture landing (MLB-44/45): museum artifacts, never committed.
+# Covers the JSONL manifest too, which *.json below would miss.
+data/cbs_raw/
 *.csv
 *.json
 !dbt_league/**/*.json

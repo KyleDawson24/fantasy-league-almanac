@@ -41,9 +41,29 @@ token (login is reCAPTCHA-walled). The non-H2H format spawned the
 league-format abstraction workstream (MLB-43); full capability manifest
 on the ticket and in the adapter contract's living notes.
 
+**CBS product plan (Per Offline Chat, 2026-07-07):** the manifest splits
+the league's data into a real 20-year *player* archive and a perishable
+*owner* layer that exists only for 2026 — the product follows that
+split. Approved order: **(1)** MLB-44 fantasy-layer capture (landing:
+gitignored raw JSON at `data/cbs_raw/` in the main checkout; Snowflake
+can load the files later) → **(2)** MLB-45 gamelog+season backfill →
+**(3)** MLB-43 first slice on 2026 data (points standings, weekly
+movement, bench efficiency — computable for 2026+ only, since deployed
+slots are captured daily) → **(4)** the "20 Years of Box Score
+Baseball" retrospective (MLB-46), an end-of-season league deliverable
+built from the backfill (player-division records under the league's own
+scoring; owner history only via a manually-seeded league-lore file,
+since the API cannot recover historical standings). Ruled out by the
+manifest: historical wasted-points/optimal-lineup, owner-attributed
+historical records, draft surfaces, transactions beyond the rolling
+window.
+
 **Depends on:** Platform Abstraction (the contract); access spikes can run
 anytime.
 
 **Seeded issues:** MLB-12 platform recon (done — findings above) ·
-MLB-13 CBS access spike (blocked on login) · MLB-14 Yahoo access spike ·
-MLB-42 Fantrax access spike (needs a dummy league)
+MLB-13 CBS access spike (done — verdict GO) · MLB-44 2026 fantasy-layer
+capture (in progress; hard deadline = rollover ~2026-09-27) · MLB-45
+gamelog backfill (unhurried) · MLB-46 retrospective (end of season) ·
+MLB-14 Yahoo access spike · MLB-42 Fantrax access spike (needs a dummy
+league)

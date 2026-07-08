@@ -49,13 +49,19 @@ MODELS = [
     "mart_league_weekly_benchmarks",
 ]
 
+# Seed-derived dims carry no league_key (scoping rides MLB-4/MLB-5).
+# Everything else is league-scoped: count within the active league so the
+# baselines stay stable when a second league's rows land in the warehouse.
+_UNSCOPED_MODELS = {"dim_stat", "dim_matchup_period"}
+
 
 def snapshot() -> dict:
     db.init()
     out = {}
     for m in MODELS:
+        where = "" if m in _UNSCOPED_MODELS else f" WHERE {db.league_predicate()}"
         try:
-            out[m] = query_snowflake(f"SELECT COUNT(*) AS n FROM {m}")[0]["n"]
+            out[m] = query_snowflake(f"SELECT COUNT(*) AS n FROM {m}{where}")[0]["n"]
         except Exception as e:
             out[m] = f"<error: {type(e).__name__}: {e}>"
     return out

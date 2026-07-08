@@ -20,7 +20,7 @@ re-exports every public name here for backward compatibility, so existing
 
 import re
 
-from db import query_snowflake
+from db import league_predicate, query_snowflake
 import records
 
 
@@ -134,9 +134,10 @@ HITTING_RECORD_ORDER = {
 
 def get_latest_matchup_period():
     """Return latest loaded (season_year, matchup_period)."""
-    rows = query_snowflake("""
+    rows = query_snowflake(f"""
         SELECT season_year, matchup_period
         FROM fct_team_weekly_active_performance
+        WHERE {league_predicate()}
         QUALIFY ROW_NUMBER() OVER (
             ORDER BY season_year DESC, matchup_period DESC
         ) = 1
@@ -149,7 +150,7 @@ def get_latest_matchup_period():
 
 def get_team_week_stat_specs():
     """Return scored hitting/pitching stat columns for the Team Weeks tab."""
-    rows = query_snowflake("""
+    rows = query_snowflake(f"""
         SELECT
             d.leaderboard_name AS stat_name,
             d.display_name,
@@ -157,8 +158,11 @@ def get_team_week_stat_specs():
             d.stat_category,
             s.points_per_unit
         FROM dim_stat d
+        -- stg_scoring_settings is per-league (each league's own weights);
+        -- dim_stat is the platform stat vocabulary and stays unscoped.
         INNER JOIN stg_scoring_settings s
             ON s.stat_name = d.stat_name
+            AND {league_predicate('s')}
         WHERE d.stat_category IN ('hitting', 'pitching')
           AND d.is_counting
         ORDER BY
@@ -217,6 +221,7 @@ def get_team_weeks(stat_specs):
             league_avg_total_points,
             {stat_select}
         FROM mart_team_matchup
+        WHERE {league_predicate()}
         ORDER BY sort_key DESC, calculated_points DESC, team_name
     """)
     return rows
@@ -255,6 +260,7 @@ def get_team_week_record_marks(stat_specs):
                 WHERE opponent_id IS NOT NULL
                   AND is_abnormal = false
                   AND {column} IS NOT NULL
+                  AND {league_predicate()}
             )
             WHERE stat_value = record_value
             GROUP BY record_value
@@ -356,7 +362,7 @@ def get_optimal_team_candidates(season_year=None, matchup_period=None,
     else:  # 'all'
         points_expr = 'sum(active_pts + inactive_pts)'
 
-    where_clauses = []
+    where_clauses = [league_predicate()]
     params = []
     if season_year is not None:
         where_clauses.append('season_year = %s')
@@ -367,7 +373,7 @@ def get_optimal_team_candidates(season_year=None, matchup_period=None,
     if team_id is not None:
         where_clauses.append('team_id = %s')
         params.append(team_id)
-    where_sql = ' AND '.join(where_clauses) if where_clauses else '1 = 1'
+    where_sql = ' AND '.join(where_clauses)
 
     rows = query_snowflake(f"""
         SELECT
@@ -429,7 +435,7 @@ def _enrich_optimal_team_with_stats(selected_rows, season_year, matchup_period,
     if not player_ids:
         return selected_rows
 
-    where_clauses = []
+    where_clauses = [league_predicate()]
     params = []
     if season_year is not None:
         where_clauses.append('season_year = %s')
@@ -601,7 +607,7 @@ def get_draft_board(season_year):
     early pick); a large negative is a bust (drafted early, underproduced).
     Rows ordered by overall_pick.
     """
-    return query_snowflake("""
+    return query_snowflake(f"""
         SELECT
             overall_pick,
             round_num,
@@ -620,6 +626,7 @@ def get_draft_board(season_year):
             overall_pick - RANK() OVER (ORDER BY season_points DESC) AS value_delta
         FROM mart_draft_board
         WHERE season_year = %s
+          AND {league_predicate()}
         ORDER BY overall_pick
     """, (season_year,))
 
@@ -663,6 +670,7 @@ def get_team_standings(season_year, stat_specs):
             {stat_select}
         FROM mart_team_season_standings
         WHERE season_year = %s
+          AND {league_predicate()}
         ORDER BY wins DESC, ties DESC, calculated_points DESC
     """, (season_year,))
 
@@ -678,7 +686,7 @@ def get_team_slot_points(season_year):
     Ordered by the roster dim's sort_order so consumers can lay columns out
     without a hardcoded slot list.
     """
-    return query_snowflake("""
+    return query_snowflake(f"""
         SELECT
             team_id,
             lineup_slot,
@@ -687,13 +695,14 @@ def get_team_slot_points(season_year):
         FROM mart_team_slot_production
         WHERE season_year = %s
           AND is_active_lineup_slot
+          AND {league_predicate()}
         ORDER BY sort_order, lineup_slot
     """, (season_year,))
 
 
 def get_slot_capacities(season_year, matchup_period):
     """Return configured active roster slot counts for one season."""
-    rows = query_snowflake("""
+    rows = query_snowflake(f"""
         SELECT
             lineup_slot,
             starter_count AS slots_to_fill
@@ -701,6 +710,7 @@ def get_slot_capacities(season_year, matchup_period):
         WHERE season_year = %s
           AND is_active_lineup_slot
           AND starter_count > 0
+          AND {league_predicate()}
         ORDER BY sort_order
     """, (season_year,))
 
@@ -728,9 +738,11 @@ def get_roster_slot_capacities(season_year, include_inactive=False):
         FROM dim_roster_slot_counts
         WHERE season_year = %s
           AND starter_count > 0
+          AND {league_filter}
           {inactive_filter}
         ORDER BY sort_order
-    """.format(inactive_filter=inactive_filter), (season_year,))
+    """.format(inactive_filter=inactive_filter,
+               league_filter=league_predicate()), (season_year,))
 
     if not rows:
         raise RuntimeError(
@@ -748,7 +760,7 @@ def get_roster_slot_capacities(season_year, include_inactive=False):
 
 def get_team_roster_history_stats(season_year):
     """Return team/player roster history for current-season and all-time views."""
-    player_rows = query_snowflake("""
+    player_rows = query_snowflake(f"""
         WITH latest_day AS (
             SELECT
                 season_year,
@@ -756,6 +768,7 @@ def get_team_roster_history_stats(season_year):
             FROM mart_daily_roster_snapshot
             WHERE season_year = %s
               AND team_id IS NOT NULL
+              AND {league_predicate()}
             GROUP BY 1
         ),
 
@@ -776,6 +789,7 @@ def get_team_roster_history_stats(season_year):
                 ON d.season_year = m.season_year
                 AND d.matchup_period = m.matchup_period
             WHERE d.team_id IS NOT NULL
+              AND {league_predicate('d')}
             QUALIFY ROW_NUMBER() OVER (
                 PARTITION BY d.team_id
                 ORDER BY d.team_name
@@ -787,12 +801,14 @@ def get_team_roster_history_stats(season_year):
             FROM mart_daily_roster_snapshot d
             WHERE d.season_year = %s
               AND d.team_id IS NOT NULL
+              AND {league_predicate('d')}
 
             UNION ALL
 
             SELECT 'all_time' AS scope, d.*
             FROM mart_daily_roster_snapshot d
             WHERE d.team_id IS NOT NULL
+              AND {league_predicate('d')}
         ),
 
         player_context AS (
@@ -820,6 +836,7 @@ def get_team_roster_history_stats(season_year):
                 ON d.season_year = ld.season_year
                 AND d.scoring_period = ld.scoring_period
             WHERE d.team_id IS NOT NULL
+              AND {league_predicate('d')}
             QUALIFY ROW_NUMBER() OVER (
                 PARTITION BY d.player_id
                 ORDER BY d.team_name
@@ -837,6 +854,7 @@ def get_team_roster_history_stats(season_year):
             LEFT JOIN dim_roster_slot_counts r
                 ON r.season_year = %s
                 AND d.lineup_slot = r.lineup_slot
+                AND {league_predicate('r')}
             WHERE d.roster_status = 'active'
         ),
 
@@ -891,12 +909,14 @@ def get_team_roster_history_stats(season_year):
             FROM fct_player_season_performance p
             WHERE p.season_year = %s
               AND p.team_id IS NOT NULL
+              AND {league_predicate('p')}
 
             UNION ALL
 
             SELECT 'all_time' AS scope, p.*
             FROM fct_player_season_performance p
             WHERE p.team_id IS NOT NULL
+              AND {league_predicate('p')}
         ),
 
         active_totals AS (
@@ -1040,7 +1060,7 @@ def get_team_roster_history_stats(season_year):
 
 def get_current_team_roster_stats(season_year):
     """Return latest roster snapshot with season-to-date team/player stats."""
-    rows = query_snowflake("""
+    rows = query_snowflake(f"""
         WITH latest_day AS (
             SELECT
                 season_year,
@@ -1048,6 +1068,7 @@ def get_current_team_roster_stats(season_year):
             FROM mart_daily_roster_snapshot
             WHERE season_year = %s
               AND team_id IS NOT NULL
+              AND {league_predicate()}
             GROUP BY 1
         ),
 
@@ -1074,6 +1095,7 @@ def get_current_team_roster_stats(season_year):
                 AND d.scoring_period = ld.scoring_period
             WHERE d.team_id IS NOT NULL
               AND d.lineup_slot <> 'FA'
+              AND {league_predicate('d')}
         ),
 
         rostered AS (
@@ -1094,6 +1116,7 @@ def get_current_team_roster_stats(season_year):
             WHERE season_year = %s
               AND team_id IS NOT NULL
               AND lineup_slot <> 'FA'
+              AND {league_predicate()}
             GROUP BY 1, 2, 3
         ),
 
@@ -1115,6 +1138,7 @@ def get_current_team_roster_stats(season_year):
                 SUM(outs) AS outs
             FROM fct_player_weekly_active_performance
             WHERE season_year = %s
+              AND {league_predicate()}
             GROUP BY 1, 2, 3
         )
 
@@ -1158,7 +1182,7 @@ def get_current_team_roster_stats(season_year):
 
 def get_almanac_records(scope):
     """Return rank-one record rows for the almanac Records tab."""
-    rows = query_snowflake("""
+    rows = query_snowflake(f"""
         SELECT
             entity_grain,
             stat_name,
@@ -1180,6 +1204,7 @@ def get_almanac_records(scope):
         WHERE record_scope = %s
           AND rank <= 10
           AND performance_status = 'active'
+          AND {league_predicate()}
         ORDER BY entity_grain, stat_name, record_direction, rank
     """, (scope,))
 
@@ -1229,9 +1254,11 @@ def count_value_occurrences_for_scope(scope, grain, stat_name, value):
         SELECT COUNT(*) AS n
         FROM {fct}
         WHERE is_abnormal = false
+          AND {league_predicate()}
           AND season_year = (
               SELECT MAX(season_year)
               FROM fct_team_weekly_active_performance
+              WHERE {league_predicate()}
           )
           AND ({col_expr}) = %s
     """, (value,))
@@ -1252,10 +1279,11 @@ def get_lineup_slot_records(scope):
     """Return best active player-week score records by roster-shaped slot."""
     season_filter = ""
     if scope == 'current_season':
-        season_filter = """
+        season_filter = f"""
           AND p.season_year = (
               SELECT MAX(season_year)
               FROM fct_team_weekly_active_performance
+              WHERE {league_predicate()}
           )
         """
     elif scope != 'all_time':
@@ -1265,9 +1293,11 @@ def get_lineup_slot_records(scope):
         WITH current_slots AS (
             SELECT lineup_slot, starter_count
             FROM dim_roster_slot_counts
-            WHERE season_year = (
+            WHERE {league_predicate()}
+              AND season_year = (
                 SELECT MAX(season_year)
                 FROM dim_roster_slot_counts
+                WHERE {league_predicate()}
             )
               AND is_active_lineup_slot
               AND starter_count > 0
@@ -1324,6 +1354,7 @@ def get_lineup_slot_records(scope):
               AND p.team_id IS NOT NULL
               AND m.is_abnormal = false
               AND p.total_stat_pts IS NOT NULL
+              AND {league_predicate('p')}
               {season_filter}
         )
         WHERE rank <= slots_to_fill
@@ -1370,7 +1401,8 @@ def _get_rate_record_rows(scope, spec):
             t.{qualifier_col} AS qualifier_value
         FROM mart_stat_leaderboard l
         LEFT JOIN fct_team_weekly_active_performance t
-            ON l.season_year    = t.season_year
+            ON l.league_key      = t.league_key
+            AND l.season_year    = t.season_year
             AND l.matchup_period = t.matchup_period
             AND l.team_id        = t.team_id
         WHERE l.entity_grain       = 'team'
@@ -1379,6 +1411,7 @@ def _get_rate_record_rows(scope, spec):
           AND l.record_direction   = %s
           AND l.record_scope       = %s
           AND l.rank <= 10
+          AND {league_predicate('l')}
         ORDER BY l.rank
     """, (spec['stat_name'], spec['direction'], scope))
 
@@ -1388,7 +1421,7 @@ def _get_rate_record_rows(scope, spec):
 
 def get_wasted_points_records(scope):
     """Return wasted-points records, which live at inactive-team grain."""
-    rows = query_snowflake("""
+    rows = query_snowflake(f"""
         SELECT
             entity_grain,
             stat_name,
@@ -1411,6 +1444,7 @@ def get_wasted_points_records(scope):
           AND record_direction = 'most'
           AND rank = 1
           AND performance_status = 'inactive'
+          AND {league_predicate()}
     """, (scope,))
 
     for row in rows:
@@ -1421,7 +1455,7 @@ def get_wasted_points_records(scope):
 
 def get_scored_record_specs():
     """Return best-only team specs for scored and auto-tracked stats."""
-    rows = query_snowflake("""
+    rows = query_snowflake(f"""
         SELECT DISTINCT
             d.leaderboard_name AS stat_name,
             d.display_name,
@@ -1431,6 +1465,7 @@ def get_scored_record_specs():
         FROM dim_stat d
         LEFT JOIN stg_scoring_settings s
             ON s.stat_name = d.stat_name
+            AND {league_predicate('s')}
         WHERE d.stat_category IN ('hitting', 'pitching', 'fielding')
           AND d.is_record_candidate
           AND (s.stat_name IS NOT NULL OR d.auto_tracked)
@@ -1450,12 +1485,14 @@ def get_scored_record_specs():
 
 def get_lineup_slot_record_specs():
     """Return active lineup-slot point record specs for the current league."""
-    rows = query_snowflake("""
+    rows = query_snowflake(f"""
         SELECT lineup_slot, starter_count AS slots_to_fill
         FROM dim_roster_slot_counts
-        WHERE season_year = (
+        WHERE {league_predicate()}
+          AND season_year = (
             SELECT MAX(season_year)
             FROM dim_roster_slot_counts
+            WHERE {league_predicate()}
         )
           AND is_active_lineup_slot
           AND starter_count > 0

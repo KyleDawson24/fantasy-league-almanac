@@ -28,7 +28,7 @@ not a manager's shame).
 
 import db
 db.init()
-from db import query_snowflake
+from db import league_predicate, query_snowflake
 
 import almanac_data
 import note_files
@@ -53,15 +53,17 @@ from generate_summary import (
 
 def get_active_season():
     return query_snowflake(
-        "SELECT MAX(season_year) AS sy FROM fct_team_weekly_active_performance"
+        f"SELECT MAX(season_year) AS sy FROM fct_team_weekly_active_performance"
+        f" WHERE {league_predicate()}"
     )[0]['sy']
 
 
 def get_latest_matchup_period(season_year):
-    return query_snowflake("""
+    return query_snowflake(f"""
         SELECT MAX(matchup_period) AS mp
         FROM fct_team_weekly_active_performance
         WHERE season_year = %s
+          AND {league_predicate()}
     """, (season_year,))[0]['mp']
 
 
@@ -69,7 +71,7 @@ def get_season_standings(season_year):
     """One row per team from mart_team_season_standings (regular season,
     abnormal weeks in -- the gameplay-day denominators normalize them),
     ordered by season calculated points."""
-    return query_snowflake("""
+    return query_snowflake(f"""
         SELECT team_id, team_name, team_abbrev, owner_display,
                wins, losses, ties,
                scoring_days_played, standard_matchup_days,
@@ -77,6 +79,7 @@ def get_season_standings(season_year):
                calculated_points, against_calculated_points
         FROM mart_team_season_standings
         WHERE season_year = %s
+          AND {league_predicate()}
         ORDER BY calculated_points DESC
     """, (season_year,))
 
@@ -84,8 +87,10 @@ def get_season_standings(season_year):
 # Rate columns must not be summed across weeks; identity/label fields
 # aren't numeric aggregates. Everything else on the player weekly fact
 # (counting stats + per-stat _pts + score totals) sums cleanly.
+# league_key is a string (never sums), but it's an identity field --
+# listed so the guard doesn't rely on type sniffing.
 _NO_SUM_KEYS = {
-    'season_year', 'matchup_period', 'team_id', 'player_id',
+    'league_key', 'season_year', 'matchup_period', 'team_id', 'player_id',
     'avg', 'obp', 'slg', 'ops', 'era', 'whip',
     'k_per_9', 'k_per_bb', 'hr_per_9', 'bb_per_9',
 }
@@ -141,10 +146,11 @@ def get_season_player_totals(season_year):
     entity -- same identity the lines print ("Player (ABBR)"). Rates are
     recomputed from the summed counting stats (see MLB-39).
     """
-    rows = query_snowflake("""
+    rows = query_snowflake(f"""
         SELECT *
         FROM fct_player_weekly_active_performance
         WHERE season_year = %s
+          AND {league_predicate()}
     """, (season_year,))
 
     totals = {}
@@ -172,13 +178,14 @@ def get_biggest_hero(season_year):
     Mirrors the league_notes.hero convention exactly -- platform lens
     (the lens that decides W/L), abnormal weeks excluded. The
     "most-heroic" (largest would-have-been deficit) variant is MLB-40."""
-    rows = query_snowflake("""
+    rows = query_snowflake(f"""
         WITH wins AS (
             SELECT t.matchup_period, t.team_id, t.team_name, t.opponent_name,
                    (t.platform_points - t.opponent_points) AS margin
             FROM fct_team_weekly_active_performance t
             WHERE t.season_year = %s AND t.result = 'W'
               AND t.is_abnormal = false
+              AND {league_predicate('t')}
         ),
         ranked AS (
             SELECT p.matchup_period, p.team_id, p.platform_points,
@@ -189,6 +196,7 @@ def get_biggest_hero(season_year):
                    ) AS rk
             FROM fct_player_weekly_active_performance p
             WHERE p.season_year = %s
+              AND {league_predicate('p')}
         ),
         top2 AS (
             SELECT matchup_period, team_id,
@@ -216,12 +224,13 @@ def get_biggest_hero(season_year):
 def get_biggest_blowout(season_year):
     """Largest calculated-lens margin of the season (winner's row).
     Abnormal weeks excluded, matching the records convention."""
-    rows = query_snowflake("""
+    rows = query_snowflake(f"""
         SELECT matchup_period, team_name, opponent_name,
                calculated_points, opponent_calculated_points, calculated_margin
         FROM mart_team_matchup
         WHERE season_year = %s AND is_abnormal = false AND NOT is_playoff
           AND calculated_margin > 0
+          AND {league_predicate()}
         ORDER BY calculated_margin DESC
         LIMIT 1
     """, (season_year,))
@@ -239,8 +248,10 @@ def get_result_extreme(season_year, result, best):
                t.calculated_points
         FROM fct_team_weekly_active_performance t
         LEFT JOIN dim_team_owner tod
-            ON t.season_year = tod.season_year AND t.team_id = tod.team_id
+            ON t.league_key = tod.league_key
+            AND t.season_year = tod.season_year AND t.team_id = tod.team_id
         WHERE t.season_year = %s AND t.result = %s AND t.is_abnormal = false
+          AND {league_predicate('t')}
         ORDER BY t.calculated_points {'DESC' if best else 'ASC'}
         LIMIT 1
     """, (season_year, result))
@@ -254,7 +265,7 @@ def get_gotw_lotw_counts(season_year):
     weekly Best/Worst Overall awards. Abnormal weeks count (each week
     still produces exactly one GotW; within a week every team plays the
     same length). DENSE_RANK so a dead-heat week credits both teams."""
-    return query_snowflake("""
+    return query_snowflake(f"""
         SELECT team_abbrev,
                SUM(CASE WHEN hi_rk = 1 THEN 1 ELSE 0 END) AS gotw_n,
                SUM(CASE WHEN lo_rk = 1 THEN 1 ELSE 0 END) AS lotw_n
@@ -270,6 +281,7 @@ def get_gotw_lotw_counts(season_year):
                    ) AS lo_rk
             FROM fct_team_weekly_active_performance
             WHERE season_year = %s AND NOT is_playoff
+              AND {league_predicate()}
         )
         GROUP BY team_abbrev
         HAVING gotw_n > 0 OR lotw_n > 0
@@ -303,7 +315,7 @@ def get_alltime_record_buffer():
     the visibility buffer the records section needs to distinguish a
     brand-new record (possibly shared by several teams this season) from
     a tie of an older standing mark."""
-    return query_snowflake("""
+    return query_snowflake(f"""
         SELECT l.entity_grain, l.stat_name, l.record_direction, l.rank,
                l.season_year, l.matchup_period,
                l.team_id, l.team_name, l.team_abbrev,
@@ -314,10 +326,12 @@ def get_alltime_record_buffer():
                l.player_id, l.player_name, l.display_name, l.stat_value
         FROM mart_stat_leaderboard l
         LEFT JOIN dim_team_owner tod
-            ON l.season_year = tod.season_year AND l.team_id = tod.team_id
+            ON l.league_key = tod.league_key
+            AND l.season_year = tod.season_year AND l.team_id = tod.team_id
         WHERE l.record_scope = 'all_time'
           AND l.performance_status = 'active'
           AND l.rank <= 10
+          AND {league_predicate('l')}
         ORDER BY l.entity_grain, l.stat_name, l.record_direction, l.rank
     """)
 
@@ -329,7 +343,7 @@ def get_season_wasted_players(season_year, limit=5):
     is player-pool trivia, not a manager's waste. FULL OUTER between the
     bench and active legs so a pure self-harm starter (never benched,
     plenty of negative days) still appears."""
-    return query_snowflake("""
+    return query_snowflake(f"""
         WITH bench AS (
             SELECT player_id,
                    MAX(player_name) AS player_name,
@@ -337,6 +351,7 @@ def get_season_wasted_players(season_year, limit=5):
                    MAX(team_name) AS bench_team_name
             FROM fct_player_weekly_inactive_performance
             WHERE season_year = %s AND wasted_bucket = 'ROSTERED_INACTIVE'
+              AND {league_predicate()}
             GROUP BY player_id
         ),
         active AS (
@@ -346,6 +361,7 @@ def get_season_wasted_players(season_year, limit=5):
                    SUM(platform_points) AS active_points
             FROM fct_player_weekly_active_performance
             WHERE season_year = %s
+              AND {league_predicate()}
             GROUP BY player_id
         ),
         player_meta AS (
@@ -358,6 +374,7 @@ def get_season_wasted_players(season_year, limit=5):
                        ) AS rn
                 FROM fct_player_daily_performance
                 WHERE season_year = %s
+                  AND {league_predicate()}
             )
             WHERE rn = 1
         )
@@ -387,23 +404,26 @@ def get_team_wasted_totals(season_year):
     negative-active magnitude, on the same player-week net convention the
     player list uses. FA-pool waste belongs to no roster and is absent
     here too."""
-    return query_snowflake("""
+    return query_snowflake(f"""
         WITH bench AS (
             SELECT team_id, SUM(calculated_points) AS bench_pts
             FROM fct_team_weekly_inactive_performance
             WHERE season_year = %s AND team_id IS NOT NULL
+              AND {league_predicate()}
             GROUP BY team_id
         ),
         neg AS (
             SELECT team_id, SUM(GREATEST(0, -platform_points)) AS neg_pts
             FROM fct_player_weekly_active_performance
             WHERE season_year = %s
+              AND {league_predicate()}
             GROUP BY team_id
         ),
         labels AS (
             SELECT team_id, MAX_BY(team_abbrev, matchup_period) AS team_abbrev
             FROM fct_team_weekly_active_performance
             WHERE season_year = %s
+              AND {league_predicate()}
             GROUP BY team_id
         )
         SELECT l.team_abbrev,
@@ -876,7 +896,12 @@ def main():
     parser = argparse.ArgumentParser(
         description='Generate the season-to-date BBCode report.')
     parser.add_argument('--season-year', type=int, default=None)
+    parser.add_argument(
+        '--league', default=None, metavar='LEAGUE_KEY',
+        help='League registry key to render (config/leagues.yml). '
+             'Default: the registry\'s default_league (the ESPN league).')
     args = parser.parse_args()
+    db.set_league(args.league)
 
     season_year = args.season_year or get_active_season()
     report = generate_season_report(season_year)

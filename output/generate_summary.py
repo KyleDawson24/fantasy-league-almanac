@@ -13,7 +13,7 @@ import json
 # Snowflake config) lives in db.py. init() is idempotent.
 import db
 db.init()
-from db import query_snowflake
+from db import league_predicate, query_snowflake
 
 from formatters import (
     format_hitter_stats_line,
@@ -31,14 +31,15 @@ import stat_catalog
 
 def get_weekly_scores(season_year, matchup_period=None):
     if matchup_period is None:
-        result = query_snowflake("""
+        result = query_snowflake(f"""
             SELECT MAX(matchup_period) as mp
             FROM fct_team_weekly_active_performance
             WHERE season_year = %s
+            AND {league_predicate()}
         """, (season_year,))
         matchup_period = result[0]['mp']
 
-    scores = query_snowflake("""
+    scores = query_snowflake(f"""
         SELECT season_year, matchup_period, team_name, team_id,
                calculated_points, calculated_hitting_pts, calculated_pitching_pts,
                owner_name, opponent_name,
@@ -46,6 +47,7 @@ def get_weekly_scores(season_year, matchup_period=None):
         FROM fct_team_weekly_active_performance
         WHERE matchup_period = %s
         AND season_year = %s
+        AND {league_predicate()}
         ORDER BY calculated_points DESC
     """, (matchup_period, season_year))
 
@@ -64,11 +66,12 @@ def get_player_contributions(season_year, matchup_period):
     tedious and error-prone (missing column -> formatter silently drops
     that stat from consideration). Per-row data volume is small.
     """
-    return query_snowflake("""
+    return query_snowflake(f"""
         SELECT *
         FROM fct_player_weekly_active_performance
         WHERE matchup_period = %s
         AND season_year = %s
+        AND {league_predicate()}
         ORDER BY calculated_points DESC
     """, (matchup_period, season_year))
 
@@ -156,13 +159,14 @@ def format_league_this_week(season_year, matchup_period):
     for (season_year, matchup_period) -- defensive only; the mart
     builds from the same fact the recap reads.
     """
-    rows = query_snowflake("""
+    rows = query_snowflake(f"""
         SELECT calculated_points_mean,        calculated_points_rank,
                calculated_hitting_pts_mean,   calculated_hitting_pts_rank,
                calculated_pitching_pts_mean,  calculated_pitching_pts_rank,
                total_weeks_in_history
         FROM mart_league_weekly_benchmarks
         WHERE season_year = %s AND matchup_period = %s
+          AND {league_predicate()}
     """, (season_year, matchup_period))
     if not rows:
         return ''
@@ -238,7 +242,7 @@ def get_wasted_points(season_year, matchup_period, limit=5):
       2. Bench team (from fct_player_weekly_inactive_performance ROSTERED_INACTIVE row)
       3. 'Free Agent' fallback when neither active nor bench association
     """
-    return query_snowflake("""
+    return query_snowflake(f"""
         WITH wasted_combined AS (
             SELECT
                 player_id,
@@ -252,6 +256,7 @@ def get_wasted_points(season_year, matchup_period, limit=5):
                          THEN team_name END) AS bench_team_name
             FROM fct_player_weekly_inactive_performance
             WHERE season_year = %s AND matchup_period = %s
+              AND {league_predicate()}
             GROUP BY player_id
         ),
         player_meta AS (
@@ -276,6 +281,7 @@ def get_wasted_points(season_year, matchup_period, limit=5):
                        ) AS rn
                 FROM fct_player_daily_performance
                 WHERE season_year = %s AND matchup_period = %s
+                  AND {league_predicate()}
             )
             WHERE rn = 1
         ),
@@ -285,6 +291,7 @@ def get_wasted_points(season_year, matchup_period, limit=5):
                    platform_points
             FROM fct_player_weekly_active_performance
             WHERE season_year = %s AND matchup_period = %s
+              AND {league_predicate()}
         )
         SELECT
             -- display_name sourced from player_meta (the daily fact's
@@ -879,8 +886,22 @@ def generate_summary(matchup_period, scores, contributions, wasted_points,
     return "\n".join(lines)
 
 if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Generate the weekly BBCode front-page summary."
+    )
+    parser.add_argument(
+        "--league", default=None, metavar="LEAGUE_KEY",
+        help="League registry key to render (config/leagues.yml). "
+             "Default: the registry's default_league (the ESPN league).",
+    )
+    args = parser.parse_args()
+    db.set_league(args.league)
+
     active_season = query_snowflake(
-        "SELECT MAX(season_year) as sy FROM fct_team_weekly_active_performance"
+        f"SELECT MAX(season_year) as sy FROM fct_team_weekly_active_performance"
+        f" WHERE {league_predicate()}"
     )[0]['sy']
 
     matchup_period, scores = get_weekly_scores(active_season)

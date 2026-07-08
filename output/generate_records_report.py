@@ -232,7 +232,13 @@ def main():
         help='Write to the PRODUCTION sheet (SHEETS_PROD_ID). Default '
              'writes to the dev/testing sheet (SHEETS_DEV_ID).',
     )
+    parser.add_argument(
+        '--league', default=None, metavar='LEAGUE_KEY',
+        help='League registry key to render (config/leagues.yml). '
+             'Default: the registry\'s default_league (the ESPN league).',
+    )
     args = parser.parse_args()
+    db.set_league(args.league)
 
     tracked = records.get_tracked_team_stats()
     stats = order_stats_for_display(tracked)

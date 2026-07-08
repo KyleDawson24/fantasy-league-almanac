@@ -5,13 +5,20 @@ had their own copy of SNOWFLAKE_CONFIG + query_snowflake) and the
 script-top boilerplate (utf-8 stdout reconfig + load_dotenv) duplicated
 across both output scripts.
 
-Three things live here:
+Four things live here:
   - init()             one-call script startup: utf-8 stdout + load_dotenv
                        + warm the Snowflake config. Output scripts call
                        this once at start.
   - query_snowflake()  the only Snowflake entry point. Lazily opens a
                        single connection on first call and reuses it for
                        the lifetime of the process. atexit cleanup.
+  - set_league() /     the process-wide target league (MLB-57). Every
+    league_predicate() league-scoped mart query filters on
+                       league_predicate(); scripts with a --league flag
+                       call set_league(args.league) right after init().
+                       Unset, it lazily resolves the registry default
+                       (the ESPN league) -- the pre-registry runbook
+                       behaves identically.
   - close()            explicit cleanup; rarely needed (atexit handles it).
 
 Connection consolidation rationale: pre-Phase-7, every records.py /
@@ -31,15 +38,25 @@ point for the stdout reconfig.
 
 import atexit
 import os
+import re
 import sys
+from pathlib import Path
 
 import snowflake.connector
 from dotenv import load_dotenv
+
+# League registry import: repo root on sys.path so the shared config/
+# namespace package resolves when output scripts run as files.
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+from config.league_registry import get_league
 
 
 _SNOWFLAKE_CONFIG = None
 _conn = None
 _stdout_reconfigured = False
+_league = None
 
 
 def _build_config():
@@ -154,3 +171,52 @@ def close():
         except Exception:
             pass
         _conn = None
+
+
+# ---------------------------------------------------------------------------
+# League targeting (MLB-57). The warehouse holds every league at once
+# (league_key in every grain); an output run renders exactly one. The
+# same process-wide pattern as the connection singleton: scripts call
+# set_league(args.league) once at startup, library modules read
+# league_predicate() when building SQL. Left unset, the registry default
+# (the ESPN league) resolves lazily on first use.
+# ---------------------------------------------------------------------------
+
+def set_league(key=None):
+    """Pin the process's target league. key=None -> registry default.
+    Raises LeagueRegistryError (with the known-key list) on unknown keys,
+    so a typo'd --league fails before any query runs."""
+    global _league
+    league = get_league(key)
+    # The key is spliced into SQL as a validated literal (see
+    # league_predicate); constrain the alphabet rather than trusting the
+    # yml blindly.
+    if not re.fullmatch(r"[a-z0-9_-]+", league.key):
+        raise ValueError(
+            f"league_key {league.key!r} contains characters outside "
+            f"[a-z0-9_-]; fix the key in config/leagues.yml"
+        )
+    _league = league
+
+
+def league():
+    """The resolved League object (config.league_registry.League)."""
+    if _league is None:
+        set_league(None)
+    return _league
+
+
+def league_key():
+    """The active league's registry key -- the value stamped in every
+    warehouse grain."""
+    return league().key
+
+
+def league_predicate(alias=None):
+    """SQL predicate pinning a query to the active league, e.g.
+    "league_key = 'espn-main'" (or "t.league_key = ..." with an alias).
+    Returned as a literal rather than a bind param so call sites don't
+    have to re-thread positional %s params; the key's alphabet is
+    validated at set_league time."""
+    column = f"{alias}.league_key" if alias else "league_key"
+    return f"{column} = '{league_key()}'"

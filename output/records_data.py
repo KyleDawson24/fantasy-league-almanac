@@ -21,7 +21,7 @@ Public API:
 - load_schedule_lookup()                -- (season, mp) -> playoff metadata
 """
 
-from db import query_snowflake
+from db import league_predicate, query_snowflake
 
 
 # ---------- Rank-1 record fetches ----------
@@ -48,7 +48,7 @@ def get_current_season_records():
 
 
 def _fetch_rank1_records(scope):
-    return query_snowflake("""
+    return query_snowflake(f"""
         SELECT entity_grain, stat_name, record_direction,
                team_id, team_name, team_abbrev,
                COALESCE(owner_display, owner_name) AS owner_name,
@@ -58,6 +58,7 @@ def _fetch_rank1_records(scope):
         WHERE record_scope = %s
           AND rank = 1
           AND performance_status = 'active'
+          AND {league_predicate()}
     """, (scope,))
 
 
@@ -72,7 +73,7 @@ def get_record_top_n(stat_name, grain='team', direction='most',
     'best' / 'worst' at the mart layer). Default limit dropped to 5 to
     match the mart's new top-5 cap.
     """
-    return query_snowflake("""
+    return query_snowflake(f"""
         SELECT rank, season_year, matchup_period, team_id, team_name,
                COALESCE(owner_display, owner_name) AS owner_name, stat_value
         FROM mart_stat_leaderboard
@@ -82,6 +83,7 @@ def get_record_top_n(stat_name, grain='team', direction='most',
           AND stat_name = %s
           AND rank <= %s
           AND performance_status = 'active'
+          AND {league_predicate()}
         ORDER BY rank
     """, (grain, scope, direction, stat_name, limit))
 
@@ -89,13 +91,14 @@ def get_record_top_n(stat_name, grain='team', direction='most',
 def get_tracked_team_stats():
     """Distinct stat_names present in the team-grain all-time 'most' leaderboard.
     Used by the records report to discover what stats to iterate."""
-    rows = query_snowflake("""
+    rows = query_snowflake(f"""
         SELECT DISTINCT stat_name
         FROM mart_stat_leaderboard
         WHERE entity_grain = 'team'
           AND record_scope = 'all_time'
           AND record_direction = 'most'
           AND performance_status = 'active'
+          AND {league_predicate()}
     """)
     return [r['stat_name'] for r in rows]
 
@@ -121,6 +124,7 @@ def get_team_contributors(season_year, matchup_period, team_id, stat_column):
         WHERE season_year = %s
           AND matchup_period = %s
           AND team_id = %s
+          AND {league_predicate()}
         ORDER BY {stat_column} DESC NULLS LAST, display_name
     """, (season_year, matchup_period, team_id))
 
@@ -198,6 +202,7 @@ def get_team_contributors_bulk(tuples, top_n=3):
         SELECT *
         FROM fct_player_weekly_active_performance
         WHERE (season_year, matchup_period, team_id) IN ({placeholders})
+          AND {league_predicate()}
     """, params)
 
     by_team_week = {}
@@ -253,6 +258,7 @@ def get_player_contributors_bulk(tuples, top_n=3, positives_only=True):
         SELECT *
         FROM fct_player_weekly_active_performance
         WHERE (season_year, matchup_period, player_id) IN ({placeholders})
+          AND {league_predicate()}
     """, params)
 
     by_player = {(r['season_year'], r['matchup_period'], r['player_id']): r
@@ -352,6 +358,7 @@ def league_history_count(grain, stat_name, value, op='='):
         SELECT COUNT(*) AS n
         FROM {fct} f
         WHERE f.is_abnormal = false
+          AND {league_predicate('f')}
           AND ({col_expr}) {op} %s
     """, (value,))
     return rows[0]['n'] if rows else 0

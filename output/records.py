@@ -42,7 +42,7 @@ Public orchestrator API:
 
 # Backward-compat re-export so league_notes.py (records.query_snowflake)
 # keeps working without consumer-side import changes.
-from db import query_snowflake
+from db import league_predicate, query_snowflake
 
 import stat_catalog
 
@@ -103,7 +103,7 @@ def get_records_set_this_week(season_year, matchup_period):
     polarity = stat_catalog.get_polarity_map()
     auto_tracked = stat_catalog.get_auto_tracked()
 
-    candidates = query_snowflake("""
+    candidates = query_snowflake(f"""
         SELECT *
         FROM mart_stat_leaderboard
         WHERE rank = 1
@@ -111,6 +111,7 @@ def get_records_set_this_week(season_year, matchup_period):
           AND season_year = %s
           AND matchup_period = %s
           AND performance_status = 'active'
+          AND {league_predicate()}
     """, (season_year, matchup_period))
 
     out = []
@@ -123,7 +124,7 @@ def get_records_set_this_week(season_year, matchup_period):
 
         # Rank 2 = prior holder. With recency tiebreak, also tells us
         # whether we tied (rank-2 stat_value == rank-1).
-        prior_rows = query_snowflake("""
+        prior_rows = query_snowflake(f"""
             SELECT *
             FROM mart_stat_leaderboard
             WHERE entity_grain = %s
@@ -132,6 +133,7 @@ def get_records_set_this_week(season_year, matchup_period):
               AND record_direction = %s
               AND rank = 2
               AND performance_status = 'active'
+              AND {league_predicate()}
         """, (grain, stat, direction))
         prior = prior_rows[0] if prior_rows else None
 
@@ -160,7 +162,7 @@ def get_records_set_this_week(season_year, matchup_period):
             # entities set simultaneously (e.g. the first-ever cycle, by two
             # teams at once) -- flag it so the recap frames it as a new record
             # rather than "the Nth to do so."
-            tied = query_snowflake("""
+            tied = query_snowflake(f"""
                 SELECT season_year, matchup_period, team_abbrev, team_name,
                        owner_name, display_name, player_name
                 FROM mart_stat_leaderboard
@@ -168,6 +170,7 @@ def get_records_set_this_week(season_year, matchup_period):
                   AND record_direction = %s AND record_scope = 'all_time'
                   AND performance_status = 'active'
                   AND stat_value = %s
+                  AND {league_predicate()}
                 ORDER BY rank
             """, (grain, stat, direction, cand['stat_value']))
             this_week = (season_year, matchup_period)
@@ -213,7 +216,7 @@ def get_records_with_contributors(scope, top_n=5):
     polarity = stat_catalog.get_polarity_map()
     auto_tracked = stat_catalog.get_auto_tracked()
 
-    rows = query_snowflake("""
+    rows = query_snowflake(f"""
         SELECT entity_grain, stat_name, record_direction, rank,
                season_year, matchup_period,
                team_id, team_name, team_abbrev, owner_name,
@@ -222,6 +225,7 @@ def get_records_with_contributors(scope, top_n=5):
         WHERE record_scope = %s
           AND rank <= %s
           AND performance_status = 'active'
+          AND {league_predicate()}
         ORDER BY entity_grain, stat_name, record_direction, rank
     """, (scope, _MART_TOP_N_BUFFER))
 

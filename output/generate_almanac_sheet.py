@@ -43,7 +43,13 @@ def main():
         action='store_true',
         help='With --no-sheets, print every tab instead of Home + first team tab.',
     )
+    parser.add_argument(
+        '--league', default=None, metavar='LEAGUE_KEY',
+        help='League registry key to render (config/leagues.yml). '
+             'Default: the registry\'s default_league (the ESPN league).',
+    )
     args = parser.parse_args()
+    db.set_league(args.league)
 
     if (args.season_year is None) != (args.matchup_period is None):
         parser.error('--season-year and --matchup-period must be supplied together')

@@ -50,6 +50,16 @@ from cbs_capture import (
 FIRST_SEASON = 2004
 LAST_SEASON = 2025          # 2026 is the live season; it gets swept at rollover
 
+# Player-seasons CBS's gamelog endpoint cannot serve — evidence in the
+# backfill manifest. Counted as known_unavailable (not failures) so the
+# verdict stays meaningful; --force retries them in case CBS heals.
+KNOWN_UNAVAILABLE = {
+    # Rostered prospect with zero MLB games (debut 2007-09); endpoint
+    # answers persistent HTTP 500 (two runs, 8 attempts, 2026-07-07),
+    # unlike Bergolla's same-shape 2006 which 200s with an empty log.
+    ("2006", "547434"): "persistent HTTP 500; no MLB games that season",
+}
+
 
 # --------------------------------------------------------------------------
 # Payload readers (shapes probed 2026-07-07; hard-fail if CBS changes them)
@@ -161,7 +171,7 @@ def run_backfill(client: Client, history_dir: Path, years: list[int], force: boo
             append_manifest(history_dir, meta, str(stats_file))
 
         universe = universe_from_stats(stats_payload)
-        landed = skipped = empty = 0
+        landed = skipped = empty = unavailable = 0
         games_total = 0
         rejected, failed = [], []
 
@@ -170,6 +180,9 @@ def run_backfill(client: Client, history_dir: Path, years: list[int], force: boo
             out = history_dir / "gamelog" / str(year) / ("%s.json" % pid)
             if out.is_file() and out.stat().st_size > 0 and not force:
                 skipped += 1
+                continue
+            if (str(year), pid) in KNOWN_UNAVAILABLE and not force:
+                unavailable += 1
                 continue
             payload, meta = client.request("gamelog", {"player_id": pid, "timeframe": str(year)})
             entries = gamelog_entries(payload) if payload is not None else None
@@ -193,15 +206,17 @@ def run_backfill(client: Client, history_dir: Path, years: list[int], force: boo
         year_summaries[year] = {
             "universe": len(universe), "landed": landed, "already_present": skipped,
             "empty_gamelogs": empty, "games_landed": games_total,
+            "known_unavailable": unavailable,
             "failed": failed, "rejected_fake_history": rejected,
         }
         if failed:
             problems.append("%d: %d gamelog fetches failed" % (year, len(failed)))
         if rejected:
             problems.append("%d: %d gamelogs REJECTED as fake history" % (year, len(rejected)))
-        print("%d: universe=%d landed=%d present=%d empty=%d games=%d failed=%d rejected=%d"
+        print("%d: universe=%d landed=%d present=%d empty=%d games=%d failed=%d "
+              "rejected=%d unavailable=%d"
               % (year, len(universe), landed, skipped, empty, games_total,
-                 len(failed), len(rejected)), flush=True)
+                 len(failed), len(rejected), unavailable), flush=True)
 
     summary = {
         "verified_at": stamp,

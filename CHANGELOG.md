@@ -155,12 +155,24 @@ output-changing; the almanac goldens were re-anchored under review).
   real half of the 20-year archive — per-season player universes from
   `league/stats?timeframe` and authentic per-game lines from
   `players/gamelog` (shape re-verified 2026-07-07: Votto 2015 = 159
-  games, `game_date` YYYYMMDD, `.ytd` running counters), landed as raw
-  envelopes under `data/cbs_raw/<league>/history/`. A gamelog is landed
-  only when every entry's `game_date` falls inside the requested season
-  — an other-year date means fake history and the file is rejected.
-  Idempotent per player-season; rerun to resume. Reuses the capture's
-  GET-only whitelisted client (museum rule).
+  entries, `game_date` YYYYMMDD), landed as raw envelopes under
+  `data/cbs_raw/<league>/history/`. A gamelog is landed only when every
+  entry dates inside the requested season — a dated entry from another
+  year means fake history and the file is rejected, while null-date
+  rows (postponed/cancelled games; 2021's COVID-makeup era has ~145)
+  validate on their in-year `point` field instead. Idempotent per
+  player-season; rerun to resume; player-seasons CBS's endpoint
+  persistently 500s on are tombstoned as `KNOWN_UNAVAILABLE` with
+  evidence (one so far: Votto 2006, a zero-MLB-games rostered
+  prospect) so the verification verdict stays meaningful. First full
+  sweep landed 2026-07-07: 3,809 player-season gamelogs across
+  2004-2025 — 556,460 daily rows, 237,181 true player-games (the
+  gamelog is a team-schedule-shaped daily log; `G` flags actual
+  appearances) — with per-year universes fully covered and verdict
+  PASS. Notably absent from per-game rows: FPTS — fantasy points per
+  game must be recomputed from scoring rules at staging time, anchored
+  against the authoritative season-grain FPTS in `league/stats`.
+  Reuses the capture's GET-only whitelisted client (museum rule).
 - **Source freshness** on the four settings-style raw tables (seasonal
   thresholds over `extracted_at`); `box_scores` documented as pending an
   extract-side load timestamp.

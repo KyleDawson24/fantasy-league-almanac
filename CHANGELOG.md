@@ -173,6 +173,33 @@ output-changing; the almanac goldens were re-anchored under review).
   game must be recomputed from scoring rules at staging time, anchored
   against the authoritative season-grain FPTS in `league/stats`.
   Reuses the capture's GET-only whitelisted client (museum rule).
+- **CBS site-UI league-history capture** (`extract/cbs_ui_capture.py`,
+  MLB-47): the site UI serves fantasy-layer history the API denies
+  under every probed parameter — the maintainer found it browsing, and
+  every mechanism turned out to be a clean GET. Lands raw HTML for
+  standings 2001+ (champions were never formally named; final
+  standings derive all 26 of them), transaction reports 2001+ under
+  both filters (bench/start moves ride the log — in a pure points
+  league the active set IS the scoring lineup, so active-points
+  attribution back two decades becomes a measurable reconstruction),
+  year-end roster reports 2003+ (the Time Period pulldown's option
+  values are `/teams/roster-report/{team}/{year}/` URLs; per-year team
+  ids parse from that year's standings page), drafts 2017+ (offline
+  order, soft signal), and per-franchise `/history/team-overview/{id}`
+  pages (franchise ids are stable across renames — the continuity
+  join). Session cookie from `CBS_WEB_COOKIES` in the root `.env`,
+  never logged; auth verified by content per page (login-bounce
+  detection, per-surface markers); idempotent; ground-truthed against
+  the maintainer's pasted 2021 roster before sweeping. First sweep
+  landed 2026-07-08: 526 GETs, verdict PASS — 26 standings years, 52
+  transaction pages (both filters; Activated/Reserved moves confirmed
+  present in the 2001 log), 375 roster reports across 2003–2025 with
+  per-year team counts that record the league's own shape (12–19
+  teams by era), 10 drafts, 34 franchise overviews. The live season's
+  roster-report pages render differently and are skipped — the API
+  capture owns 2026. Era-specific parse notes (transaction verb
+  vocabulary, draft page structure, embedded player-picker furniture)
+  ride with the format-abstraction staging work.
 - **Source freshness** on the four settings-style raw tables (seasonal
   thresholds over `extracted_at`); `box_scores` documented as pending an
   extract-side load timestamp.

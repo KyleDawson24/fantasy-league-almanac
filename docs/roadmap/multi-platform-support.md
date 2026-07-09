@@ -88,12 +88,30 @@ only — the repo is public) → MLB-60 stat crosswalk (fielding included)
 standings arc landed; then the canonical bridge (`stat_classification.
 canonical_key` + IRSTR, byte-neutral) + `stg_cbs__player_season_stats`
 feeding `mart_player_season_records` — the 20-year CBS record book,
-verified vs real MLB history; calculated lens + best-games need the
-recompute) → MLB-62 per-game FPTS
+verified vs real MLB history — BUT that first record book exposed a
+material scope flaw, see the pivot below) → MLB-62 per-game FPTS
 recompute reconciled to season anchors (residuals double as era-rule
 detection) → MLB-63 ownership + active-set reconstruction with
 per-season fidelity grades (the owner-story centerpiece) → MLB-64
 dim_franchise (rename-proof continuity; v1 may ship without).
+
+**STATS-SOURCE PIVOT (2026-07-09, with the maintainer).** The first CBS
+record book surfaced impossible results (no Cole/Sale/Judge/Trout);
+verify-by-content proved `league/stats` is **free-agent-only** — every
+rostered player is absent from all 20 years (0/480; the archive is the
+*current FA pool's* careers, not league history). Rather than fight
+CBS's stats endpoint, the stats source **pivots to a universal feed +
+platform membership**: the *baseball* layer (what a player did per game)
+is universal (the free MLB Stats API), sourced once and reused across
+platforms; platforms provide only the *fantasy* layer (who was rostered/
+active when, scoring rules). Spike-proven — Verlander 2019 recomputes
+exact, and where CBS under-tracks a stat (inherited-runners-stranded)
+the universal source is *more* accurate, which is exactly the
+`platform_`/`calculated_` split. New ticket **MLB-70** (universal stats
+extract + CBS↔MLBAM name crosswalk, ~99%+) is the new stats spine
+feeding MLB-62; the captured CBS gamelogs (MLB-45) become the
+reconciliation ground-truth. MLB-63 (membership) is now the spine — a
+player's production only counts when they were rostered/active.
 Surfaces: MLB-65 marts (standings arcs, record book with the
 2026+-active-only era rule, the first-ever champions list) → MLB-66
 almanac v1 (home + team tabs, explainers required) → MLB-46
@@ -144,7 +162,10 @@ carries all 11 scored pitching categories with feed observation plus ~45
 unscored pitching keys; PPos/MLBST reclassed vestigial→metadata and
 BFP/K-BB/W-L/SHD vestigial→real once pitcher rows populated them; the
 scored IRSTR proved a direct feed key reconciling FPTS 594/594, no
-longer gating MLB-62) · MLB-61 staging · MLB-62 FPTS recompute · MLB-63
+longer gating MLB-62) · MLB-61 staging (F7 standings + the FA-only
+record book landed 2026-07-09, then the stats-source pivot) · MLB-70
+universal MLB stats extract + CBS↔MLBAM crosswalk (the new stats spine,
+2026-07-09) · MLB-62 FPTS recompute (now universal-sourced) · MLB-63
 reconstruction · MLB-64 dim_franchise · MLB-65 marts · MLB-66 almanac
 v1 · MLB-14 Yahoo access spike ·
 MLB-42 Fantrax access spike (needs a dummy league)

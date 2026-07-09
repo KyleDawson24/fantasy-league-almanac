@@ -106,9 +106,13 @@ roster dates, 16 standings periods, full 197-entry transaction window;
 cadence decided Per Offline Chat 2026-07-07: rides the ESPN weekly
 runbook as its last step — SETUP.md documents it, and the MLB-31
 runner inherits it as a non-fatal step) · MLB-45
-gamelog backfill (2004–2025 COMPLETE + verified 2026-07-07: 3,809
-player-season gamelogs, 237,181 player-games, one evidenced tombstone;
-2026 sweeps at rollover) · MLB-46 retrospective (end
+gamelog backfill (2004–2025 COMPLETE + verified: hitters 2026-07-07
+— 3,809 player-season gamelogs, 237,181 player-games; **pitchers
+2026-07-09** — `position=P` universe key found, 5,109 pitcher-season
+gamelogs + 16 two-way sentinel seasons, ~120,700 appearance rows,
+verdict PASS, 8 pre-2007 tombstones. Warehouse reloaded (`CBS_GAMELOGS`
+677,151 rows) and content-verified: 2025 season FPTS reconciles 594/594
+exact — the MLB-62 anchor. 2026 sweeps at rollover) · MLB-46 retrospective (end
 of season) · MLB-47 UI league-history capture (CAPTURED + verified 2026-07-08:
 526 pages, verdict PASS — standings 2001–2026, transactions ×2
 filters 2001–2026 with Activated/Reserved moves present back to 2001,
@@ -129,9 +133,13 @@ MLB-53..56 parsers) · MLB-60 stat
 crosswalk (LANDED 2026-07-08, in review: `canonical_stats` +
 `cbs_stat_map` seeds per the accepted MLB-4 design — canonical keys
 project-owned, bref_key as nullable alignment; census findings: 2026
-rules score NO fielding, and **the captured feeds contain NO pitching
-stats — MLB-45 reopened for a pitching-capture variant, gating
-MLB-62**) · MLB-61 staging · MLB-62 FPTS recompute · MLB-63
+rules score NO fielding, and — at census time — no pitching stats, which
+reopened MLB-45. **Pitching now landed 2026-07-09**: the crosswalk
+carries all 11 scored pitching categories with feed observation plus ~45
+unscored pitching keys; PPos/MLBST reclassed vestigial→metadata and
+BFP/K-BB/W-L/SHD vestigial→real once pitcher rows populated them; the
+scored IRSTR proved a direct feed key reconciling FPTS 594/594, no
+longer gating MLB-62) · MLB-61 staging · MLB-62 FPTS recompute · MLB-63
 reconstruction · MLB-64 dim_franchise · MLB-65 marts · MLB-66 almanac
 v1 · MLB-14 Yahoo access spike ·
 MLB-42 Fantrax access spike (needs a dummy league)

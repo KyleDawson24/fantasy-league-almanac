@@ -81,6 +81,38 @@ for the ESPN league.
   untouched VARIANTs (staging owns interpretation). The parsed-UI half
   of the loader waits on the HTML parsers.
 
+- **CBS pitching archive swept + crosswalked (MLB-45 reopened / MLB-60).**
+  The historical archive was hitters-only because the universe query was:
+  `league/stats` serves the hitter table by default, and `position=P` is
+  the pitcher-universe key (the `stats_type=pitching`-style toggles all
+  decoy — empty 200 or the hitter default, failing silently). `extract/
+  cbs_backfill.py` gained a `--backfill-pitching` mode that sweeps
+  per-season pitcher universes under that param (validated against the
+  2025 anchor before trusting any sparse-era emptiness) and their
+  gamelogs under the same content-authenticity gate as the hitter sweep.
+  - Landed 2026-07-09: **22 pitcher-universe season files (5,116
+    player-season rows), 5,109 pitcher-season gamelogs (2007–2025),
+    ~120,700 per-appearance rows**, verdict PASS. Pitcher gamelogs are
+    appearance-grain (only games pitched), unlike the schedule-grain
+    hitter logs.
+  - The two-way check turned up a structural fact: CBS models a two-way
+    player as **two separately-rosterable pseudo-players** under sentinel
+    ids (900 "Ohtani (Batter)" / 901 "(Pitcher)", on different teams in
+    2026), which `league/stats` omits from both universe tables — so the
+    person was invisible to the whole 20-year archive. `players/gamelog`
+    serves the ids directly, so the sweep fetches them explicitly (901's
+    2021 log = his real 23 starts; 2020 = 2, the injury year).
+  - The pre-2007 era serves no per-game data for anyone (hitters empty,
+    pitchers HTTP 500); 7 star pitcher-seasons tombstoned as
+    `KNOWN_UNAVAILABLE` with two-run evidence.
+  - `extract/cbs_load.py`'s season-stats walker now also walks the
+    `stats_pitching/` directory (both universes share `CBS_SEASON_STATS`,
+    told apart by `params.position`); reloaded idempotently —
+    `CBS_SEASON_STATS` 44 rows, `CBS_GAMELOGS` 677,151. Warehouse
+    content-verified: an in-universe ace's gamelog matches file-for-file,
+    and **2025 season FPTS reconciles 594/594 exact** under the recompute
+    formula (the MLB-62 anchor). Read-only throughout (museum rule).
+
 - **Canonical stat catalog + CBS crosswalk (MLB-4 design / MLB-60).**
   `canonical_stats` seed: 56 project-owned stat slugs (fielding
   first-class) with Baseball-Reference alignment as a nullable
@@ -90,11 +122,12 @@ for the ESPN league.
   loaded CBS archives plus all 16 scored categories, dispositioned
   mapped / metadata / derived_composite / vestigial / unknown, with
   scored-coverage enforced by dbt + unit tests against a committed
-  scoring-rules fixture. The census behind it surfaced two findings:
-  the current CBS rules score NO fielding (vocabulary ≠ rules), and the
-  captured feeds contain NO pitching stats at all — the capture needs a
-  pitching variant (tracked on the backfill ticket) before the FPTS
-  recompute can exist.
+  scoring-rules fixture. The census behind it surfaced that the current
+  CBS rules score NO fielding (vocabulary ≠ rules), and — at the time —
+  that the captured feeds held no pitching stats, which reopened the
+  backfill ticket (MLB-45) for a pitching sweep. That sweep has since
+  landed (next entry), and the crosswalk now carries the full pitching
+  vocabulary.
 
 ### Changed
 
@@ -251,7 +284,9 @@ for the ESPN league.
   PASS. Notably absent from per-game rows: FPTS — fantasy points per
   game must be recomputed from scoring rules at staging time, anchored
   against the authoritative season-grain FPTS in `league/stats`.
-  Reuses the capture's GET-only whitelisted client (museum rule).
+  Reuses the capture's GET-only whitelisted client (museum rule). The
+  pitcher half followed 2026-07-09 (`--backfill-pitching`, see the
+  Unreleased entry) once the `position=P` universe key was found.
 - **CBS site-UI league-history capture** (`extract/cbs_ui_capture.py`,
   MLB-47): the site UI serves fantasy-layer history the API denies
   under every probed parameter — the maintainer found it browsing, and

@@ -822,3 +822,86 @@ models:
         description: 'The record value.'
         tests:
           - not_null
+
+  - name: mart_team_acquisition_channels
+    description: >
+      MLB-17: team production split by acquisition channel and departure type,
+      under two lenses. One wide row per team feeds both Advanced Standings
+      transaction blocks. ACQUIRED = points a team's players produced for it,
+      bucketed by how the player arrived (Keeper / Draft / Trade / FA Add);
+      LOST = points departed players produced while off the roster, bucketed by
+      how they left (Dropped / Traded Away). The ACTIVE lens counts only started
+      production (lost = for other teams only); the ROSTERED lens counts all
+      production including bench/IL (lost = other teams AND unowned). Deltas:
+      FA delta = FA-add acquired minus dropped lost; Trade delta = trade
+      acquired minus traded-away lost (both can go negative). Built over
+      fct_roster_stints x fct_player_daily_performance; points rounded once at
+      this grain. Reconciles exactly: the four acquired channels sum to the
+      team's own active (and rostered) production. Materialization: table.
+      Grain: one row per (league_key, season_year, team_id).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - season_year
+              - team_id
+    columns:
+      - name: league_key
+        description: 'League registry key.'
+        tests:
+          - not_null
+      - name: season_year
+        description: 'Season the acquisition accounting covers.'
+        tests:
+          - not_null
+      - name: team_id
+        description: 'ESPN fantasy team id.'
+        tests:
+          - not_null
+      - name: team_name
+        description: 'Latest-in-season team name.'
+      - name: team_abbrev
+        description: 'Latest-in-season team abbreviation.'
+      - name: owner_display
+        description: 'Owner display name (via dim_team_owner).'
+      - name: keeper_active_pts
+        description: 'Active points scored for the team by players kept from the prior season.'
+      - name: draft_active_pts
+        description: 'Active points scored for the team by players it drafted.'
+      - name: trade_active_pts
+        description: 'Active points scored for the team by players acquired via trade.'
+      - name: fa_add_active_pts
+        description: 'Active points scored for the team by players added from free agency.'
+      - name: acquired_active_pts
+        description: 'Total active points the roster produced (sum of the four channels; equals the team''s own active production).'
+      - name: dropped_active_pts
+        description: 'Active points that dropped players went on to score FOR OTHER TEAMS while off this roster.'
+      - name: traded_away_active_pts
+        description: 'Active points that traded-away players went on to score for other teams while off this roster.'
+      - name: lost_active_pts
+        description: 'Total active points forfeited to other teams (dropped + traded away).'
+      - name: fa_delta_active_pts
+        description: 'FA-add acquired minus dropped lost (active lens). Negative = the drops outproduced the adds elsewhere.'
+      - name: trade_delta_active_pts
+        description: 'Trade acquired minus traded-away lost (active lens). Negative = gave up more than gained.'
+      - name: keeper_rostered_pts
+        description: 'All points (active + bench/IL) kept players produced while on the roster.'
+      - name: draft_rostered_pts
+        description: 'All points drafted players produced while on the roster.'
+      - name: trade_rostered_pts
+        description: 'All points trade-acquired players produced while on the roster.'
+      - name: fa_add_rostered_pts
+        description: 'All points FA-added players produced while on the roster.'
+      - name: acquired_rostered_pts
+        description: 'Total points produced while rostered (sum of the four channels; equals the team''s own rostered production).'
+      - name: dropped_rostered_pts
+        description: 'All points dropped players produced onward (other teams AND unowned) while off this roster.'
+      - name: traded_away_rostered_pts
+        description: 'All points traded-away players produced onward while off this roster.'
+      - name: lost_rostered_pts
+        description: 'Total points forfeited onward (dropped + traded away, rostered lens).'
+      - name: fa_delta_rostered_pts
+        description: 'FA-add acquired minus dropped lost (rostered lens).'
+      - name: trade_delta_rostered_pts
+        description: 'Trade acquired minus traded-away lost (rostered lens).'

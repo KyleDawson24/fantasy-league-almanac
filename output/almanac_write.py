@@ -526,6 +526,22 @@ def _standings_table_bounds(rows):
     return a_hdr, a_end, b_hdr, b_end
 
 
+def _acquisition_table_bounds(rows):
+    """Locate the acquisition-channel blocks (Active + Rostered lenses) stacked
+    below the slot grid. Returns a list of (header_idx, end_idx). The headers
+    are indented like Table B (Team in column 1) but carry a 'Keeper' column,
+    which is what tells them apart from the slot grid."""
+    bounds = []
+    for i, r in enumerate(rows):
+        if len(r) > 3 and r[1] == 'Team' and 'Keeper' in r:
+            end = i + 1
+            while (end < len(rows) and len(rows[end]) > 1
+                   and rows[end][1] not in ('', None)):
+                end += 1
+            bounds.append((i, end))
+    return bounds
+
+
 def _apply_standings_gradients(spreadsheet, worksheet, rows, stat_specs):
     """Red->white->green column gradients. Table A: every stat and points
     column, polarity-aware -- positive-weighted stats and the three score
@@ -556,6 +572,16 @@ def _apply_standings_gradients(spreadsheet, worksheet, rows, stat_specs):
         for col in range(3, len(rows[b_hdr])):
             requests.append(_color_scale_request(
                 sheet_id, col, b_end, scale='three_good_high', row_ranges=b_range,
+            ))
+    # Acquisition blocks: acquired columns green-high, lost columns green-low,
+    # the two Net deltas on a zero-centered diverging scale (polarity-aware).
+    _acq_scale = {'most': 'three_good_high', 'fewest': 'three_good_low',
+                  'diverging': 'diverging_zero'}
+    for hdr, end in _acquisition_table_bounds(rows):
+        acq_range = [{'startRowIndex': hdr + 1, 'endRowIndex': end}]
+        for col, direction in almanac_render.acquisition_gradient_columns():
+            requests.append(_color_scale_request(
+                sheet_id, col, end, scale=_acq_scale[direction], row_ranges=acq_range,
             ))
     if requests:
         _sheets_batch_update(
@@ -618,9 +644,9 @@ def _replace_advanced_standings_tab(spreadsheet, rows, stat_specs):
         formats = [
             {'range': 'A1', 'format': {'textFormat': {'bold': True, 'fontSize': 13}}},
         ]
-        for header_idx in (a_hdr, b_hdr):
-            if header_idx is None:
-                continue
+        header_indices = [h for h in (a_hdr, b_hdr) if h is not None]
+        header_indices += [h for h, _ in _acquisition_table_bounds(rows)]
+        for header_idx in header_indices:
             r = header_idx + 1
             formats.append({
                 'range': f'A{r}:{last_col}{r}',
@@ -637,6 +663,15 @@ def _replace_advanced_standings_tab(spreadsheet, rows, stat_specs):
                     'range': f'A{header_idx}',
                     'format': {'textFormat': {'bold': True}},
                 })
+        # Bold the overall acquisition section header (sits above the explainer,
+        # so the per-header "row above" pass doesn't reach it).
+        for i, row in enumerate(rows):
+            if row and row[0] == 'Production by Acquisition Channel':
+                formats.append({
+                    'range': f'A{i + 1}',
+                    'format': {'textFormat': {'bold': True}},
+                })
+                break
         _batch_format(worksheet, formats)
     except Exception as exc:
         print(f"[almanac] standings formatting skipped: {exc}")
@@ -1397,6 +1432,16 @@ def _color_scale_request(sheet_id, column_index, row_count, scale='three_good_hi
                 'type': 'MAX',
                 'color': max_color,
             },
+        }
+    elif scale == 'diverging_zero':
+        # Zero-centered: red for the most negative, white at exactly 0, green
+        # for the most positive. For polarity-aware delta columns (FA / Trade
+        # Net) where the sign is the story, not the rank.
+        gradient_rule = {
+            'minpoint': {'type': 'MIN', 'color': {'red': 0.96, 'green': 0.62, 'blue': 0.60}},
+            'midpoint': {'type': 'NUMBER', 'value': '0',
+                         'color': {'red': 1, 'green': 1, 'blue': 1}},
+            'maxpoint': {'type': 'MAX', 'color': {'red': 0.67, 'green': 0.86, 'blue': 0.64}},
         }
     else:
         low_color = {'red': 0.96, 'green': 0.62, 'blue': 0.60}

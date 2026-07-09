@@ -122,6 +122,7 @@ exposures:
       - ref('mart_team_matchup')
       - ref('mart_team_season_standings')
       - ref('mart_team_slot_production')
+      - ref('mart_team_acquisition_channels')
       - ref('dim_roster_slot_counts')
       - ref('dim_stat')
       - ref('dim_matchup_period')

@@ -48,6 +48,13 @@ sources:
           freshness:
             warn_after: {count: 210, period: day}
             error_after: {count: 420, period: day}
+      - name: transactions
+        description: "Raw ESPN transaction board, append-only (MLB-16). Each row is a VARIANT array of verbatim ACTIVITY_TRANSACTIONS topic objects for a season, paged to exhaustion from the communication endpoint (view=kona_league_communication) -- ESPN's durable full-season add/drop/trade log for baseball (the mTransactions2 view is a current-scoring-period decoy). Each topic nests messages carrying messageTypeId (178 add, 179 drop, 224/239/244 trade legs, 188 lineup), targetId (playerId), and from/to/for team ids. stg_transactions interprets the vocabulary. Current-season only (prior seasons unreachable via leagueHistory's topics filter). Staging picks the latest snapshot per season."
+        config:
+          loaded_at_field: extracted_at
+          freshness:
+            warn_after: {count: 210, period: day}
+            error_after: {count: 420, period: day}
 
       # CBS raw archives (MLB-59 loader, extract/cbs_load.py) -- same
       # warehouse, same RAW schema, platform-prefixed tables. Payloads land

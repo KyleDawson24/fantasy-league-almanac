@@ -867,6 +867,103 @@ def load_draft_to_snowflake(conn, draft_rows, year, league_key):
         cursor.close()
 
 
+def fetch_transactions(year):
+    """Return the season's transaction activity as verbatim ESPN topic
+    objects (add / drop / trade, plus lineup moves that share the feed),
+    newest-first across the whole season.
+
+    ESPN keeps the durable, full-season transaction log for baseball in the
+    league message board -- the communication endpoint's
+    ACTIVITY_TRANSACTIONS topics -- NOT in the mTransactions2 view, which for
+    flb returns only the current scoring period (MLB-16 spike, 2026-07-09).
+    We page the board to exhaustion and store the topics verbatim; the
+    stg_transactions model interprets the messageTypeId vocabulary (178 add /
+    179 drop / 224, 239, 244 trade legs / 188 lineup). Extract captures,
+    staging interprets -- so no filtering happens here.
+
+    Historical reach: the per-season path serves the active season's full log;
+    prior seasons 404 here and the leagueHistory communication view rejects
+    the topics filter, so this is current-season only for now.
+
+    Returns [] when the board is empty (pre-draft), so the caller can skip
+    the load.
+    """
+    url = f"{ESPN_API_BASE}/{year}/segments/0/leagues/{LEAGUE_ID}/communication/"
+    topics = []
+    offset, page_size, max_topics = 0, 200, 20000
+    while offset < max_topics:
+        fantasy_filter = {
+            "topics": {
+                "filterType": {"value": ["ACTIVITY_TRANSACTIONS"]},
+                "limit": page_size,
+                "offset": offset,
+                "sortMessageDate": {"sortPriority": 1, "sortAsc": False},
+            }
+        }
+        response = requests.get(
+            url,
+            params={"view": "kona_league_communication"},
+            cookies={"swid": SWID, "espn_s2": ESPN_S2},
+            headers={"x-fantasy-filter": json.dumps(fantasy_filter)},
+        )
+        response.raise_for_status()
+        page = response.json().get("topics") or []
+        if not page:
+            break
+        topics.extend(page)
+        if len(page) < page_size:
+            break
+        offset += page_size
+    return topics
+
+
+def load_transactions_to_snowflake(conn, topics, year, league_key):
+    """Append the season's transaction board as a row in RAW.TRANSACTIONS.
+
+    Append-only snapshot (mirrors DRAFT_PICKS / TEAM_OWNERS); the staging
+    model picks the latest row per league + season via extracted_at. The full
+    topic list is stored as one verbatim VARIANT payload per (league, season,
+    extract).
+    """
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS TRANSACTIONS (
+                season_year     INTEGER,
+                raw_json        VARIANT,
+                extracted_at    TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP(),
+                league_key      VARCHAR
+            )
+        """)
+        ensure_league_key_column(cursor, "TRANSACTIONS")
+
+        cursor.execute(
+            """
+            INSERT INTO TRANSACTIONS (season_year, raw_json, league_key)
+            SELECT %s, PARSE_JSON(%s), %s
+            """,
+            (year, json.dumps(topics), league_key),
+        )
+
+        conn.commit()
+        print(f"  Loaded {len(topics)} transaction topics for {year} into Snowflake.")
+
+    finally:
+        cursor.close()
+
+
+def extract_transactions(conn, year, league_key):
+    """Pull the season transaction board from ESPN and load to Snowflake."""
+    print(f"\nTransactions for {year}:")
+    topics = fetch_transactions(year)
+    if topics:
+        print(f"  Retrieved {len(topics)} transaction topics for {year}")
+        load_transactions_to_snowflake(conn, topics, year, league_key)
+    else:
+        print(f"  No transaction activity found for {year} -- skipping transactions load")
+
+
 def extract_scoring_settings(conn, year, league_key):
     """Pull scoring settings from ESPN and load to Snowflake."""
     print(f"\nScoring settings for {year}:")
@@ -935,6 +1032,15 @@ if __name__ == "__main__":
         help="Extract league settings only (skip box scores)",
     )
     parser.add_argument(
+        "--include-transactions", action="store_true",
+        help="Also extract the season transaction log (adds/drops/trades) "
+             "from the ESPN message board (MLB-16)",
+    )
+    parser.add_argument(
+        "--transactions-only", action="store_true",
+        help="Extract the transaction log only (skip box scores and settings)",
+    )
+    parser.add_argument(
         "--league", default=None, metavar="LEAGUE_KEY",
         help="League registry key to extract (config/leagues.yml). "
              "Default: the registry's default_league (the ESPN league).",
@@ -964,14 +1070,19 @@ if __name__ == "__main__":
           f"(league_key={league_key}, platform={target_league.platform})")
 
     # Determine what to extract
-    do_box_scores = not args.settings_only
+    do_box_scores = not args.settings_only and not args.transactions_only
     do_settings = args.settings_only or args.include_settings
+    do_transactions = args.transactions_only or args.include_transactions
 
     with get_snowflake_connection() as conn:
 
         # --- League settings ---
         if do_settings:
             extract_league_settings(conn, year, league_key)
+
+        # --- Transactions (MLB-16) ---
+        if do_transactions:
+            extract_transactions(conn, year, league_key)
 
         # --- Box scores ---
         if do_box_scores:

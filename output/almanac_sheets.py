@@ -37,6 +37,7 @@ from almanac_data import (
     get_draft_board,
     get_team_standings,
     get_team_slot_points,
+    get_team_acquisition_channels,
     get_home_tab_data,
     get_optimal_team,
     get_slot_capacities,
@@ -135,14 +136,17 @@ from almanac_render import (
     _team_week_stat_headers,
     boxscore_formula,
     format_all_league_team_row,
+    format_acquisition_row,
     format_record_matrix_row,
     format_record_row,
     format_team_history_matrix_row,
     format_team_roster_row,
     format_team_week_row,
+    acquisition_gradient_columns,
     standings_gradient_columns,
     standings_header,
     team_tab_title,
+    ACQUISITION_HEADER,
 )
 
 # v1.1.1 Tier 2c.3: logic surface lives in almanac_logic.py now.

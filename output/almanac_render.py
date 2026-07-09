@@ -648,6 +648,60 @@ def standings_gradient_columns(hitting_specs, pitching_specs):
     return columns
 
 
+# v2.0 Advanced Standings, acquisition blocks (MLB-17). Indented one cell like
+# the slot grid so Team / Owner line up under Table A, but the 'Keeper' column
+# is what the write layer keys off to tell the two apart. Buffer '' cells sit
+# between the Acquired group, the Lost group, and the Net deltas.
+ACQUISITION_HEADER = ['', 'Team', 'Owner',
+                      'Keeper', 'Draft', 'Trade', 'FA Add', 'Acquired', '',
+                      'Dropped', 'Traded Away', 'Lost', '',
+                      'FA Net', 'Trade Net']
+
+# Which mart column family each lens reads.
+_ACQ_LENS_SUFFIX = {'active': 'active_pts', 'rostered': 'rostered_pts'}
+
+
+def _acq_num(value):
+    """Display a mart points value: coerce Decimal/None to a 1-decimal float
+    so the tab (and its golden TSV) stay clean and deterministic."""
+    return round(float(value or 0), 1)
+
+
+def format_acquisition_row(team_row, lens):
+    """One acquisition-block data row for a team under the given lens
+    ('active' or 'rostered'), mirroring ACQUISITION_HEADER: the four acquired
+    channels + their total, the two lost buckets + their total, then the two
+    Net deltas. Buffer cells between the groups."""
+    sfx = _ACQ_LENS_SUFFIX[lens]
+
+    def v(channel):
+        return _acq_num(team_row.get(f'{channel}_{sfx}'))
+
+    return [
+        '',
+        team_row.get('team_abbrev') or '',
+        team_row.get('owner_display') or '',
+        v('keeper'), v('draft'), v('trade'), v('fa_add'), v('acquired'), '',
+        v('dropped'), v('traded_away'), v('lost'), '',
+        _acq_num(team_row.get(f'fa_delta_{sfx}')),
+        _acq_num(team_row.get(f'trade_delta_{sfx}')),
+    ]
+
+
+def acquisition_gradient_columns():
+    """(column_index, direction) pairs for an acquisition block, matching
+    ACQUISITION_HEADER. Acquired channels + total paint green-high ('most');
+    the Lost buckets + total paint green-low ('fewest' -- forfeiting less is
+    better); the two Net deltas use a zero-centered diverging scale
+    ('diverging' -- red negative, white zero, green positive). Buffer columns
+    (8, 12) get no gradient. Positional, like standings_gradient_columns."""
+    return [
+        (3, 'most'), (4, 'most'), (5, 'most'), (6, 'most'), (7, 'most'),
+        (9, 'fewest'), (10, 'fewest'), (11, 'fewest'),
+        (13, 'diverging'), (14, 'diverging'),
+    ]
+
+
 def format_record_matrix_row(spec, current_record=None, all_time_record=None,
                              league_id=None, display_map=None, schedule_lookup=None):
     """Project current/all-time holders into one side-by-side record row."""

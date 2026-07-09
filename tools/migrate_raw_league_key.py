@@ -33,15 +33,18 @@ from dotenv import load_dotenv
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from config.league_registry import get_league
 
-# The five RAW tables the ESPN extract owns. CBS raw tables (when they
-# land under MLB-59+) are created WITH league_key from day one and never
-# need this migration.
+# The RAW tables the ESPN extract owns. CBS raw tables (when they land
+# under MLB-59+) are created WITH league_key from day one and never need
+# this migration. TRANSACTIONS (MLB-16) is created WITH league_key too, so
+# it has no legacy rows to backfill -- it's listed for completeness / a
+# no-op self-heal if an older extract ever created it without the column.
 RAW_TABLES = [
     "BOX_SCORES",
     "SCORING_SETTINGS",
     "ROSTER_SETTINGS",
     "TEAM_OWNERS",
     "DRAFT_PICKS",
+    "TRANSACTIONS",
 ]
 
 

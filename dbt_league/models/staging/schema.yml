@@ -215,6 +215,64 @@ models:
       - name: keeper
         description: 'True when the pick was a keeper retained from the prior season.'
 
+  - name: stg_transactions
+    description: >
+      One transaction event leg per row, flattened from the append-only
+      RAW.TRANSACTIONS snapshots (latest per league + season) -- ESPN's
+      full-season add/drop/trade log, captured from the communication message
+      board (MLB-16). The lineup start/sit chatter (messageTypeId 188) that
+      shares the feed is dropped; add (178), drop (179), and trade (224/239/244)
+      legs are kept and normalized to directed player movement (a NULL team
+      side means free agency). This is the platform-neutral event shape a
+      future stg_cbs__transactions (over RAW.CBS_TRANSACTIONS) converges onto.
+      Grain: one row per (league_key, season_year, transaction_id, player_id,
+      source_message_type_id).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - season_year
+              - transaction_id
+              - player_id
+              - source_message_type_id
+    columns:
+      - name: league_key
+        description: 'League registry key.'
+        tests:
+          - not_null
+      - name: season_year
+        description: 'Season the transaction belongs to.'
+        tests:
+          - not_null
+      - name: transaction_id
+        description: 'ESPN message-board topic id; groups the legs of one transaction (the two sides of a trade, an add and its paired drop).'
+        tests:
+          - not_null
+      - name: source_message_type_id
+        description: 'Raw ESPN messageTypeId, kept for traceability: 178 add, 179 drop, 224/239/244 trade legs.'
+        tests:
+          - not_null
+      - name: event_type
+        description: 'Normalized event kind.'
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['add', 'drop', 'trade']
+      - name: player_id
+        description: 'ESPN stable numeric player identifier (the moved player).'
+        tests:
+          - not_null
+      - name: event_ts
+        description: 'When the transaction posted (from the message epoch-ms date).'
+      - name: from_team_id
+        description: 'Team the player left. NULL when arriving from free agency (always NULL on an add).'
+      - name: to_team_id
+        description: 'Team the player joined. NULL when departing to free agency (always NULL on a drop). For the 239 trade variant, resolved from `for` when `to` is the -1 sentinel.'
+      - name: counterparty_team_id
+        description: "Raw `for` team on the message: the trade counterparty on 239 legs, NULL otherwise."
+
   - name: stg_team_owners
     description: >
       Per-league, per-season team -> owner bridge, flattened from

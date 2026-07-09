@@ -35,6 +35,7 @@ from almanac_data import (
     slot_label,
 )
 from almanac_render import (
+    ACQUISITION_HEADER,
     ADVANCED_STANDINGS_TAB,
     HOME_ALLTIME_HEADER,
     HOME_DEVIATION_LABEL,
@@ -62,6 +63,7 @@ from almanac_render import (
     format_all_league_team_row,
     format_all_league_team_row_with_deviation,
     format_all_league_thin_row,
+    format_acquisition_row,
     format_draft_board_cell,
     format_draft_value_row,
     format_standings_row,
@@ -828,10 +830,11 @@ def build_draft_board_color_grid(board_rows):
 
 
 def build_advanced_standings_tab_rows(standings_rows, slot_rows, stat_specs,
-                                      season_year):
+                                      season_year, acquisition_rows=None):
     """Build the Advanced Standings tab: the per-stat weekly-average
     standings (Table A) stacked over a team x active-lineup-slot points
-    grid (Table B).
+    grid (Table B), then two acquisition-channel blocks (Active and Rostered
+    lenses) when acquisition_rows is supplied (MLB-17).
 
     standings_rows come from almanac_data.get_team_standings (already
     ordered as a standings, with the per-week denominators on every row);
@@ -895,6 +898,40 @@ def build_advanced_standings_tab_rows(standings_rows, slot_rows, stat_specs,
             team.get('owner_display') or '',
             *[team_slots.get(slot, '') for slot in slot_cols],
         ])
+
+    # Acquisition-channel blocks (MLB-17): production by how each player was
+    # acquired, and the production forfeited when they left, under two lenses.
+    # Each block is ranked by its own Acquired total (the "rankings by
+    # acquisition channel" deliverable), ties broken by abbrev for determinism.
+    if acquisition_rows:
+        rows.append([])
+        rows.append([])
+        rows.append(['Production by Acquisition Channel'])
+        rows.append([
+            "Points each team's roster produced, split by how each player was "
+            "acquired (Acquired), against the points departed players went on "
+            "to produce elsewhere (Lost). FA Net = FA-add acquired minus "
+            "dropped lost; Trade Net = trade acquired minus traded-away lost."
+        ])
+        lens_blocks = (
+            ('active',
+             'Active Lens - started points only (Lost = production for other teams)'),
+            ('rostered',
+             'Rostered Lens - all points incl. bench/IL (Lost = other teams AND unowned)'),
+        )
+        for lens, label in lens_blocks:
+            total_key = f'acquired_{lens}_pts'
+            ranked = sorted(
+                acquisition_rows,
+                key=lambda r: (-float(r.get(total_key) or 0),
+                               r.get('team_abbrev') or ''),
+            )
+            rows.append([])
+            rows.append([label])
+            rows.append(list(ACQUISITION_HEADER))
+            for team in ranked:
+                rows.append(format_acquisition_row(team, lens))
+
     return rows
 
 

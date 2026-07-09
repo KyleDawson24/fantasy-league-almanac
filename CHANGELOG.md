@@ -22,6 +22,49 @@ for the ESPN league.
 
 ### Added
 
+- **Transaction Records: production by acquisition channel on Advanced
+  Standings (MLB-16 spike / MLB-17).** The named key output — team rankings
+  by how each player's production was acquired.
+  - **The ESPN transaction log, found by content (MLB-16).** The durable,
+    full-season add/drop/trade log lives on the league *message board* — the
+    `communication/?view=kona_league_communication` endpoint's
+    `ACTIVITY_TRANSACTIONS` topics, paged to exhaustion — NOT in `mTransactions2`,
+    which for `flb` is a current-scoring-period decoy (200 OK, ~40 rows, no
+    filter widens it). Verified 3,028 topics spanning draft day → today.
+    `extract/extract.py` gains `--include-transactions` / `--transactions-only`,
+    landing the verbatim topics in a new append-only `RAW.TRANSACTIONS`
+    (league_key-stamped, `ADD COLUMN IF NOT EXISTS` self-heal, dbt source +
+    migration list updated). Current-season only for now (prior seasons 404 the
+    per-season path; `leagueHistory`'s communication view rejects the topics
+    filter — a documented follow-up).
+  - **`stg_transactions`** decodes the messageTypeId vocabulary (178 add / 179
+    drop / 224·239·244 trade legs / 188 lineup-noise dropped) into a
+    platform-neutral directed-event shape (a NULL team side = free agency) that
+    a future `stg_cbs__transactions` converges onto.
+  - **`fct_roster_stints`** (marts/core): one row per contiguous window a player
+    spent on a team, tagged with how it opened (KEEPER / DRAFT / TRADE / FA_ADD)
+    and closed (DROPPED / TRADED_AWAY). Membership is the DENSE lineup shell
+    (`stg_box_scores`, gaps-and-islands over a per-league dense period index, so
+    an unloaded All-Star gap doesn't split a stint while a real off-roster gap
+    does); the log supplies the directed 224/244 TRADE edges — the only thing
+    roster state can't tell from a same-window drop+add. Draft/keeper from
+    `stg_draft`; scoped to seasons that have a transaction log so no season
+    silently mislabels team-changes as adds. Locked stint semantics (Per Offline
+    Chat 2026-07-09): most-recent event governs, no channel inheritance, the
+    lost-clock keyed on player so the thrice-dropped guy isn't double-counted.
+  - **`mart_team_acquisition_channels`** (marts/reporting): wide per-team, two
+    lenses — ACTIVE (started points; lost = for other teams) and ROSTERED (all
+    points incl. bench/IL; lost = other teams AND unowned) — with FA and Trade
+    Net deltas. Reconciles exactly: the four acquired channels sum to each
+    team's own active (and rostered) production.
+  - **Advanced Standings** grows two stacked blocks under the weekly grid
+    (Active + Rostered lenses), teams as rows ranked by Acquired total, with
+    write-layer gradients (acquired green-high, lost green-low, the Nets
+    zero-centered diverging / polarity-aware). The almanac golden re-anchored on
+    `Advanced-Standings.tsv` ONLY — a pure append; the recap and records BBCode
+    goldens held byte-identical. On the `league_almanac` exposure; grain-tested;
+    full `dbt build` green (337 nodes), 7 new almanac unit tests.
+
 - **CBS player record book — the first tangible CBS almanac content
   (MLB-61 F1 / MLB-65), and the vocabulary bridge under it.** The
   ESPN→canonical bridge (`stat_classification.canonical_key` + an `IRSTR`

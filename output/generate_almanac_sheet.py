@@ -87,6 +87,7 @@ def main():
         almanac_sheets.get_team_slot_points(season_year),
         team_week_stat_specs,
         season_year,
+        acquisition_rows=almanac_sheets.get_team_acquisition_channels(season_year),
     )
     # Home is built last among the data tabs: its nav band (#23) lists the
     # team tabs + Draft Recap. Preview has no real gids, so nav_targets stays

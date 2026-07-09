@@ -21,7 +21,7 @@ items ship in the gaps while the platform work runs.
 | Clone & Run Demo Mode | [brief](docs/roadmap/clone-and-run-demo-mode.md) | DuckDB target + sample league; runnable by a recruiter in one command |
 | Multi-Platform Support | [brief](docs/roadmap/multi-platform-support.md) | CBS · Yahoo · a recon-chosen third platform |
 | Public Dashboard | [brief](docs/roadmap/public-dashboard.md) | Looker/Tableau public surface; ESPN-first, grows with the platforms |
-| Transaction Records | [brief](docs/roadmap/transaction-records.md) | Rankings by acquisition channel: keeper / draft / trade / FA |
+| Transaction Records | [brief](docs/roadmap/transaction-records.md) | Rankings by acquisition channel: keeper / draft / trade / FA · acquisition-channel rankings landed 2026-07-09 (in review) |
 | Self-Serve Web App | [brief](docs/roadmap/self-serve-web-app.md) | Bring-your-own-credentials app; highest total value, furthest out |
 | Player Profiles | [brief](docs/roadmap/player-profiles.md) | Player cards — parked until a front surface exists |
 | Newsletter & Distribution | [brief](docs/roadmap/newsletter-and-distribution.md) | Email edition + the multi-sink interface |

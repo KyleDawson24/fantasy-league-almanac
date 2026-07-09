@@ -1013,6 +1013,30 @@ def _standings_team(team_id=1, abbrev='AAA', wins=2, losses=1, ties=0,
     return row
 
 
+def _acq_team(team_id=1, abbrev='AAA', **overrides):
+    """A mart_team_acquisition_channels-shaped row for the acquisition blocks."""
+    row = {
+        'team_id': team_id,
+        'team_abbrev': abbrev,
+        'owner_display': f'Owner {team_id}',
+    }
+    for lens in ('active', 'rostered'):
+        row.update({
+            f'keeper_{lens}_pts': 100.0,
+            f'draft_{lens}_pts': 200.0,
+            f'trade_{lens}_pts': 50.0,
+            f'fa_add_{lens}_pts': 25.0,
+            f'acquired_{lens}_pts': 375.0,
+            f'dropped_{lens}_pts': 10.0,
+            f'traded_away_{lens}_pts': 5.0,
+            f'lost_{lens}_pts': 15.0,
+            f'fa_delta_{lens}_pts': 15.0,
+            f'trade_delta_{lens}_pts': 45.0,
+        })
+    row.update(overrides)
+    return row
+
+
 class TestAdvancedStandingsRows:
     def test_standings_header_layout(self):
         header = almanac_sheets.standings_header(
@@ -1114,6 +1138,73 @@ class TestAdvancedStandingsRows:
         assert rows[10] == ['', 'Team', 'Owner', 'C', 'SP']
         assert rows[11] == ['', 'AAA', 'Owner 1', 5.5, 9.9]
         assert rows[12] == ['', 'BBB', 'Owner 2', 4.4, '']
+
+    def test_acquisition_header_layout(self):
+        assert almanac_sheets.ACQUISITION_HEADER == [
+            '', 'Team', 'Owner',
+            'Keeper', 'Draft', 'Trade', 'FA Add', 'Acquired', '',
+            'Dropped', 'Traded Away', 'Lost', '',
+            'FA Net', 'Trade Net',
+        ]
+
+    def test_format_acquisition_row_active_lens(self):
+        row = almanac_render.format_acquisition_row(_acq_team(), 'active')
+        assert row == [
+            '', 'AAA', 'Owner 1',
+            100.0, 200.0, 50.0, 25.0, 375.0, '',
+            10.0, 5.0, 15.0, '',
+            15.0, 45.0,
+        ]
+
+    def test_format_acquisition_row_reads_the_selected_lens(self):
+        # The rostered lens pulls the *_rostered_pts family, not *_active_pts.
+        team = _acq_team(keeper_active_pts=1.0, keeper_rostered_pts=999.0)
+        assert almanac_render.format_acquisition_row(team, 'active')[3] == 1.0
+        assert almanac_render.format_acquisition_row(team, 'rostered')[3] == 999.0
+
+    def test_format_acquisition_row_zero_and_negative(self):
+        # Zeros render as 0.0 (not blank); deltas can go negative.
+        team = _acq_team(trade_active_pts=0.0, fa_delta_active_pts=-42.0)
+        row = almanac_render.format_acquisition_row(team, 'active')
+        assert row[5] == 0.0        # Trade
+        assert row[13] == -42.0     # FA Net
+
+    def test_acquisition_gradient_columns_positions_and_polarity(self):
+        # Acquired channels green-high, Lost buckets green-low, Net deltas
+        # zero-centered diverging; buffer columns 8 and 12 skipped.
+        assert almanac_sheets.acquisition_gradient_columns() == [
+            (3, 'most'), (4, 'most'), (5, 'most'), (6, 'most'), (7, 'most'),
+            (9, 'fewest'), (10, 'fewest'), (11, 'fewest'),
+            (13, 'diverging'), (14, 'diverging'),
+        ]
+
+    def test_build_advanced_standings_appends_ranked_acquisition_blocks(self):
+        standings = [_standings_team(team_id=1, abbrev='AAA')]
+        acq = [
+            _acq_team(team_id=1, abbrev='AAA', acquired_active_pts=100.0),
+            _acq_team(team_id=2, abbrev='BBB', acquired_active_pts=300.0),
+        ]
+        rows = almanac_sheets.build_advanced_standings_tab_rows(
+            standings, [], _STANDINGS_SPECS, 2026, acquisition_rows=acq,
+        )
+
+        assert ['Production by Acquisition Channel'] in rows
+        lens_labels = [r[0] for r in rows if r and str(r[0]).startswith(
+            ('Active Lens', 'Rostered Lens'))]
+        assert len(lens_labels) == 2
+        # Both block headers carry 'Keeper' (the write layer keys off it).
+        acq_headers = [i for i, r in enumerate(rows)
+                       if len(r) > 3 and r[1] == 'Team' and 'Keeper' in r]
+        assert len(acq_headers) == 2
+        # Ranked by the lens's Acquired total desc: BBB (300) before AAA (100).
+        first_block = rows[acq_headers[0] + 1: acq_headers[0] + 3]
+        assert [r[1] for r in first_block] == ['BBB', 'AAA']
+
+    def test_build_advanced_standings_omits_blocks_without_data(self):
+        rows = almanac_sheets.build_advanced_standings_tab_rows(
+            [_standings_team()], [], _STANDINGS_SPECS, 2026,
+        )
+        assert ['Production by Acquisition Channel'] not in rows
 
 
 class TestReapplyFormulaCellsRetry:

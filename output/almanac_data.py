@@ -700,6 +700,31 @@ def get_team_slot_points(season_year):
     """, (season_year,))
 
 
+def get_team_acquisition_channels(season_year):
+    """Per-team production by acquisition channel and departure type, both
+    lenses, from mart_team_acquisition_channels (MLB-17). One row per team;
+    the builder orders each lens block by its own Acquired total. Feeds the two
+    transaction blocks stacked under the Advanced Standings weekly grid.
+    """
+    return query_snowflake(f"""
+        SELECT
+            team_id,
+            team_abbrev,
+            owner_display,
+            keeper_active_pts,   draft_active_pts,   trade_active_pts,
+            fa_add_active_pts,   acquired_active_pts,
+            dropped_active_pts,  traded_away_active_pts, lost_active_pts,
+            fa_delta_active_pts, trade_delta_active_pts,
+            keeper_rostered_pts,   draft_rostered_pts,   trade_rostered_pts,
+            fa_add_rostered_pts,   acquired_rostered_pts,
+            dropped_rostered_pts,  traded_away_rostered_pts, lost_rostered_pts,
+            fa_delta_rostered_pts, trade_delta_rostered_pts
+        FROM mart_team_acquisition_channels
+        WHERE season_year = %s
+          AND {league_predicate()}
+    """, (season_year,))
+
+
 def get_slot_capacities(season_year, matchup_period):
     """Return configured active roster slot counts for one season."""
     rows = query_snowflake(f"""

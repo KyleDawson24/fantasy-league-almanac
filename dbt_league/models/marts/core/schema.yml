@@ -1337,3 +1337,90 @@ models:
         description: 'Authoritative season platform total. FORMAT-CONDITIONAL: the sum of the matchup-era wrapper team scores, NULL for non-H2H leagues (whose real platform total lives in the standings feed instead).'
       - name: against_platform_points
         description: 'Points conceded: opponents'' authoritative platform totals summed across the team''s matchups. NULL for non-H2H leagues (no opponents).'
+
+  - name: fct_roster_stints
+    description: >
+      MLB-16/17. One row per contiguous window a player spent on a single
+      fantasy team (a "stint"), tagged with how it OPENED (acquisition channel)
+      and CLOSED (departure type). The platform-neutral spine of the
+      acquisition-channel reporting and, later, player-profile acquisition
+      stories. CBS transaction data feeds the same shape once stg_cbs__-
+      transactions lands.
+
+      Membership (the WHEN) is the DENSE lineup shell stg_box_scores -- a row
+      for every rostered player every scoring period, bench and IL included --
+      so gaps-and-islands over a per-league dense period index cuts stints
+      correctly (an unloaded All-Star gap doesn't split a continuous stint; a
+      real off-roster gap does). The transaction log (stg_transactions) supplies
+      the directed 224/244 TRADE edges, the only thing roster state can't tell
+      apart from a same-window drop+add. Draft/keeper attribution joins
+      stg_draft on (player, team) for opening-day stints.
+
+      Scope: only (league, season) pairs that have a transaction log -- a
+      season without one would silently label every team->team move FA_ADD.
+      ESPN = current season only for now (prior seasons aren't reachable via
+      leagueHistory's topics filter).
+
+      Known edges (immaterial): a handful of opening-day players drafted by a
+      DIFFERENT team than they open on (draft-day shuffle) fall to FA_ADD;
+      a same-direction round-trip trade could in principle reuse a directed
+      edge. Both are rare and documented rather than special-cased.
+
+      Materialization: table (window-heavy; a stable spine for the mart).
+      Grain: one row per (league_key, season_year, player_id, stint_index).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - season_year
+              - player_id
+              - stint_index
+    columns:
+      - name: league_key
+        description: 'League registry key.'
+        tests:
+          - not_null
+      - name: season_year
+        description: 'Season the stint belongs to.'
+        tests:
+          - not_null
+      - name: player_id
+        description: 'ESPN stable numeric player identifier.'
+        tests:
+          - not_null
+      - name: stint_index
+        description: '1-based ordinal of this stint within the player''s season timeline (a re-acquisition opens a fresh stint, so the same team can appear under two stint_index values).'
+        tests:
+          - not_null
+      - name: team_id
+        description: 'The fantasy team the player was rostered on for this stint.'
+        tests:
+          - not_null
+      - name: stint_start_period
+        description: 'First scoring period of the stint (rostered).'
+      - name: stint_end_period
+        description: 'Last scoring period of the stint (rostered).'
+      - name: stint_start_idx
+        description: 'Dense per-league period index of the stint start (contiguity/adjacency math).'
+      - name: stint_end_idx
+        description: 'Dense per-league period index of the stint end.'
+      - name: rostered_days
+        description: 'Count of scoring periods the player was rostered during the stint (bench/IL included).'
+      - name: opened_at_season_start
+        description: 'True when the stint begins on the first loaded period (the opening-day roster) -- the draft/keeper reconciliation point.'
+      - name: open_at_season_end
+        description: 'True when the stint is still active at the latest loaded period (never closed).'
+      - name: open_channel
+        description: 'How the player arrived on this team for this stint: KEEPER / DRAFT (opening-day roster, per stg_draft keeper flag), TRADE (direct handoff from another team backed by a 224/244 trade edge), or FA_ADD (arrived from free agency, or an unbacked team->team handoff == drop+add).'
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['KEEPER', 'DRAFT', 'TRADE', 'FA_ADD']
+      - name: close_type
+        description: 'How the player left this team: TRADED_AWAY (direct handoff to another team backed by a trade edge), DROPPED (left to free agency or an unbacked handoff), or NULL while still rostered at the latest loaded period.'
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['TRADED_AWAY', 'DROPPED']

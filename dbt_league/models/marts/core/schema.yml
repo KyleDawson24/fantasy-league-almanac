@@ -1161,3 +1161,179 @@ models:
           rounded 1 decimal.
       - name: eligible_days
         description: 'Count of distinct scoring periods (= days) the player was eligible at this position during this matchup period. Useful for per-day rate queries; not strictly required by the optimal-team selector.'
+
+  - name: fct_team_season_performance
+    description: >
+      Season-grain team performance -- the SHARED, format-modular team-stats
+      spine. One row per (league_key, season_year, team_id): a team's full
+      regular-season stat line, calculated score lenses, and (where the format
+      delivers them) the official W-L record + authoritative platform total.
+      Season is the atom; all-time is a GROUP BY rollup over this fact, so the
+      same model serves single-season team stats and all-time franchise
+      records (MLB-69).
+
+      Format-modularity (MLB-43): the stat rollup is format-AGNOSTIC -- it sums
+      fct_player_weekly_active_performance, so any format produces team stats
+      once players carry a team_id, no matchups required. The W-L / platform-
+      total OVERLAY is format-CONDITIONAL: a LEFT JOIN of the matchup-gated
+      team-week fact, populated where the league delivers matchups (H2H, any
+      platform) and NULL where it doesn't (points, any platform) -- a
+      data-presence toggle, never a platform check. NULL-safe playoff filter
+      (not coalesce(is_playoff,false)) keeps the regular season and survives
+      the unscoped schedule so a no-schedule league isn't silently dropped.
+
+      Verified against mart_team_season_standings: counting + W-L match
+      exactly; calculated points within accumulated rounding (this fact rounds
+      once at season grain from the unrounded player totals -- the more-correct
+      round-of-sum). Holds ESPN only until the CBS player-performance
+      convergence lands (MLB-61 F1 + MLB-62); CBS then flows in unchanged.
+
+      Materialization: table (float score sums; feeds records/almanac goldens).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - season_year
+              - team_id
+    columns:
+      - name: league_key
+        description: 'League registry key. First-class grain dimension; consumers filter on it.'
+        tests:
+          - not_null
+      - name: season_year
+        description: 'Season year. The atom -- all-time is a rollup over this.'
+        tests:
+          - not_null
+      - name: team_id
+        description: 'Stable numeric fantasy team id (rename-proof; the franchise-continuity key).'
+        tests:
+          - not_null
+      - name: team_name
+        description: 'Team name from the team''s latest played period (mid-season renames can''t surface stale).'
+      - name: team_abbrev
+        description: 'Owner-set short team code, latest played period.'
+      - name: owner_display
+        description: 'Canonical owner label (nickname > proper name), via dim_team_owner. Franchise-continuity join key for all-time rollups.'
+      - name: periods_played
+        description: 'Distinct scoring/matchup periods this team produced in this season. A normalization denominator; also the shape signal (ESPN ~20 weeks, a points league its scoring periods).'
+        tests:
+          - not_null
+      - name: wins
+        description: 'Regular-season wins. FORMAT-CONDITIONAL: populated where the league delivers matchups, NULL for non-H2H (points) leagues of any platform.'
+      - name: losses
+        description: 'Regular-season losses. NULL for non-H2H leagues (see wins).'
+      - name: ties
+        description: 'Regular-season ties. NULL for non-H2H leagues (see wins).'
+      - name: h
+        description: '{{ doc("stat_h") }}'
+      - name: ab
+        description: '{{ doc("stat_ab") }}'
+      - name: b_bb
+        description: '{{ doc("stat_b_bb") }}'
+      - name: b_so
+        description: '{{ doc("stat_b_so") }}'
+      - name: hbp
+        description: '{{ doc("stat_hbp") }}'
+      - name: sf
+        description: '{{ doc("stat_sf") }}'
+      - name: hr
+        description: '{{ doc("stat_hr") }}'
+      - name: r
+        description: '{{ doc("stat_r") }}'
+      - name: rbi
+        description: '{{ doc("stat_rbi") }}'
+      - name: sb
+        description: '{{ doc("stat_sb") }}'
+      - name: cs
+        description: '{{ doc("stat_cs") }}'
+      - name: tb
+        description: '{{ doc("stat_tb") }}'
+      - name: singles
+        description: '{{ doc("stat_singles") }}'
+      - name: doubles
+        description: '{{ doc("stat_doubles") }}'
+      - name: triples
+        description: '{{ doc("stat_triples") }}'
+      - name: xbh
+        description: '{{ doc("stat_xbh") }}'
+      - name: gdp
+        description: 'Grounded into double plays (season sum).'
+      - name: b_ibb
+        description: 'Batter intentional walks (season sum).'
+      - name: cyc
+        description: 'Hits for the cycle (season sum).'
+      - name: w
+        description: '{{ doc("stat_w") }}'
+      - name: l
+        description: '{{ doc("stat_l") }}'
+      - name: k
+        description: '{{ doc("stat_k") }}'
+      - name: er
+        description: '{{ doc("stat_er") }}'
+      - name: outs
+        description: '{{ doc("stat_outs") }}'
+      - name: qs
+        description: '{{ doc("stat_qs") }}'
+      - name: sv
+        description: '{{ doc("stat_sv") }}'
+      - name: hld
+        description: '{{ doc("stat_hld") }}'
+      - name: p_h
+        description: '{{ doc("stat_p_h") }}'
+      - name: p_bb
+        description: '{{ doc("stat_p_bb") }}'
+      - name: p_hr
+        description: '{{ doc("stat_p_hr") }}'
+      - name: p_r
+        description: '{{ doc("stat_p_r") }}'
+      - name: cg
+        description: '{{ doc("stat_cg") }}'
+      - name: blk
+        description: '{{ doc("stat_blk") }}'
+      - name: wp
+        description: '{{ doc("stat_wp") }}'
+      - name: hbp_p
+        description: 'Batters hit by pitch, pitcher side (season sum).'
+      - name: blsv
+        description: 'Blown saves (season sum).'
+      - name: nh
+        description: 'No-hitters thrown (season sum).'
+      - name: pg
+        description: 'Perfect games thrown (season sum).'
+      - name: pk
+        description: 'Pickoffs (season sum).'
+      - name: sho
+        description: 'Shutouts thrown (season sum).'
+      - name: avg
+        description: 'Team batting average, recomputed from season counting sums (SUM(H)/SUM(AB)).'
+      - name: obp
+        description: 'Team on-base percentage (season).'
+      - name: slg
+        description: 'Team slugging percentage (season).'
+      - name: ops
+        description: 'Team OPS (season).'
+      - name: era
+        description: 'Team ERA (season).'
+      - name: whip
+        description: 'Team WHIP (season).'
+      - name: k_per_9
+        description: 'Team strikeouts per 9 (season).'
+      - name: k_per_bb
+        description: 'Team strikeout-to-walk ratio (season).'
+      - name: calculated_hitting_pts
+        description: 'Season hitting points under current-season scoring weights, rounded once at season grain from the unrounded player totals.'
+      - name: calculated_pitching_pts
+        description: 'Season pitching points under current rules, rounded once at season grain.'
+      - name: calculated_points
+        description: 'Season total points under current rules, rounded once at season grain. The cross-season-comparable score lens.'
+      - name: negative_points
+        description: 'Season rollup of gross-negative-production magnitude across active players.'
+      - name: platform_hitting_pts
+        description: 'Season platform hitting points (player rollup; the wrapper gives no team-level split). Always available.'
+      - name: platform_pitching_pts
+        description: 'Season platform pitching points (player rollup).'
+      - name: platform_points
+        description: 'Authoritative season platform total. FORMAT-CONDITIONAL: the sum of the matchup-era wrapper team scores, NULL for non-H2H leagues (whose real platform total lives in the standings feed instead).'
+      - name: against_platform_points
+        description: 'Points conceded: opponents'' authoritative platform totals summed across the team''s matchups. NULL for non-H2H leagues (no opponents).'

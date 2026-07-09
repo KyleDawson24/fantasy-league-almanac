@@ -680,3 +680,87 @@ models:
         description: 'True for the most recent captured period this season -- the current standings. For a completed season this is the final standings; for an in-progress season (2026) it is the current leader, not a crowned champion.'
         tests:
           - not_null
+
+  - name: mart_team_alltime
+    description: >
+      All-time franchise records: one row per (league_key, team_id), rolling
+      fct_team_season_performance across every season a franchise played. The
+      accumulation axis of the records surface (MLB-69) and the team half of
+      the almanac's all-time leaders. Franchise = team_id (stable across
+      renames); display name/owner are the latest season, totals span the
+      whole lineage. Counting stats sum; rates recompute from the summed
+      counting; W-L is NULL for pure points franchises (no H2H seasons).
+      Platform-neutral -- any league rolls up here, filtered by league_key.
+      Verified: ESPN league-wide all-time wins == losses (closed H2H).
+      Materialization: table.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - team_id
+    columns:
+      - name: league_key
+        description: 'League registry key. Consumers filter on it.'
+        tests:
+          - not_null
+      - name: team_id
+        description: 'Stable franchise id (the rollup key across seasons/renames).'
+        tests:
+          - not_null
+      - name: team_name
+        description: 'Current franchise name (latest season).'
+      - name: team_abbrev
+        description: 'Current franchise short code (latest season).'
+      - name: owner_display
+        description: 'Current owner label (latest season), via dim_team_owner.'
+      - name: seasons_played
+        description: 'Number of seasons this franchise appears in the fact.'
+        tests:
+          - not_null
+      - name: first_season
+        description: 'Earliest season played.'
+        tests:
+          - not_null
+      - name: last_season
+        description: 'Most recent season played.'
+        tests:
+          - not_null
+      - name: wins
+        description: 'All-time regular-season wins. NULL for a franchise with no H2H seasons (pure points).'
+      - name: losses
+        description: 'All-time regular-season losses. NULL for a pure-points franchise.'
+      - name: ties
+        description: 'All-time regular-season ties. NULL for a pure-points franchise.'
+      - name: hr
+        description: '{{ doc("stat_hr") }}'
+      - name: r
+        description: '{{ doc("stat_r") }}'
+      - name: rbi
+        description: '{{ doc("stat_rbi") }}'
+      - name: sb
+        description: '{{ doc("stat_sb") }}'
+      - name: tb
+        description: '{{ doc("stat_tb") }}'
+      - name: k
+        description: '{{ doc("stat_k") }}'
+      - name: w
+        description: '{{ doc("stat_w") }}'
+      - name: sv
+        description: '{{ doc("stat_sv") }}'
+      - name: er
+        description: '{{ doc("stat_er") }}'
+      - name: outs
+        description: '{{ doc("stat_outs") }}'
+      - name: calculated_points
+        description: 'All-time total points under current-season scoring weights (sum of the season fact''s once-rounded values).'
+        tests:
+          - not_null
+      - name: calculated_hitting_pts
+        description: 'All-time hitting points under current rules.'
+      - name: calculated_pitching_pts
+        description: 'All-time pitching points under current rules.'
+      - name: best_season_points
+        description: 'The franchise''s highest single-season calculated_points (the peak axis).'
+      - name: best_season_year
+        description: 'Season in which best_season_points was set.'

@@ -405,3 +405,62 @@ models:
         description: 'Cumulative season-to-date fantasy points -- the platform''s own season FPTS total, the standings currency of a points league. Grows period over period (asserted first<=last at capture).'
         tests:
           - not_null
+
+  - name: stg_cbs__player_season_stats
+    description: >
+      CBS adapter (#2) player-season performance, LONG form and
+      canonical-bridged: one row per (league_key, season_year, player_id,
+      stat_name). The season-grain half of F1 -- the record book's raw
+      material. Each player object's native CBS stat keys are unpivoted and
+      bridged cbs_key -> canonical_key (cbs_stat_map) -> stat_name (dim_stat),
+      so CBS emits the SAME stat_name vocabulary the ESPN DAG speaks and the
+      shared dim_stat metadata applies. Unmapped keys drop at the INNER JOINs.
+      Hitter + pitcher universes share the model (params.position); a player
+      scores in one universe (zero real-id overlap 2004-2025), so
+      (player_id, season_year, stat_name) is unique. Season FPTS bridges to
+      PLATFORM_POINTS; the display key INN drops (OUTS carries the innings
+      signal); the two-way sentinels (900/901) are absent from the universes.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - season_year
+              - player_id
+              - stat_name
+    columns:
+      - name: league_key
+        description: 'League registry key.'
+        tests:
+          - not_null
+      - name: season_year
+        description: 'MLB season year (2004-2025 from the API archive).'
+        tests:
+          - not_null
+      - name: player_id
+        description: 'CBS stable numeric player id.'
+        tests:
+          - not_null
+      - name: player_name
+        description: 'Player name as CBS reported it that season.'
+      - name: universe
+        description: '''hitting'' or ''pitching'' -- which season universe the row came from (params.position). Context, not grain (a player is in one).'
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['hitting', 'pitching']
+      - name: stat_name
+        description: 'The bridged ESPN-namespace stat name (HR, K, OUTS, IRSTR, PLATFORM_POINTS...). FK to dim_stat.'
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_stat')
+                field: stat_name
+      - name: stat_category
+        description: 'hitting | pitching | fielding | total, from dim_stat.'
+      - name: stat_value
+        description: 'The season value (counting total, rate, or season FPTS). Thousands separators stripped; non-numeric values dropped upstream.'
+        tests:
+          - not_null

@@ -84,7 +84,10 @@ dry-run). Data chain (CBS milestone): MLB-59 warehouse loader →
 MLB-53/54/55/56 UI parsers (standings / transaction verb census /
 year-end rosters / drafts+franchise overviews; synthetic test fixtures
 only — the repo is public) → MLB-60 stat crosswalk (fielding included)
-→ MLB-61 staging onto the accepted contract → MLB-62 per-game FPTS
+→ MLB-61 staging onto the accepted contract (STARTED 2026-07-09: F7
+standings first — `stg_cbs__standings` + `mart_period_standings`, the
+2026 arc, shared-DAG-free; F1 player performance + the canonical bridge
+next) → MLB-62 per-game FPTS
 recompute reconciled to season anchors (residuals double as era-rule
 detection) → MLB-63 ownership + active-set reconstruction with
 per-season fidelity grades (the owner-story centerpiece) → MLB-64

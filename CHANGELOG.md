@@ -22,6 +22,22 @@ for the ESPN league.
 
 ### Added
 
+- **First CBS reporting mart: the 2026 standings arc (MLB-61 F7).** CBS
+  becomes adapter #2 at the staging boundary, starting with the
+  lowest-risk feed. `stg_cbs__standings` reads `raw.cbs_standings`
+  directly (F7 standings are *platform-delivered* — a non-H2H points
+  league has no matchups to derive standings from), and
+  `mart_period_standings` computes the arc: one row per
+  `(league_key, season_year, period, team_id)` with cumulative points +
+  rank and derived movement (points earned that period, rank change,
+  distance behind the leader). Platform-neutral by name and shape — any
+  future points league reuses it. The six `raw.cbs_*` tables are declared
+  as dbt sources. No shared ESPN DAG model changed (zero goldens risk);
+  256 rows, 19 schema tests + the full 194-test suite green.
+  Content-verified against the real 2026 pennant race. Scope: 2026
+  in-progress only (the API is current-season); historical champions
+  land from the parsed UI pages (MLB-53) into the same mart shape.
+
 - **League registry + `league_key` re-grain (multi-league foundation,
   MLB-48 design / MLB-57 implementation).** One warehouse namespace,
   `league_key` as a first-class dimension in every grain — the accepted

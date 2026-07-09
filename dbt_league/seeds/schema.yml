@@ -200,10 +200,16 @@ seeds:
       keys), or unknown. `.ytd` running-counter keys are excluded by
       rule: derived, dropped-or-validated at staging, never crosswalked.
 
-      KNOWN GAP (2026-07-08): the captured feeds contain NO pitching
-      stat keys -- the 11 scored pitching categories map from their
-      scoring_rules names with appears_in='scoring_rules' until the
-      pitching capture variant lands (see MLB-45).
+      Pitching landed (2026-07-09, MLB-45): the position=P universe sweep
+      filled the feed's pitching vocabulary -- all 11 scored pitching
+      categories now carry gamelog|season observation, plus ~45 unscored
+      pitching keys (counting, rates, batting-allowed lines). Two
+      corrections the pitcher data forced: PPos and MLBST were reclassed
+      from vestigial to metadata (populated SP/RP and roster-status on
+      pitcher rows -- they only read null on hitters), and BFP/K-BB/W-L/
+      SHD went from vestigial to real (mapped/derived_composite). The
+      scored IRSTR is a DIRECT feed key (not IR-IRS): it reconciles 2025
+      season FPTS 587/587 exactly, the MLB-62 recompute anchor.
     columns:
       - name: cbs_key
         description: 'Primary key. The stat abbreviation exactly as CBS spells it in feeds/rules.'

@@ -43,7 +43,51 @@ strikeouts_pitching,Strikeouts (Pitching),pitching,SO,false,bref pitching-table 
 quality_starts,Quality Starts,pitching,,false,Fantasy construct; derivable from bref data but not a bref column
 complete_games,Complete Games,pitching,CG,false,
 innings_pitched,Innings Pitched,pitching,IP,false,Platforms score whole innings (CBS INN); thirds handling is a staging concern
-inherited_runners_stranded,Inherited Runners Stranded,pitching,,false,Reliever construct; bref carries inherited-runner data only on reliever pages
+inherited_runners_stranded,Inherited Runners Stranded,pitching,,false,Reliever construct; bref carries inherited-runner data only on reliever pages. CBS carries a DIRECT IRSTR feed key (the scored one) plus raw IR / IRS; IRSTR reconciles 2025 season FPTS 587/587 where IR - IRS lands 559/587 -- IRSTR is authoritative; IR - IRS only an approximation
+losses,Losses,pitching,L,false,
+games_started_pitching,Games Started (Pitcher),pitching,GS,false,Distinct canonical from games_started_field; bref GS reused with stat_category disambiguating
+appearances_pitching,Appearances (Pitcher),pitching,G,false,Pitcher games; bref pitching-table G (reused abbreviation)
+games_finished,Games Finished,pitching,GF,false,
+outs_recorded,Outs Recorded,pitching,,false,IP thirds as the integer primitive (CBS OUTS = 3 x innings); innings_pitched carries the bref identity
+batters_faced,Batters Faced,pitching,BF,false,
+runs_allowed,Runs Allowed,pitching,R,false,bref pitching-table R; category disambiguates from the batter canonical runs
+home_runs_allowed,Home Runs Allowed,pitching,HR,false,bref pitching-table HR
+hit_batsmen,Hit Batsmen,pitching,HBP,false,Pitcher-side HBP -- the separate canonical the hit_by_pitch note anticipated
+intentional_walks_issued,Intentional Walks Issued,pitching,IBB,false,
+balks,Balks,pitching,BK,false,
+wild_pitches,Wild Pitches,pitching,WP,false,
+pickoffs,Pickoffs,pitching,,false,No bref standard-table column
+pitch_count,Pitches Thrown,pitching,,false,bref carries pitch counts only on game logs; no standard-table column
+shutouts,Shutouts,pitching,SHO,false,CBS spells the feed key SO; the slug dodges the strikeout collision
+no_hitters,No-Hitters,pitching,,false,Game-event flag; bref tabulates them only on specialty pages
+no_hit_losses,No-Hit Losses,pitching,,false,Rare hard-luck flag (one in the 2004-2025 census); kept for full accounting
+complete_game_losses,Complete-Game Losses,pitching,,false,Hard-luck split; not derivable from season totals
+blown_saves,Blown Saves,pitching,,false,Semi-standard reliever stat; bref reliever pages only (the holds precedent)
+blown_save_losses,Blown-Save Losses,pitching,,false,Split of blown_saves; not derivable from season totals
+save_opportunities,Save Opportunities,pitching,,true,S + BS (verified arithmetically on pitcher season rows)
+relief_wins,Relief Wins,pitching,,false,Role-split of wins; not derivable from season totals
+relief_losses,Relief Losses,pitching,,false,Role-split of losses
+innings_as_starter,Innings as Starter,pitching,,false,Role-split of innings_pitched (CBS SINN; == INN for pure starters)
+inherited_runners,Inherited Runners,pitching,,false,Reliever construct; bref reliever pages only
+inherited_runners_scored,Inherited Runners Scored,pitching,,false,CBS feed key IRS -- inherited runners that scored (the failure event); the scored strand category is the direct IRSTR key rather than this
+perfect_games,Perfect Games,pitching,,false,Game-event flag (CBS feed key PG); exactly one in the 2004-2025 archive; bref tabulates on specialty pages only
+at_bats_against,At Bats Against,pitching,,false,
+total_bases_allowed,Total Bases Allowed,pitching,,false,
+singles_allowed,Singles Allowed,pitching,,false,
+doubles_allowed,Doubles Allowed,pitching,,false,
+triples_allowed,Triples Allowed,pitching,,false,
+air_outs,Air Outs,pitching,,false,Outs recorded in the air; no bref standard-table column
+ground_outs,Ground Outs,pitching,,false,
+era,Earned Run Average,pitching,ERA,true,9 x ER / IP
+whip,WHIP,pitching,WHIP,true,(HA + BBI) / IP
+opp_batting_avg,Opponent Batting Average,pitching,,true,HA / ABA
+opp_on_base_pct,Opponent On-Base Percentage,pitching,,true,
+opp_slugging_pct,Opponent Slugging Percentage,pitching,,true,TBA / ABA
+k_per_9,Strikeouts per 9 Innings,pitching,SO9,true,
+bb_per_9,Walks per 9 Innings,pitching,BB9,true,
+h_per_9,Hits per 9 Innings,pitching,H9,true,
+r_per_9,Runs per 9 Innings,pitching,,true,No bref standard-table column
+win_pct,Win Percentage,pitching,W-L%,true,W / (W + L)
 putouts,Putouts,fielding,PO,false,
 assists_fielding,Assists,fielding,A,false,
 errors,Errors,fielding,E,false,

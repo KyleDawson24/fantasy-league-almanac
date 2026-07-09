@@ -33,17 +33,76 @@ OBP,on_base_pct,hitting,mapped,false,,gamelog|season,false,Derived rate
 SLG,slugging_pct,hitting,mapped,false,,gamelog|season,false,Derived rate
 OPS,ops,hitting,mapped,false,,gamelog|season,false,Derived rate
 SBPCT,sb_pct,hitting,mapped,false,,gamelog|season,false,Derived rate; feed reports 0-100 scale
-W,wins,pitching,mapped,true,10,scoring_rules,false,Scored +10. NO pitching keys exist in the captured feeds -- the capture's pitching variant is an open gap (see MLB-45 2026-07-08 comment)
-S,saves,pitching,mapped,true,8,scoring_rules,false,Scored +8; feed key pending pitching capture
-HD,holds,pitching,mapped,true,6,scoring_rules,false,Scored +6; feed key pending pitching capture
-CG,complete_games,pitching,mapped,true,5,scoring_rules,false,Scored +5; feed key pending pitching capture
-QS,quality_starts,pitching,mapped,true,4,scoring_rules,false,Scored +4; feed key pending pitching capture
-INN,innings_pitched,pitching,mapped,true,3,scoring_rules,false,Scored +3/inning; feed key pending pitching capture
-IRSTR,inherited_runners_stranded,pitching,mapped,true,2,scoring_rules,false,Scored +2; feed key pending pitching capture
-K,strikeouts_pitching,pitching,mapped,true,1,scoring_rules,false,Scored +1; rules-group Pitching disambiguates from batter KO
-HA,hits_allowed,pitching,mapped,true,-1,scoring_rules,false,Scored -1; feed key pending pitching capture
-BBI,walks_issued,pitching,mapped,true,-1,scoring_rules,false,Scored -1; feed key pending pitching capture
-ER,earned_runs,pitching,mapped,true,-2,scoring_rules,false,Scored -2; feed key pending pitching capture
+W,wins,pitching,mapped,true,10,gamelog|season|scoring_rules,false,Scored +10. Feed key present on pitcher rows (MLB-45 sweep 2026-07-09)
+S,saves,pitching,mapped,true,8,gamelog|season|scoring_rules,false,Scored +8
+HD,holds,pitching,mapped,true,6,gamelog|season|scoring_rules,false,Scored +6
+CG,complete_games,pitching,mapped,true,5,gamelog|season|scoring_rules,false,Scored +5
+QS,quality_starts,pitching,mapped,true,4,gamelog|season|scoring_rules,false,Scored +4
+INN,innings_pitched,pitching,mapped,true,3,gamelog|season|scoring_rules,false,Scored +3/inning but REALIZED at out-granularity -- CBS pays OUTS (1 pt/out = 3/inning); INN itself is decimal thirds (66.2 = 66-2/3). 2025 season FPTS reconciles 587/587 via OUTS rather than floor(INN)
+IRSTR,inherited_runners_stranded,pitching,mapped,true,2,gamelog|season|scoring_rules,false,Scored +2. Direct feed key -- reconciles 2025 FPTS 587/587; IR - IRS only approximates it (559/587). Sparse in early years (present 1224/5116 rows)
+K,strikeouts_pitching,pitching,mapped,true,1,gamelog|season|scoring_rules,false,Scored +1; the feeds' pitcher-K key. rules-group Pitching disambiguates from batter KO
+HA,hits_allowed,pitching,mapped,true,-1,gamelog|season|scoring_rules,false,Scored -1
+BBI,walks_issued,pitching,mapped,true,-1,gamelog|season|scoring_rules,false,Scored -1
+ER,earned_runs,pitching,mapped,true,-2,gamelog|season|scoring_rules,false,Scored -2
+L,losses,pitching,mapped,false,,gamelog|season,false,Pitcher losses
+GS,games_started_pitching,pitching,mapped,false,,gamelog|season,false,Games started as pitcher (distinct from the GST field-start key)
+APP,appearances_pitching,pitching,mapped,false,,gamelog|season,false,Pitching appearances (games pitched)
+GF,games_finished,pitching,mapped,false,,gamelog|season,false,
+OUTS,outs_recorded,pitching,mapped,false,,gamelog|season,false,IP as integer thirds (3 x innings); the primitive the INN scoring actually pays
+IR,inherited_runners,pitching,mapped,false,,gamelog|season,false,Runners inherited by a reliever; IRSTR (scored) is stranded; IRS is scored
+IRS,inherited_runners_scored,pitching,mapped,false,,gamelog|season,false,Inherited runners that scored (the failure event); NOT the scored strand category
+RA,runs_allowed,pitching,mapped,false,,gamelog|season,false,All runs allowed (ER is the scored subset)
+HRA,home_runs_allowed,pitching,mapped,false,,gamelog|season,false,
+HB,hit_batsmen,pitching,mapped,false,,gamelog|season,false,Pitcher hit-by-pitch (batters plunked); distinct canonical from the batter HP
+IBBI,intentional_walks_issued,pitching,mapped,false,,gamelog|season,false,Pitcher-issued IBB (batting-side IB is the separate key)
+B,balks,pitching,mapped,false,,gamelog|season,false,Balks (max ~4/season in census)
+WP,wild_pitches,pitching,mapped,false,,gamelog|season,false,
+PKO,pickoffs,pitching,mapped,false,,gamelog|season,false,
+PC,pitch_count,pitching,mapped,false,,gamelog|season,false,Pitches thrown
+SO,shutouts,pitching,mapped,false,,gamelog|season,false,CBS spells shutouts SO (max 3/season); the scored strikeout is K rather than this
+NH,no_hitters,pitching,mapped,false,,gamelog|season,false,No-hitter game flag (Verlander 2007-06-12 authenticated SO=1/NH=1)
+PG,perfect_games,pitching,mapped,false,,gamelog|season,false,Perfect-game flag; exactly one in the 2004-2025 archive
+BS,blown_saves,pitching,mapped,false,,gamelog|season,false,
+SOP,save_opportunities,pitching,mapped,false,,gamelog|season,false,S + BS (verified 331/331 on pitcher rows)
+RW,relief_wins,pitching,mapped,false,,gamelog|season,false,Role-split of wins
+RL,relief_losses,pitching,mapped,false,,gamelog|season,false,Role-split of losses
+CGL,complete_game_losses,pitching,mapped,false,,gamelog|season,false,
+NHL,no_hit_losses,pitching,mapped,false,,gamelog|season,false,Hard-luck no-hit loss (one in census)
+BSL,blown_save_losses,pitching,mapped,false,,gamelog|season,false,
+SINN,innings_as_starter,pitching,mapped,false,,gamelog|season,false,Innings pitched as a starter (== INN for pure starters)
+AO,air_outs,pitching,mapped,false,,gamelog|season,false,Outs recorded in the air (flyouts/popouts)
+GO,ground_outs,pitching,mapped,false,,gamelog|season,false,
+ABA,at_bats_against,pitching,mapped,false,,gamelog|season,false,At-bats against -- the batting-allowed line
+TBA,total_bases_allowed,pitching,mapped,false,,gamelog|season,false,
+1BA,singles_allowed,pitching,mapped,false,,gamelog|season,false,
+2BA,doubles_allowed,pitching,mapped,false,,gamelog|season,false,
+3BA,triples_allowed,pitching,mapped,false,,gamelog|season,false,
+ERA,era,pitching,mapped,false,,gamelog|season,false,Derived rate; staging recomputes 9 x ER / IP
+WHIP,whip,pitching,mapped,false,,gamelog|season,false,Derived rate; (HA + BBI) / IP
+BAA,opp_batting_avg,pitching,mapped,false,,gamelog|season,false,Derived rate; HA / ABA
+OBA,opp_on_base_pct,pitching,mapped,false,,gamelog|season,false,Derived rate
+SLGA,opp_slugging_pct,pitching,mapped,false,,gamelog|season,false,Derived rate; TBA / ABA
+WPCT,win_pct,pitching,mapped,false,,gamelog|season,false,Derived rate; W / (W + L)
+Kd9,k_per_9,pitching,mapped,false,,gamelog|season,false,Derived rate; strikeouts per 9
+BBd9,bb_per_9,pitching,mapped,false,,gamelog|season,false,Derived rate; walks per 9
+Hd9,h_per_9,pitching,mapped,false,,gamelog|season,false,Derived rate; hits per 9
+Rd9,r_per_9,pitching,mapped,false,,gamelog|season,false,Derived rate; runs per 9
+GPSP,,metadata,metadata,false,,gamelog|season,false,Games as starting pitcher -- joins the GP-by-position family (GPP/GPRP); staging position signal; not a crosswalked stat
+IRPCT,,pitching,derived_composite,false,,gamelog|season,false,Inherited-runners strand rate = 100 x (IR - IRS) / IR (verified 426/426)
+GdAO,,pitching,derived_composite,false,,gamelog|season,false,Ground-to-air-out ratio = GO / AO
+SHD,,pitching,derived_composite,false,,gamelog|season,false,Saves + Holds (verified 5116/5116); was mis-marked vestigial on hitter-only data
+INNs,,pitching,derived_composite,false,,gamelog|season,true,Innings variant (thirds-formatted); relationship to INN unconfirmed
+INNdGS,,pitching,derived_composite,false,,gamelog|season,true,Innings per game-started shaped; formula unconfirmed
+INNdGSd,,pitching,derived_composite,false,,gamelog|season,true,Per-GS innings composite; formula unconfirmed
+OUTSdGS,,pitching,derived_composite,false,,gamelog|season,true,Outs per game-started shaped; formula unconfirmed
+HIP,,pitching,derived_composite,false,,gamelog|season,true,Per-appearance rate shaped (~0.71 on a start); formula unconfirmed
+IRB,,pitching,unknown,false,,gamelog|season,true,Inherited-runners family (bequeathed?); sparse; formula unconfirmed
+NW,,pitching,unknown,false,,gamelog|season,true,Present and non-zero on pitcher rows but not W-L/W-S/W-HD; formula undecoded (was mis-marked vestigial on hitter-only data)
+MERA,,pitching,unknown,false,,gamelog|season,true,Takes large signed values (3600/-720...); a scaled/modified ERA shape; undecoded
+RPF,,pitching,unknown,false,,gamelog|season,true,Very sparse (a handful of 1-5 values); undecoded
+PP,,pitching,vestigial,false,,gamelog|season,false,All-zero but for 3 fractional outliers in the whole archive
+RT,,pitching,vestigial,false,,gamelog|season,false,Present but always zero when non-null
+KIP,,pitching,vestigial,false,,gamelog|season,false,Present but always zero when non-null
 PO,putouts,fielding,mapped,false,,gamelog|season,false,
 AST,assists_fielding,fielding,mapped,false,,gamelog|season,false,
 E,errors,fielding,mapped,false,,gamelog|season,false,
@@ -81,12 +140,11 @@ RP,,hitting,derived_composite,false,,gamelog|season,true,Runs-produced-shaped co
 RPA,,hitting,derived_composite,false,,gamelog|season,true,Per-appearance composite; formula unconfirmed
 RdAB,,hitting,derived_composite,false,,gamelog|season,true,Runs-driven-per-AB-shaped composite; formula unconfirmed
 COM,,hitting,derived_composite,false,,gamelog|season,true,Takes negative values (census avg -0.47); plus/minus-shaped composite; formula unconfirmed
-BFP,,pitching,vestigial,false,,gamelog|season,false,Present but all-zero in every captured row (pitching feed gap)
-K-BB,,pitching,vestigial,false,,gamelog|season,false,All-zero in every captured row
-W-L,,pitching,vestigial,false,,gamelog|season,false,All-zero in every captured row
-NW,,pitching,vestigial,false,,gamelog|season,false,All-zero in every captured row
-SHD,,pitching,vestigial,false,,gamelog|season,false,All-zero in every captured row
+BFP,batters_faced,pitching,mapped,false,,gamelog|season,false,Batters faced; == PA on pitcher rows (906/906). Was mis-marked vestigial on hitter-only data
+K-BB,,pitching,derived_composite,false,,gamelog|season,false,K - BBI on pitcher rows (verified 938/938); was mis-marked vestigial on hitter-only data
+W-L,,pitching,derived_composite,false,,gamelog|season,false,W - L on pitcher rows (verified 938/938); was mis-marked vestigial on hitter-only data
+PA,,pitching,derived_composite,false,,gamelog|season,false,Plate appearances against == BFP on pitcher rows (906/906); pitcher-only key in this archive
 SN,,metadata,vestigial,false,,gamelog|season,false,Constant = the season year (a season marker; not a stat)
-MLBST,,metadata,vestigial,false,,gamelog|season,false,Always zero/null in captured rows
-PPos,,metadata,vestigial,false,,gamelog|season,false,Always null in captured rows (primary-position placeholder)
+MLBST,,metadata,metadata,false,,gamelog|season,false,MLB roster-status marker (ACT/MIN/INJ/I60/D60/NWT...); staging context; not a stat. Was mis-marked vestigial where it read null on hitter rows
+PPos,,metadata,metadata,false,,gamelog|season,false,Primary pitching position SP/RP/P on pitcher rows (+CF/SS/C for position players who pitched); era-true signal. NOT vestigial -- it was only ever null on hitter rows
 _,,unknown,unknown,false,,gamelog|season,true,Undocumented key (avg 1.8 / max 4 on played games); decode before any consumer touches it

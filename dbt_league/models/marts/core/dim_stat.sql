@@ -70,6 +70,13 @@ select
     -- threshold filter when qualifier_min IS NULL.
     qualifier_stat,
     qualifier_min,
-    notes
+    notes,
+
+    -- The ESPN->canonical bridge (MLB-4 / CBS convergence): the
+    -- platform-neutral canonical_stats slug this stat_name maps into.
+    -- Lets a second platform converge by mapping its own vocabulary
+    -- (cbs_stat_map: cbs_key -> canonical_key) back to the stat_name this
+    -- DAG already speaks. NULL where a stat has no canonical counterpart.
+    canonical_key
 
 from {{ ref('stat_classification') }}

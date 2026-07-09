@@ -73,6 +73,22 @@ seeds:
         description: 'Minimum qualifier_stat volume below which the rate doesn''t qualify as a record (e.g. 225 AB for hitting rates, 150 outs = 50 IP for pitching rates). mart_stat_leaderboard skips the threshold filter when NULL.'
       - name: notes
         description: 'Free-text context for unusual rows -- mislabels, scoring-weight discoveries, deprecated stats, ESPN internal flags. Often references the Phase X documentation where the row''s history was hashed out.'
+      - name: canonical_key
+        description: >
+          The ESPN->canonical bridge (MLB-4 / the CBS convergence): the
+          platform-neutral canonical_stats slug this ESPN stat maps into, so a
+          second platform (CBS via cbs_stat_map -> canonical_key -> this
+          stat_name) can converge onto the same DAG that speaks ESPN
+          stat_names. Populated for real baseball stats with a canonical
+          counterpart; NULL for ESPN-internal flags, project score/rate rows,
+          and stats with no canonical yet (PA, cycle, net-stats). The one
+          non-ESPN row here (IRSTR) exists purely so CBS's scored strand
+          category survives the int_player_daily INNER JOIN.
+        tests:
+          - relationships:
+              arguments:
+                to: ref('canonical_stats')
+                field: canonical_key
 
   - name: matchup_schedule
     description: >

@@ -607,3 +607,76 @@ models:
           - not_null
       - name: starter_count
         description: 'Configured number of starting slots of this type, from dim_roster_slot_counts.'
+
+  - name: mart_period_standings
+    description: >
+      Period-grain standings arc for POINTS leagues -- the format-conditional
+      counterpart to mart_team_season_standings (which is W-L-derived from
+      matchups). One row per (league_key, season_year, period, team_id): a
+      team's cumulative season-to-date points and rank at the close of each
+      scoring period, plus derived movement (points earned that period, rank
+      change, distance behind the leader). Read directly from
+      stg_cbs__standings -- a delivered-standings feed (F7) needs no daily
+      rollup, matchup pairs, or scoring recompute. The almanac home tab's
+      standings arc. Platform-neutral: any future points league reuses it,
+      filtered by league_key.
+
+      Scope: the CBS API is current-season, so this holds 2026 in-progress
+      today; historical seasons (champions 2001-2025) arrive from the parsed
+      UI pages (MLB-53) into the same shape. is_latest_period marks the
+      current leader, not a crowned champion (2026 is unfinished).
+
+      Materialization: table -- cumulative float points and their window
+      deltas re-derive per query in a view (boundary cells could flip between
+      reads); same determinism rationale as the other score-sum marts.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - season_year
+              - period
+              - team_id
+    columns:
+      - name: league_key
+        description: 'League registry key. Consumers filter on it; the leader/behind windows partition within one league.'
+        tests:
+          - not_null
+      - name: season_year
+        description: 'MLB season year.'
+        tests:
+          - not_null
+      - name: period
+        description: 'CBS scoring-period number (1-indexed).'
+        tests:
+          - not_null
+      - name: team_id
+        description: 'CBS stable numeric fantasy-team id.'
+        tests:
+          - not_null
+      - name: team_name
+        description: 'Fantasy team name at this period.'
+      - name: division_name
+        description: 'CBS division label (cosmetic in a points league).'
+      - name: standings_rank
+        description: 'League-wide rank at the close of this period (1 = first).'
+        tests:
+          - not_null
+      - name: points
+        description: 'Cumulative season-to-date fantasy points at this period.'
+        tests:
+          - not_null
+      - name: period_points
+        description: 'Points earned in this period alone (cumulative now minus cumulative at the prior period; equals the full cumulative total in period 1).'
+        tests:
+          - not_null
+      - name: rank_change
+        description: 'Rank movement since the previous period (positive = climbed). NULL in period 1 (no prior rank).'
+      - name: points_behind_leader
+        description: 'Cumulative points behind the period leader (0 for the leader).'
+        tests:
+          - not_null
+      - name: is_latest_period
+        description: 'True for the most recent captured period this season -- the current standings. For a completed season this is the final standings; for an in-progress season (2026) it is the current leader, not a crowned champion.'
+        tests:
+          - not_null

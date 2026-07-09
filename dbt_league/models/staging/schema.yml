@@ -357,3 +357,51 @@ models:
         description: 'Configured starters, or raw position limit (-1 = No Limit).'
         tests:
           - not_null
+
+  - name: stg_cbs__standings
+    description: >
+      CBS adapter (#2) F7 standings -- the platform-DELIVERED period-end
+      standings a non-H2H points league serves in place of matchup-derived
+      ones. One row per (league_key, season_year, period, team_id): a team's
+      cumulative season-to-date points and rank at the close of each scoring
+      period. Read straight from raw.cbs_standings (one captured file per
+      period, content-verified at capture); latest snapshot per period wins.
+      Currently 2026 only (the CBS API is current-season); historical seasons
+      arrive from the parsed UI pages (MLB-53) into the same shape.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - season_year
+              - period
+              - team_id
+    columns:
+      - name: league_key
+        description: 'League registry key (config/leagues.yml), stamped into RAW at extract time. First-class dimension in every grain per the MLB-48 multi-league design.'
+        tests:
+          - not_null
+      - name: season_year
+        description: 'MLB season year the standings describe.'
+        tests:
+          - not_null
+      - name: period
+        description: 'CBS scoring-period number (1-indexed). The standings history key -- each captured file echoes the period it served.'
+        tests:
+          - not_null
+      - name: team_id
+        description: 'CBS stable numeric fantasy-team id (rename-proof; the dim_franchise continuity key, MLB-64).'
+        tests:
+          - not_null
+      - name: team_name
+        description: 'Fantasy team name as of this period (can change across a season; the mart takes the latest for display).'
+      - name: division_name
+        description: 'CBS division label. Cosmetic in a points league (the overall rank is league-wide); carried for display.'
+      - name: standings_rank
+        description: 'League-wide rank (1 = first) at the close of this period. Ties can leave gaps in the sequence.'
+        tests:
+          - not_null
+      - name: points
+        description: 'Cumulative season-to-date fantasy points -- the platform''s own season FPTS total, the standings currency of a points league. Grows period over period (asserted first<=last at capture).'
+        tests:
+          - not_null

@@ -48,3 +48,24 @@ sources:
           freshness:
             warn_after: {count: 210, period: day}
             error_after: {count: 420, period: day}
+
+      # CBS raw archives (MLB-59 loader, extract/cbs_load.py) -- same
+      # warehouse, same RAW schema, platform-prefixed tables. Payloads land
+      # VERBATIM in a `payload` VARIANT with envelope-lineage columns
+      # (endpoint, params, captured_at, http_status, source_path); every row
+      # carries league_key. Staging (stg_cbs__*) is the convergence boundary.
+      # No freshness config: the fantasy-layer tables are captured on the
+      # weekly runbook, the history tables are a one-time backfill; captured_at
+      # exists but seasonal thresholds don't fit a mixed-cadence archive.
+      - name: cbs_standings
+        description: "Raw CBS period-end standings (league/standings/overall?period=N), one row per scoring period. payload.body.overall_standings.divisions[].teams[] carries cumulative season-to-date rank + points. The platform-delivered F7 feed -- a non-H2H points league has no matchups to derive standings from."
+      - name: cbs_season_stats
+        description: "Raw CBS season-grain player stats (league/stats?timeframe=YYYY), one row per season universe file. params.position distinguishes the hitter universe (absent) from the pitcher universe (position=P). payload.body.league_stats.players[] carries flat native stat keys + the platform's own season FPTS -- the MLB-62 reconciliation anchor."
+      - name: cbs_gamelogs
+        description: "Raw CBS per-game player stat lines (players/gamelog), exploded to one row per game entry. game VARIANT = {game_date, opponent, ..., stats:{native per-game keys}}. Appearance-grain for pitchers, team-schedule-grain for hitters (G flags real appearances). No per-game FPTS -- MLB-62 recomputes from scoring weights."
+      - name: cbs_rosters
+        description: "Raw CBS 2026 daily rosters (league/rosters?point=YYYYMMDD&team_id=all), one row per date. payload.body.rosters.teams[].players[] carries the deployed slot (roster_pos) and the started/sat split (roster_status A/RS) -- the perishable fantasy layer, F3."
+      - name: cbs_config
+        description: "Raw CBS config snapshots (details/teams/owners/league_rules/scoring_rules), one row per snapshot with a config_kind column. scoring_rules.categories carries the F4 scoring weights (keyed on the stat name); teams/owners carry F8 team + owner identity."
+      - name: cbs_transactions
+        description: "Raw CBS 2026 transaction-log snapshots (league/transaction-list/log), one row per snapshot. The rolling add/drop/trade window -- F10, current-season only at the API (full history rides the UI capture, MLB-47)."

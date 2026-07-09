@@ -25,6 +25,13 @@ pitcher gamelogs ride the exact same per-game date gate, and two-way
 players already landed by the hitter sweep skip via the shared
 gamelog/<year>/<player_id>.json idempotency.
 
+Except there are no two-way players to overlap: CBS splits them into
+two rosterable pseudo-players under sentinel ids that league/stats
+history omits from BOTH position tables (so neither sweep's universe
+can ever enumerate them), while players/gamelog serves them normally.
+The pitching sweep fetches SENTINEL_PLAYERS explicitly — see the
+constant for the evidence trail.
+
 MUSEUM RULE (standing): read-only forever. This script reuses
 cbs_capture's GET-only whitelisted Client — polite pacing, backoff, token
 from the repo-root .env, never printed, params redacted everywhere.
@@ -77,6 +84,21 @@ PITCHING_GATE_KEYS = ("INN", "ERA")
 # Probe ground truth for validating position=P semantics at run start:
 # 2025 answered 594 pitchers, pitching columns, season-grain FPTS.
 PITCHING_ANCHOR_YEAR = 2025
+
+# CBS models two-way players as TWO separately-rosterable pseudo-players
+# with hand-allocated sentinel ids — league bsb has exactly one such
+# pair (2026 roster scan). league/stats history omits the sentinels from
+# BOTH position tables (probed 2026-07-09: absent from every landed
+# universe, 2004-2025), so universe-driven enumeration can never find
+# them — but players/gamelog serves them fine (901's 2021 log = his real
+# 23 starts, batting included; 900's = schedule-grain hitting). The
+# pitching sweep fetches them explicitly from their MLB debut season.
+# Season-grain FPTS for the halves exists NOWHERE in league/stats — the
+# MLB-62 anchor has a documented hole here.
+SENTINEL_PLAYERS = {
+    "900": ("Shohei Ohtani (Batter)", 2018),
+    "901": ("Shohei Ohtani (Pitcher)", 2018),
+}
 
 # Player-seasons CBS's gamelog endpoint cannot serve — evidence in the
 # backfill manifest. Counted as known_unavailable (not failures) so the
@@ -332,6 +354,39 @@ def run_backfill(client: Client, history_dir: Path, years: list[int], force: boo
             if (i + 1) % 50 == 0:
                 print("  %d: %d/%d players..." % (year, i + 1, len(universe)), flush=True)
 
+        # Split-player sentinels ride the pitching sweep: never in any
+        # universe, so they get explicit fetches under the same gate.
+        sentinels = {}
+        if pitching:
+            for pid, (label, debut) in sorted(SENTINEL_PLAYERS.items()):
+                if year < debut:
+                    continue
+                out = history_dir / "gamelog" / str(year) / ("%s.json" % pid)
+                if out.is_file() and out.stat().st_size > 0 and not force:
+                    sentinels[pid] = "present"
+                    continue
+                if (str(year), pid) in KNOWN_UNAVAILABLE and not force:
+                    sentinels[pid] = "known unavailable"
+                    unavailable += 1
+                    continue
+                payload, meta = client.request("gamelog", {"player_id": pid, "timeframe": str(year)})
+                entries = gamelog_entries(payload) if payload is not None else None
+                if entries is None:
+                    sentinels[pid] = "FAILED (HTTP %s)" % meta.get("http_status")
+                    failed.append(pid)
+                    append_manifest(history_dir, meta, None)
+                elif offyear_entries(entries, year):
+                    sentinels[pid] = "REJECTED (off-year dates)"
+                    rejected.append(pid)
+                    meta["note"] = ("REJECTED: %d off-year game_date entries"
+                                    % offyear_entries(entries, year))
+                    append_manifest(history_dir, meta, None)
+                else:
+                    write_json(out, envelope(payload, meta, league, year))
+                    append_manifest(history_dir, meta, str(out))
+                    sentinels[pid] = "landed (%d games)" % len(entries)
+                    games_total += len(entries)
+
         year_summaries[year] = {
             "universe": len(universe), "landed": landed, "already_present": skipped,
             "empty_gamelogs": empty, "games_landed": games_total,
@@ -342,7 +397,10 @@ def run_backfill(client: Client, history_dir: Path, years: list[int], force: boo
             # Texture for the verification record: rows missing pitching
             # keys (decoy residue would be ALL of them — gated above),
             # season FPTS coverage (the MLB-62 anchor), and the two-way
-            # overlap with the landed hitter universe (Ohtani check).
+            # overlap with the landed hitter universe (structurally empty
+            # under the split-player scheme; kept as the proof).
+            if sentinels:
+                year_summaries[year]["sentinel_gamelogs"] = sentinels
             year_summaries[year]["rows_missing_pitching_keys"] = sum(
                 1 for p in universe if not pitcher_shaped(p))
             year_summaries[year]["fpts_rows"] = fpts_rows(universe)

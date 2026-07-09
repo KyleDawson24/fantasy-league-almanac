@@ -17,7 +17,9 @@ Families -> tables:
   2026/standings/periods/period_N   -> CBS_STANDINGS    (row per period file)
   2026/transactions/snapshot_*.json -> CBS_TRANSACTIONS (row per snapshot)
   2026/config/<kind>_*.json         -> CBS_CONFIG       (row per snapshot; kind column)
-  history/stats/<year>.json         -> CBS_SEASON_STATS (row per season file)
+  history/stats/<year>.json         -> CBS_SEASON_STATS (row per season file;
+  history/stats_pitching/<year>.json   hitter + pitcher universes share the
+                                       table -- params.position tells them apart)
   history/gamelog/<year>/<pid>.json -> CBS_GAMELOGS     (row PER GAME entry --
                                        the one deliberate explosion, per the
                                        ticket; each game object verbatim)
@@ -207,13 +209,18 @@ def walk_config(root):
 
 
 def walk_season_stats(root):
-    for path in sorted((root / "history" / "stats").glob("*.json")):
-        doc, env = read_envelope(path, root)
-        yield "CBS_SEASON_STATS", {
-            **env,
-            "season_year": season_from(doc),
-            "payload": doc.get("payload"),
-        }
+    # Hitter universes (stats/) and pitcher universes (stats_pitching/,
+    # from league/stats?position=P -- the MLB-45 pitching sweep) share
+    # one table; the envelope's params.position distinguishes them, so
+    # the payloads stay verbatim and staging does the telling-apart.
+    for sub in ("stats", "stats_pitching"):
+        for path in sorted((root / "history" / sub).glob("*.json")):
+            doc, env = read_envelope(path, root)
+            yield "CBS_SEASON_STATS", {
+                **env,
+                "season_year": season_from(doc),
+                "payload": doc.get("payload"),
+            }
 
 
 def walk_gamelogs(root):

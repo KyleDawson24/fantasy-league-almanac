@@ -22,6 +22,23 @@ for the ESPN league.
 
 ### Added
 
+- **CBS player record book — the first tangible CBS almanac content
+  (MLB-61 F1 / MLB-65), and the vocabulary bridge under it.** The
+  ESPN→canonical bridge (`stat_classification.canonical_key` + an `IRSTR`
+  row, exposed on `dim_stat`, byte-neutral for ESPN) lets CBS converge on
+  the stat_names the DAG already speaks. `stg_cbs__player_season_stats`
+  unpivots `CBS_SEASON_STATS` through it — 252,224 stat-rows across 8,926
+  player-seasons (2004–2025), season FPTS as `PLATFORM_POINTS`, innings
+  via `OUTS`, the scored strand as `IRSTR`. `mart_player_season_records`
+  ranks the top-10 single-season performances all-time per stat, reusing
+  the shared `dim_stat` catalog for candidacy/polarity/display (CBS
+  records need zero CBS-specific stat metadata). Content-verified against
+  real MLB history: best season ever = Verlander 2011 (1,010 pts), most K
+  = Kershaw 2015 (301), most HR = J.D. Martinez 2017 (45). No recompute
+  needed for the platform lens (season FPTS is in the data); the
+  calculated lens + best single *games* follow with the gamelog recompute
+  (MLB-62). 18 schema tests + full suite green.
+
 - **Shared format-modular team-season fact + all-time ESPN team stats
   (MLB-69).** `fct_team_season_performance` is the season-grain team-stats
   spine both platforms feed: the stat rollup is *format-agnostic* (sums

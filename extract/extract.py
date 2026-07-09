@@ -881,12 +881,17 @@ def fetch_transactions(year):
     179 drop / 224, 239, 244 trade legs / 188 lineup). Extract captures,
     staging interprets -- so no filtering happens here.
 
-    Historical reach: the per-season path serves the active season's full log;
-    prior seasons 404 here and the leagueHistory communication view rejects
-    the topics filter, so this is current-season only for now.
+    Historical reach: ESPN serves the message board for the CURRENT season
+    only. Prior seasons 404 the per-season path, AND leagueHistory doesn't carry
+    the board (its /communication/ 404s and its mTransactions2 returns an empty
+    array) -- verified 2025 + 2024, 2026-07-09. So this feed is current-season
+    only at the source; the warehouse layer is already season-general (every
+    grain carries season_year and fct_roster_stints self-scopes to seasons that
+    have a log), so a prior season lights up the instant its rows exist -- from
+    a similarly-shaped source, not this endpoint. A 404 here is treated as "no
+    board for this season," returning [] so a backfill --year cleanly no-ops.
 
-    Returns [] when the board is empty (pre-draft), so the caller can skip
-    the load.
+    Returns [] when the board is empty (pre-draft) or not served for the season.
     """
     url = f"{ESPN_API_BASE}/{year}/segments/0/leagues/{LEAGUE_ID}/communication/"
     topics = []
@@ -906,6 +911,13 @@ def fetch_transactions(year):
             cookies={"swid": SWID, "espn_s2": ESPN_S2},
             headers={"x-fantasy-filter": json.dumps(fantasy_filter)},
         )
+        # A past season's board isn't served (the endpoint 404s). Treat that as
+        # "no transactions for this season" rather than an error, so pointing a
+        # backfill at any --year is safe.
+        if response.status_code == 404:
+            print(f"  ESPN serves no transaction board for {year} "
+                  f"(current-season only) -- skipping.")
+            return []
         response.raise_for_status()
         page = response.json().get("topics") or []
         if not page:

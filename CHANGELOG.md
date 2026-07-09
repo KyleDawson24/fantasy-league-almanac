@@ -22,6 +22,27 @@ for the ESPN league.
 
 ### Added
 
+- **Shared format-modular team-season fact + all-time ESPN team stats
+  (MLB-69).** `fct_team_season_performance` is the season-grain team-stats
+  spine both platforms feed: the stat rollup is *format-agnostic* (sums
+  the player-active fact, so any format produces team stats once players
+  carry a `team_id`), while the W-L / authoritative-platform-total
+  *overlay* is *format-conditional* — a LEFT JOIN of the matchup-gated
+  team-week fact, populated where the league delivers matchups (H2H, any
+  platform) and NULL where it doesn't (points, any platform). The toggle
+  is data-presence, never a platform check; the playoff filter is
+  NULL-safe so a no-schedule league isn't silently dropped. Season is the
+  grain atom — all-time is a rollup, so the same fact serves single-season
+  and all-time. Verified against `mart_team_season_standings`: counting +
+  W-L match exactly on all 30 ESPN team-seasons (calculated points within
+  0.4, this fact being the more-correct round-once-at-season). On top,
+  `mart_team_alltime` rolls it into franchise records (all-time
+  accumulation + best single season) — the long-wanted all-time ESPN
+  team stats, with league-wide all-time wins == losses (282-282)
+  confirming the overlay. Both models additive; no shared ESPN model
+  changed. CBS team stats drop in unchanged once the player-performance
+  convergence lands.
+
 - **First CBS reporting mart: the 2026 standings arc (MLB-61 F7).** CBS
   becomes adapter #2 at the staging boundary, starting with the
   lowest-risk feed. `stg_cbs__standings` reads `raw.cbs_standings`

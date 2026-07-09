@@ -108,6 +108,22 @@ KNOWN_UNAVAILABLE = {
     # answers persistent HTTP 500 (two runs, 8 attempts, 2026-07-07),
     # unlike Bergolla's same-shape 2006 which 200s with an empty log.
     ("2006", "547434"): "persistent HTTP 500; no MLB games that season",
+    # The pre-2007 per-game void, pitcher side (MLB-45, 2026-07-09): the
+    # gamelog endpoint serves NO daily rows before 2007 — hitters get an
+    # empty 200 (Bergolla 2004/2005 landed empty despite real games),
+    # pitchers get persistent HTTP 500. These seven are stars who
+    # certainly pitched those seasons, so it's a CBS availability gap,
+    # not "no games"; confirmed 500 across two runs (8 attempts each,
+    # 2026-07-08 + 2026-07-09). Their season-grain universe rows DID
+    # land (stats_pitching/), so the seasons aren't invisible. --force
+    # retries in case CBS ever heals the early archive.
+    ("2004", "390851"): "pre-2007 gamelog void; persistent HTTP 500 (Greinke)",
+    ("2005", "390851"): "pre-2007 gamelog void; persistent HTTP 500 (Greinke)",
+    ("2005", "555244"): "pre-2007 gamelog void; persistent HTTP 500 (Hill)",
+    ("2005", "530362"): "pre-2007 gamelog void; persistent HTTP 500 (Verlander)",
+    ("2006", "390851"): "pre-2007 gamelog void; persistent HTTP 500 (Greinke)",
+    ("2006", "555244"): "pre-2007 gamelog void; persistent HTTP 500 (Hill)",
+    ("2006", "530362"): "pre-2007 gamelog void; persistent HTTP 500 (Verlander)",
 }
 
 

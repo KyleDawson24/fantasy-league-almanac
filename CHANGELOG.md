@@ -22,6 +22,39 @@ for the ESPN league.
 
 ### Added
 
+- **Universal stats layer: the CBS record book's stats source pivoted to the
+  MLB Stats API (MLB-70).** CBS's `league/stats` history is free-agent-only —
+  every currently-rostered player is absent from all 20 "historical" years
+  (verified by content: universe ∩ rosters = ∅), so a record book built on it
+  silently lacked Cole, Judge, Trout, and Ohtani. Player production is now
+  sourced from the public statsapi.mlb.com (complete for all MLB players,
+  portable across platforms) and joined to CBS's fantasy layer (membership +
+  scoring rules); the CBS gamelog archive is recontextualized as
+  reconciliation ground-truth for the `platform_` lens.
+  - **`extract/mlb_crosswalk.py`** — CBS player id → MLBAM id (2,225 rows,
+    99.7%). Name-normalized matching disambiguated by season overlap AND
+    season-team agreement: CBS's per-season `TM` column against the statsapi
+    season listings' `currentTeam` (verified season-accurate), with the CBS
+    team-code map *learned* from unique-name co-occurrence (31 codes, 3×
+    dominance guard) rather than hardcoded. Fuzzy initial-key matches are
+    rejected when team evidence disagrees in every comparable season. The
+    team pass resolved all 21 flagged same-name collisions (three Luis
+    Garcías, two Will Smiths, two Max Muncys…) and caught three unflagged
+    silent mismatches — Vladimir Guerrero **Jr.** had been mapped to his
+    father, Eury Pérez to a 2012 outfielder of the same name, Juan Morillo
+    to a 2006 reliever. Content-verified: Vladdy Jr 2021 HR=48, catcher
+    Will Smith 2024 HR=20, Astros Luis García 2021 W=11, Eury 2023 K=108.
+  - **`extract/mlb_stats.py`** — season (yearByYear) + per-game (gameLog)
+    sweeps for every crosswalked MLBAM id (idempotent/resumable, polite
+    pacing, no key needed). 2,227 players, 14,518 gamelog-season files,
+    zero failed fetches.
+  - **`extract/mlb_load.py`** — lands the files verbatim in two
+    platform-neutral raw tables (deliberately no `league_key`: this is the
+    shared baseball layer every league joins to): `RAW.MLB_SEASON_STATS`
+    (16,957 rows) and `RAW.MLB_GAMELOGS` (595,918 per-game rows,
+    1991–2026). Content-verified: Cole 2019 K=326, Judge 2022 HR=62 — the
+    totals the free-agent-only source could never produce.
+
 - **Transaction Records: production by acquisition channel on Advanced
   Standings (MLB-16 spike / MLB-17).** The named key output — team rankings
   by how each player's production was acquired.

@@ -53,9 +53,9 @@ active-status-per-day is 2026 (roster capture) + history (MLB-63 reconstruction)
 
 | Table | Rows | Role |
 |---|---|---|
-| `MLB_GAMELOGS` | 592,729 | **The stats spine.** Per-game, universal, 2214 players |
-| `MLB_SEASON_STATS` | 16,906 | Season aggregates (yearByYear); carries season `team` |
-| `CBS_MLBAM_CROSSWALK` | 2,226 | CBS player id → MLBAM id (99.7%; 21 `_COLLISION` flagged) |
+| `MLB_GAMELOGS` | 595,918 | **The stats spine.** Per-game, universal, 2,227 players |
+| `MLB_SEASON_STATS` | 16,957 | Season aggregates (yearByYear); carries season `team` |
+| `CBS_MLBAM_CROSSWALK` | 2,225 | CBS player id → MLBAM id (99.7%; team-aware, **0 collisions**) |
 | `CBS_GAMELOGS` | 677,151 | CBS's own per-game (FA-only) — **reconciliation ground-truth** now |
 | `CBS_SEASON_STATS` | 44 files | CBS season FPTS = the `platform_` anchor (FA-only) |
 | `CBS_ROSTERS` | 105 | 2026 daily rosters (`roster_status` A/RS = active/reserve) |
@@ -108,11 +108,13 @@ killed the MLB extract once at 87/2214). Always make sweeps idempotent + log to 
 
 ## What's left — the chain to a working almanac output
 
-1. **Collision-fix** (21 rows). The crosswalk flagged 21 same-name collisions (two
-   real Max Muncys / Will Smiths, three Luis Garcías) `_COLLISION`. Split them with
-   **season-team**: match CBS `pro_team`-per-season to the MLBAM's team-per-season
-   (`MLB_SEASON_STATS.team` — verify it's populated; the per-game `game:team` came
-   back null). Rewrite those crosswalk rows.
+1. **Collision-fix — DONE 2026-07-10.** The crosswalk rebuild is team-aware:
+   CBS's per-season `TM` column (NOT `pro_team`, which is current-team stamped on
+   every row) scored against the statsapi season listings' `currentTeam`, with the
+   CBS team-code map learned from unique-name co-occurrence. All 21 flags resolved
+   PLUS three silent mismatches caught (Vladdy Jr was mapped to his FATHER; Eury
+   Pérez and Juan Morillo to older same-name players). 13 reassigned ids extracted,
+   loaded, content-verified (Vladdy Jr 2021 HR=48, catcher Smith 2024 HR=20).
 
 2. **Recompute (MLB-62)** — the core dbt build:
    - `stg_mlb__player_game`: `MLB_GAMELOGS` → tidy per-game stat rows. Map statsapi
@@ -165,7 +167,8 @@ killed the MLB extract once at 87/2214). Always make sweeps idempotent + log to 
   committed on a **detached HEAD** and had to be reclaimed by fast-forward. Run
   `git symbolic-ref -q HEAD`.
 - **Detached sweeps** (above). Keep the laptop awake for long runs.
-- **Crosswalk is name-based**; the 21 collisions need season-team.
+- **Crosswalk is name+season+team-based** (0 collisions since 2026-07-10); CBS's
+  `TM` = season-team, `pro_team` = current-team-on-every-row (do not join on it).
 - **statsapi shape:** `people/{id}/stats?stats=gameLog&group={hitting|pitching}&season=YYYY`;
   splits are games; season stats via `stats=yearByYear&group=hitting,pitching`;
   name→id via `people/search?names=`; all-players-in-a-season via

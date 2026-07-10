@@ -6,6 +6,7 @@ import pytest
 
 import almanac_data
 import almanac_sheets
+import stat_catalog
 
 
 def _player_text(cell):
@@ -657,7 +658,11 @@ class TestRecordsRows:
         assert result[8] == 'Contributor A: 20, Contributor B: 10'
         assert result[9].startswith('=HYPERLINK(')
 
-    def test_records_tab_uses_side_by_side_current_then_all_time(self):
+    def test_records_tab_uses_side_by_side_current_then_all_time(self, monkeypatch):
+        # The caption thresholds are the builder's only non-injectable input;
+        # stub them so the test never reaches the warehouse.
+        monkeypatch.setattr(stat_catalog, 'get_rate_qualifiers',
+                            lambda: {'AVG': ('ab', 175), 'ERA': ('outs', 450)})
         all_time = [_record(stat='HR', value=5)]
         current = [_record(stat='HR', value=4)]
         specs = [{

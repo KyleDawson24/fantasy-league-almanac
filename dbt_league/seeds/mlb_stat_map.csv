@@ -1,0 +1,100 @@
+statsapi_key,stat_group,canonical_key,stat_category,disposition,notes
+airOuts,hitting,,,no_canonical,Batter fly-outs made; the air_outs canonical is the pitcher-side stat
+atBats,hitting,at_bats,hitting,mapped,
+atBatsPerHomeRun,hitting,,,rate,Feed-computed rate; VARCHAR ('-.--' when undefined)
+avg,hitting,,,rate,Feed-computed rate; recompute downstream from counting stats
+babip,hitting,,,rate,Feed-computed rate
+baseOnBalls,hitting,walks,hitting,mapped,Batter walks -- the scored batting BB (+1)
+catchersInterference,hitting,catcher_interference_drawn,hitting,mapped,Batter reaches on CI
+caughtStealing,hitting,caught_stealing,hitting,mapped,
+caughtStealingPercentage,hitting,,,rate,Feed-computed rate
+doubles,hitting,doubles,hitting,mapped,
+flyOuts,hitting,,,no_canonical,Subset of batter air outs
+gamesPlayed,hitting,games_played,general,mapped,1 per gamelog row; sum group-scoped downstream (a batting pitcher's hitting rows also carry it)
+groundIntoDoublePlay,hitting,gidp,hitting,mapped,
+groundIntoTriplePlay,hitting,,,no_canonical,No CBS/canonical counterpart
+groundOuts,hitting,,,no_canonical,Batter ground-outs made; the ground_outs canonical is pitcher-side
+groundOutsToAirouts,hitting,,,rate,Feed-computed rate
+hitByPitch,hitting,hit_by_pitch,hitting,mapped,
+hits,hitting,hits,hitting,mapped,
+homeRuns,hitting,home_runs,hitting,mapped,
+intentionalWalks,hitting,intentional_walks,hitting,mapped,
+leftOnBase,hitting,left_on_base,hitting,mapped,
+numberOfPitches,hitting,,,no_canonical,Pitches SEEN as batter; pitch_count canonical is pitches thrown
+obp,hitting,,,rate,Feed-computed rate
+ops,hitting,,,rate,Feed-computed rate
+plateAppearances,hitting,,,no_canonical,No hitting-PA canonical (CBS TPA composite unconfirmed); batters_faced is the pitching analog
+rbi,hitting,rbi,hitting,mapped,Scored +1
+runs,hitting,runs,hitting,mapped,Scored +1
+sacBunts,hitting,sac_bunts,hitting,mapped,
+sacFlies,hitting,sac_flies,hitting,mapped,
+slg,hitting,,,rate,Feed-computed rate
+stolenBasePercentage,hitting,,,rate,Feed-computed rate
+stolenBases,hitting,stolen_bases,hitting,mapped,Scored +1
+strikeOuts,hitting,strikeouts_batting,hitting,mapped,Batter strikeouts (CBS KO); the scored pitching K is the pitching-group key
+summary,hitting,,,display,Human-readable game line ('2-5 | 2B K R')
+totalBases,hitting,total_bases,hitting,mapped,Scored +1
+triples,hitting,triples,hitting,mapped,
+airOuts,pitching,air_outs,pitching,mapped,
+atBats,pitching,at_bats_against,pitching,mapped,
+avg,pitching,,,rate,Feed-computed opponent BA
+balks,pitching,balks,pitching,mapped,
+baseOnBalls,pitching,walks_issued,pitching,mapped,Scored -1 (CBS BBI)
+battersFaced,pitching,batters_faced,pitching,mapped,
+blownSaves,pitching,blown_saves,pitching,mapped,
+catchersInterference,pitching,,,no_canonical,CI charged while pitching; no CBS/canonical counterpart
+caughtStealing,pitching,,,no_canonical,Runners CS while pitching; the catcher_caught_stealing canonical is fielding-side
+caughtStealingPercentage,pitching,,,rate,Feed-computed rate
+completeGames,pitching,complete_games,pitching,mapped,Scored +5
+doubles,pitching,doubles_allowed,pitching,mapped,
+earnedRuns,pitching,earned_runs,pitching,mapped,Scored -2
+era,pitching,,,rate,Feed-computed rate
+flyOuts,pitching,,,no_canonical,Subset of air outs allowed
+gamesFinished,pitching,games_finished,pitching,mapped,
+gamesPitched,pitching,appearances_pitching,pitching,mapped,CBS APP / G on pitcher rows
+gamesPlayed,pitching,games_played,general,mapped,Equal to gamesPitched on every gamelog row; both canonicals carried (CBS serves both G and APP)
+gamesStarted,pitching,games_started_pitching,pitching,mapped,The QS derivation's start flag
+groundIntoDoublePlay,pitching,,,no_canonical,GIDP induced; no CBS/canonical counterpart
+groundOuts,pitching,ground_outs,pitching,mapped,
+groundOutsToAirouts,pitching,,,rate,Feed-computed rate
+hitBatsmen,pitching,hit_batsmen,pitching,mapped,CBS HB
+hitByPitch,pitching,,,duplicate,Identical to hitBatsmen on every pitching row (161923/161923 verified 2026-07-11); hitBatsmen is the mapped carrier
+hits,pitching,hits_allowed,pitching,mapped,Scored -1 (CBS HA)
+hitsPer9Inn,pitching,,,rate,Feed-computed rate
+holds,pitching,holds,pitching,mapped,Scored +6 (CBS HD)
+homeRuns,pitching,home_runs_allowed,pitching,mapped,
+homeRunsPer9,pitching,,,rate,Feed-computed rate
+inheritedRunners,pitching,inherited_runners,pitching,mapped,IRSTR derivation input (IR - IRS); statsapi serves no direct strand key
+inheritedRunnersScored,pitching,inherited_runners_scored,pitching,mapped,IRSTR derivation input
+inningsPitched,pitching,,,notation,Decimal-thirds display string ('6.2' = 6-2/3); outs is the integer primitive and the INN scoring payer
+intentionalWalks,pitching,intentional_walks_issued,pitching,mapped,
+losses,pitching,losses,pitching,mapped,
+numberOfPitches,pitching,pitch_count,pitching,mapped,
+obp,pitching,,,rate,Feed-computed rate
+ops,pitching,,,rate,Feed-computed rate
+outs,pitching,outs_recorded,pitching,mapped,IP as integer thirds -- the primitive CBS's INN scoring pays (+1/out = +3/inning)
+pickoffs,pitching,pickoffs,pitching,mapped,
+pitchesPerInning,pitching,,,rate,Feed-computed rate
+runs,pitching,runs_allowed,pitching,mapped,All runs allowed (earned_runs is the scored subset)
+runsScoredPer9,pitching,,,rate,Feed-computed rate
+sacBunts,pitching,,,no_canonical,Sac bunts allowed; no CBS/canonical counterpart
+sacFlies,pitching,,,no_canonical,Sac flies allowed; no CBS/canonical counterpart
+saveOpportunities,pitching,save_opportunities,pitching,mapped,
+saves,pitching,saves,pitching,mapped,Scored +8 (CBS S)
+shutouts,pitching,shutouts,pitching,mapped,
+slg,pitching,,,rate,Feed-computed rate
+stolenBasePercentage,pitching,,,rate,Feed-computed rate
+stolenBases,pitching,,,no_canonical,SB allowed while pitching; no CBS/canonical counterpart
+strikeOuts,pitching,strikeouts_pitching,pitching,mapped,Scored +1 (CBS K)
+strikePercentage,pitching,,,rate,Feed-computed rate
+strikeoutWalkRatio,pitching,,,rate,Feed-computed rate
+strikeoutsPer9Inn,pitching,,,rate,Feed-computed rate
+strikes,pitching,,,no_canonical,Strikes thrown; no CBS/canonical counterpart
+summary,pitching,,,display,Human-readable game line
+totalBases,pitching,total_bases_allowed,pitching,mapped,
+triples,pitching,triples_allowed,pitching,mapped,
+walksPer9Inn,pitching,,,rate,Feed-computed rate
+whip,pitching,,,rate,Feed-computed rate
+wildPitches,pitching,wild_pitches,pitching,mapped,
+winPercentage,pitching,,,rate,Feed-computed rate
+wins,pitching,wins,pitching,mapped,Scored +10

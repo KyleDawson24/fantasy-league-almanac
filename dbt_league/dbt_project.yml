@@ -111,6 +111,14 @@ seeds:
         appears_in: varchar
         needs_confirmation: boolean
         notes: varchar
+    mlb_stat_map:
+      +column_types:
+        statsapi_key: varchar
+        stat_group: varchar
+        canonical_key: varchar
+        stat_category: varchar
+        disposition: varchar
+        notes: varchar
     owner_nicknames:
       +column_types:
         # All varchar so the optional preferred_name (often blank) isn't

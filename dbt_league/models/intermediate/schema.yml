@@ -66,3 +66,81 @@ models:
           Magnitude (unsigned positive) of net-negative platform_points on this day: GREATEST(0, -platform_points).
           Per-day platform-level metric -- each negative day counts separately, even if the week-level platform total is net positive.
           Weekly rollup is SUM(negative_points). For a player with one -5 day and net-positive week: daily row has 5, weekly rollup = 5.
+
+  - name: int_cbs__player_game_points
+    description: >
+      The MLB-62 recompute: per-game calculated_ fantasy points for the CBS
+      league -- universal per-game stats (stg_mlb__player_game) priced by
+      the league's own rules (stg_cbs__scoring_settings) on CBS player
+      identity (stg_cbs__mlbam_crosswalk). The only per-game-capable scoring
+      lens (CBS serves no per-game FPTS); the substrate for the record book
+      and, when membership lands (MLB-63), the active-only slicing. One row
+      per (league_key, player, discipline-line, game): a pre-2022 pitcher's
+      two-discipline game is two rows, each priced by its own group's
+      categories; Ohtani routes to 900/901 via the crosswalk's
+      stat_group_scope. QS derived per start (started AND outs>=18 AND
+      er<=3); IRSTR derived as ir - irs; INN paid at out-granularity via
+      the settings translation. Crosswalk INNER join = the population gate
+      (drops pre-collision-fix orphan gamelogs). league_key fans from the
+      settings; current weights price all seasons.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - cbs_player_id
+              - stat_group
+              - game_pk
+              - game_date
+              - game_index
+    columns:
+      - name: league_key
+        description: 'League registry key, fanned from stg_cbs__scoring_settings -- each league prices the shared baseball layer with its own rules.'
+        tests:
+          - not_null
+      - name: cbs_player_id
+        description: 'CBS player id (two-way pseudo-ids 900/901 land as separate players per MLB-68).'
+        tests:
+          - not_null
+      - name: cbs_player_name
+        description: 'CBS player name, discipline-suffixed for the two-way pseudo-ids.'
+      - name: mlbam_id
+        description: 'The universal-layer player key behind this row.'
+        tests:
+          - not_null
+      - name: season_year
+        description: 'MLB season year.'
+        tests:
+          - not_null
+      - name: stat_group
+        description: 'Discipline of this game line (hitting | pitching). Batting categories price hitting rows, pitching categories pitching rows -- enforced by the per-group stat map.'
+        tests:
+          - not_null
+      - name: game_date
+        description: 'Game date.'
+        tests:
+          - not_null
+      - name: game_pk
+        description: 'MLB game id (doubleheader legs distinct; one known same-date partial-line pair shares one, split by game_index).'
+        tests:
+          - not_null
+      - name: calculated_fpts
+        description: 'The game''s total calculated_ fantasy points under current CBS rules. calculated_hitting_pts + calculated_pitching_pts.'
+        tests:
+          - not_null
+      - name: calculated_hitting_pts
+        description: 'Batting-category contribution (R/RBI/BB/SB/TB at +1).'
+      - name: calculated_pitching_pts
+        description: 'Pitching-category contribution (W/S/HD/CG/QS/outs/IRSTR/K/HA/BBI/ER).'
+      - name: outs
+        description: 'Outs recorded -- the INN category at its true pay granularity (1 pt/out). There is deliberately no innings column; thirds notation stays out of the engine.'
+      - name: qs
+        description: 'Derived quality start flag: games_started_pitching = 1 AND outs >= 18 AND earned runs <= 3.'
+      - name: irstr
+        description: 'Derived inherited runners stranded: ir - irs (statsapi has no direct strand key; CBS''s own direct IRSTR key exists only at season grain and anchors reconciliation instead).'
+      - name: gs
+        description: 'Games started (pitching) -- QS derivation context, unpriced.'
+      - name: ir
+        description: 'Inherited runners -- IRSTR derivation context, unpriced.'
+      - name: irs
+        description: 'Inherited runners scored -- IRSTR derivation context, unpriced.'

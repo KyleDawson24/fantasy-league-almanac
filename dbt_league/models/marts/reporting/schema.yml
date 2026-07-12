@@ -905,3 +905,74 @@ models:
         description: 'FA-add acquired minus dropped lost (rostered lens).'
       - name: trade_delta_rostered_pts
         description: 'Trade acquired minus traded-away lost (rostered lens).'
+
+  - name: mart_player_fpts_reconciliation
+    description: >
+      The MLB-62 delta report: season-summed calculated_ FPTS (universal
+      stats priced by current CBS rules) against the platform_ anchor
+      (CBS's own awarded season FPTS). Reconciliation, NOT exact-match --
+      the delta is a feature: it surfaces era-rule changes (via
+      platform_identity_residual: the platform total vs the platform's own
+      stat values priced at current weights) and platform data gaps (via
+      drivers: per-category divergence -- the spike's exhibit is Kirby
+      Yates 2019, whose CBS feed carries no IRSTR, making calculated_ MORE
+      accurate than the platform's own total). One row per (league_key,
+      season_year, cbs_player_id, universe); the population is the INNER
+      join of both lenses -- the free-agent-only CBS archive x the
+      crosswalk -- so currently-rostered players (no platform anchor: the
+      pivot's reason) and the Ohtani sentinels (absent from the season
+      universes) do not appear. The record book reads the calculated_
+      lens, never this mart; this is the QA gate and the almanac's
+      asterisk factory.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - season_year
+              - cbs_player_id
+              - universe
+    columns:
+      - name: league_key
+        description: 'League registry key.'
+        tests:
+          - not_null
+      - name: season_year
+        description: 'MLB season year (the archive overlap: 2004-2025).'
+        tests:
+          - not_null
+      - name: cbs_player_id
+        description: 'CBS player id.'
+        tests:
+          - not_null
+      - name: player_name
+        description: 'Platform-reported name (calculated-side name as fallback).'
+      - name: universe
+        description: 'Which CBS season universe anchors the row (hitting | pitching), matched to the calculated side''s stat_group -- a pre-2022 pitcher reconciles on his pitching line only; batting production CBS never priced stays out by construction.'
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['hitting', 'pitching']
+      - name: games
+        description: 'Calculated-side game rows behind the season sum (MLB gamelog appearances in this discipline).'
+      - name: calculated_fpts
+        description: 'Season sum of per-game calculated_ points (int_cbs__player_game_points).'
+        tests:
+          - not_null
+      - name: platform_fpts
+        description: 'CBS''s own awarded season FPTS -- the platform_ anchor.'
+        tests:
+          - not_null
+      - name: fpts_delta
+        description: 'calculated_fpts - platform_fpts. The headline divergence; zero means the lenses agree exactly.'
+      - name: abs_fpts_delta
+        description: 'Magnitude of fpts_delta (the QA sort key).'
+      - name: fpts_delta_pct
+        description: 'fpts_delta / |platform_fpts| (NULL when the platform total is 0).'
+      - name: platform_recomputed_fpts
+        description: 'The platform''s own stat values priced at CURRENT weights (universe-scoped).'
+      - name: platform_identity_residual
+        description: 'platform_fpts - platform_recomputed_fpts. ~0 = the platform total is self-consistent under today''s rules (the 587/587 anchor property), so fpts_delta is stat-VALUE-driven (feed gaps); large = the total was computed under different rules (era-rule detection).'
+      - name: drivers
+        description: 'Per-category divergence object keyed by CBS category ({calculated, platform, pts_delta}); zero-delta categories omitted. Platform NULLs (untracked categories, e.g. early-year IRSTR) compare as 0 -- exactly the gap this report exists to surface.'

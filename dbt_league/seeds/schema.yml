@@ -260,3 +260,61 @@ seeds:
         description: 'Pipe-joined surfaces the key was observed on: gamelog | season | scoring_rules.'
       - name: needs_confirmation
         description: 'True where the mapping or formula is a best-effort read of undocumented CBS vocabulary; confirm before a consumer leans on it.'
+
+  - name: mlb_stat_map
+    description: >
+      MLB Stats API vocabulary -> canonical stat keys (MLB-62): every stat
+      key observed in the loaded MLB_GAMELOGS game:stat payloads (full
+      2026-07-11 census, both stat groups), dispositioned. The composite
+      key is (statsapi_key, stat_group) because the API reuses key names
+      across disciplines with different meanings: pitching hits = hits
+      allowed, pitching baseOnBalls = walks issued, pitching strikeOuts =
+      the scored K. Counting keys land as 'mapped'; feed-computed rate
+      strings (avg/era/whip, VARCHAR in the payload) as 'rate' -- recompute
+      downstream from counting stats; inningsPitched as 'notation'
+      (decimal-thirds display -- outs is the integer primitive CBS's INN
+      scoring pays); the pitching hitByPitch as 'duplicate' (identical to
+      hitBatsmen on every loaded row); keys with no canonical counterpart
+      as 'no_canonical'. Unlike cbs_stat_map there is no scored-flag
+      column: scoring weights are CBS's (stg_cbs__scoring_settings), not
+      the baseball layer's.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - statsapi_key
+              - stat_group
+    columns:
+      - name: statsapi_key
+        description: 'The stat key exactly as statsapi.mlb.com spells it in gameLog splits (camelCase).'
+        tests:
+          - not_null
+      - name: stat_group
+        description: 'Which statsapi group the key was observed under -- the discipline scope of the mapping.'
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['hitting', 'pitching']
+      - name: canonical_key
+        description: 'FK to canonical_stats. Populated iff disposition=mapped.'
+        tests:
+          - relationships:
+              arguments:
+                to: ref('canonical_stats')
+                field: canonical_key
+      - name: stat_category
+        description: 'The mapped canonical''s category (hitting | pitching | general). Matches canonical_stats; gamesPlayed is the ''general'' row in both groups.'
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['hitting', 'pitching', 'general']
+      - name: disposition
+        description: 'mapped (crosswalked to a canonical stat) | rate (feed-computed rate string; recompute downstream) | notation (display formatting of a mapped primitive) | duplicate (identical twin of a mapped key) | display (human-readable summary) | no_canonical (counting key with no canonical counterpart).'
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['mapped', 'rate', 'notation', 'duplicate', 'display', 'no_canonical']
+      - name: notes
+        description: 'Scoring role, derivation inputs, verification notes.'

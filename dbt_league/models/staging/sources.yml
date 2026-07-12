@@ -76,3 +76,18 @@ sources:
         description: "Raw CBS config snapshots (details/teams/owners/league_rules/scoring_rules), one row per snapshot with a config_kind column. scoring_rules.categories carries the F4 scoring weights (keyed on the stat name); teams/owners carry F8 team + owner identity."
       - name: cbs_transactions
         description: "Raw CBS 2026 transaction-log snapshots (league/transaction-list/log), one row per snapshot. The rolling add/drop/trade window -- F10, current-season only at the API (full history rides the UI capture, MLB-47)."
+
+      # Universal baseball layer (MLB-70, extract/mlb_stats.py + mlb_load.py)
+      # -- the platform-NEUTRAL stats spine sourced from the public MLB Stats
+      # API (statsapi.mlb.com). These tables carry NO league_key by design:
+      # they are the shared what-a-player-did layer that every league's
+      # fantasy layer (membership + scoring rules) joins onto. The pivot's
+      # reason: CBS's league/stats history is free-agent-only (0/480
+      # currently-rostered players present), so the baseball layer must come
+      # from a complete source.
+      - name: mlb_gamelogs
+        description: "Raw MLB Stats API per-game logs, one row PER GAME per (player, season, stat_group) -- the deliberate explosion; each game's stat split lands verbatim in the game VARIANT ({stat, team, opponent, isHome, isWin, date, game.gamePk}). 595K+ rows, 2,227 players, full careers of every crosswalked CBS player (sparse pre-2008). stat_group 'hitting'|'pitching' scopes each row's stat keys -- the MLB-68 two-way split rides it."
+      - name: mlb_season_stats
+        description: "Raw MLB Stats API season aggregates (yearByYear), one row per (player, season, stat_group). Carries the season team -- the crosswalk's team-evidence source -- and serves as the gamelog-completeness cross-check (season totals vs per-game sums)."
+      - name: cbs_mlbam_crosswalk
+        description: "CBS player id -> MLBAM id bridge (extract/mlb_crosswalk.py, rebuilt in place). Name+season+team-aware scoring against the statsapi season listings; 0 collisions since 2026-07-10. The one sanctioned shared pair is Ohtani: CBS's two-way pseudo-ids 900 '(Batter)' / 901 '(Pitcher)' both map to MLBAM 660271, disambiguated by the name suffix (MLB-68)."

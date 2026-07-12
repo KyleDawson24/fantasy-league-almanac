@@ -519,6 +519,192 @@ models:
       - name: stat_category
         description: 'hitting | pitching | fielding | total, from dim_stat.'
       - name: stat_value
-        description: 'The season value (counting total, rate, or season FPTS). Thousands separators stripped; non-numeric values dropped upstream.'
+        description: 'The season value (counting total, rate, or season FPTS). Thousands separators stripped; non-numeric values dropped upstream. NOTE the population: the CBS season archive is free-agent-only (the MLB-70 pivot''s reason) -- this model anchors reconciliation, it is NOT the record book''s stats source.'
+        tests:
+          - not_null
+
+  - name: stg_mlb__player_game
+    description: >
+      The universal baseball layer at game grain (MLB-70/MLB-62), LONG form
+      and canonical-keyed: one row per (mlbam_id, stat_group, game,
+      canonical_key) from the MLB Stats API gamelogs. Platform-NEUTRAL -- no
+      league_key; this is the what-a-player-did spine every league's fantasy
+      layer (membership + scoring rules) joins onto. statsapi keys map via
+      the mlb_stat_map seed, (statsapi_key, stat_group)-keyed because the
+      API reuses names across disciplines (pitching hits = hits allowed).
+      Speaks canonical_key, NOT ESPN stat_name: the universal layer carries
+      stats the ESPN bridge doesn't (inherited_runners feeds the IRSTR
+      derivation); consumers bridge via dim_stat.canonical_key. Non-mapped
+      dispositions (rate strings, the inningsPitched notation, summary,
+      duplicates, no-canonical keys) drop at the INNER JOIN.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - mlbam_id
+              - stat_group
+              - game_pk
+              - game_date
+              - game_index
+              - canonical_key
+    columns:
+      - name: mlbam_id
+        description: 'MLBAM player id -- the universal layer''s player key. Crosswalks to CBS ids via stg_cbs__mlbam_crosswalk.'
+        tests:
+          - not_null
+      - name: season_year
+        description: 'MLB season year (full careers of crosswalked players; 1991-present, sparse pre-2008).'
+        tests:
+          - not_null
+      - name: stat_group
+        description: 'statsapi discipline group of this game line. Scopes the key mapping AND the two-way identity split (MLB-68: hitting rows feed the (Batter) pseudo-id, pitching rows the (Pitcher) one).'
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['hitting', 'pitching']
+      - name: game_date
+        description: 'Game date as statsapi reports it.'
+        tests:
+          - not_null
+      - name: game_pk
+        description: 'MLB game id. Doubleheader legs get distinct game_pks (game_number tells 1 from 2). One known feed quirk: a single (mlbam_id, stat_group, game_pk) appears twice -- two same-date partial lines of one game -- kept verbatim, distinguished by game_index; additive sums stay correct.'
+        tests:
+          - not_null
+      - name: game_number
+        description: 'Game number within the day (doubleheader marker).'
+      - name: game_index
+        description: 'Load-order index within the (player, season, group) gamelog file; the verbatim-grain tiebreak.'
+        tests:
+          - not_null
+      - name: team_id
+        description: 'MLBAM team id the player appeared for in this game (era-true -- midseason trades switch it game-over-game).'
+      - name: team_name
+        description: 'MLB team name for team_id.'
+      - name: opponent_team_id
+        description: 'MLBAM opponent team id.'
+      - name: opponent_team_name
+        description: 'MLB opponent team name.'
+      - name: is_home
+        description: 'True when the player''s team was home.'
+      - name: is_win
+        description: 'True when the player''s team won the game.'
+      - name: canonical_key
+        description: 'FK to canonical_stats -- the platform-neutral stat slug (mlb_stat_map bridge).'
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('canonical_stats')
+                field: canonical_key
+      - name: stat_category
+        description: 'hitting | pitching | general, from the seed (matches canonical_stats). games_played is the one ''general'' key: 1 on every gamelog row of BOTH groups -- sum it group-scoped or a batting pitcher''s games double.'
+      - name: stat_value
+        description: 'The per-game value. Mapped keys are integer-typed in the feed; cast defensively via try_to_double.'
+        tests:
+          - not_null
+
+  - name: stg_cbs__mlbam_crosswalk
+    description: >
+      The CBS player id -> MLBAM id bridge, staged from the team-aware
+      crosswalk build (extract/mlb_crosswalk.py, 0 collisions since
+      2026-07-10). PLATFORM-level, not league-level -- no league_key;
+      league scoping enters where membership and scoring rules join.
+      stat_group_scope implements MLB-68: CBS splits a two-way player into
+      discipline pseudo-ids suffixed '(Batter)'/'(Pitcher)' (Ohtani 900/901,
+      both -> MLBAM 660271, the one sanctioned shared pair); the scope
+      column turns the suffix into a join predicate so hitting gamelogs
+      feed the batter id and pitching gamelogs the pitcher id, while
+      unsuffixed players (scope NULL) take both groups.
+    columns:
+      - name: cbs_player_id
+        description: 'CBS stable numeric player id (string-typed as CBS serves it). Two-way pseudo-ids included.'
+        tests:
+          - not_null
+          - unique
+      - name: cbs_player_name
+        description: 'Player name as CBS spells it, including the two-way discipline suffix.'
+      - name: mlbam_id
+        description: 'MLBAM player id. NOT unique: the two-way split maps two CBS pseudo-ids onto one MLBAM id.'
+        tests:
+          - not_null
+      - name: mlbam_name
+        description: 'Player name as statsapi spells it.'
+      - name: match_method
+        description: 'How the crosswalk matched this player (the build script''s full non-collision vocabulary). A _COLLISION-suffixed method would mean an unreviewed shared id survived the build -- deliberately NOT accepted here so it fails loudly.'
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['name_unique', 'name_evidence_override', 'name_team_season',
+                         'name_season_overlap', 'name_ambiguous', 'fuzzy_unique',
+                         'fuzzy_team_season', 'fuzzy_overlap']
+      - name: stat_group_scope
+        description: 'NULL = this CBS id takes both stat groups (the normal case). ''hitting''/''pitching'' = discipline pseudo-id; only that group''s gamelog rows feed it.'
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['hitting', 'pitching']
+
+  - name: stg_cbs__scoring_settings
+    description: >
+      CBS adapter (#2) scoring rules -- the F4 weights that price the
+      calculated_ lens (MLB-62). One row per scored category from the
+      platform's own scoring_rules feed (raw.cbs_config), current season's
+      snapshot only, applied universally across seasons (the ESPN
+      stg_scoring_settings convention). canonical_key is the SCORING
+      PRIMITIVE a points engine multiplies: the INN row is translated to
+      outs_recorded at points/3 (CBS pays 1 pt/out -- verified 587/587
+      against 2025 season FPTS where floor(INN) reconciles only 559/587),
+      with the verbatim feed values riding in cbs_key/feed_points. QS and
+      IRSTR pass through as canonicals with no statsapi feed key -- engines
+      DERIVE their per-game values. The cbs_stat_map seed's points_2026
+      mirrors this feed; assert_cbs_scoring_feed_matches_seed keeps them
+      in lockstep.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - cbs_key
+    columns:
+      - name: league_key
+        description: 'League registry key, from the raw config row.'
+        tests:
+          - not_null
+      - name: settings_season
+        description: 'Season of the surfaced rules snapshot (max season with a scoring_rules capture, latest snapshot wins).'
+        tests:
+          - not_null
+      - name: cbs_key
+        description: 'The category key exactly as the rules feed names it (R, TB, INN, IRSTR...).'
+        tests:
+          - not_null
+      - name: rules_group
+        description: 'CBS''s own grouping of the category.'
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['Batting', 'Pitching']
+      - name: canonical_key
+        description: 'The scoring primitive (canonical_stats slug) an engine multiplies. outs_recorded for the INN row; quality_starts / inherited_runners_stranded are engine-derived.'
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('canonical_stats')
+                field: canonical_key
+      - name: stat_name
+        description: 'ESPN-namespace stat name where the vocabulary bridges (dim_stat convergence); NULL where it doesn''t.'
+      - name: stat_category
+        description: 'hitting | pitching, from cbs_stat_map. The universe/group scope guard downstream joins use.'
+        tests:
+          - not_null
+      - name: points_per_unit
+        description: 'The EFFECTIVE weight per unit of the scoring primitive (feed_points/3 for INN -> outs). Negative for penalty categories (HA/BBI/ER).'
+        tests:
+          - not_null
+      - name: feed_points
+        description: 'The verbatim points value as the rules feed lists it (3/inning for INN).'
         tests:
           - not_null

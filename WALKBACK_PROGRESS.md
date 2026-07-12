@@ -111,3 +111,8 @@ It is committed at every checkpoint, so the branch on GitHub mirrors it.
   `Get-Content C:\Users\kyled\projects\espn-league-manager\data\mlb_stats\ui_extract_20260712.log -Wait -Tail 5`
   When it lands: mlb_load → rebuild the engine chain → re-measure
   2003-2020 in mart_team_points_reconciliation.
+- D PACING FIX: the first hour showed ~10h projected — early-era
+  veterans carry 15+ seasons and most calls were PRE-LEAGUE games that
+  can never attribute. mlb_stats gained --min-season 2001; sweep
+  restarted (idempotent — the hour already landed stays), now fetching
+  only league-era seasons per player. Projection ~2-3h.

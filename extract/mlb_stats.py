@@ -127,6 +127,10 @@ def main() -> None:
     ap.add_argument("--limit", type=int, help="only the first N crosswalk players")
     ap.add_argument("--players", nargs="+", type=int, help="explicit MLBAM ids")
     ap.add_argument("--force", action="store_true", help="re-fetch landed files")
+    ap.add_argument("--min-season", type=int, default=None,
+                    help="skip gamelog seasons before this year (the league "
+                         "started 2001; pre-league games can never attribute, "
+                         "and early-era veterans carry 15+ wasted seasons)")
     args = ap.parse_args()
 
     root = find_repo_root(Path(__file__).resolve().parent)
@@ -158,6 +162,8 @@ def main() -> None:
                                "payload": yby})
         # 2. Game logs per active (season, group).
         for yr, grps in sorted(season_groups(yby).items()):
+            if args.min_season and int(yr) < args.min_season:
+                continue
             for grp in grps:
                 g = grp.lower()
                 if g not in GROUPS:

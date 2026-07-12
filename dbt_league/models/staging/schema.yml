@@ -584,6 +584,117 @@ models:
       - name: pro_team
         description: 'MLB team abbreviation at snapshot time (context).'
 
+  - name: stg_cbs__ui_standings
+    description: >
+      Season FINAL standings from the parsed UI history (MLB-53), one row
+      per (league_key, season_year, franchise_id), 2001-2025. Carries the
+      champions list (is_champion), the league-shape timeline
+      (teams_in_season), and the per-season name -> franchise_id map every
+      other UI family resolves against (names drift AND get reused across
+      franchises -- Foster's Folly is id 13 through 2019 and id 30 from
+      2021 -- so never join names across seasons).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - season_year
+              - franchise_id
+    columns:
+      - name: league_key
+        tests: [not_null]
+      - name: season_year
+        tests: [not_null]
+      - name: franchise_id
+        description: 'CBS stable franchise id (from the team-overview hrefs) -- the provenance SPINE per the 2026-07-12 design; owner-lineage overlays ride MLB-64.'
+        tests: [not_null]
+      - name: team_name
+        description: 'The franchise''s name THAT season.'
+        tests: [not_null]
+      - name: standings_rank
+        tests: [not_null]
+      - name: is_champion
+        description: 'rank = 1 -- the first officially crowned champions in league history.'
+      - name: total_points
+        tests: [not_null]
+      - name: teams_in_season
+        description: 'League shape: 16 except 15 (2002) and 12 (2020).'
+
+  - name: stg_cbs__ui_rosters
+    description: >
+      Year-end roster ANCHORS (MLB-55), one row per raw anchor row with
+      franchise identity resolved through the per-season name map --
+      CONFIRMED membership, the states the MLB-63 walk-back starts from.
+      Own%/Start% are GLOBAL-CBS and ABSOLUTE (verified: rostered players
+      below the 1-in-16 local floor); est_start_share = start/own is the
+      conditional activity estimator for the no-lineup-log era (NULL when
+      own = 0 -- undefined, lowest confidence). Anything built on it must
+      carry an estimated-vs-confirmed provenance flag. Row preservation
+      pinned by assert_cbs_ui_rosters_rowcount_preserved.
+    columns:
+      - name: league_key
+        tests: [not_null]
+      - name: season_year
+        tests: [not_null]
+      - name: franchise_id
+        tests: [not_null]
+      - name: player_name
+        description: 'Display-ordered name (First Last), flipped from the page''s ''Last, First''. Identity resolution to ids is a later pass; the walk-back joins names per (season, franchise).'
+        tests: [not_null]
+      - name: roster_status
+        description: 'Year-end A (active) / RS (reserve).'
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['A', 'RS']
+      - name: est_start_share
+        description: 'start_pct/own_pct capped at 1 -- the estimated share of rostered time spent ACTIVE, for eras without lineup logs. An ESTIMATE, never confirmed data.'
+
+  - name: stg_cbs__ui_transactions
+    description: >
+      The league's full movement record normalized (MLB-54): one row per
+      player-action 2001-2026, era verb vocabulary mapped to move types
+      (add | drop | trade_in | activate | reserve | slot_move), slot
+      transitions and trade counterparties extracted, chronology parsed
+      (the 2001-era log is date-grain; effective_date can precede the
+      timestamp -- retroactive edits). Unmapped phrases land NULL and fail
+      the tests loudly. THE FIDELITY MAP: 2001-2003 + 2021+ carry lineup
+      verbs (day-grain active sets); 2004-2020 membership moves only.
+      row_seq walks newest-first: ascending = walk-back order.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - season_year
+              - row_seq
+              - entry_seq
+    columns:
+      - name: league_key
+        tests: [not_null]
+      - name: season_year
+        tests: [not_null]
+      - name: txn_date
+        description: 'The transaction''s log date (timestamp''s date part; the 2001-era log is date-only).'
+        tests: [not_null]
+      - name: effective_date
+        description: 'The scoring-effective date where the era states one.'
+      - name: franchise_id
+        description: 'The acting team: the modern /teams/{id} link (same id space as the franchise map, verified) else name-resolved per season. NULL where neither resolves (2026 trades name-resolve only after final standings exist; mid-season renames can miss the year-end map).'
+      - name: player_cbs_id
+        description: 'CBS player id where the era links it (~2013+, 33.5k rows) -- joins the calculated_ lens directly.'
+      - name: move_type
+        description: 'The normalized move. Slot moves are ACTIVE-lineup repositioning; trade_in is the receiving side (both directions exist, sharing txn_row_key).'
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['add', 'drop', 'trade_in', 'activate', 'reserve', 'slot_move']
+      - name: action_raw
+        description: 'The era''s verbatim phrase (''Signed'', ''Moved from DH to 1B''...). The normalizer''s audit trail.'
+        tests: [not_null]
+
   - name: stg_mlb__player_game
     description: >
       The universal baseball layer at game grain (MLB-70/MLB-62), LONG form

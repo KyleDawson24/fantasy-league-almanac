@@ -23,7 +23,15 @@ rendering yet." The plumbing all stands (MLB-62 recompute, record book,
 MLB-58 registry sinks, data-presence dispatch, quota-hardened writer);
 what changes is the CONTENT assembly and its prerequisite.
 
-**START HERE → parse the captured UI history (the new critical path):**
+**START HERE → parse the captured UI history (the new critical path).
+Kyle confirmed 2026-07-12: year-end rosters are the ANCHORS, not the
+deliverable — the full chain is MLB-55 (anchors) → MLB-54 (transaction
+logs incl. activate/reserve verbs, both filters captured on disk) →
+MLB-63 (walk BACKWARDS from each anchor through the season's moves →
+day-to-day rosters AND daily active/reserve state, per-season fidelity
+grades; contradictions vs the anchor = the log missed something = the
+grade says so on the sheet). Historic ACTIVE-lens team pages ride that;
+2026 stays capture-based.**
 1. **MLB-55 — year-end rosters 2003-2025** (375 pages,
    `data/cbs_raw/bsb/history/ui/rosters/{year}/team_{id}.html`). The
    `<table id=lineup_views_archived>` is clean/regular (verified

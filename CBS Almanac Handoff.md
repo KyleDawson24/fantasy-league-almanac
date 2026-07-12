@@ -15,7 +15,9 @@ Run everything **from the worktree**; the raw data lives in the **main checkout*
 (`C:\Users\kyled\projects\espn-league-manager\data\...`) — pass `--data-dir`.
 Tooling: the `.venv` in the **main checkout** (`...\espn-league-manager\.venv\Scripts\`).
 
-**START HERE next session → "What's left" step 2: the MLB-62 recompute (task #13).**
+**START HERE next session → "What's left" step 3: rebuild the record book on
+the `calculated_` lens (MLB-62 landed 2026-07-11; the engine to build on is
+`int_cbs__player_game_points`).**
 
 ---
 
@@ -127,7 +129,23 @@ killed the MLB extract once at 87/2214). Always make sweeps idempotent + log to 
    Pérez and Juan Morillo to older same-name players). 13 reassigned ids extracted,
    loaded, content-verified (Vladdy Jr 2021 HR=48, catcher Smith 2024 HR=20).
 
-2. **Recompute (MLB-62)** — the core dbt build **← YOU ARE HERE**:
+2. **Recompute (MLB-62) — DONE 2026-07-11.** The chain:
+   `mlb_stat_map` seed → `stg_mlb__player_game` (long canonical per-game rows)
+   → `stg_cbs__scoring_settings` (feed-read weights; INN lands as
+   outs_recorded @ 1/out) + `stg_cbs__mlbam_crosswalk` (scope column routes
+   the 900/901 split) → `int_cbs__player_game_points` (the priced per-game
+   engine; QS + IRSTR derived) → `mart_player_fpts_reconciliation` (the delta
+   report). All content-verified: Cole 2019 326 K / 26 QS / 959 fpts; Ohtani
+   two-way split leak-free; Yates 2019 +18 = 9 untracked strands × 2.
+   Findings: platform_identity_residual = 0.0 on all 8,185 rows (no era-rule
+   changes in the archive; CBS totals self-consistent under current weights);
+   2023-25 ~97% exact; ALL large deltas = CBS's sparse pre-2023 IRSTR feed
+   (calculated_ is more accurate than the platform). **Bonus: the delta
+   report's first run caught two silent crosswalk mismatches** (Michael
+   Taylor → the real "Michael A. Taylor" 572191; Jose Hernandez → the LHP
+   669796) — the crosswalk build now evidence-guards unique exact-name
+   matches too; post-fix ZERO real-production platform rows are missing
+   from reconciliation. Original spec follows for reference:
    - **Two-way join note (MLB-68, decided):** CBS's Ohtani pseudo-ids (900
      Batter / 901 Pitcher) both map to MLBAM 660271 — the one sanctioned
      shared crosswalk pair. The statsapi `stat_group` column splits the
@@ -161,7 +179,9 @@ killed the MLB extract once at 87/2214). Always make sweeps idempotent + log to 
 
 - **MLB-70** — universal stats layer: **COMPLETE 2026-07-10** (team-aware
   crosswalk with 0 collisions, extract, load — content-verified end-to-end).
-- **MLB-62** — per-game FPTS recompute. Reframed to universal-sourced; the next build.
+- **MLB-62** — per-game FPTS recompute: **COMPLETE 2026-07-11** (the
+  calculated_ engine + reconciliation mart, content-verified end-to-end;
+  caught + fixed two crosswalk mismatches on the way).
 - **MLB-61** — CBS staging. Standings arc + FA-only record book landed; pivot to
   universal for the record book.
 - **MLB-63** — ownership/active-set reconstruction. **Now the spine** (production only

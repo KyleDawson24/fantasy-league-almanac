@@ -55,6 +55,60 @@ for the ESPN league.
     1991–2026). Content-verified: Cole 2019 K=326, Judge 2022 HR=62 — the
     totals the free-agent-only source could never produce.
 
+- **The `calculated_` lens: per-game CBS fantasy points recomputed from the
+  universal stats layer (MLB-62).** CBS serves no per-game FPTS, so the
+  almanac's per-game-capable scoring view is computed here: universal
+  per-game stats × the league's own scoring rules, on CBS player identity.
+  The dbt chain, staging → intermediate → reporting:
+  - **`mlb_stat_map` seed + `stg_mlb__player_game`** — the statsapi
+    vocabulary census (both stat groups, every observed key dispositioned)
+    mapped into the canonical catalog; the staging model unpivots
+    `RAW.MLB_GAMELOGS` into long canonical-keyed per-game stat rows.
+    (statsapi_key, stat_group)-keyed because the API reuses names across
+    disciplines — pitching `hits` is hits allowed, pitching `strikeOuts`
+    the scored K.
+  - **`stg_cbs__scoring_settings`** — the platform's own scoring_rules
+    feed staged into effective weights (the ESPN staging convention:
+    current season's rules, applied universally). The one translation:
+    CBS lists INN at 3/inning but *pays* at out-granularity — the row
+    lands as `outs_recorded` at 1 pt/out (verified 587/587 against 2025
+    season FPTS where `floor(INN)` reconciles only 559/587). A singular
+    test pins the feed to the `cbs_stat_map` seed's documented weights.
+  - **`stg_cbs__mlbam_crosswalk` + `int_cbs__player_game_points`** — the
+    engine: one priced row per (league, player, discipline-line, game).
+    QS derived per start (`gamesStarted=1 AND outs≥18 AND ER≤3`), IRSTR
+    derived as `inheritedRunners − inheritedRunnersScored`, and the
+    MLB-68 two-way split implemented as a crosswalk join predicate —
+    Ohtani's hitting games feed CBS 900 "(Batter)", pitching games 901
+    "(Pitcher)", reported as two players. Content-verified: Cole 2019 =
+    326 K / 26 QS / 637 outs; Ohtani 2021 = 103 R/100 RBI/318 TB on 900
+    and 156 K/9 W on 901, with zero cross-discipline leakage.
+  - **`mart_player_fpts_reconciliation`** — the delta report:
+    season-summed `calculated_` vs CBS's own awarded FPTS (`platform_`),
+    per-category drivers, and an era-rule detector
+    (`platform_identity_residual`). The findings: the residual is 0.0 on
+    all 8,185 reconciled player-seasons (CBS's archive totals are exactly
+    self-consistent under current weights — no era-rule changes anywhere),
+    2023–25 reconcile ~97% exact, and every large delta is the platform's
+    own IRSTR feed gap (sparse pre-2023): Kirby Yates 2019 = 559
+    calculated vs 541 platform — 9 stranded runners CBS never tracked;
+    Rich Hill 2013 is +102 on 51 missing strands. The `calculated_` lens
+    is *more* accurate than the platform's own totals — the delta is a
+    feature, surfaced per-player for the almanac's asterisks.
+  - **The delta report caught two more silent crosswalk mismatches on its
+    first run** — CBS's "Michael Taylor" (11 production seasons) had
+    exact-name-matched a 2011–14 stranger because the real player lives
+    under statsapi's "Michael **A.** Taylor", and "Jose Hernandez"
+    (2023–24 LHP) had matched the 1990s infielder. The crosswalk build
+    gained the missing guard: UNIQUE exact-name candidates must now pass
+    the same evidence bar as fuzzy ones (zero season overlap = a
+    same-name stranger; and the wider initial-key pool can override a
+    bare-name match by strictly beating it on team agreement). Rebuild
+    diff: exactly 2 rows changed, both content-verified — all 14 affected
+    player-seasons now reconcile at **exactly 0.0** delta, and zero
+    platform player-seasons with real production are missing from the
+    reconciliation.
+
 - **Transaction Records: production by acquisition channel on Advanced
   Standings (MLB-16 spike / MLB-17).** The named key output — team rankings
   by how each player's production was acquired.

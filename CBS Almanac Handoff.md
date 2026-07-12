@@ -55,9 +55,24 @@ grade says so on the sheet). Historic ACTIVE-lens team pages ride that;
   across 2020; Aching Hippos id 1 → renamed Mesa Javelinas 2023; id 1 sat
   out 2020 while Scott co-ran a temp team w/ Patrick Lahie). Recorded
   on MLB-64.
-- NEXT once the sweep lands: parse transactions family (rows carry CBS
-  player ids + team ids + verbs + effective dates in modern era; early
-  era vocabulary TBD) → MLB-63 walk-back → then the almanac v2 build.
+- **TRANSACTIONS PARSED + LANDED 2026-07-12 (98e95f0)**:
+  RAW.CBS_UI_TRANSACTIONS = 52,369 player-actions / 24,388 transactions
+  / 2001-2026, full-season spans, zero missing action phrases, 33.5k
+  with real CBS player ids. Integrity traps handled in code: bgFan rows
+  are REAL transactions (exclusion-based row matching — include-list
+  zebra classes caused every boundary overlap); CBS double-renders rows
+  adjacently (identity = cell-content hash, class ignored); end-of-season
+  offsets clamp to a shifted window (walker window-merges prefix-onto-
+  tail; 678 dupes dropped). Trades = one txn id across two per-side rows
+  (NOT dupes). **THE FIDELITY MAP IS EMPIRICAL: 2001-2003 + 2021+ have
+  full lineup logs (day-grain active sets); 2004-2020 membership moves
+  only (adds/drops/trades — active approximated via Start%). 2001's 572
+  'Signed' = likely the founding roster construction.**
+- NEXT: (a) staging normalization for the UI families (verbs→move types,
+  dates, names; MLB-54's remaining half — verify 2026 UI rows against
+  the API log's 197 entries, the one dual-source year) + UI-name→id
+  identity for rosters; (b) MLB-63 walk-back with the per-era grades
+  above; (c) the almanac v2 build on real history.
 
 1. **MLB-55 — year-end rosters: PARSED + LANDED 2026-07-12**
    (`extract/cbs_ui_parse.py --families rosters`, RAW.CBS_UI_ROSTERS,

@@ -101,6 +101,14 @@ class UiClient:
         extra_page = kwargs.get("page")
         if extra_page:
             url += "?page=%s" % extra_page
+        # start_row pagination (discovered by the maintainer 2026-07-12):
+        # the transaction report's REAL pager. The bare URL equals
+        # start_row=1 (newest first); offsets walk back through the season;
+        # rows-per-page varies by year. The ?page= param above was the
+        # older guess -- CBS ignores it (kept for manifest continuity).
+        extra_start = kwargs.get("start_row")
+        if extra_start and int(extra_start) > 1:
+            url += "?start_row=%d" % int(extra_start)
         meta = {"url": url, "ts": datetime.now(timezone.utc).isoformat(timespec="seconds")}
         last_err = None
         for backoff in [0] + RETRY_BACKOFF:
@@ -341,12 +349,95 @@ def verify(ui_dir: Path, stamp: str, last_season: int) -> None:
     print("  VERIFY: %s" % json.dumps(summary), flush=True)
 
 
+# Transaction rows across ALL eras: the data table's row1/row2 TRs.
+# Row markup drifts by era -- 2021 ids are epoch-txnid, 2015 adds a third
+# segment, 2001-2008 carry NO ids -- so detection is class-based and
+# scoped to the one data table; the duplicate-page clamp check compares
+# the first row's raw content instead of an id.
+_TXN_TABLE_MARK = 'class="data borderTop'
+_TXN_ROW_RE = re.compile(r'<tr[^>]*class="row[12]"[^>]*>.*?</tr>', re.DOTALL)
+
+
+def _txn_rows(html: str) -> list:
+    i = html.find(_TXN_TABLE_MARK)
+    if i < 0:
+        return []
+    return _TXN_ROW_RE.findall(html[i:html.find('</table>', i)])
+
+
+def run_transactions_sweep(client: UiClient, ui_dir: Path, last_season: int,
+                           force: bool, filters=("all",)) -> None:
+    """Full-history transaction capture via start_row pagination -- the real
+    pager the maintainer found 2026-07-12 (the original capture's ?page=
+    guess is ignored by CBS, which is why the archive held only each
+    season's last ~30 moves). The bare URL equals start_row=1, newest
+    first; the next offset is 1 + rows seen so far (rows-per-page varies
+    by year); a page past the season's end renders zero transaction rows
+    (or clamps to a repeat), which ends the year.
+
+    Idempotent: present files are read and counted, not refetched, so an
+    interrupted sweep resumes where it stopped. Filenames: {year}.html for
+    start_row=1 (the original capture's name, so those pages are reused),
+    {year}_r{start_row}.html beyond."""
+    for f in filters:
+        for year in range(FIRST_SEASON, last_season + 1):
+            start_row, season_rows, pages, prev_first = 1, 0, 0, None
+            while True:
+                if pages >= 500:
+                    print("  transactions/%s %d: RUNAWAY GUARD at 500 pages -- "
+                          "inspect before trusting" % (f, year), flush=True)
+                    break
+                suffix = ("%d.html" % year if start_row == 1
+                          else "%d_r%d.html" % (year, start_row))
+                out = ui_dir / "transactions" / f / suffix
+                if out.is_file() and out.stat().st_size > 0 and not force:
+                    html = out.read_text(encoding="utf-8", errors="replace")
+                else:
+                    html, meta = client.get("transactions", filter=f, year=year,
+                                            start_row=start_row)
+                    if html is None:
+                        append_manifest(ui_dir, meta, None)
+                        if "AUTH-BOUNCED" in str(meta.get("note", "")):
+                            raise SystemExit(
+                                "Cookie no longer authenticates (%s) -- re-extract "
+                                "CBS_WEB_COOKIES and rerun; the sweep resumes from "
+                                "landed pages." % meta["url"])
+                        print("  transactions/%s %d r%d: %s" % (
+                            f, year, start_row, meta.get("note")), flush=True)
+                        break
+                    if not _txn_rows(html):
+                        # Past the season's end: nothing to land, year done.
+                        meta["note"] = "zero transaction rows (end of season)"
+                        append_manifest(ui_dir, meta, None)
+                        break
+                    land(out, html)
+                    append_manifest(ui_dir, meta, str(out))
+                rows = _txn_rows(html)
+                first = hash(rows[0]) if rows else None
+                if not rows or first == prev_first:
+                    break   # empty present file (defensive) / clamped offset
+                prev_first = first
+                pages += 1
+                season_rows += len(rows)
+                start_row += len(rows)
+            print("  transactions/%s %d: %d moves across %d pages" % (
+                f, year, season_rows, pages), flush=True)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     mode = ap.add_mutually_exclusive_group(required=True)
     mode.add_argument("--probe", action="store_true", help="auth + shape check; lands nothing")
     mode.add_argument("--capture", action="store_true", help="full sweep + verify")
+    mode.add_argument("--transactions-sweep", action="store_true",
+                      help="full-history transaction capture via start_row "
+                           "pagination; pair with --last-season 2025 to leave "
+                           "the live season to the API capture")
     ap.add_argument("--last-season", type=int, default=2026)
+    ap.add_argument("--txn-filters", default="all",
+                    help="comma list for --transactions-sweep: all (includes the "
+                         "activate/reserve lineup moves MLB-63 needs) and/or "
+                         "all_but_lineup")
     ap.add_argument("--force", action="store_true", help="re-fetch pages already landed")
     args = ap.parse_args()
 
@@ -363,6 +454,12 @@ def main() -> None:
     print("cbs_ui_capture: league=%s landing=%s" % (league, ui_dir), flush=True)
     if args.probe:
         run_probe(client)
+    elif args.transactions_sweep:
+        filters = tuple(x.strip() for x in args.txn_filters.split(",") if x.strip())
+        unknown = [x for x in filters if x not in TXN_FILTERS]
+        if unknown:
+            raise SystemExit("unknown txn filters %s; known %s" % (unknown, TXN_FILTERS))
+        run_transactions_sweep(client, ui_dir, args.last_season, args.force, filters)
     else:
         run_capture(client, ui_dir, args.last_season, args.force)
     print("done: %d GETs, read-only." % client.calls, flush=True)

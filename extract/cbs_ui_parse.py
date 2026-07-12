@@ -82,7 +82,32 @@ TABLES = {
 
 _TABLE_RE = re.compile(
     r'<table[^>]*id=lineup_views_archived.*?</table>', re.DOTALL)
+_ANY_TABLE_RE = re.compile(r'<table[^>]*>.*?</table>', re.DOTALL)
 _CELL_RE = re.compile(r'<td[^>]*>(.*?)</td>', re.DOTALL)
+
+
+def _roster_table_region(html, rel_path):
+    """The roster content spans ONE OR MANY tables depending on the render:
+    the league-wide 2012+ pages put every team inside the single
+    id=lineup_views_archived table, while the (re-captured 2026-07-12)
+    early-year pages render team 1 in the id'd table and teams 2..N in
+    consecutive sibling <table class="data"> blocks right after it. Take
+    the contiguous run: the id'd table plus every immediately-following
+    data table that opens with a title row. The page's OTHER furniture
+    (the global player-picker) doesn't match that shape and ends the run."""
+    tables = list(_ANY_TABLE_RE.finditer(html))
+    start = next((n for n, m in enumerate(tables)
+                  if 'lineup_views_archived' in m.group(0)[:200]), None)
+    if start is None:
+        raise ValueError(f"{rel_path}: no lineup_views_archived table")
+    chunks = [tables[start].group(0)]
+    for m in tables[start + 1:]:
+        head = m.group(0)[:300]
+        if 'class="data"' in head and '<tr class="title">' in head:
+            chunks.append(m.group(0))
+        else:
+            break
+    return "\n".join(chunks)
 
 # Label rows name the columns, and BOTH the column set and the first
 # cell's text are era-dependent: the modern era runs Player | MLB |
@@ -158,10 +183,7 @@ def parse_roster_page(path, rel_path):
     file_franchise_id = int(re.search(r'team_(\d+)\.html$', path.name).group(1))
     html = path.read_text(encoding='utf-8', errors='replace')
 
-    table_match = _TABLE_RE.search(html)
-    if not table_match:
-        raise ValueError(f"{rel_path}: no lineup_views_archived table")
-    table = table_match.group(0)
+    table = _roster_table_region(html, rel_path)
 
     rows = []
     labels = None

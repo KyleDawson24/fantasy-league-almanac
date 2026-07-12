@@ -46,11 +46,33 @@ grade says so on the sheet). Historic ACTIVE-lens team pages ride that;
    pre-2012 membership must come from the transaction walk-back alone
    (grade accordingly) — OR a live-UI re-probe with a different URL
    form (Kyle-side call; CBS_WEB_COOKIES may need refresh).
-2. **MLB-53 — standings 2001-2026** (26 pages, `.../ui/standings/`).
-   Franchise ids + names via the SINGLE-QUOTED
-   `history/team-overview/{id}'` hrefs (verified present, 48 links on
-   2021.html). → season finishes, champions list, league-shape
-   timeline, historic Standings-tab rows.
+2. **MLB-53 — standings: PARSED + LANDED 2026-07-12**
+   (RAW.CBS_UI_STANDINGS, 395 rows, 25 completed seasons 2001-2025,
+   34 franchise ids, zero unresolved). THE CHAMPIONS LIST EXISTS:
+   Hardball Hackers ×5, Bayside Bombers ×4, Aching Hippos ×2, 13
+   distinct champs. Team names DRIFT across eras ('Junk Drawer All-Stars'
+   2008 vs 'Junk Drawer All-Stars' now) — the name→id map is (season, name)
+   keyed. League shape: 16 teams except 15 (2002) and 12 (2020).
+   2026's Final Standings card is legitimately empty (in progress).
+
+2b. **⚠ SECOND CAPTURE GAP — the transaction logs are WINDOWED
+   (blocks MLB-63's day-grain walk-back).** The captured
+   `/transactions/all/{filter}/{year}` pages hold only the LAST ~30
+   moves of each season (2021: Sep 20-29 only), and the page has NO
+   pagination controls — it's a fixed tail report. The GOOD news
+   baked in those 30-row samples: transaction rows carry REAL CBS
+   player ids (`/players/playerpage/{id}`), team ids (`/teams/{id}`),
+   clean verbs (Activated / Benched / presumably Added / Dropped /
+   Traded), a transaction timestamp AND a separate EFFECTIVE date.
+   If the full log is reachable at all, it's via a live probe:
+   try the `:param` table style (the sort links use
+   `?:sort_dir=&:sort_col=`, so `:page=` / `:rows=` variants are
+   plausible), ascending sort (doubles the window to first+last 30),
+   date-scoped URL forms, or the commissioner's edit-transactions
+   view (the page embeds a commish form; Kyle's login may lack it).
+   WITHOUT the full logs: no day-grain reconstruction — membership =
+   year-end anchors only (2012+ complete, pre-2012 commissioner-only),
+   fidelity-labeled, which still makes modern-era team pages real.
 3. **Almanac v2 per the approved blueprint** (Kyle's sign-offs
    2026-07-12, ESPN fixtures = ground truth for architecture —
    `tests/fixtures/almanac_v1_1_0/*.tsv`):

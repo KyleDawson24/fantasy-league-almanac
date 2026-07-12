@@ -15,17 +15,62 @@ Run everything **from the worktree**; the raw data lives in the **main checkout*
 (`C:\Users\kyled\projects\espn-league-manager\data\...`) — pass `--data-dir`.
 Tooling: the `.venv` in the **main checkout** (`...\espn-league-manager\.venv\Scripts\`).
 
-**THE ALMANAC RENDERS (2026-07-12). All four chain steps are done:**
-recompute (MLB-62) → record book rebuild → registry sinks (MLB-58) → the
-points-league renderer (MLB-66 v1: home + 16 team tabs,
-`output/cbs_almanac_sheets.py`, dispatched by data-presence from
-`generate_almanac_sheet.py`). 17-tab preview verified against real data;
-ESPN path golden-proven byte-safe. **What remains before the
-merge-to-main gate: Kyle runs
-`python output/generate_almanac_sheet.py --league cbs-bsb --prod`
-(the expired OAuth token re-mints via browser consent on that run),
-eyeballs the Sheet, then `git merge --ff-only` this branch into main.**
-Dev-sheet dry run first if preferred (no --prod → CBS_SHEETS_DEV_ID).
+**COURSE CORRECTION (2026-07-12, Kyle's review of the v1 render): the v1
+almanac layout was wrong-shaped — REBUILD to mirror the ESPN workbook's
+ARCHITECTURE, and the team pages need HISTORIC rosters first.**
+Kyle: "if we don't have historic data we don't have anything worth
+rendering yet." The plumbing all stands (MLB-62 recompute, record book,
+MLB-58 registry sinks, data-presence dispatch, quota-hardened writer);
+what changes is the CONTENT assembly and its prerequisite.
+
+**START HERE → parse the captured UI history (the new critical path):**
+1. **MLB-55 — year-end rosters 2003-2025** (375 pages,
+   `data/cbs_raw/bsb/history/ui/rosters/{year}/team_{id}.html`). The
+   `<table id=lineup_views_archived>` is clean/regular (verified
+   2026-07-12): title row = "TeamName - Owner Name"; label row Player |
+   MLB | Own % | Start % | Status | Pos; player cells pack "Last, First
+   POS MLBTEAM". NO CBS player ids — identity = name+season+team match
+   (reuse the evidence-guarded mlb_crosswalk machinery). Beware the
+   MLB-55-documented page furniture (a global player-picker embedded
+   in the page — parse ONLY the lineup_views_archived table).
+   → membership v0: per (season, franchise_id, player) with fidelity
+   grade 'year_end'. This unlocks team all-time pools.
+2. **MLB-53 — standings 2001-2026** (26 pages, `.../ui/standings/`).
+   Franchise ids + names via the SINGLE-QUOTED
+   `history/team-overview/{id}'` hrefs (verified present, 48 links on
+   2021.html). → season finishes, champions list, league-shape
+   timeline, historic Standings-tab rows.
+3. **Almanac v2 per the approved blueprint** (Kyle's sign-offs
+   2026-07-12, ESPN fixtures = ground truth for architecture —
+   `tests/fixtures/almanac_v1_1_0/*.tsv`):
+   - **Home** = navigation-first (Navigate table w/ live #gid links,
+     two-pass write like ESPN's), points glossary, All-League Team
+     boards: **Season-to-Date + All-Time ONLY** (no Team-of-the-Period).
+   - **Records tab** = PLAYER records only: Best Season (existing mart)
+     side-by-side with Best Career Totals (new accumulation model over
+     int_cbs__player_season_stats — the MLB-69 axis). No weekly/period
+     records (period boundaries unavailable historically + irrelevant).
+   - **Standings tab** (replaces Matchup History): 2026 period-by-period
+     arc + historic season finishes once MLB-53 parses.
+   - **Team pages** (the meat): Best Lineup slot-filled by ACTIVE points
+     per eligible position (slot template C/1B/2B/3B/SS/OF×3/U/DH+P×9),
+     RosterDays/Games/Active/Bench/ppg + stat columns, bench ranked by
+     total rostered points — current-season × ALL-TIME side by side;
+     all-time pool = year-end-roster membership (fidelity-labeled).
+   - **Advanced Standings: skipped** for CBS v1. **Draft Recap: skipped**
+     (MLB-56 unparsed; offline-draft noise) — nav placeholder.
+   - **The 2026 active lens = a dbt FACT model** (Kyle's call): daily
+     rosters (stg_cbs__rosters) × per-game points
+     (int_cbs__player_game_points) on (player_id, date) → player-team-day
+     grain w/ active/bench split. Feeds team pages + the Season board +
+     MLB-63 later.
+   v1 renderer content in `output/cbs_almanac_sheets.py` gets rebuilt;
+   keep its write layer (quota-hardened 2026-07-12: one style
+   batch_update per tab + 70s quota backoff mirroring almanac_write).
+
+The merge-to-main gate stays: Kyle eyeballs the rendered Sheet. OAuth
+token was re-minted during his 2026-07-12 dev run (dev sheet now holds
+the half-written v1 output; the v2 rewrite overwrites it).
 
 ---
 

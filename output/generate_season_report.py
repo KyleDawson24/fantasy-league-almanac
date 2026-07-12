@@ -902,6 +902,13 @@ def main():
              'Default: the registry\'s default_league (the ESPN league).')
     args = parser.parse_args()
     db.set_league(args.league)
+    # MLB-58: BBCode is a per-league surface; fail loudly when the league
+    # declares none.
+    if not db.league().sinks.get('bbcode', False):
+        raise SystemExit(
+            f"League '{db.league_key()}' has no BBCode surface configured "
+            f"(sinks.bbcode in config/leagues.yml); nothing to generate."
+        )
 
     season_year = args.season_year or get_active_season()
     report = generate_season_report(season_year)
@@ -909,7 +916,7 @@ def main():
     log_dir = os.path.join(os.path.dirname(__file__), '..', 'output', 'logs')
     os.makedirs(log_dir, exist_ok=True)
     timestamp = datetime.now().strftime('%Y-%m-%d_%H%M%S')
-    log_path = os.path.join(log_dir, f'season_report_{season_year}_{timestamp}.txt')
+    log_path = os.path.join(log_dir, f'season_report_{db.league_file_tag()}{season_year}_{timestamp}.txt')
     with open(log_path, 'w', encoding='utf-8') as f:
         f.write(report)
     print(report)

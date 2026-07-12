@@ -220,3 +220,13 @@ def league_predicate(alias=None):
     validated at set_league time."""
     column = f"{alias}.league_key" if alias else "league_key"
     return f"{column} = '{league_key()}'"
+
+
+def league_file_tag():
+    """League segment for output artifact filenames (MLB-58: log-file
+    naming is league-scoped so multi-league runs never collide). Empty
+    for the registry's default league -- the pre-registry filenames stay
+    byte-identical -- and '<key>_' for every other league."""
+    if league_key() == get_league(None).key:
+        return ''
+    return f"{league_key()}_"

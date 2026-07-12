@@ -878,7 +878,7 @@ def generate_summary(matchup_period, scores, contributions, wasted_points,
     log_dir = os.path.join(os.path.dirname(__file__), "..", "output","logs")
     os.makedirs(log_dir, exist_ok=True)
     timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-    log_path = os.path.join(log_dir, f"summary_{matchup_period}_{timestamp}.txt")
+    log_path = os.path.join(log_dir, f"summary_{db.league_file_tag()}{matchup_period}_{timestamp}.txt")
     with open(log_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
     print(f"\nLog saved to: {log_path}")
@@ -898,6 +898,14 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     db.set_league(args.league)
+    # MLB-58: BBCode is a per-league surface. A league that declares
+    # sinks.bbcode: false (or nothing) has no recap to generate -- fail
+    # loudly before any query runs.
+    if not db.league().sinks.get('bbcode', False):
+        raise SystemExit(
+            f"League '{db.league_key()}' has no BBCode surface configured "
+            f"(sinks.bbcode in config/leagues.yml); nothing to generate."
+        )
 
     active_season = query_snowflake(
         f"SELECT MAX(season_year) as sy FROM fct_team_weekly_active_performance"

@@ -262,7 +262,7 @@ def main():
     log_dir = os.path.join(os.path.dirname(__file__), "..", "output", "logs")
     os.makedirs(log_dir, exist_ok=True)
     timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-    log_path = os.path.join(log_dir, f"records_report_{timestamp}.txt")
+    log_path = os.path.join(log_dir, f"records_report_{db.league_file_tag()}{timestamp}.txt")
     with open(log_path, "w", encoding="utf-8") as f:
         f.write(summary)
     print(f"Log saved to: {log_path}")
@@ -276,7 +276,7 @@ def main():
         print("[sheets] --no-sheets flag set; suppressing Sheets sink")
     else:
         try:
-            sheets_id, target_label = sheets_target.resolve_sheets_target(args.prod)
+            sheets_id, target_label = sheets_target.resolve_sheets_target(args.prod, db.league())
         except RuntimeError as exc:
             parser.error(str(exc))
         if not sheets_id:

@@ -122,8 +122,9 @@ killed the MLB extract once at 87/2214). Always make sweeps idempotent + log to 
   `mart_player_fpts_reconciliation`). NOT a record source.
 - `marts/reporting/mart_player_season_records` — REBUILT on the
   `calculated_` lens via `int_cbs__player_season_stats` (universal
-  population). PG deliberately absent (underivable: bad game-grain
-  battersFaced + invisible errors); NH derives cleanly.
+  population). PG deliberately absent (bf=outs means faced-the-MINIMUM,
+  not perfect — erased-runner no-hitters are indistinguishable from
+  perfectos in a pitcher's aggregate line); NH derives cleanly.
 
 ---
 

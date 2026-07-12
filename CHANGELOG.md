@@ -126,12 +126,17 @@ for the ESPN league.
   IRSTR surfaces here per its seed note (CBS-scored, ESPN-suppressed).
   Honest-derivation line drawn in data: NH derives cleanly (CG + 0 H +
   27 outs — Scherzer's two-no-hitter 2015 tops the list), while PG is
-  **deliberately absent** — statsapi's game-grain `battersFaced` is
-  unreliable (Framber's 2023 no-hitter reports bf = outs = 27 alongside
-  a walk) and error-only baserunners are invisible in a pitcher's line,
-  so a derived perfect-game flag would have crowned three false
-  perfectos. Interim TOTAL lens clearly labeled until MLB-63 membership
-  scopes it; archive-era seasons (2004+, data-driven floor).
+  **deliberately absent**: `battersFaced = outs` means *faced the
+  minimum*, not *nobody reached* — a walk erased on a double play
+  (Verlander 2011, Valdez 2023) or a dropped-third-strike runner caught
+  stealing (Means 2021) produces bf = outs = 27 on a non-perfect game,
+  and the erasure events that separate those from Germán's real perfecto
+  never appear in a pitcher's aggregate line. 3 of the archive's 4
+  minimum-faced no-hitters would be false perfectos under any
+  line-derivable predicate (the feed itself is consistent — walkers who
+  stay on base do make bf > outs, 18 of 22 no-hitters). Interim TOTAL
+  lens clearly labeled until MLB-63 membership scopes it; archive-era
+  seasons (2004+, data-driven floor).
 
 - **Transaction Records: production by acquisition channel on Advanced
   Standings (MLB-16 spike / MLB-17).** The named key output — team rankings

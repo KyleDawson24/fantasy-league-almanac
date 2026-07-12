@@ -78,5 +78,8 @@ leagues:
     final_season: null
     sinks:
       bbcode: false
-      sheets_almanac_env: null
-      sheets_dev_env: null
+      # MLB-49 (2026-07-12): the CBS almanac Sheet + its dev sibling,
+      # mirroring the ESPN pair. Ids live in .env per the registry's
+      # quasi-privacy convention; access verified by title read at wiring.
+      sheets_almanac_env: CBS_SHEETS_OUTPUT_ID
+      sheets_dev_env: CBS_SHEETS_DEV_ID

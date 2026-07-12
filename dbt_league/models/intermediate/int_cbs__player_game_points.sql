@@ -229,12 +229,19 @@ select
     g.gs, g.ir, g.irs,
     -- Unscored game-event flag for the record book / retrospective. An
     -- official individual no-hitter is a 9+ inning complete game with zero
-    -- hits allowed -- all three inputs are reliable feed primitives.
-    -- PERFECT games are deliberately NOT derived: the feed's game-grain
-    -- battersFaced is unreliable (Framber Valdez's 2023 no-hitter reports
-    -- bf = outs = 27 alongside a walk -- arithmetically impossible), and an
-    -- error-only baserunner (Scherzer 2015-10-03) never appears in the
-    -- pitcher's line at all, so any derivation would crown false perfectos.
+    -- hits allowed -- pure same-line aggregates, no base-state needed.
+    -- PERFECT games are deliberately NOT derived: the closest available
+    -- test, battersFaced = outs, means "faced the MINIMUM," not "nobody
+    -- reached" -- a walked runner erased on a double play (Verlander
+    -- 2011-05-07, Valdez 2023-08-01) or a dropped-third-strike runner
+    -- caught stealing (Means 2021-05-05) produces bf = outs = 27 on a
+    -- non-perfect game, and the erasure events that distinguish those from
+    -- Domingo German's real perfecto never appear in a pitcher's aggregate
+    -- line. 3 of the archive's 4 minimum-faced no-hitters are false
+    -- positives under any line-derivable predicate. The feed itself is
+    -- consistent (walkers who STAY on base do make bf > outs -- 18 of the
+    -- archive's 22 no-hitters); the lesson is that base-state facts can't
+    -- be reconstructed from one line's aggregates.
     iff(g.cg = 1 and g.ha = 0 and g.outs >= 27, 1, 0) as nh,
     g.r_pts, g.rbi_pts, g.bb_pts, g.sb_pts, g.tb_pts,
     g.w_pts, g.s_pts, g.hd_pts, g.cg_pts, g.qs_pts, g.outs_pts, g.irstr_pts,

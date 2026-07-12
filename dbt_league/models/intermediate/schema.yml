@@ -145,7 +145,7 @@ models:
       - name: irs
         description: 'Inherited runners scored -- IRSTR derivation context, unpriced.'
       - name: nh
-        description: 'Derived no-hitter flag: complete game, zero hits allowed, outs >= 27 (official individual no-hitters only). Unscored; feeds the record book. There is deliberately NO perfect-game flag -- the feed''s game-grain battersFaced is unreliable and error-only baserunners are invisible in a pitcher''s line, so perfection cannot be derived honestly.'
+        description: 'Derived no-hitter flag: complete game, zero hits allowed, outs >= 27 (official individual no-hitters only). Unscored; feeds the record book. There is deliberately NO perfect-game flag -- battersFaced = outs means "faced the minimum" (erased baserunners), not "nobody reached," and the erasure events that separate the two are invisible in a pitcher''s aggregate line; 3 of the archive''s 4 minimum-faced no-hitters would be false perfectos.'
 
   - name: int_cbs__player_season_stats
     description: >

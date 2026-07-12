@@ -434,30 +434,46 @@ def build_all_tabs():
 # Sheets write
 # ---------------------------------------------------------------------------
 
-_MAX_ATTEMPTS = 5
+# The Sheets API caps WRITE REQUESTS PER MINUTE per user. Two defenses,
+# both learned from the ESPN writer's history with the same quota:
+#   1. One styling batch_update per tab (freeze + cell formats + column
+#      widths in a single request) -- ~3 write calls per tab instead of
+#      ~6, which keeps a 17-tab run under the per-minute cap outright.
+#   2. When the quota still trips, wait PAST the minute window before
+#      retrying (70s, mirroring almanac_write._sheets_call) -- an
+#      exponential ladder that tops out under 60s can never outlast a
+#      per-minute bucket.
+
+_QUOTA_ATTEMPTS = 3
+_QUOTA_WAIT_SECONDS = 70
+
+
+def _is_quota_error(exc):
+    message = str(exc).lower()
+    return '[429]' in message or 'quota exceeded' in message or 'rate limit' in message
 
 
 def _sheets_call(label, fn):
-    """Retry wrapper for transient Sheets API failures (quota 429s, 5xx).
+    """Run a Sheets mutation, backing off when the API write quota resets.
     Mirrors almanac_write._sheets_call; extracting the two into a shared
-    plumbing module is a follow-up (kept separate here so the
-    golden-covered ESPN writer stays untouched)."""
-    for attempt in range(1, _MAX_ATTEMPTS + 1):
+    plumbing module is a follow-up (kept separate so the golden-covered
+    ESPN writer stays untouched)."""
+    for attempt in range(1, _QUOTA_ATTEMPTS + 1):
         try:
             return fn()
         except gspread.exceptions.APIError as exc:
-            status = getattr(getattr(exc, 'response', None), 'status_code', None)
-            if attempt == _MAX_ATTEMPTS or status not in (429, 500, 502, 503):
+            if attempt == _QUOTA_ATTEMPTS or not _is_quota_error(exc):
                 raise
-            wait = min(2 ** attempt, 30)
-            print(f"[cbs-almanac] {label}: Sheets API {status}; "
-                  f"retry {attempt}/{_MAX_ATTEMPTS - 1} in {wait}s")
-            time.sleep(wait)
+            print(f"[cbs-almanac] Sheets quota hit during {label}; "
+                  f"retrying in {_QUOTA_WAIT_SECONDS}s")
+            time.sleep(_QUOTA_WAIT_SECONDS)
 
 
 def write_cbs_almanac(sheet_id, tabs):
     """Write every tab (create-or-replace by title) with light formatting:
-    frozen header band, bold sections, sensible column widths."""
+    frozen header band, bold sections, sensible column widths. Idempotent:
+    a rerun overwrites every tab, so a quota-interrupted run just needs
+    running again."""
     client = _get_authorized_client()
     spreadsheet = _sheets_call('open', lambda: client.open_by_key(sheet_id))
 
@@ -478,14 +494,12 @@ def write_cbs_almanac(sheet_id, tabs):
             lambda ws=worksheet, r=rows: ws.update(
                 r, 'A1', value_input_option='RAW'),
         )
-        _sheets_call(f'freeze {title}',
-                     lambda ws=worksheet: ws.freeze(rows=2))
-        if formats:
-            _sheets_call(
-                f'format {title}',
-                lambda ws=worksheet, f=formats: ws.batch_format(f),
-            )
-        _apply_column_widths(spreadsheet, worksheet, title)
+        _sheets_call(
+            f'style {title}',
+            lambda ws=worksheet, t=title, f=formats:
+                spreadsheet.batch_update(
+                    {'requests': _tab_style_requests(ws.id, t, f)}),
+        )
         print(f"[cbs-almanac] wrote tab: {title} ({len(rows)} rows)")
 
 
@@ -493,12 +507,35 @@ _HOME_WIDTHS = [(0, 1, 170), (1, 2, 230), (2, 3, 110), (3, 7, 95)]
 _TEAM_WIDTHS = [(0, 1, 90), (1, 2, 210), (2, 3, 60), (3, 4, 120), (4, 6, 95)]
 
 
-def _apply_column_widths(spreadsheet, worksheet, title):
-    widths = _HOME_WIDTHS if title == HOME_TAB else _TEAM_WIDTHS
+def _tab_style_requests(sheet_gid, title, formats):
+    """Every non-value mutation for one tab as raw batch_update requests:
+    frozen header band, the builder's cell formats (converted from the
+    gspread batch_format shape), column widths."""
     requests = [{
+        'updateSheetProperties': {
+            'properties': {
+                'sheetId': sheet_gid,
+                'gridProperties': {'frozenRowCount': 2},
+            },
+            'fields': 'gridProperties.frozenRowCount',
+        },
+    }]
+    for spec in formats or ():
+        grid_range = gspread.utils.a1_range_to_grid_range(
+            spec['range'], sheet_id=sheet_gid)
+        fields = ','.join(sorted(spec['format'].keys()))
+        requests.append({
+            'repeatCell': {
+                'range': grid_range,
+                'cell': {'userEnteredFormat': spec['format']},
+                'fields': f'userEnteredFormat({fields})',
+            },
+        })
+    widths = _HOME_WIDTHS if title == HOME_TAB else _TEAM_WIDTHS
+    requests.extend({
         'updateDimensionProperties': {
             'range': {
-                'sheetId': worksheet.id,
+                'sheetId': sheet_gid,
                 'dimension': 'COLUMNS',
                 'startIndex': start,
                 'endIndex': end,
@@ -506,6 +543,5 @@ def _apply_column_widths(spreadsheet, worksheet, title):
             'properties': {'pixelSize': pixels},
             'fields': 'pixelSize',
         },
-    } for start, end, pixels in widths]
-    _sheets_call(f'widths {title}',
-                 lambda: spreadsheet.batch_update({'requests': requests}))
+    } for start, end, pixels in widths)
+    return requests

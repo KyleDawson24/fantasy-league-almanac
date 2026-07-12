@@ -35,10 +35,22 @@ It is committed at every checkpoint, so the branch on GitHub mirrors it.
 - [x] A3: membership self-audits — **100% ANCHOR COVERAGE, all 23
       anchored seasons** (every one of the 10,449 year-end states is
       reproduced by a season-end stint)
-- [ ] B1: single-rostering truncation + active intervals (lineup eras)
-- [ ] B2: per-game attribution fact w/ provenance
-- [ ] C1: standings reconciliation mart + season grades
-- [ ] Ship: tests, docs, catalog, Linear, handoff
+- [x] B1: single-rostering truncation (departure-day exclusive; receiver
+      owns the effective date) + lineup intervals WITH THE BACKWARD HALF
+      (state before a player's first lineup event = the INVERSE of that
+      event; zero-event players hold their anchor status)
+- [x] B2: `fct_cbs_player_game_attribution` — every priced game
+      franchise-attributed with per-row provenance (captured /
+      reconstructed_day / estimated_startshare / estimated_membership) +
+      state_source + ambiguity/contested/inferred-end flags; one
+      attribution per game guaranteed (position-aware tie-break)
+- [x] C1: `mart_team_points_reconciliation` — reconstructed vs OFFICIAL
+      standings, 25 seasons × 16 teams
+- [ ] D: COVERAGE EXTENSION (new critical path — see log) — identity +
+      gamelog extract for the UI-history population, then re-measure
+      2003-2020
+- [ ] Ship: schema docs + grain tests for the five new models, catalog,
+      Linear, handoff (deferred to post-D — the models churn again)
 
 ## Questions / Issues for Kyle (collected as encountered)
 
@@ -71,3 +83,22 @@ It is committed at every checkpoint, so the branch on GitHub mirrors it.
   Block-B truncation rule.
 - CHECKPOINT: Block A committed. Next: B1 truncation + active
   intervals.
+- B+C built. FIRST report card looked terrible (-30% to -99% per team)
+  and decomposed into TWO separate causes via the rostered-lens column:
+  (1) modern era = WEIGHT loss — set-and-forget starters have no lineup
+  events, my forward-only intervals defaulted them to reserve; (2)
+  pre-2016 = COVERAGE starvation — the universal gamelog layer only
+  holds crosswalked players (the 2004+ archive population), so
+  early-era rostered players who retired before ~2015 have NO games.
+- FIX (modern): the backward state half — prior-inverse intervals +
+  anchor-hold. **Modern era now reconciles at 2.4–7.5% mean absolute
+  error** (2025: 2.4%, official 8,690 vs reconstructed 8,750). The
+  walk-back is VALIDATED where coverage exists.
+- NEW CRITICAL PATH (D): extend identity + gamelogs to the UI-history
+  population (~thousands of pre-2015 players from the 10,449 anchors +
+  moves) via the proven name+season+team machinery, re-run the engine,
+  re-measure 2003-2020. This is another extract sweep (detached).
+- ISSUE #4 for Kyle: none of this needs you — but note the 2021 mean
+  error (7.5%) runs slightly hotter than 2025 (2.4%): older lineup
+  logs are a touch noisier (retroactive edits, the truncation class).
+  The per-season grades will carry it honestly.

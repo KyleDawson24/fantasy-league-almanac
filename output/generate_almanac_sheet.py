@@ -15,6 +15,7 @@ import db
 db.init()
 
 import almanac_sheets
+import cbs_almanac_sheets
 import sheets_target
 
 
@@ -50,6 +51,14 @@ def main():
     )
     args = parser.parse_args()
     db.set_league(args.league)
+
+    # Format dispatch by DATA PRESENCE (the format-modularity rule): a
+    # league with delivered period standings is a points league -- no
+    # matchups exist, so the H2H almanac shape below cannot apply. The
+    # ESPN league has no period-standings rows and flows on unchanged.
+    if cbs_almanac_sheets.is_points_league():
+        _run_points_league_almanac(args, parser)
+        return
 
     if (args.season_year is None) != (args.matchup_period is None):
         parser.error('--season-year and --matchup-period must be supplied together')
@@ -116,7 +125,8 @@ def main():
         sheet_id, target_label = None, None
     else:
         try:
-            sheet_id, target_label = sheets_target.resolve_sheets_target(args.prod)
+            sheet_id, target_label = sheets_target.resolve_sheets_target(
+                args.prod, db.league())
         except RuntimeError as exc:
             parser.error(str(exc))
 
@@ -138,6 +148,44 @@ def main():
         season_year=season_year,
         matchup_period=matchup_period,
     )
+
+
+def _run_points_league_almanac(args, parser):
+    """The points-league almanac path (MLB-66): home + team tabs from the
+    standings arc, record book, and captured rosters. Same preview /
+    dev-default / explicit-prod UX as the H2H path; the sheet resolves
+    from the league's registry sinks (MLB-58). --season-year /
+    --matchup-period are H2H concepts and are ignored here (the points
+    almanac's horizon comes from the data)."""
+    tabs = cbs_almanac_sheets.build_all_tabs()
+    preview_tabs = [(title, rows) for title, rows, _ in tabs]
+
+    if args.preview_dir:
+        _write_preview_dir(preview_tabs, args.preview_dir)
+
+    if args.no_sheets:
+        sheet_id, target_label = None, None
+    else:
+        try:
+            sheet_id, target_label = sheets_target.resolve_sheets_target(
+                args.prod, db.league())
+        except RuntimeError as exc:
+            parser.error(str(exc))
+
+    if not sheet_id:
+        print(
+            f"[almanac] preview only; not writing Sheets (--no-sheets set, "
+            f"or no dev sheet configured for league '{db.league_key()}')"
+        )
+        _print_preview(preview_tabs, print_all=args.print_all)
+        return
+
+    if target_label == 'PROD':
+        print(f"[almanac] >>> writing to PRODUCTION sheet: {sheet_id}")
+    else:
+        print(f"[almanac] writing to dev sheet: {sheet_id}")
+
+    cbs_almanac_sheets.write_cbs_almanac(sheet_id, tabs)
 
 
 def _print_preview(tabs, print_all=False):

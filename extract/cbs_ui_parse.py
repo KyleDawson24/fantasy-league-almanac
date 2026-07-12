@@ -45,6 +45,20 @@ from dotenv import load_dotenv
 LEAGUE_KEY = "cbs-bsb"
 
 TABLES = {
+    "CBS_UI_STANDINGS": """CREATE TABLE IF NOT EXISTS CBS_UI_STANDINGS (
+        league_key      VARCHAR,
+        season_year     INTEGER,
+        division_name   VARCHAR,
+        standings_rank  INTEGER,
+        franchise_id    INTEGER,
+        team_name       VARCHAR,
+        batting_points  FLOAT,
+        pitching_points FLOAT,
+        total_points    FLOAT,
+        points_behind   FLOAT,
+        source_path     VARCHAR,
+        loaded_at       TIMESTAMP_NTZ
+    )""",
     "CBS_UI_ROSTERS": """CREATE TABLE IF NOT EXISTS CBS_UI_ROSTERS (
         league_key      VARCHAR,
         season_year     INTEGER,
@@ -274,7 +288,106 @@ def walk_rosters(ui_root):
                         yield "CBS_UI_ROSTERS", row
 
 
-FAMILIES = {"rosters": walk_rosters}
+# ---------------------------------------------------------------------------
+# standings (MLB-53): ui/standings/{year}.html -> CBS_UI_STANDINGS.
+# The year-by-year dashboard's "Final Standings" card: divisions as
+# subtitle rows, label rows in <th> cells (Rank | Team | Batting |
+# Pitching | Total | Behind -- column set label-driven for era drift),
+# and each team cell links /history/team-overview/{franchise_id} -- the
+# per-season name -> franchise id map every other UI family joins on.
+# ---------------------------------------------------------------------------
+
+_STANDINGS_TR_RE = re.compile(
+    r'<tr\s+class="(subtitle|label|row[12])"[^>]*>(.*?)</tr>', re.DOTALL)
+_ANY_CELL_RE = re.compile(r'<t[dh][^>]*>(.*?)</t[dh]>', re.DOTALL)
+_TEAM_LINK_RE = re.compile(
+    r"history/team-overview/(\d+)'[^>]*>([^<]+)<")
+_STANDINGS_LABEL_KEYS = {
+    'rank': 'rank',
+    'team': 'team',
+    'batting': 'batting',
+    'pitching': 'pitching',
+    'total': 'total',
+    'behind': 'behind',
+    'points': 'total',   # era variant: a single Points column
+}
+
+
+def _num(value):
+    value = value.replace(',', '').strip()
+    try:
+        return float(value)
+    except ValueError:
+        return None
+
+
+def parse_standings_page(path, rel_path):
+    """One standings/{year}.html -> list of row dicts."""
+    year = int(path.stem)
+    html = path.read_text(encoding='utf-8', errors='replace')
+
+    i = html.find('>Final Standings<')
+    if i < 0:
+        raise ValueError(f"{rel_path}: no Final Standings card")
+    table_start = html.find('<table', i)
+    table_end = html.find('</table>', table_start)
+    table = html[table_start:table_end]
+
+    rows = []
+    labels = None
+    division = None
+    for tr_match in _STANDINGS_TR_RE.finditer(table):
+        kind, body = tr_match.group(1), tr_match.group(2)
+        if kind == 'subtitle':
+            division = _clean(_ANY_CELL_RE.search(body).group(1))
+            continue
+        if kind == 'label':
+            labels = [_STANDINGS_LABEL_KEYS.get(_clean(c).lower())
+                      for c in _ANY_CELL_RE.findall(body)]
+            if 'rank' not in labels or 'team' not in labels:
+                labels = None
+            continue
+        if labels is None:
+            continue
+        cells = _ANY_CELL_RE.findall(body)
+        if len(cells) != len(labels):
+            continue
+        cell = dict(zip(labels, cells))
+        team_cell = cell.get('team', '')
+        link = _TEAM_LINK_RE.search(team_cell)
+        rows.append({
+            "league_key": LEAGUE_KEY,
+            "season_year": year,
+            "division_name": division,
+            "standings_rank": int(_clean(cell.get('rank', '')) or 0) or None,
+            "franchise_id": int(link.group(1)) if link else None,
+            "team_name": (htmllib.unescape(link.group(2)).strip() if link
+                          else _clean(team_cell)),
+            "batting_points": _num(_clean(cell.get('batting', ''))),
+            "pitching_points": _num(_clean(cell.get('pitching', ''))),
+            "total_points": _num(_clean(cell.get('total', ''))),
+            "points_behind": _num(_clean(cell.get('behind', ''))),
+            "source_path": rel_path,
+        })
+    if not rows:
+        # The in-progress season's card is legitimately empty (the year
+        # has no FINAL standings yet; the API's period standings carry
+        # the live season). A structural change would fail earlier at
+        # the missing-card check.
+        print(f"  {rel_path}: Final Standings card empty "
+              f"(season in progress) -- skipped")
+    return rows
+
+
+def walk_standings(ui_root):
+    root = ui_root / "standings"
+    for path in sorted(root.glob("*.html")):
+        rel = str(path.relative_to(ui_root)).replace("\\", "/")
+        for row in parse_standings_page(path, rel):
+            yield "CBS_UI_STANDINGS", row
+
+
+FAMILIES = {"rosters": walk_rosters, "standings": walk_standings}
 
 
 def build_config():

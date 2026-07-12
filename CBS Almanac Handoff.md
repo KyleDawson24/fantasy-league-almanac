@@ -32,17 +32,20 @@ day-to-day rosters AND daily active/reserve state, per-season fidelity
 grades; contradictions vs the anchor = the log missed something = the
 grade says so on the sheet). Historic ACTIVE-lens team pages ride that;
 2026 stays capture-based.**
-1. **MLB-55 — year-end rosters 2003-2025** (375 pages,
-   `data/cbs_raw/bsb/history/ui/rosters/{year}/team_{id}.html`). The
-   `<table id=lineup_views_archived>` is clean/regular (verified
-   2026-07-12): title row = "TeamName - Owner Name"; label row Player |
-   MLB | Own % | Start % | Status | Pos; player cells pack "Last, First
-   POS MLBTEAM". NO CBS player ids — identity = name+season+team match
-   (reuse the evidence-guarded mlb_crosswalk machinery). Beware the
-   MLB-55-documented page furniture (a global player-picker embedded
-   in the page — parse ONLY the lineup_views_archived table).
-   → membership v0: per (season, franchise_id, player) with fidelity
-   grade 'year_end'. This unlocks team all-time pools.
+1. **MLB-55 — year-end rosters: PARSED + LANDED 2026-07-12**
+   (`extract/cbs_ui_parse.py --families rosters`, RAW.CBS_UI_ROSTERS,
+   6,354 rows 2003-2025; Ohtani ownership trail matches Kyle's ground
+   truth). Era lessons baked into the parser: label-driven columns
+   (modern Own%/Start% vs early Eligible), 2012+ pages are LEAGUE-WIDE
+   (title rows delimit teams; sibling files deduped after verified
+   identical), franchise ids are ALL name-resolved (join the MLB-53
+   name→id map — the filename ids are lies). **⚠ CAPTURE GAP
+   DISCOVERED: 2003-2011 pages ignore the team id — the archive holds
+   ONLY the commissioner's (Aching Hippos) year-end roster for those
+   seasons.** Early-era anchors = 1 team/season; the other 15 teams'
+   pre-2012 membership must come from the transaction walk-back alone
+   (grade accordingly) — OR a live-UI re-probe with a different URL
+   form (Kyle-side call; CBS_WEB_COOKIES may need refresh).
 2. **MLB-53 — standings 2001-2026** (26 pages, `.../ui/standings/`).
    Franchise ids + names via the SINGLE-QUOTED
    `history/team-overview/{id}'` hrefs (verified present, 48 links on

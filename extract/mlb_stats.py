@@ -96,8 +96,22 @@ def crosswalk_ids(root: Path) -> list[dict]:
         private_key_file_pwd=os.getenv("SNOWFLAKE_PRIVATE_KEY_PASSPHRASE"),
         password=os.getenv("SNOWFLAKE_PASSWORD"))
     cur = conn.cursor()
-    cur.execute("SELECT DISTINCT mlbam_id, MAX(cbs_name) FROM RAW.CBS_MLBAM_CROSSWALK "
-                "WHERE mlbam_id IS NOT NULL GROUP BY 1 ORDER BY 1")
+    # The union: the CBS-id crosswalk (archive + current rosters) plus the
+    # name-keyed UI-history crosswalk (the MLB-63 coverage extension --
+    # rostered players the archive universe never held). Extraction is
+    # idempotent, so overlap costs nothing.
+    cur.execute("SELECT COUNT(*) FROM information_schema.tables "
+                "WHERE table_schema='RAW' AND table_name='CBS_UI_MLBAM_XWALK'")
+    has_ui = cur.fetchone()[0] > 0
+    if has_ui:
+        cur.execute("SELECT mlbam_id, MAX(cbs_name) FROM ("
+                    "SELECT mlbam_id, cbs_name FROM RAW.CBS_MLBAM_CROSSWALK "
+                    "UNION ALL "
+                    "SELECT mlbam_id, cbs_name FROM RAW.CBS_UI_MLBAM_XWALK"
+                    ") WHERE mlbam_id IS NOT NULL GROUP BY 1 ORDER BY 1")
+    else:
+        cur.execute("SELECT DISTINCT mlbam_id, MAX(cbs_name) FROM RAW.CBS_MLBAM_CROSSWALK "
+                    "WHERE mlbam_id IS NOT NULL GROUP BY 1 ORDER BY 1")
     rows = [{"mlbam_id": int(r[0]), "name": r[1]} for r in cur.fetchall()]
     cur.close(); conn.close()
     return rows

@@ -102,3 +102,12 @@ It is committed at every checkpoint, so the branch on GitHub mirrors it.
   error (7.5%) runs slightly hotter than 2025 (2.4%): older lineup
   logs are a touch noisier (retroactive edits, the truncation class).
   The per-season grades will carry it honestly.
+- D IN FLIGHT: the UI-history identity pass matched **2,736 of 2,753
+  year-end-roster names (99.4%)** to MLBAM ids (index extended to 2001;
+  the 17 stragglers are the rename class — Fausto Carmona, Leo Núñez,
+  Melvin Upton — flagged, not guessed). The gamelog extract for the
+  extended population (3,852 total ids; ~1,600 genuinely new) is
+  RUNNING DETACHED:
+  `Get-Content C:\Users\kyled\projects\espn-league-manager\data\mlb_stats\ui_extract_20260712.log -Wait -Tail 5`
+  When it lands: mlb_load → rebuild the engine chain → re-measure
+  2003-2020 in mart_team_points_reconciliation.

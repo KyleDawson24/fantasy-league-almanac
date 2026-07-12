@@ -262,11 +262,45 @@ def match(player: dict, idx: dict, ikey: dict, team_map: dict) -> dict:
     return out
 
 
+def ui_players(cur) -> list[dict]:
+    """The UI-HISTORY population (MLB-63 coverage extension): every
+    distinct year-end-roster name, with per-season MLB-team evidence from
+    the anchor rows themselves ('Bagwell, Jeff 1B HOU' carries the team).
+    These are the rostered players the CBS archive universe never held
+    (retired before the FA archive's living window) -- the reason the
+    reconstruction's early era starves. Same shapes as cbs_players(), so
+    the same index/team-map/match machinery applies; cbs_id is the
+    display name (this population has NO CBS ids anywhere)."""
+    seasons = defaultdict(set)
+    evidence = defaultdict(dict)
+    cur.execute("""
+        SELECT player_name, season_year,
+               NULLIF(TRIM(COALESCE(mlb_team, '')), '')
+        FROM RAW.CBS_UI_ROSTERS
+    """)
+    for name, yr, tm in cur.fetchall():
+        seasons[name].add(int(yr))
+        if tm:
+            evidence[name][int(yr)] = tm.upper()
+    return [{"cbs_id": name, "name": name, "seasons": seasons[name],
+             "evidence": dict(evidence.get(name, {}))} for name in seasons]
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--ui-population", action="store_true",
+                    help="match the parsed year-end-roster names (no CBS ids "
+                         "exist for them) -> RAW.CBS_UI_MLBAM_XWALK; the "
+                         "coverage extension for the MLB-63 reconstruction")
     args = ap.parse_args()
     load_dotenv()
+    if args.ui_population:
+        # The UI anchors reach back to 2003 and hold players whose careers
+        # ENDED that era (Alomar, McGriff) -- the 2004+ index can't see
+        # them. The league started in 2001; index from there.
+        global FIRST_SEASON
+        FIRST_SEASON = 2001
 
     conn = snowflake.connector.connect(
         account=os.getenv("SNOWFLAKE_ACCOUNT"), user=os.getenv("SNOWFLAKE_USER"),
@@ -279,8 +313,12 @@ def main():
 
     print("building MLB player index (statsapi, %d-%d)..." % (FIRST_SEASON, LAST_SEASON), flush=True)
     idx, ikey = build_mlb_index()
-    players = cbs_players(cur)
-    print("CBS distinct players to map: %d" % len(players), flush=True)
+    if args.ui_population:
+        players = ui_players(cur)
+        print("UI-history distinct names to map: %d" % len(players), flush=True)
+    else:
+        players = cbs_players(cur)
+        print("CBS distinct players to map: %d" % len(players), flush=True)
 
     team_map = learn_team_map(players, idx)
     print("learned team map (%d codes):" % len(team_map))
@@ -337,17 +375,22 @@ def main():
     if args.dry_run:
         print("\ndry run -- nothing landed.")
         return
-    cur.execute("""CREATE OR REPLACE TABLE RAW.CBS_MLBAM_CROSSWALK (
-        cbs_player_id VARCHAR, cbs_name VARCHAR, mlbam_id INTEGER,
-        mlbam_name VARCHAR, method VARCHAR, loaded_at TIMESTAMP_NTZ)""")
+    # The UI-population mode lands a NAME-keyed sibling table (this
+    # population has no CBS ids anywhere); the classic mode rebuilds the
+    # CBS-id crosswalk. Same evidence machinery, different identity key.
+    table = "CBS_UI_MLBAM_XWALK" if args.ui_population else "CBS_MLBAM_CROSSWALK"
+    key_col = "ui_name" if args.ui_population else "cbs_player_id"
+    cur.execute("""CREATE OR REPLACE TABLE RAW.%s (
+        %s VARCHAR, cbs_name VARCHAR, mlbam_id INTEGER,
+        mlbam_name VARCHAR, method VARCHAR, loaded_at TIMESTAMP_NTZ)""" % (table, key_col))
     loaded_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     cur.executemany(
-        "INSERT INTO RAW.CBS_MLBAM_CROSSWALK "
-        "(cbs_player_id, cbs_name, mlbam_id, mlbam_name, method, loaded_at) "
+        "INSERT INTO RAW." + table + " "
+        "(" + key_col + ", cbs_name, mlbam_id, mlbam_name, method, loaded_at) "
         "VALUES (%(cbs_player_id)s, %(cbs_name)s, %(mlbam_id)s, %(mlbam_name)s, %(method)s, '" + loaded_at + "')",
         [r for r in rows if r["mlbam_id"]])
     conn.commit()
-    print("\nlanded %d rows -> RAW.CBS_MLBAM_CROSSWALK" % len(mapped))
+    print("\nlanded %d rows -> RAW.%s" % (len(mapped), table))
     cur.close(); conn.close()
 
 

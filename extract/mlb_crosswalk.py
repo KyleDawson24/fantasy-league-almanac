@@ -184,14 +184,50 @@ def _score(cands: dict, player: dict, team_map: dict):
 def match(player: dict, idx: dict, ikey: dict, team_map: dict) -> dict:
     """Resolve one CBS player to an MLBAM id. Exact normname first (team +
     season scored when ambiguous); then the forgiving initial-key fallback,
-    which must not contradict the team evidence. Returns method for review."""
+    which must not contradict the team evidence. Returns method for review.
+
+    UNIQUE candidates still pass a season-overlap sanity check: a CBS
+    production season (FPTS != 0) means the player appeared in MLB that
+    year, so their true MLBAM id MUST be in that season's listing. A unique
+    candidate sharing ZERO of the player's seasons is a different person
+    wearing the same bare name -- the Michael A. Taylor class, where the
+    true player's statsapi form carries a middle initial so the bare
+    'Michael Taylor' key holds only a 2011-14 stranger. Exact-unique falls
+    through to the initial-key pool (where team+season scoring can see the
+    real candidate); a fuzzy-unique that fails the check rejects to
+    unmatched."""
     out = {"mlbam_id": None, "mlbam_name": None, "method": "unmatched"}
     ev = player["evidence"]
+
+    def impossible(e):
+        return bool(player["seasons"]) and not any(
+            yr in e["seasons"] for yr in player["seasons"])
 
     cands = idx.get(norm(player["name"]), {})
     if len(cands) == 1:
         mid, e = next(iter(cands.items()))
-        return {**out, "mlbam_id": mid, "mlbam_name": e["name"], "method": "name_unique"}
+        if not impossible(e):
+            # A bare-name index can narrow to a same-name stranger whose
+            # career merely GRAZES the player's seasons (spring 40-man
+            # listings) while the real player hides under a middle-initial
+            # form in the initial-key pool. Before trusting exact-unique,
+            # let the wider pool compete ON TEAM EVIDENCE: a rival wins
+            # only by strictly beating the exact candidate on BOTH team
+            # agreement and composite score -- when the exact candidate is
+            # genuinely right, a rival would have to out-agree the player's
+            # own team trail, which it can't.
+            fc = ikey.get(initial_key(player["name"]), {})
+            exact_rank = None
+            if len(fc) > 1 and mid in fc:
+                ranked = _score(fc, player, team_map)
+                top = ranked[0]
+                exact_rank = next((t for t in ranked if t[4] == mid), None)
+                if (exact_rank is not None and top[4] != mid
+                        and top[1] > exact_rank[1] and top[0] > exact_rank[0]):
+                    return {**out, "mlbam_id": top[4], "mlbam_name": top[5]["name"],
+                            "method": "name_evidence_override"}
+            return {**out, "mlbam_id": mid, "mlbam_name": e["name"], "method": "name_unique"}
+        # zero-overlap exact-unique: fall through to the initial-key pool
     if len(cands) > 1:
         ranked = _score(cands, player, team_map)
         top, runner = ranked[0], ranked[1]
@@ -206,6 +242,8 @@ def match(player: dict, idx: dict, ikey: dict, team_map: dict) -> dict:
     fc = ikey.get(initial_key(player["name"]), {})
     if len(fc) == 1:
         mid, e = next(iter(fc.items()))
+        if impossible(e):
+            return out   # zero season overlap: same-name stranger, reject
         comparable = [yr for yr, code in ev.items()
                       if team_map.get(code) is not None and e["teams"].get(yr)]
         if comparable and not any(
@@ -283,7 +321,9 @@ def main():
              "1666825": 519293,   # Will Smith the reliever
              "2862994": 677651,   # Luis Garcia the Astros SP
              "2768551": 671277,   # Luis Garcia the Nationals infielder
-             "2069487": 472610}   # Luis Garcia the veteran reliever
+             "2069487": 472610,   # Luis Garcia the veteran reliever
+        "1954849": 572191,   # Michael A. Taylor -- NOT the bare-named 2011-14 Michael Taylor
+        "29038651": 669796}  # Jose E. Hernandez the Pirates/Dodgers LHP -- not the 90s infielder
     print("spot checks (cbs_id -> expected MLBAM):")
     for r in rows:
         if r["cbs_player_id"] in known:

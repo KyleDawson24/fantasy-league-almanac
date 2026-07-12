@@ -1,10 +1,21 @@
-# CBS Almanac — Universal-Stats Pivot Handoff (2026-07-09)
+# CBS Almanac — Universal-Stats Pivot Handoff (updated 2026-07-10)
 
-Branch: `claude/modest-montalcini-3af8c4` (worktree `modest-montalcini-3af8c4`).
-**Unpushed by design** — QA bar: nothing pushes until CBS outputs generate.
+Branch: `claude/modest-montalcini-3af8c4` (worktree `modest-montalcini-3af8c4`) —
+**the integration line**: main + everything CBS, one straight line (main is its
+ancestor). Pushed to origin; branch pushes are routine backups. The finish:
+`git merge --ff-only` into main **when the almanac renders** (that QA bar governs
+the merge, not branch pushes). Anything landing on main in the meantime gets
+merged into this branch immediately to keep the fast-forward property.
+⚠ **New sessions spawn fresh worktrees on fresh stub branches.** Do the work in
+THIS worktree / commit to THIS branch explicitly (`git -C <this worktree> …`);
+`git symbolic-ref -q HEAD` before every commit. If the worktree directory is
+missing (cleanup prunes it), recreate:
+`git worktree add <path> claude/modest-montalcini-3af8c4` — the branch is the truth.
 Run everything **from the worktree**; the raw data lives in the **main checkout**
 (`C:\Users\kyled\projects\espn-league-manager\data\...`) — pass `--data-dir`.
 Tooling: the `.venv` in the **main checkout** (`...\espn-league-manager\.venv\Scripts\`).
+
+**START HERE next session → "What's left" step 2: the MLB-62 recompute (task #13).**
 
 ---
 
@@ -116,7 +127,12 @@ killed the MLB extract once at 87/2214). Always make sweeps idempotent + log to 
    Pérez and Juan Morillo to older same-name players). 13 reassigned ids extracted,
    loaded, content-verified (Vladdy Jr 2021 HR=48, catcher Smith 2024 HR=20).
 
-2. **Recompute (MLB-62)** — the core dbt build:
+2. **Recompute (MLB-62)** — the core dbt build **← YOU ARE HERE**:
+   - **Two-way join note (MLB-68, decided):** CBS's Ohtani pseudo-ids (900
+     Batter / 901 Pitcher) both map to MLBAM 660271 — the one sanctioned
+     shared crosswalk pair. The statsapi `stat_group` column splits the
+     disciplines cleanly: hitting game rows feed 900, pitching rows feed 901
+     (reported as two players).
    - `stg_mlb__player_game`: `MLB_GAMELOGS` → tidy per-game stat rows. Map statsapi
      keys (`strikeOuts`, `homeRuns`, `earnedRuns`, `inheritedRunners`,
      `inheritedRunnersScored`, `outs`, `wins`, `saves`, `holds`, `completeGames`,
@@ -143,8 +159,8 @@ killed the MLB extract once at 87/2214). Always make sweeps idempotent + log to 
 
 ## Tickets (Linear team `fantasy-league-almanac`, project Multi-Platform Support)
 
-- **MLB-70** — universal stats extract + crosswalk. Crosswalk + extract + load DONE;
-  the recompute-feed is what remains. (AlmanacAgent)
+- **MLB-70** — universal stats layer: **COMPLETE 2026-07-10** (team-aware
+  crosswalk with 0 collisions, extract, load — content-verified end-to-end).
 - **MLB-62** — per-game FPTS recompute. Reframed to universal-sourced; the next build.
 - **MLB-61** — CBS staging. Standings arc + FA-only record book landed; pivot to
   universal for the record book.

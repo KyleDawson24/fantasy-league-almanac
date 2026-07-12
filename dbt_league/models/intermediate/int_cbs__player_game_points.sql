@@ -227,6 +227,15 @@ select
     g.r, g.rbi, g.bb, g.sb, g.tb,
     g.w, g.s, g.hd, g.cg, g.qs, g.outs, g.irstr, g.k, g.ha, g.bbi, g.er,
     g.gs, g.ir, g.irs,
+    -- Unscored game-event flag for the record book / retrospective. An
+    -- official individual no-hitter is a 9+ inning complete game with zero
+    -- hits allowed -- all three inputs are reliable feed primitives.
+    -- PERFECT games are deliberately NOT derived: the feed's game-grain
+    -- battersFaced is unreliable (Framber Valdez's 2023 no-hitter reports
+    -- bf = outs = 27 alongside a walk -- arithmetically impossible), and an
+    -- error-only baserunner (Scherzer 2015-10-03) never appears in the
+    -- pitcher's line at all, so any derivation would crown false perfectos.
+    iff(g.cg = 1 and g.ha = 0 and g.outs >= 27, 1, 0) as nh,
     g.r_pts, g.rbi_pts, g.bb_pts, g.sb_pts, g.tb_pts,
     g.w_pts, g.s_pts, g.hd_pts, g.cg_pts, g.qs_pts, g.outs_pts, g.irstr_pts,
     g.k_pts, g.ha_pts, g.bbi_pts, g.er_pts,

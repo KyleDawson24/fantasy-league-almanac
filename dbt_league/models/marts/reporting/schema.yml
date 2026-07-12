@@ -768,16 +768,24 @@ models:
   - name: mart_player_season_records
     description: >
       The player-season record book: top-10 single-season performances
-      all-time for each record-candidate stat, plus the marquee best-season by
-      the platform's own points (PLATFORM_POINTS). The PEAK axis of the
-      records reframe (best single period -- a season for a points league);
+      all-time for each record-candidate stat, plus the marquee best-season
+      fantasy-point records (CALCULATED_POINTS + the hitting/pitching splits).
+      REBUILT on the calculated_ lens (MLB-62): stats come from the universal
+      baseball layer (int_cbs__player_season_stats), complete for every
+      crosswalked player -- not the platform's free-agent-only archive that
+      silently lacked Cole, Judge, Trout, and Ohtani. The platform_ lens is
+      record-ineligible (population bias) and lives in
+      mart_player_fpts_reconciliation instead. The PEAK axis of the records
+      reframe (best single period -- a season for a points league);
       accumulation (most all-time) is the sibling, MLB-69. Reuses the shared
-      dim_stat catalog for record candidacy / polarity / display -- the payoff
-      of the vocabulary bridge (CBS arrives already in ESPN stat_name form).
-      "Most" direction (value DESC); rank unique 1..10, ties broken by recency
-      (equal stat_value flags a genuine tie). Rates excluded pending qualifier
-      handling; two-way sentinels absent (season universes omit them).
-      Platform-neutral by shape; fed by CBS today. Materialization: table.
+      dim_stat catalog for candidacy / polarity / display; IRSTR included
+      explicitly (CBS-scored, ESPN-suppressed by seed flag). "Most" direction
+      (value DESC); rank unique 1..10, ties broken by recency (equal
+      stat_value flags a genuine tie). Interim TOTAL lens until MLB-63
+      membership lands; archive-era seasons (2004+); pre-2011 population thin
+      (pruned universes); rates excluded pending qualifier handling; two-way
+      sentinels appear as two players (900/901, MLB-68). Materialization:
+      table.
     tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
@@ -801,23 +809,21 @@ models:
       - name: polarity
         description: 'positive | negative | neutral, from dim_stat -- so the consumer labels "most" as best (HR) or dubious (ER allowed).'
       - name: stat_category
-        description: 'hitting | pitching | fielding | total, from dim_stat.'
+        description: 'hitting | pitching | total, from dim_stat.'
       - name: rank
         description: '1..10 within (league_key, stat_name); ties broken by recency.'
         tests:
           - not_null
       - name: player_id
-        description: 'CBS player id of the record holder.'
+        description: 'CBS player id of the record holder (two-way pseudo-ids included).'
         tests:
           - not_null
       - name: player_name
-        description: 'Record holder name.'
+        description: 'Record holder name (discipline-suffixed for the two-way pseudo-ids).'
       - name: season_year
         description: 'Season the record was set.'
         tests:
           - not_null
-      - name: universe
-        description: '''hitting'' or ''pitching'' universe the season row came from.'
       - name: stat_value
         description: 'The record value.'
         tests:

@@ -144,3 +144,58 @@ models:
         description: 'Inherited runners -- IRSTR derivation context, unpriced.'
       - name: irs
         description: 'Inherited runners scored -- IRSTR derivation context, unpriced.'
+      - name: nh
+        description: 'Derived no-hitter flag: complete game, zero hits allowed, outs >= 27 (official individual no-hitters only). Unscored; feeds the record book. There is deliberately NO perfect-game flag -- the feed''s game-grain battersFaced is unreliable and error-only baserunners are invisible in a pitcher''s line, so perfection cannot be derived honestly.'
+
+  - name: int_cbs__player_season_stats
+    description: >
+      Player-season stats on the CALCULATED_ lens, LONG form and
+      stat_name-bridged: one row per (league_key, cbs_player_id, season_year,
+      stat_name) -- the record book's stats source, complete for every
+      crosswalked player (the universal-sourced sibling of the free-agent-only
+      stg_cbs__player_season_stats, which anchors reconciliation instead).
+      Three row families: bridged counting stats (stg_mlb__player_game
+      canonicals summed and translated to ESPN stat_names; games_played
+      hitting-group-scoped -- the ESPN G is games-by-batters, and the scope
+      keeps a batting pitcher's season from double-counting), exact derived
+      shapes (1B = H-2B-3B-HR, XBH = 2B+3B+HR), and engine rows
+      (QS/IRSTR/NH season counts + CALCULATED_POINTS and its
+      hitting/pitching splits from int_cbs__player_game_points; PG
+      deliberately absent -- underivable from this feed). Seasons
+      floored to the platform archive's first season (data-driven, 2004);
+      interim TOTAL lens until MLB-63 membership scopes it; pre-2011
+      population thin (CBS pruned old universes -- early players enter the
+      crosswalk only via career overlap).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - cbs_player_id
+              - season_year
+              - stat_name
+    columns:
+      - name: league_key
+        description: 'League registry key, fanned from the scoring settings / engine.'
+        tests:
+          - not_null
+      - name: cbs_player_id
+        description: 'CBS player id (two-way pseudo-ids 900/901 as separate players, MLB-68).'
+        tests:
+          - not_null
+      - name: cbs_player_name
+        description: 'CBS player name, discipline-suffixed for the two-way pseudo-ids.'
+      - name: season_year
+        description: 'MLB season year, within the platform archive era (2004+).'
+        tests:
+          - not_null
+      - name: stat_name
+        description: 'ESPN-namespace stat name (the dim_stat bridge) plus the engine rows (QS, IRSTR, NH, CALCULATED_POINTS, CALCULATED_HITTING_PTS, CALCULATED_PITCHING_PTS).'
+        tests:
+          - not_null
+      - name: stat_category
+        description: 'hitting | pitching | general | total.'
+      - name: stat_value
+        description: 'The season value (counting sum, derived count, or calculated points).'
+        tests:
+          - not_null

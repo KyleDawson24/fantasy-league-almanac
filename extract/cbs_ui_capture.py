@@ -349,20 +349,29 @@ def verify(ui_dir: Path, stamp: str, last_season: int) -> None:
     print("  VERIFY: %s" % json.dumps(summary), flush=True)
 
 
-# Transaction rows across ALL eras: the data table's row1/row2 TRs.
-# Row markup drifts by era -- 2021 ids are epoch-txnid, 2015 adds a third
-# segment, 2001-2008 carry NO ids -- so detection is class-based and
-# scoped to the one data table; the duplicate-page clamp check compares
-# the first row's raw content instead of an id.
+# Transaction rows across ALL eras, matched by EXCLUSION: every <tr> in
+# the data table except the label header and footer/pagination furniture.
+# Why not an include-list of zebra classes: CBS renders some real
+# transaction rows as class="bgFan", and missing those makes the offset
+# stride fall short of the server's page size -- every boundary then
+# overlaps by the miscount (discovered on the 2026-07-12 sweep; the
+# parser dedupes the overlaps this run left behind). Row markup also
+# drifts by era (ids two-part 2021 / three-part 2015 / absent
+# 2001-2008), so nothing here keys on ids; the duplicate-page clamp
+# check compares the first row's cell content.
 _TXN_TABLE_MARK = 'class="data borderTop'
-_TXN_ROW_RE = re.compile(r'<tr[^>]*class="row[12]"[^>]*>.*?</tr>', re.DOTALL)
+_TXN_TR_RE = re.compile(r'<tr([^>]*)>(.*?)</tr>', re.DOTALL)
+_TXN_SKIP_RE = re.compile(r'class="(?:label|footer)')
 
 
 def _txn_rows(html: str) -> list:
     i = html.find(_TXN_TABLE_MARK)
     if i < 0:
         return []
-    return _TXN_ROW_RE.findall(html[i:html.find('</table>', i)])
+    table = html[i:html.find('</table>', i)]
+    return [m.group(2) for m in _TXN_TR_RE.finditer(table)
+            if not _TXN_SKIP_RE.search(m.group(1))
+            and m.group(2).count('<td') >= 4]
 
 
 def run_transactions_sweep(client: UiClient, ui_dir: Path, last_season: int,

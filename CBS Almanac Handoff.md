@@ -32,6 +32,33 @@ day-to-day rosters AND daily active/reserve state, per-season fidelity
 grades; contradictions vs the anchor = the log missed something = the
 grade says so on the sheet). Historic ACTIVE-lens team pages ride that;
 2026 stays capture-based.**
+**BOTH CAPTURE GAPS CLOSED 2026-07-12 (later same day):**
+- **Early rosters**: the live re-probe showed the ORIGINAL roster-report
+  URLs now render league-wide for 2003-2011 (CBS behavior change);
+  144-page force re-sweep + parser upgrade (consume the contiguous run
+  of sibling data tables — early renders split teams into separate
+  tables) → RAW.CBS_UI_ROSTERS = **10,449 rows, ALL teams every season
+  2003-2025**. Full anchor set.
+- **Transactions**: Kyle found the real pager — `?start_row=N` (bare URL
+  = start_row=1, newest first; rows/page varies by year; the old ?page=
+  guess is ignored — hence the last-30 tails). `cbs_ui_capture.py
+  --transactions-sweep` walks the full history (row detection era-proof:
+  ids two-part 2021 / three-part 2015 / ABSENT 2001-2008 → class-based +
+  content-hash clamp). 2001 validated: 4,198 moves / 140 pages. **Full
+  2001-2025 sweep of the `all` filter RUNNING DETACHED** (log:
+  `data/cbs_raw/bsb/history/ui/txn_sweep_20260712.log`); resumable/
+  idempotent — if dead, relaunch the same command. NO API alternative
+  exists (transaction-list/log = current rolling window only).
+- **Franchise provenance design (Kyle)**: franchise_id = the spine
+  (standings map is authority); owner-lineage overlay later; curated
+  continuity-overrides seed for the traps (Foster's Folly id 13→30
+  across 2020; Aching Hippos id 1 → renamed Mesa Javelinas 2023; id 1 sat
+  out 2020 while Scott co-ran a temp team w/ Patrick Lahie). Recorded
+  on MLB-64.
+- NEXT once the sweep lands: parse transactions family (rows carry CBS
+  player ids + team ids + verbs + effective dates in modern era; early
+  era vocabulary TBD) → MLB-63 walk-back → then the almanac v2 build.
+
 1. **MLB-55 — year-end rosters: PARSED + LANDED 2026-07-12**
    (`extract/cbs_ui_parse.py --families rosters`, RAW.CBS_UI_ROSTERS,
    6,354 rows 2003-2025; Ohtani ownership trail matches Kyle's ground

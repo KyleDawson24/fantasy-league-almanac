@@ -109,6 +109,30 @@ for the ESPN league.
     platform player-seasons with real production are missing from the
     reconciliation.
 
+- **The record book rebuilt on the calculated_ lens — the pivot's payoff
+  (MLB-62 → MLB-65).** `mart_player_season_records` now reads
+  `int_cbs__player_season_stats`, a player-season LONG model over the
+  universal layer (bridged counting stats + exact derived shapes 1B/XBH +
+  the engine's QS/IRSTR/NH season counts and CALCULATED_POINTS with its
+  hitting/pitching splits — stat_names the shared seed already marks as
+  record candidates). The book the free-agent-only source could never
+  produce, now verified real: **Cole 2019's 326 K is the #1 strikeout
+  season** (Sale 308, Kershaw 301 behind him), **Judge 2022's 62 HR the
+  #1 homer season** (Raleigh's 2025 60 at #2), Verlander 2011 the best
+  fantasy season at 1010 — matching the platform's own total for the old
+  FA-only marquee record to the point — and Ohtani's 2024 batter-half
+  (815) the best hitting season. The platform_ lens is record-INELIGIBLE
+  by design (population bias) and lives in the reconciliation mart;
+  IRSTR surfaces here per its seed note (CBS-scored, ESPN-suppressed).
+  Honest-derivation line drawn in data: NH derives cleanly (CG + 0 H +
+  27 outs — Scherzer's two-no-hitter 2015 tops the list), while PG is
+  **deliberately absent** — statsapi's game-grain `battersFaced` is
+  unreliable (Framber's 2023 no-hitter reports bf = outs = 27 alongside
+  a walk) and error-only baserunners are invisible in a pitcher's line,
+  so a derived perfect-game flag would have crowned three false
+  perfectos. Interim TOTAL lens clearly labeled until MLB-63 membership
+  scopes it; archive-era seasons (2004+, data-driven floor).
+
 - **Transaction Records: production by acquisition channel on Advanced
   Standings (MLB-16 spike / MLB-17).** The named key output — team rankings
   by how each player's production was acquired.

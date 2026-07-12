@@ -15,9 +15,13 @@ Run everything **from the worktree**; the raw data lives in the **main checkout*
 (`C:\Users\kyled\projects\espn-league-manager\data\...`) — pass `--data-dir`.
 Tooling: the `.venv` in the **main checkout** (`...\espn-league-manager\.venv\Scripts\`).
 
-**START HERE next session → "What's left" step 3: rebuild the record book on
-the `calculated_` lens (MLB-62 landed 2026-07-11; the engine to build on is
-`int_cbs__player_game_points`).**
+**START HERE next session → "What's left" step 4: the render (MLB-66 via the
+MLB-58 sink). Steps 2 AND 3 landed 2026-07-11: the recompute
+(`int_cbs__player_game_points` + `mart_player_fpts_reconciliation`) and the
+record book rebuild (`int_cbs__player_season_stats` →
+`mart_player_season_records`, verified: Cole 326 K #1, Judge 62 HR #1,
+Verlander 2011 = 1010 top season). ⚠ The render is gated on MLB-49 (Kyle:
+share the Sheet + drop the id in .env — flipped to him with instructions).**
 
 ---
 
@@ -112,10 +116,14 @@ killed the MLB extract once at 87/2214). Always make sweeps idempotent + log to 
 - The **vocab bridge**: `stat_classification.canonical_key` (67 ESPN stats mapped) +
   an `IRSTR` row; `dim_stat` exposes `canonical_key`. Byte-neutral for ESPN.
 
-**Superseded (rebuild on universal stats):**
-- `staging/stg_cbs__player_season_stats` → `marts/reporting/mart_player_season_records`
-  — the record book, but built on the **FA-only** CBS universe. Wrong population.
-  Rebuild against `MLB_GAMELOGS` (`calculated_`).
+**Re-scoped (2026-07-11, both now good):**
+- `staging/stg_cbs__player_season_stats` — the FA-only platform archive,
+  recontextualized as the `platform_` reconciliation anchor (feeds
+  `mart_player_fpts_reconciliation`). NOT a record source.
+- `marts/reporting/mart_player_season_records` — REBUILT on the
+  `calculated_` lens via `int_cbs__player_season_stats` (universal
+  population). PG deliberately absent (underivable: bad game-grain
+  battersFaced + invisible errors); NH derives cleanly.
 
 ---
 
@@ -164,10 +172,16 @@ killed the MLB extract once at 87/2214). Always make sweeps idempotent + log to 
    - Reconcile season-sum(`calculated_`) vs CBS `platform_` (season universe FPTS,
      where available) → the delta report (era-rule + data-gap detection).
 
-3. **Rebuild the record book**: `mart_player_season_records` on `calculated_` from the
-   universal source → Cole 326 K, Judge 62 HR, the real thing. **Active-only** lights
-   up when membership (MLB-63) lands; until then, ship the "total (rostered)" lens
-   clearly labeled.
+3. **Rebuild the record book — DONE 2026-07-11.**
+   `int_cbs__player_season_stats` (player-season LONG on calculated_: bridged
+   counting stats + derived 1B/XBH + engine QS/IRSTR/NH +
+   CALCULATED_POINTS/_HITTING/_PITCHING; archive-era floor 2004, data-driven)
+   → `mart_player_season_records` rebuilt (42 stats × top-10). Verified: Cole
+   2019 326 K #1, Judge 2022 62 HR #1 (Raleigh 2025 60 #2), Verlander 2011 =
+   1010 top calculated season (matches the old platform marquee exactly),
+   Ohtani-Batter 2024 = 815 top hitting season, Scherzer 2015 = 2 NH.
+   platform_ lens record-ineligible (reconciliation-only); PG underivable
+   (documented in the engine); total lens labeled until MLB-63.
 
 4. **Render (MLB-66 / MLB-58)**: the almanac Sheet (home + team tabs) via the
    registry-resolved sink into Kyle's Sheet (MLB-49, created). Reuse the ESPN almanac

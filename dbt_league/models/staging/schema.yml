@@ -523,6 +523,67 @@ models:
         tests:
           - not_null
 
+  - name: stg_cbs__rosters
+    description: >
+      CBS adapter (#2) F3 daily rosters -- the perishable fantasy layer the
+      capture program exists to save (dies at rollover; exists only for
+      captured dates, 2026 season). One row per (league_key, roster_date,
+      team_id, player_id): the deployed slot (roster_pos) and the
+      started-vs-benched split (roster_status A/RS) -- in a daily-lineup
+      points league the active set IS the lineup. Latest load per date
+      wins. Consumers: the CBS almanac's team tabs (latest date); MLB-63's
+      active-set membership reconstruction (full range).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - roster_date
+              - team_id
+              - player_id
+    columns:
+      - name: league_key
+        description: 'League registry key.'
+        tests:
+          - not_null
+      - name: season_year
+        description: 'Season the snapshot belongs to.'
+        tests:
+          - not_null
+      - name: roster_date
+        description: 'The date this roster snapshot describes (the point= param, verified by content at capture).'
+        tests:
+          - not_null
+      - name: team_id
+        description: 'CBS stable numeric fantasy-team id.'
+        tests:
+          - not_null
+      - name: team_name
+        description: 'Fantasy team name as of the snapshot.'
+      - name: team_abbr
+        description: 'CBS team abbreviation.'
+      - name: division_name
+        description: 'CBS division label (cosmetic in a points league).'
+      - name: player_id
+        description: 'CBS stable numeric player id (two-way pseudo-ids included). Joins the calculated_ lens via int_cbs__player_season_stats / the crosswalk.'
+        tests:
+          - not_null
+      - name: player_name
+        description: 'Player name as CBS serves it.'
+      - name: roster_pos
+        description: 'Deployed slot on this date (C/1B/2B/.../OF/U/P/RS...).'
+      - name: roster_status
+        description: 'A = active (started) | RS = reserve (benched) -- the daily scoring split.'
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['A', 'RS']
+      - name: eligible_positions
+        description: 'CBS eligible-positions display string (context).'
+      - name: pro_team
+        description: 'MLB team abbreviation at snapshot time (context).'
+
   - name: stg_mlb__player_game
     description: >
       The universal baseball layer at game grain (MLB-70/MLB-62), LONG form

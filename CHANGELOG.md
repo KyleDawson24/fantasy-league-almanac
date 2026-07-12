@@ -138,6 +138,31 @@ for the ESPN league.
   lens clearly labeled until MLB-63 membership scopes it; archive-era
   seasons (2004+, data-driven floor).
 
+- **The CBS almanac renders: home tab + 16 team tabs, registry-resolved
+  sinks (MLB-58 / MLB-66).** The multi-league foundation's last leg —
+  output surfaces now resolve their destination from the league registry
+  (`sinks.sheets_almanac_env` / `sheets_dev_env` name per-league .env
+  variables; `--prod` without a configured sink fails loudly before
+  anything generates, a missing dev sink stays preview-only, BBCode
+  surfaces refuse leagues that don't declare them, log files are
+  league-scoped) — and the first non-ESPN surface ships over it.
+  `generate_almanac_sheet.py --league cbs-bsb` dispatches by **data
+  presence** (rows in `mart_period_standings` = a points league; the
+  format-modularity rule, never a platform check) to the points-league
+  almanac: current standings with movement, the calculated_-lens record
+  book (fantasy-point seasons + curated hitting/pitching records), and
+  per-team tabs with the season trajectory and the current roster —
+  active/reserve split, each player carrying their season calculated
+  FPTS from the new `stg_cbs__rosters` (F3: the perishable deployed-slot
+  + started/benched layer the capture program exists to save). Every
+  section states its own data horizon (champions and the league-shape
+  timeline arrive with the history parse; roster-scoped records with
+  membership) — the almanac gets more truthful every season, on the
+  sheet. No wall-clock cells: previews are deterministic and golden-able
+  from day one. The ESPN H2H path is proven byte-safe by the warehouse
+  golden suite (one pre-existing round-boundary re-anchor, ±0.1 cells,
+  verified against a stashed working tree).
+
 - **Transaction Records: production by acquisition channel on Advanced
   Standings (MLB-16 spike / MLB-17).** The named key output — team rankings
   by how each player's production was acquired.

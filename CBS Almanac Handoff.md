@@ -15,13 +15,17 @@ Run everything **from the worktree**; the raw data lives in the **main checkout*
 (`C:\Users\kyled\projects\espn-league-manager\data\...`) — pass `--data-dir`.
 Tooling: the `.venv` in the **main checkout** (`...\espn-league-manager\.venv\Scripts\`).
 
-**START HERE next session → "What's left" step 4: the render (MLB-66 via the
-MLB-58 sink). Steps 2 AND 3 landed 2026-07-11: the recompute
-(`int_cbs__player_game_points` + `mart_player_fpts_reconciliation`) and the
-record book rebuild (`int_cbs__player_season_stats` →
-`mart_player_season_records`, verified: Cole 326 K #1, Judge 62 HR #1,
-Verlander 2011 = 1010 top season). ⚠ The render is gated on MLB-49 (Kyle:
-share the Sheet + drop the id in .env — flipped to him with instructions).**
+**THE ALMANAC RENDERS (2026-07-12). All four chain steps are done:**
+recompute (MLB-62) → record book rebuild → registry sinks (MLB-58) → the
+points-league renderer (MLB-66 v1: home + 16 team tabs,
+`output/cbs_almanac_sheets.py`, dispatched by data-presence from
+`generate_almanac_sheet.py`). 17-tab preview verified against real data;
+ESPN path golden-proven byte-safe. **What remains before the
+merge-to-main gate: Kyle runs
+`python output/generate_almanac_sheet.py --league cbs-bsb --prod`
+(the expired OAuth token re-mints via browser consent on that run),
+eyeballs the Sheet, then `git merge --ff-only` this branch into main.**
+Dev-sheet dry run first if preferred (no --prod → CBS_SHEETS_DEV_ID).
 
 ---
 

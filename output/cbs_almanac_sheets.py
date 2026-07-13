@@ -447,36 +447,46 @@ def _select_bench(candidates, starters, n):
     return bench
 
 
+def _month_of_last_day(d):
+    """Last calendar day of d's month."""
+    from datetime import timedelta
+    nxt = (d.replace(day=28) + timedelta(days=4)).replace(day=1)
+    return nxt - timedelta(days=1)
+
+
 def _month_window():
-    """The most recent COMPLETED calendar month of play (Kyle, 2026-07-13):
-    he wanted 'the most recent completed scoring period', but CBS periods
-    carry no date boundaries anywhere (the standings track period ids and
-    cumulative points, never day windows) and roster captures are daily,
-    so there's nothing to date-scope a period against. The calendar month
-    is the clean, honestly-derivable stand-in he offered as the fallback.
-    A month is 'completed' once max(game_date) passes its last day."""
-    row = query_snowflake(f"""
-        SELECT
-            CASE WHEN MAX(game_date) = LAST_DAY(MAX(game_date))
-                 THEN DATE_TRUNC('month', MAX(game_date))
-                 ELSE DATE_TRUNC('month', DATEADD('month', -1, MAX(game_date)))
-            END AS lo,
-            CASE WHEN MAX(game_date) = LAST_DAY(MAX(game_date))
-                 THEN MAX(game_date)
-                 ELSE LAST_DAY(DATEADD('month', -1, MAX(game_date)))
-            END AS hi
-        FROM fct_player_daily_performance
-        WHERE {league_predicate()} AND game_date IS NOT NULL
-    """)[0]
-    return row['lo'], row['hi']
+    """The RUNNING Team-of-the-Month window with an 8th-of-month rollover
+    (Kyle, 2026-07-13): from the 8th onward we show the CURRENT month as it
+    accrues; in the first week of a new month we retrospect on the PREVIOUS
+    (completed) month. This is the ONE deliberately-live board -- it reads
+    TODAY'S date, not just warehouse state, so it turns over with the
+    calendar ("changes regularly, feels alive"). The window caps at the
+    latest game date, so a running month shows only the data we have; if
+    the chosen month has no data yet (extraction lag), it steps back to the
+    last month that does."""
+    from datetime import date, timedelta
+    today = date.today()
+    anchor = today if today.day >= 8 else (today.replace(day=1) - timedelta(days=1))
+    first = anchor.replace(day=1)
+    max_d = query_snowflake(
+        f"SELECT MAX(game_date) AS d FROM fct_player_daily_performance"
+        f" WHERE {league_predicate()} AND game_date IS NOT NULL"
+    )[0]['d']
+    hi = min(_month_of_last_day(first), max_d) if max_d else _month_of_last_day(first)
+    while max_d and hi < first:
+        first = (first - timedelta(days=1)).replace(day=1)
+        hi = min(_month_of_last_day(first), max_d)
+    return first, hi
 
 
-def get_window_lineup(date_from, date_to):
-    """Best weighted-active lineup over a date window, built from the
-    daily fact directly (fct_player_position_pts aggregates CBS to season
-    grain, so a sub-season window needs its own candidate query). Same
-    selector + enrichment as the other boards. Feeds the Team of the
-    Month board."""
+def get_window_lineup(date_from, date_to, weighted=True):
+    """Best lineup over a date window, built from the daily fact directly
+    (fct_player_position_pts aggregates CBS to season grain, so a
+    sub-season window needs its own candidate query). weighted=True is the
+    active lens (the display lineup); weighted=False is the total/rostered
+    lens that drives the Total-Pts Best deviation. Feeds the Team of the
+    Month board + its deviation."""
+    weight = 'COALESCE(active_weight, 0)' if weighted else '1'
     candidates = query_snowflake(f"""
         WITH exploded AS (
             SELECT
@@ -485,7 +495,7 @@ def get_window_lineup(date_from, date_to):
                 CASE WHEN slot.value::string = 'P'
                      THEN total_pitching_stat_pts
                      ELSE total_hitting_stat_pts END
-                    * COALESCE(active_weight, 0) AS pos_pts
+                    * {weight} AS pos_pts
             FROM fct_player_daily_performance,
                  LATERAL FLATTEN(input => eligible_slots) slot
             WHERE {league_predicate()}
@@ -927,10 +937,11 @@ def build_home_rows(context, nav_targets=None):
     columns driven by the rostered-lens alternate lineup.
 
     Three boards top-to-bottom (Kyle's lean, 2026-07-13): Team of the
-    Month (lightweight, the most recent completed calendar month, no
-    bench/deviation), Season-to-Date, All-Time. Season and All-Time carry
-    the league's 11 reserve spots as a bench block, labeled BE - Pos and
-    ranked by TOTAL points (starters rank by active points).
+    Month (a running board with an 8th-of-month rollover, carrying the
+    Total-Pts Best deviation but no bench), Season-to-Date, All-Time.
+    Season and All-Time carry the league's 11 reserve spots as a bench
+    block (a blank buffer row separates it from the starters), labeled
+    BE - Pos and ranked by TOTAL points (starters rank by active points).
 
     CBS exceptions to the ESPN shape, all Kyle-specified (2026-07-13):
     Points cells are plain whole numbers (season-long, no boxscore); the
@@ -952,16 +963,19 @@ def build_home_rows(context, nav_targets=None):
     right_width = len(HOME_HEADER) + 2  # widest board (season: +deviation pair)
 
     # ------------------------------------------------ right band (F..O)
-    # Three boards top-to-bottom, Kyle's lean (2026-07-13): Week, Season,
-    # All-Time. Week is the lightweight trailing-week team (no bench, no
-    # deviation); Season carries the Total-Pts Best deviation + the
+    # Three boards top-to-bottom, Kyle's lean (2026-07-13): Month, Season,
+    # All-Time. Month is the running team (Total-Pts Best deviation, no
+    # bench); Season carries the Total-Pts Best deviation + the
     # reserve bench; All-Time swaps the deviation for a Years-of-Service
     # column and carries the bench, with retired players' Fantasy Team
     # cells flagged for gray.
     season_dev = _deviation_by_slot(context['season_board'],
                                     context['season_board_rostered'])
+    month_dev = _deviation_by_slot(context['month_board'],
+                                   context['month_board_rostered'])
     lo, _hi = context['month_window']
-    month_label = f'All-League Team of the Month: {lo:%B %Y}'
+    month_label = (f'Team of the Month - {lo:%B %Y} '
+                   f'(rolls over on the 8th of each new month)')
 
     def _board(title, lineup, mode, dev_map=None):
         if mode == 'season':
@@ -972,7 +986,13 @@ def build_home_rows(context, nav_targets=None):
             hdr = list(HOME_HEADER)
         rows_, meta_ = [[title], [], hdr], [{'k': 'title'}, {'k': 'blank'},
                                             {'k': 'header'}]
+        prev_bench = False
         for sel in lineup:
+            is_bench = str(sel.get('slot_label') or '').startswith('BE')
+            if is_bench and not prev_bench:   # blank buffer between starters + bench
+                rows_.append([])
+                meta_.append({'k': 'blank'})
+            prev_bench = is_bench
             if mode == 'season':
                 r = format_all_league_team_row_with_deviation(
                     sel, (dev_map or {}).get(sel.get('slot_label')))
@@ -990,7 +1010,7 @@ def build_home_rows(context, nav_targets=None):
 
     right, meta = [], []
     for title, lineup, mode, dev in [
-        (month_label, context['month_board'], 'plain', None),
+        (month_label, context['month_board'], 'season', month_dev),
         (f'All-League Team Season-to-Date: {season}', context['season_board'],
          'season', season_dev),
         (f'All-League Team: All-Time ({era})', context['alltime_board'],
@@ -1062,10 +1082,11 @@ def build_home_rows(context, nav_targets=None):
                                                       'foregroundColor': _WHITE},
                                        'backgroundColor': _NAVY}})
         elif m['k'] == 'data':
-            if m.get('retired'):  # gray the former-teams cell (I = Fantasy Team)
+            if m.get('retired'):  # gray + font-8 the former-teams cell (I = Fantasy Team)
                 formats.append({'range': f'I{r}:I{r}',
-                                'format': {'textFormat': {'foregroundColor':
-                                                          {'red': 0.6, 'green': 0.6, 'blue': 0.6}}}})
+                                'format': {'textFormat': {
+                                    'fontSize': 8,
+                                    'foregroundColor': {'red': 0.6, 'green': 0.6, 'blue': 0.6}}}})
             if m.get('years'):    # font-8 the years-of-service cell (N)
                 formats.append({'range': f'N{r}:N{r}',
                                 'format': {'textFormat': {'fontSize': 8}}})
@@ -1421,7 +1442,9 @@ def build_all_tabs(nav_targets=None):
     # display lineup + bench, re-keyed for the active/retired split +
     # years-of-service (its longevity column replaces the deviation).
     context['month_window'] = _month_window()
-    context['month_board'] = get_window_lineup(*context['month_window'])
+    context['month_board'] = get_window_lineup(*context['month_window'], weighted=True)
+    context['month_board_rostered'] = get_window_lineup(
+        *context['month_window'], weighted=False)
     context['season_board'] = get_best_lineup(
         entity_id=None, season_year=season, bench=_CBS_BENCH_SLOTS)
     context['season_board_rostered'] = get_best_lineup(

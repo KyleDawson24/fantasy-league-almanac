@@ -3,9 +3,14 @@ version: 2
 models:
   - name: int_player_daily
     description: >
-      Wide daily row per (league, season, scoring_period, team, player, lineup_slot).
+      Wide daily row per (league, season, scoring_period, team, player_key, lineup_slot).
       Combines per-stat point contributions (one column per scored stat) with per-player ESPN platform totals.
-      View materialization; the table cost lives at the weekly layer one level up.
+      MLB-72 union layer: the ESPN branch UNION ALLs int_cbs__player_daily
+      (CBS day-grain in the same column contract), so both leagues' daily
+      production flows through one shape into the shared fact family.
+      player_key is the cross-league grain identity; game_date /
+      active_weight / provenance are the union-layer columns both branches
+      fill. View materialization; the table cost lives at the weekly layer one level up.
     tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
@@ -14,7 +19,7 @@ models:
               - season_year
               - scoring_period
               - team_id
-              - player_id
+              - player_key
               - lineup_slot
     columns:
       - name: league_key
@@ -26,25 +31,37 @@ models:
         tests:
           - not_null
       - name: scoring_period
-        description: 'Daily ESPN scoring period number. Starts at 1 on league opening day.'
+        description: 'The day key: ESPN''s daily scoring period number (starts at 1 on league opening day) on ESPN rows; the calendar date as YYYYMMDD on CBS rows (whose platform serves no period ids historically).'
         tests:
           - not_null
       - name: matchup_period
-        description: 'The weekly matchup period this scoring period belongs to. Functionally determined by (season_year, scoring_period) via matchup_schedule.'
+        description: 'The weekly matchup period this scoring period belongs to. Functionally determined by (season_year, scoring_period) via matchup_schedule on ESPN rows; NULL on CBS rows (no historic period boundaries exist -- period-scoped CBS surfaces read stg_cbs__standings).'
       - name: team_id
-        description: 'ESPN stable numeric team identifier. NULL for free agents.'
+        description: 'Stable numeric team identifier (ESPN team_id / CBS franchise_id). NULL for ESPN free agents.'
       - name: player_id
-        description: 'ESPN stable numeric player identifier.'
+        description: 'Stable numeric player identifier (ESPN ids; CBS numeric ids incl. the 900/901 two-way pseudo-pair). NULL on CBS ui-only synthetic identities -- player_key is the grain column.'
+      - name: player_key
+        description: 'Cross-league player identity, the grain column (MLB-72): ESPN player_id stringified; the CBS platform id verbatim, including ui-only-<mlbam> synthetics that have no numeric form.'
         tests:
           - not_null
+      - name: game_date
+        description: 'Real calendar date of the day''s production. NULL on ESPN rows (their day identity is the platform scoring_period); always set on CBS rows.'
+      - name: active_weight
+        description: 'The day''s scoring weight: 1/0 where the active state is known (ESPN slots, CBS captured/reconstructed days), the start-share estimator on CBS 2004-2020 estimated days, NULL where membership is confirmed but activity unknown.'
+      - name: provenance
+        description: 'How the day''s roster state is known: captured (platform-served -- all ESPN rows + CBS 2026), reconstructed_day, estimated_startshare, estimated_membership (the MLB-63 walk-back enum).'
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['captured', 'reconstructed_day', 'estimated_startshare', 'estimated_membership']
       - name: lineup_slot
-        description: 'Slot the player occupied on this scoring_period (1B/SP/BE/FA/etc.). Part of the grain because a player can appear in multiple slots within a matchup_period.'
+        description: 'Slot the player occupied on this scoring_period (ESPN: 1B/SP/BE/FA/etc. CBS: the captured deployed slot for 2026, ACT/RS for reconstructed history, EST for the estimated era). Part of the grain because a player can appear in multiple slots within a matchup_period.'
         tests:
           - not_null
       - name: lineup_slot_category
-        description: '"hitting" / "pitching" / "inactive". Derived from lineup_slot at stg_box_scores.'
+        description: '"hitting" / "pitching" / "inactive" (+ "estimated" on CBS estimated-era rows). Derived from lineup_slot at stg_box_scores (ESPN) / int_cbs__player_daily (CBS).'
       - name: is_active_slot
-        description: 'true when lineup_slot_category != "inactive". Convenience flag for downstream active/inactive fact splits.'
+        description: 'true when lineup_slot_category != "inactive". NULL on CBS estimated-era rows (the state is not knowable per-day there; active_weight carries the estimator). Convenience flag for downstream active/inactive fact splits.'
       - name: display_name
         description: 'Nickname-resolved player name (COALESCE(nickname, player_name)).'
       - name: position
@@ -66,6 +83,109 @@ models:
           Magnitude (unsigned positive) of net-negative platform_points on this day: GREATEST(0, -platform_points).
           Per-day platform-level metric -- each negative day counts separately, even if the week-level platform total is net positive.
           Weekly rollup is SUM(negative_points). For a player with one -5 day and net-positive week: daily row has 5, weekly rollup = 5.
+
+  - name: int_cbs__eligibility_windows
+    description: >
+      CBS position eligibility as date-scoped windows, implementing the
+      league's captured rule verbatim ("Players are eligible at their primary
+      position, plus positions they've played 20 games last year or 10 games
+      this year") with after-achievement semantics: primary and
+      prior-year-20 windows open on opening day (Jan 1), the in-season-10
+      window opens ON the date of the 10th game at the position, inclusive.
+      Primary is DERIVED (prior-season argmax fielding games, current-season
+      fallback for rookies/returners) because CBS serves no historical
+      primary-position label; graded against the 2026 captured
+      eligible_positions. DH-for-all is deliberately absent (slot semantics,
+      not an earned window -- consumers floor empty arrays to ['DH']).
+      Games-by-position merges the season-grain fielding sweep with the
+      per-game positions (GREATEST of the two counts). One league today;
+      league_key fans from the scoring settings like the points engine.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - mlbam_id
+              - season_year
+              - cbs_position
+    columns:
+      - name: league_key
+        tests:
+          - not_null
+      - name: mlbam_id
+        description: 'MLBAM player id -- windows are baseball-identity-keyed; the crosswalk''s stat_group_scope guard routes them onto CBS identities at consumption (a ''(Batter)'' pseudo-id never shows P, a ''(Pitcher)'' only P).'
+        tests:
+          - not_null
+      - name: season_year
+        tests:
+          - not_null
+      - name: cbs_position
+        description: 'CBS slot-vocabulary position: C/1B/2B/3B/SS/OF/DH/P (LF/CF/RF collapse to OF, SP/RP to P -- matching the 2026 captures).'
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['C', '1B', '2B', '3B', 'SS', 'OF', 'DH', 'P']
+      - name: eligible_from
+        description: 'The date the window opens: Jan 1 for primary / prior_year_20 (opening-day eligibility), the 10th game''s date for in_season_10.'
+        tests:
+          - not_null
+      - name: eligibility_source
+        description: 'The strongest claim granting the position: primary > prior_year_20 > in_season_10 (earliest window wins; source breaks same-date ties).'
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['primary', 'prior_year_20', 'in_season_10']
+
+  - name: int_cbs__player_daily
+    description: >
+      The MLB-72 union feed: CBS day-grain production in int_player_daily's
+      exact column contract (fct_cbs_player_game_attribution x
+      int_cbs__player_game_points, game grain aggregated to day grain, plus
+      the scope-guarded eligibility arrays and the walk-back's provenance /
+      active_weight). int_player_daily UNION ALLs this model; see its docs
+      for the shared column semantics. CBS scored categories land on their
+      ESPN-shape homonyms (bb->b_bb, s->sv, hd->hld, ha->p_h, bbi->p_bb);
+      IRSTR rides only inside total_pitching_stat_pts (no per-stat column in
+      the shared shape); unmapped columns are 0. eligible_slots floors to
+      ['DH'] for fieldless hitters / ['P'] for pitcher-scoped identities,
+      mirroring CBS's own display.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - season_year
+              - scoring_period
+              - team_id
+              - player_key
+              - lineup_slot
+    columns:
+      - name: player_key
+        tests:
+          - not_null
+      - name: team_id
+        description: 'CBS franchise_id -- never NULL here (the attribution fact is rostered-games-only by construction).'
+        tests:
+          - not_null
+      - name: game_date
+        tests:
+          - not_null
+      - name: lineup_slot
+        description: 'Captured deployed slot for 2026 (C/1B/../P, RS); ACT/RS for reconstructed lineup-era days; EST for the estimated era.'
+        tests:
+          - not_null
+      - name: provenance
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['captured', 'reconstructed_day', 'estimated_startshare', 'estimated_membership']
+      - name: eligible_slots
+        description: 'Date-scoped derived eligibility array as of this day (int_cbs__eligibility_windows through the crosswalk scope guard), CBS vocabulary, alphabetically ordered for determinism, floored to the identity''s universal position when no window has opened.'
+        tests:
+          - not_null
 
   - name: int_cbs__player_game_points
     description: >

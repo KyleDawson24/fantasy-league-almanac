@@ -3,11 +3,28 @@
 -- Combines per-stat point contributions with per-player ESPN platform totals
 -- and player display metadata in one row.
 --
--- Grain: (league_key, season_year, scoring_period, team_id, player_id,
+-- MLB-72: this is the UNION LAYER -- the ESPN branch below is joined by a
+-- UNION ALL of int_cbs__player_daily (CBS day-grain in the same column
+-- contract), so every league's daily production flows through one shape
+-- into the shared fact family. Four columns exist for the union's sake and
+-- are filled by both branches:
+--   player_key    the grain identity as VARCHAR (ESPN: player_id stringified;
+--                 CBS: the platform id, including 'ui-only-' synthetics that
+--                 have no numeric form). player_id stays for ESPN consumers.
+--   game_date     the real calendar date (NULL on ESPN rows -- their day
+--                 identity is the platform scoring_period).
+--   active_weight the day's scoring weight: ESPN 1/0 by slot; CBS 1/0 where
+--                 the state is known, the start-share estimator (or NULL)
+--                 where 2004-2020 history is estimated.
+--   provenance    how we know the day's state ('captured' for everything
+--                 platform-served; the walk-back enum for CBS history).
+--
+-- Grain: (league_key, season_year, scoring_period, team_id, player_KEY,
 -- lineup_slot). matchup_period travels as a derived column (functionally
 -- determined by (league_key, season_year, scoring_period) via the
--- extract-stamped raw rows). Team and owner names are denormalized for
--- downstream convenience.
+-- extract-stamped raw rows) on ESPN rows and is NULL on CBS rows (no
+-- historic period boundaries exist). Team and owner names are denormalized
+-- for downstream convenience.
 --
 -- Carries:
 --   - Identifier 5-tuple + matchup_period
@@ -332,7 +349,14 @@ final as (
         -- concept (consumer-side: GREATEST(0, -week_active_platform_pts))
         -- when all the player's negative days fall in active slots, and is
         -- finer-grained otherwise (separately attributes each negative day).
-        case when b.points < 0 then -b.points else 0 end as negative_points
+        case when b.points < 0 then -b.points else 0 end as negative_points,
+
+        -- Union-layer columns (see the header). ESPN state is always
+        -- platform-served, hence 'captured' / binary weight.
+        to_varchar(w.player_id) as player_key,
+        cast(null as date)      as game_date,
+        iff(w.lineup_slot_category != 'inactive', 1.0, 0.0) as active_weight,
+        'captured'              as provenance
     from daily_wide w
     left join {{ ref('stg_box_scores') }} b
         on w.league_key = b.league_key
@@ -354,3 +378,29 @@ final as (
 )
 
 select * from final
+
+union all
+
+-- The CBS branch (MLB-72): day-grain CBS production in the same column
+-- contract. Explicit list so a drift in either file fails loudly at parse
+-- rather than silently mis-mapping a positional UNION.
+select
+    league_key, season_year, matchup_period, scoring_period, team_id,
+    team_name, team_abbrev, owner_name, player_id, player_name, display_name,
+    position, pro_team, eligible_slots, lineup_slot, lineup_slot_category,
+    is_active_slot, games_played, platform_points, platform_hitting_pts,
+    platform_pitching_pts,
+    h, ab, b_bb, b_so, hbp, sf, hr, r, rbi, sb, cs, tb, singles, doubles,
+    triples, xbh, gdp, b_ibb, cyc,
+    h_pts, ab_pts, b_bb_pts, b_so_pts, hbp_pts, sf_pts, hr_pts, r_pts,
+    rbi_pts, sb_pts, cs_pts, tb_pts, singles_pts, doubles_pts, triples_pts,
+    xbh_pts, gdp_pts, b_ibb_pts, cyc_pts,
+    w, l, k, er, outs, qs, sv, hld, p_h, p_bb, p_hr, p_r, cg, blk, wp,
+    hbp_p, blsv, nh, pg, pk, sho,
+    w_pts, l_pts, k_pts, er_pts, outs_pts, qs_pts, sv_pts, hld_pts,
+    p_h_pts, p_bb_pts, p_hr_pts, p_r_pts, cg_pts, blk_pts, wp_pts,
+    hbp_p_pts, blsv_pts, nh_pts, pg_pts, pk_pts, sho_pts,
+    total_hitting_stat_pts, total_pitching_stat_pts, total_stat_pts,
+    negative_points,
+    player_key, game_date, active_weight, provenance
+from {{ ref('int_cbs__player_daily') }}

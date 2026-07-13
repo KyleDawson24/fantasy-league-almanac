@@ -46,6 +46,12 @@
 
 with daily as (
     select * from {{ ref('fct_player_daily_performance') }}
+    -- Weekly facts exist only where the platform defines matchup periods.
+    -- CBS union rows (MLB-72) carry matchup_period NULL -- their weekly
+    -- rollup is undefined and they'd collapse into one season-wide NULL
+    -- pseudo-week per player; period-scoped CBS surfaces read the CBS
+    -- staging directly instead. No-op for ESPN rows (always period-stamped).
+    where matchup_period is not null
 ),
 
 weekly as (

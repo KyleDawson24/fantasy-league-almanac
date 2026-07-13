@@ -249,6 +249,12 @@ models:
       pro_team / position / eligible_slots snapshot, league_notes
       callouts for HR streaks / no_negative_days / SP-start counts)
       should re-point at this fact in a follow-on commit.
+
+      MLB-72: serves both leagues (int_player_daily unions the CBS
+      day-grain branch). CBS rows add lineup_slot codes RS/EST, the
+      'estimated' performance_status, and the union-layer passthroughs
+      (player_key, game_date, active_weight, provenance); ESPN-visible
+      values are byte-identical to the pre-union fact.
     tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
@@ -257,7 +263,7 @@ models:
               - season_year
               - scoring_period
               - team_id
-              - player_id
+              - player_key
               - lineup_slot
     columns:
       - name: league_key
@@ -271,20 +277,23 @@ models:
         tests:
           - not_null
       - name: player_id
+        description: 'Numeric player id. NULL on CBS ui-only synthetic identities; player_key is the grain column.'
+      - name: player_key
+        description: 'Cross-league player identity (MLB-72), the grain column. See int_player_daily.'
         tests:
           - not_null
       - name: lineup_slot
         tests:
           - not_null
       - name: performance_status
-        description: '''active'' (lineup_slot NOT IN BE/IL/FA) or ''inactive'' (lineup_slot IN BE/IL/FA).'
+        description: '''active'' (lineup_slot NOT IN BE/IL/FA/RS), ''inactive'' (BE/IL/FA/RS), or ''estimated'' (CBS 2004-2020 estimated-state days -- consumers weight by active_weight instead of the binary lens).'
         tests:
           - not_null
           - accepted_values:
               arguments:
-                values: ['active', 'inactive']
+                values: ['active', 'inactive', 'estimated']
       - name: wasted_bucket
-        description: '''FA'' (free agent), ''ROSTERED_INACTIVE'' (BE/IL), or NULL (active). Categorizes the two flavors of inactive.'
+        description: '''FA'' (free agent), ''ROSTERED_INACTIVE'' (BE/IL, CBS RS), or NULL (active / estimated). Categorizes the flavors of inactive.'
         tests:
           - accepted_values:
               arguments:
@@ -292,11 +301,17 @@ models:
               config:
                 where: "wasted_bucket is not null"
       - name: is_active_slot
-        description: 'Boolean equivalent of performance_status = ''active''. Retained for backward compatibility.'
+        description: 'Boolean equivalent of performance_status = ''active''. NULL on CBS estimated-era rows. Retained for backward compatibility.'
+      - name: game_date
+        description: 'Real calendar date (CBS rows); NULL on ESPN rows whose day identity is scoring_period.'
+      - name: active_weight
+        description: 'The day''s scoring weight: 1/0 where state is known, the start-share estimator on CBS estimated days, NULL where activity is unknowable.'
+      - name: provenance
+        description: 'captured / reconstructed_day / estimated_startshare / estimated_membership -- how the day''s roster state is known.'
       - name: platform_points
-        description: 'ESPN per-player per-day total. NULL for FA rows in some edge cases.'
+        description: 'ESPN per-player per-day total. NULL for FA rows in some edge cases and on all CBS rows (CBS serves no per-day platform totals -- platform_ is a season-grain anchor there).'
       - name: negative_points
-        description: 'Magnitude (positive) of net-negative platform_points on this day. Zero when platform_points >= 0.'
+        description: 'Magnitude (positive) of net-negative points on this day (platform lens for ESPN, calculated for CBS). Zero when the day is non-negative.'
 
   - name: fct_player_weekly_slot_performance
     description: >
@@ -1102,7 +1117,7 @@ models:
               - season_year
               - matchup_period
               - team_id
-              - player_id
+              - player_key
               - position
     columns:
       - name: league_key
@@ -1110,25 +1125,27 @@ models:
         tests:
           - not_null
       - name: season_year
-        description: 'ESPN season year. Part of the grain.'
+        description: 'Season year. Part of the grain.'
         tests:
           - not_null
       - name: matchup_period
-        description: 'Matchup period within the season. Part of the grain.'
-        tests:
-          - not_null
+        description: 'Matchup period within the season. Part of the grain on ESPN rows; NULL on CBS rows (no historic period boundaries -- a CBS player-position aggregates to one season-grain row).'
       - name: team_id
-        description: 'Fantasy team_id while the player was rostered. NULL for FA-time rows (the player was on the league''s free-agent pool that period).'
+        description: 'Fantasy team_id while the player was rostered. NULL for FA-time rows (the player was on the league''s free-agent pool that period). CBS rows are never FA (attribution is rostered-only).'
       - name: player_id
-        description: 'ESPN player_id. Part of the grain.'
+        description: 'Numeric player id. NULL on CBS ui-only synthetic identities; player_key is the grain column (1:1 with player_id on ESPN rows).'
+      - name: player_key
+        description: 'Cross-league player identity (MLB-72). Part of the grain.'
         tests:
           - not_null
       - name: position
         description: >
           Eligibility code from the player's eligible_slots VARIANT array
           (e.g., '1B', 'OF', 'SP', 'UTIL'). Combined codes like '1B/3B' or
-          '2B/SS' appear when ESPN expresses dual-slot eligibility. BE and
-          IL are filtered out (roster slots, not lineup positions).
+          '2B/SS' appear when ESPN expresses dual-slot eligibility; CBS rows
+          emit the CBS vocabulary ({C,1B,2B,3B,SS,OF,DH,P}, date-scoped by
+          int_cbs__eligibility_windows). BE and IL are filtered out (roster
+          slots, not lineup positions).
         tests:
           - not_null
       - name: player_name
@@ -1156,9 +1173,23 @@ models:
       - name: inactive_pts
         description: >
           Same construction as active_pts but for inactive-slot days
-          (performance_status='inactive' -- BE / IL / FA). Position-
+          (performance_status='inactive' -- BE / IL / FA / CBS RS). Position-
           category-appropriate calculated points (total_*_stat_pts),
           rounded 1 decimal.
+      - name: weighted_active_pts
+        description: >
+          MLB-72 generalization of active_pts across the union:
+          SUM(position points * active_weight). ESPN days weight 1/0 by slot
+          (identical to active_pts by construction); CBS estimated-era days
+          contribute their start-share fraction; NULL-weight days
+          (membership confirmed, activity unknown) contribute 0 --
+          conservative, and the almanac's provenance note owns the caveat.
+          The CBS Best-Lineup axis.
+      - name: rostered_pts
+        description: >
+          Weight-independent total (active + inactive + estimated) --
+          everything the player produced while rostered and eligible at
+          this position. The CBS bench-ranking axis.
       - name: eligible_days
         description: 'Count of distinct scoring periods (= days) the player was eligible at this position during this matchup period. Useful for per-day rate queries; not strictly required by the optimal-team selector.'
 

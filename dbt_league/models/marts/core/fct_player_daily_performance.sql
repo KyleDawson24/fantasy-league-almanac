@@ -21,6 +21,14 @@
 -- layer means both daily and weekly consumers see the same status
 -- semantics from one canonical computation.
 --
+-- MLB-72: int_player_daily now unions the CBS day-grain branch, so this
+-- fact serves both leagues. CBS rows introduce two lineup_slot codes the
+-- derivations fold in ('RS' reserve -> inactive; 'EST' estimated state ->
+-- the new 'estimated' performance_status, with active_weight carrying the
+-- start-share estimator) plus the union-layer passthroughs (player_key,
+-- game_date, active_weight, provenance). ESPN rows never emit RS/EST, so
+-- every ESPN-visible value is byte-identical to the pre-union fact.
+--
 -- Materialization: view. int_player_daily is itself a view at ~600K
 -- rows; adding another view over it costs nothing at storage and
 -- queries within real workload latency. Flip to table if a future
@@ -39,6 +47,7 @@ select
     team_abbrev,
     owner_name,
     player_id,
+    player_key,
     player_name,
     display_name,
     position,
@@ -47,23 +56,30 @@ select
     lineup_slot,
     lineup_slot_category,
     games_played,
+    game_date,
 
     -- Status flags. performance_status mirrors the WHERE clause on the
     -- active weekly fact (lineup_slot NOT IN BE/IL/FA -> 'active'),
     -- redundant with is_active_slot but with the consumer-facing label
     -- string used across mart_stat_leaderboard. wasted_bucket
     -- distinguishes the two flavors of inactive: 'FA' for free agents,
-    -- 'ROSTERED_INACTIVE' for BE/IL, NULL for active.
+    -- 'ROSTERED_INACTIVE' for BE/IL (and CBS's RS), NULL for active.
+    -- CBS's estimated era gets its own status: neither active nor
+    -- inactive is knowable per-day there -- consumers weight by
+    -- active_weight instead (fct_player_position_pts.weighted_active_pts).
     is_active_slot,
     case
-        when lineup_slot in ('BE', 'IL', 'FA') then 'inactive'
+        when lineup_slot in ('BE', 'IL', 'FA', 'RS') then 'inactive'
+        when lineup_slot = 'EST'                     then 'estimated'
         else 'active'
     end as performance_status,
     case
-        when lineup_slot = 'FA'          then 'FA'
-        when lineup_slot in ('BE', 'IL') then 'ROSTERED_INACTIVE'
+        when lineup_slot = 'FA'                then 'FA'
+        when lineup_slot in ('BE', 'IL', 'RS') then 'ROSTERED_INACTIVE'
         else null
     end as wasted_bucket,
+    active_weight,
+    provenance,
 
     -- Platform totals
     platform_points,

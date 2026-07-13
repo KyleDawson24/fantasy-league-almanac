@@ -695,6 +695,57 @@ models:
         description: 'The era''s verbatim phrase (''Signed'', ''Moved from DH to 1B''...). The normalizer''s audit trail.'
         tests: [not_null]
 
+  - name: stg_mlb__fielding_seasons
+    description: >
+      Season-grain games-by-position from the fielding yearByYear sweep,
+      typed and mapped to the CBS position vocabulary (LF/CF/RF/OF -> OF,
+      P/SP/RP -> P; PH/PR-class codes map NULL). Platform-neutral like the
+      other stg_mlb__ models. Raw split grain -- a traded player carries one
+      split per team per season, so (mlbam_id, season_year, position) is NOT
+      unique; consumers SUM to their grain (int_cbs__eligibility_windows).
+      Full careers ride here including pre-league seasons, which the
+      'played 20 games LAST year' test needs for the league's own first
+      seasons.
+    columns:
+      - name: mlbam_id
+        tests:
+          - not_null
+      - name: cbs_position
+        description: 'CBS slot-vocabulary position, or NULL for non-position codes (dropped by consumers).'
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['C', '1B', '2B', '3B', 'SS', 'OF', 'DH', 'P']
+              config:
+                where: "cbs_position is not null"
+
+  - name: stg_mlb__game_positions
+    description: >
+      Per-game positions played (loader family 'gamepos' re-walking the
+      gamelog files for the split-level positionsPlayed; pitching games
+      constant P), typed and mapped to the CBS position vocabulary. The DATE
+      half of the eligibility derivation: season-grain fielding says how
+      many games at a position, this says WHEN the Nth happened
+      (after-achievement semantics -- eligible from the 10th game this
+      year). One game can emit multiple rows that are one game at slot
+      vocabulary (LF then CF mid-game; a position player's mop-up P inning
+      rides in from both group files) -- consumers count DISTINCT game_pk,
+      never raw rows. Platform-neutral.
+    columns:
+      - name: mlbam_id
+        tests:
+          - not_null
+      - name: game_pk
+        tests:
+          - not_null
+      - name: cbs_position
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['C', '1B', '2B', '3B', 'SS', 'OF', 'DH', 'P']
+              config:
+                where: "cbs_position is not null"
+
   - name: stg_mlb__player_game
     description: >
       The universal baseball layer at game grain (MLB-70/MLB-62), LONG form

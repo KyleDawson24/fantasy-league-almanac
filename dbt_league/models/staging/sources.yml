@@ -89,6 +89,10 @@ sources:
         description: "Raw MLB Stats API per-game logs, one row PER GAME per (player, season, stat_group) -- the deliberate explosion; each game's stat split lands verbatim in the game VARIANT ({stat, team, opponent, isHome, isWin, date, game.gamePk}). 595K+ rows, 2,227 players, full careers of every crosswalked CBS player (sparse pre-2008). stat_group 'hitting'|'pitching' scopes each row's stat keys -- the MLB-68 two-way split rides it."
       - name: mlb_season_stats
         description: "Raw MLB Stats API season aggregates (yearByYear), one row per (player, season, stat_group). Carries the season team -- the crosswalk's team-evidence source -- and serves as the gamelog-completeness cross-check (season totals vs per-game sums)."
+      - name: mlb_fielding
+        description: "Raw MLB Stats API fielding yearByYear splits, one row per (player, season, TEAM, position): games/gamesStarted at that position. The games-by-position eligibility input (CBS's captured rule prices positions by last-year/this-year games played there). ALL career seasons ride in one call -- pre-league years included, which the season-Y 'played 20 games last year' test needs for the league's own first seasons. Traded players carry one row per team; consumers SUM across teams."
+      - name: mlb_game_positions
+        description: "Per-game positions re-walked from the SAME gamelog files as mlb_gamelogs (loader family 'gamepos'; no re-fetch): one row per (player, season, game, position) from the split-level positionsPlayed the gamelogs walker never projected, pitching games constant P. Dates the in-season eligibility achievement ('10 games this year' becomes eligible ON the 10th game's date). Pinch-hit-only appearances emit no rows -- correct, they don't advance position counters. A position player's mop-up pitching appears from BOTH group files on one game_pk; consumers dedupe on game_pk."
       # Parsed UI history (extract/cbs_ui_parse.py over the MLB-47 captured
       # pages) -- the fantasy-layer history the API denies, structured.
       # Idempotent by source_path; verbatim-leaning (era phrases land raw).

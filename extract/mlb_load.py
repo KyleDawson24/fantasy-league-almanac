@@ -11,6 +11,16 @@ Families -> tables:
   season/<mlbam>.json            -> MLB_SEASON_STATS  (row per player-season-group)
   gamelog/<mlbam>/<yr>_<grp>.json -> MLB_GAMELOGS      (row PER GAME -- the
                                      deliberate explosion; each game verbatim)
+  fielding/<mlbam>.json          -> MLB_FIELDING      (row per player-season-
+                                     POSITION: games/gamesStarted there -- the
+                                     eligibility input, season grain)
+  gamelog/<mlbam>/<yr>_<grp>.json -> MLB_GAME_POSITIONS (family "gamepos": the
+                                     SAME files re-walked for the split-level
+                                     positionsPlayed the gamelogs walker never
+                                     projected -- one row per game-position,
+                                     pitching games constant P. Dates the
+                                     "Nth game at a position this season"
+                                     eligibility achievement; no re-fetch)
 
 Mechanics mirror cbs_load: rows stream to NDJSON, PUT to the table stage, COPY
 INTO with MATCH_BY_COLUMN_NAME. Idempotent: files whose source_path is already
@@ -50,6 +60,28 @@ TABLES = {
         game_date     DATE,
         game_index    INTEGER,
         game          VARIANT,
+        fetched_at    VARCHAR,
+        source_path   VARCHAR,
+        loaded_at     TIMESTAMP_NTZ
+    )""",
+    "MLB_FIELDING": """CREATE TABLE IF NOT EXISTS MLB_FIELDING (
+        mlbam_id      INTEGER,
+        season_year   INTEGER,
+        position      VARCHAR,
+        stat          VARIANT,
+        team          VARIANT,
+        fetched_at    VARCHAR,
+        source_path   VARCHAR,
+        loaded_at     TIMESTAMP_NTZ
+    )""",
+    "MLB_GAME_POSITIONS": """CREATE TABLE IF NOT EXISTS MLB_GAME_POSITIONS (
+        mlbam_id      INTEGER,
+        season_year   INTEGER,
+        stat_group    VARCHAR,
+        game_date     DATE,
+        game_pk       INTEGER,
+        game_index    INTEGER,
+        position      VARCHAR,
         fetched_at    VARCHAR,
         source_path   VARCHAR,
         loaded_at     TIMESTAMP_NTZ
@@ -115,6 +147,51 @@ def walk_gamelogs(root):
                     "game_date": sp.get("date"), "game_index": i, "game": game}
 
 
+def walk_fielding(root):
+    fdir = root / "fielding"
+    if not fdir.is_dir():
+        return
+    for path in sorted(fdir.glob("*.json")):
+        doc, env = read_doc(path, root)
+        stats = (doc.get("payload") or {}).get("stats") or []
+        for block in stats:
+            for sp in block.get("splits", []):
+                stat = sp.get("stat") or {}
+                yield "MLB_FIELDING", {
+                    **env, "season_year": _int(sp.get("season")),
+                    "position": (stat.get("position") or {}).get("abbreviation"),
+                    "stat": stat, "team": sp.get("team")}
+
+
+def walk_gamepos(root):
+    # Re-walks the gamelog files for the split-level positionsPlayed that
+    # walk_gamelogs never projected into MLB_GAMELOGS.game. Hitting games
+    # emit one row per position played; games with NO positionsPlayed
+    # (pinch-hit-only appearances) emit nothing -- correct, since they
+    # don't advance position-eligibility counters. Pitching games are
+    # constant P (the discipline IS the position).
+    for pdir in sorted((root / "gamelog").iterdir()):
+        if not pdir.is_dir():
+            continue
+        for path in sorted(pdir.glob("*.json")):
+            doc, env = read_doc(path, root)
+            grp, season = doc.get("group"), _int(doc.get("season"))
+            for i, sp in enumerate(splits_of(doc)):
+                game_pk = (sp.get("game") or {}).get("gamePk")
+                if grp == "pitching":
+                    positions = ["P"]
+                else:
+                    positions = [(p or {}).get("abbreviation")
+                                 for p in (sp.get("positionsPlayed") or [])]
+                for pos in positions:
+                    if not pos:
+                        continue
+                    yield "MLB_GAME_POSITIONS", {
+                        **env, "season_year": season, "stat_group": grp,
+                        "game_date": sp.get("date"), "game_pk": game_pk,
+                        "game_index": i, "position": pos}
+
+
 def _int(v):
     try:
         return int(v)
@@ -122,7 +199,8 @@ def _int(v):
         return None
 
 
-FAMILIES = {"season": walk_season, "gamelogs": walk_gamelogs}
+FAMILIES = {"season": walk_season, "gamelogs": walk_gamelogs,
+            "fielding": walk_fielding, "gamepos": walk_gamepos}
 
 
 def loaded_paths(cursor, table):

@@ -28,10 +28,17 @@
 --
 -- ==========================================================================
 -- GRAIN:
---   One row per (league_key, season_year, matchup_period, team_id, player_id, position).
+--   One row per (league_key, season_year, matchup_period, team_id, player_KEY, position).
 --   team_id is NULLABLE -- NULL rows represent FA time during that period.
+--   matchup_period is NULLABLE -- CBS rows carry no period boundaries, so a
+--   CBS (season, team, player, position) aggregates into ONE season-grain
+--   row with matchup_period NULL (ESPN rows always carry their period).
+--   player_key is the identity column (MLB-72): ESPN ids stringified, CBS
+--   platform ids including the 'ui-only-' synthetics whose player_id is
+--   NULL. player_id remains for ESPN consumers, 1:1 with player_key there.
 --   "position" is the eligible_slots code (e.g., '1B', 'OF', 'SP', 'UTIL',
---   plus combined codes like '1B/3B' or '2B/SS' when ESPN expresses them).
+--   plus combined codes like '1B/3B' or '2B/SS' when ESPN expresses them;
+--   CBS emits its own vocabulary {C,1B,2B,3B,SS,OF,DH,P}).
 --   BE and IL are filtered out.
 -- ==========================================================================
 --
@@ -71,6 +78,7 @@ with daily_eligible as (
         d.scoring_period,
         d.team_id,
         d.player_id,
+        d.player_key,
         d.player_name,
         d.display_name,
         d.pro_team,
@@ -118,7 +126,8 @@ with daily_eligible as (
              else d.total_hitting_stat_pts
         end as position_calculated_pts,
 
-        d.performance_status
+        d.performance_status,
+        d.active_weight
     from {{ ref('fct_player_daily_performance') }} d,
     lateral flatten(input => d.eligible_slots) slot
     where slot.value::string not in ('BE', 'IL')
@@ -130,11 +139,14 @@ aggregated as (
         season_year,
         matchup_period,
         team_id,
-        player_id,
+        player_key,
         position,
 
-        -- Display helpers (stable per player_id within a matchup;
+        -- Display helpers (stable per player_key within a matchup;
         -- MAX is a no-op aggregation that just satisfies GROUP BY).
+        -- player_id rides as an aggregate: 1:1 with player_key on ESPN
+        -- rows (identical output), NULL on CBS ui-only synthetics.
+        max(player_id)     as player_id,
         max(player_name)   as player_name,
         max(display_name)  as display_name,
         max(pro_team)      as pro_team,
@@ -154,6 +166,17 @@ aggregated as (
                        then position_calculated_pts else 0 end), 1) as active_pts,
         round(sum(case when performance_status = 'inactive'
                        then position_calculated_pts else 0 end), 1) as inactive_pts,
+
+        -- MLB-72 lenses. weighted_active_pts generalizes active_pts across
+        -- the union: ESPN days weight 1/0 by slot (identical to active_pts
+        -- by construction); CBS estimated-era days contribute their
+        -- start-share fraction (NULL-weight days -- membership confirmed,
+        -- activity unknown -- contribute 0: conservative, and the almanac's
+        -- provenance note owns the caveat). rostered_pts is the
+        -- weight-independent total (the CBS bench ranking axis).
+        round(sum(position_calculated_pts * coalesce(active_weight, 0)), 1)
+            as weighted_active_pts,
+        round(sum(position_calculated_pts), 1) as rostered_pts,
 
         -- Eligibility days: count of distinct scoring periods (= days)
         -- the player was eligible at this position during this matchup

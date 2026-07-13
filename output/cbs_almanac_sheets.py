@@ -380,7 +380,12 @@ def get_best_lineup(entity_id=None, season_year=None,
     boards; season_year=None gives all-time. points_type
     'weighted_active' is the display lineup; 'rostered' builds the
     alternate lineup behind the Total-Pts Best deviation columns. bench>0
-    appends that many reserve picks (the league's 11 reserve slots)."""
+    appends that many reserve picks (the league's 11 reserve slots).
+
+    Lens split (Kyle, 2026-07-13, universal with the team pages): STARTERS
+    by ACTIVE points (weighted_active -- which INCLUDES the estimated
+    active production from 2004-2020 start shares); BENCH by TOTAL
+    (rostered) points, so a benched star's whole line counts."""
     candidates = get_optimal_team_candidates(
         season_year=season_year,
         team_id=entity_id,
@@ -389,16 +394,34 @@ def get_best_lineup(entity_id=None, season_year=None,
     candidates = _synthesize_universal_slots(candidates)
     lineup = get_optimal_team_selections(candidates, CBS_SLOT_CAPS)
     if bench:
-        lineup = lineup + _select_bench(candidates, lineup, bench)
+        # Bench pool = TOTAL points (not the starters' active lens), and
+        # UN-synthesized so each reserve carries a real position for its
+        # "BE - Pos" label rather than a universal DH/U clone.
+        bench_pool = get_optimal_team_candidates(
+            season_year=season_year, team_id=entity_id, points_type='rostered')
+        lineup = lineup + _select_bench(bench_pool, lineup, bench)
     _enrich_lineup(lineup, entity_id=entity_id, season_year=season_year)
+    # Finalize bench labels after enrichment so the position reads from the
+    # player's primary (their current-ish display position for actives,
+    # their historical primary for retirees) rather than the arbitrary
+    # tie-break among equal-value eligibility rows.
+    for sel in lineup:
+        if sel.get('lineup_slot') == 'BE':
+            pos = sel.get('primary_position') or sel.get('_bench_pos') or ''
+            sel['slot_label'] = f'BE - {pos}' if pos else 'BE'
+            # Point the shared slash-line helper at the player's discipline
+            # (it keys off lineup_slot: P -> W-L/ERA/WHIP, else AVG/OBP/SLG).
+            # slot_label keeps the "BE - Pos" display; only the slash
+            # discipline reads lineup_slot.
+            sel['lineup_slot'] = pos or 'BE'
     return lineup
 
 
 def _select_bench(candidates, starters, n):
-    """The reserve block: the n best players NOT in the starting lineup,
-    by their best position points. CBS reserve slots are position-blind
-    (11 of them), so this ranks whole players, not positions. Labeled
-    BE 1..BE n; each carries its best position for display."""
+    """The reserve block: the n best players NOT in the starting lineup, by
+    TOTAL (rostered) points. CBS reserve slots are position-blind (11 of
+    them), so this ranks whole players; each carries its best real
+    position as the '_bench_pos' fallback for the BE - Pos label."""
     used = {s.get('player_key') or s.get('player_id') for s in starters}
     best = {}
     for c in candidates:
@@ -412,33 +435,48 @@ def _select_bench(candidates, starters, n):
                     key=lambda c: (-(c['position_pts'] or 0),
                                    str(c.get('player_key') or c['player_id'])))[:n]
     bench = []
-    for i, base in enumerate(ranked, 1):
+    for base in ranked:
         row = dict(base)
         row['lineup_slot'] = 'BE'
-        row['slot_label'] = f'BE {i}'
+        row['_bench_pos'] = base.get('position')
+        # The selector stamps platform_points on starters (from position_pts);
+        # bench rows bypass it, so carry the total-points value across for
+        # the shared formatter's Points cell.
+        row['platform_points'] = base.get('position_pts')
         bench.append(row)
     return bench
 
 
-def _week_window():
-    """The latest full week of play: the 7-day window ending on the most
-    recent game date. The 'this week' scope for the Team of the Week
-    board -- trailing days, not a period id (CBS period boundaries aren't
-    day-mapped historically, and the trailing week is what a reader means
-    by 'this week')."""
-    row = query_snowflake(
-        f"SELECT MAX(game_date) AS hi, DATEADD(day, -6, MAX(game_date)) AS lo"
-        f" FROM fct_player_daily_performance WHERE {league_predicate()}"
-        f"   AND game_date IS NOT NULL"
-    )[0]
+def _month_window():
+    """The most recent COMPLETED calendar month of play (Kyle, 2026-07-13):
+    he wanted 'the most recent completed scoring period', but CBS periods
+    carry no date boundaries anywhere (the standings track period ids and
+    cumulative points, never day windows) and roster captures are daily,
+    so there's nothing to date-scope a period against. The calendar month
+    is the clean, honestly-derivable stand-in he offered as the fallback.
+    A month is 'completed' once max(game_date) passes its last day."""
+    row = query_snowflake(f"""
+        SELECT
+            CASE WHEN MAX(game_date) = LAST_DAY(MAX(game_date))
+                 THEN DATE_TRUNC('month', MAX(game_date))
+                 ELSE DATE_TRUNC('month', DATEADD('month', -1, MAX(game_date)))
+            END AS lo,
+            CASE WHEN MAX(game_date) = LAST_DAY(MAX(game_date))
+                 THEN MAX(game_date)
+                 ELSE LAST_DAY(DATEADD('month', -1, MAX(game_date)))
+            END AS hi
+        FROM fct_player_daily_performance
+        WHERE {league_predicate()} AND game_date IS NOT NULL
+    """)[0]
     return row['lo'], row['hi']
 
 
-def get_week_lineup(date_from, date_to):
-    """The Team of the Week: best weighted-active lineup over a date
-    window, built from the daily fact directly (fct_player_position_pts
-    aggregates CBS to season grain, so the week needs its own windowed
-    candidate query). Same selector + enrichment as the other boards."""
+def get_window_lineup(date_from, date_to):
+    """Best weighted-active lineup over a date window, built from the
+    daily fact directly (fct_player_position_pts aggregates CBS to season
+    grain, so a sub-season window needs its own candidate query). Same
+    selector + enrichment as the other boards. Feeds the Team of the
+    Month board."""
     candidates = query_snowflake(f"""
         WITH exploded AS (
             SELECT
@@ -525,7 +563,8 @@ def _enrich_lineup(lineup, entity_id=None, season_year=None,
             MAX_BY(team_name, game_date)              AS latest_team_name,
             MAX_BY(team_abbrev, game_date)            AS team_abbrev,
             MAX_BY(owner_name, game_date)             AS owner_name,
-            MAX_BY(pro_team, game_date)               AS pro_team
+            MAX_BY(pro_team, game_date)               AS pro_team,
+            MAX_BY(position, game_date)               AS primary_position
         FROM fct_player_daily_performance
         WHERE {' AND '.join(filters)}
         GROUP BY player_key
@@ -888,9 +927,10 @@ def build_home_rows(context, nav_targets=None):
     columns driven by the rostered-lens alternate lineup.
 
     Three boards top-to-bottom (Kyle's lean, 2026-07-13): Team of the
-    Week (lightweight, trailing 7 days, no bench/deviation), Season-to-
-    Date, All-Time. Season and All-Time carry the league's 11 reserve
-    spots as a bench block.
+    Month (lightweight, the most recent completed calendar month, no
+    bench/deviation), Season-to-Date, All-Time. Season and All-Time carry
+    the league's 11 reserve spots as a bench block, labeled BE - Pos and
+    ranked by TOTAL points (starters rank by active points).
 
     CBS exceptions to the ESPN shape, all Kyle-specified (2026-07-13):
     Points cells are plain whole numbers (season-long, no boxscore); the
@@ -920,16 +960,15 @@ def build_home_rows(context, nav_targets=None):
     # cells flagged for gray.
     season_dev = _deviation_by_slot(context['season_board'],
                                     context['season_board_rostered'])
-    lo, hi = context['week_window']
-    week_label = (f'All-League Team of the Week: {_fmt_date(lo)} – '
-                  f'{_fmt_date(hi)}')
+    lo, _hi = context['month_window']
+    month_label = f'All-League Team of the Month: {lo:%B %Y}'
 
     def _board(title, lineup, mode, dev_map=None):
         if mode == 'season':
             hdr = [*HOME_HEADER, _CBS_DEVIATION_LABEL, '']
         elif mode == 'alltime':
             hdr = [*HOME_HEADER, 'Years of Service']
-        else:  # week
+        else:  # 'plain' -- the month board: base columns, no deviation/years
             hdr = list(HOME_HEADER)
         rows_, meta_ = [[title], [], hdr], [{'k': 'title'}, {'k': 'blank'},
                                             {'k': 'header'}]
@@ -951,7 +990,7 @@ def build_home_rows(context, nav_targets=None):
 
     right, meta = [], []
     for title, lineup, mode, dev in [
-        (week_label, context['week_board'], 'week', None),
+        (month_label, context['month_board'], 'plain', None),
         (f'All-League Team Season-to-Date: {season}', context['season_board'],
          'season', season_dev),
         (f'All-League Team: All-Time ({era})', context['alltime_board'],
@@ -1381,8 +1420,8 @@ def build_all_tabs(nav_targets=None):
     # rostered-lens starters (no bench) driving Total-Pts Best. All-Time =
     # display lineup + bench, re-keyed for the active/retired split +
     # years-of-service (its longevity column replaces the deviation).
-    context['week_window'] = _week_window()
-    context['week_board'] = get_week_lineup(*context['week_window'])
+    context['month_window'] = _month_window()
+    context['month_board'] = get_window_lineup(*context['month_window'])
     context['season_board'] = get_best_lineup(
         entity_id=None, season_year=season, bench=_CBS_BENCH_SLOTS)
     context['season_board_rostered'] = get_best_lineup(

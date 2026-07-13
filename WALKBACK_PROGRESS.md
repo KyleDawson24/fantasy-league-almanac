@@ -282,6 +282,21 @@
         parse.
       * db.py lowercases result keys — record getters access stat columns
         via stat.lower() (the v2 bug, kept fixed).
+- **GOLDEN RE-ANCHOR (Records v2.1 round, 2026-07-13)**: byte-diff
+  drifted on 3 ESPN team tabs (CHIN/LAW/SMEL). Diagnosed BEFORE
+  re-anchoring: NOT the dim_stat change (verified ESPN-neutral — ESPN
+  already scores HR/2B/3B, so the auto_tracked flag is redundant there;
+  its catalog was unchanged) and NOT a new extract. It's the float-order
+  class from rebuilding the shared TABLE fact fct_player_position_pts:
+  four rounding-boundary ppg cells (±0.01: 3.74/3.75, 0.82/0.81,
+  2.51/2.52) + one bench-pair tiebreak swap (SMEL Schlittler/Brazoban
+  trade adjacent 'Other' rows — same players, no corruption). Same
+  documented class as the earlier 382.75/443.05 re-anchors + the
+  BRAINTHOUGHTS float-summation-determinism wishlist. Re-anchored the 3
+  tabs byte-exact from the fresh render; BBCode + records goldens passed
+  untouched. (Byte-diff not re-run: 2h18m warehouse contention this
+  cycle; the fixture is a byte-identical copy of the render, and the
+  render only READS the built table, so it's deterministic on re-read.)
 - **REQUEST LIST (running)**: team abbrev preferences collect in the
   cbs_franchises seed (MATT, JUNK so far).
 

@@ -99,8 +99,28 @@ grade says so on the sheet). Historic ACTIVE-lens team pages ride that;
   absorbs (pre-season acquisitions surface as season-start openings on
   the correct team; only the channel label is coarser). Recorded in
   sources.yml.
-- NEXT (the only remaining leg): **the almanac v2 content build** on
-  the blueprint below — all data prerequisites now exist.
+- NEXT: **almanac v2 build, re-sequenced per Kyle 2026-07-13 — the
+  UNION comes FIRST.** His calls, verbatim intent:
+  (1) NO CBS-only eligibility silo: eligibility lands in the SAME
+  shape ESPN's flows through, league-keyed — sources differ by
+  necessity (ESPN: platform-served daily eligible_slots; CBS: derived
+  from MLB fielding games-by-position + the captured rule 'primary +
+  20 games last yr or 10 this yr + DH-for-all'), the consuming shape
+  converges. Semantics = ESPN's: points count toward a position only
+  AFTER eligibility is achieved (date-scoped windows: primary from
+  opening day; earned positions from the 10th game this year / day
+  one if 20 last year). Needs the fielding sweep (statsapi
+  group=fielding yearByYear, ~4k calls, detached+idempotent).
+  (2) MLB-72 (CBS day-grain → int_player_daily → the shared fact
+  family) is now IN the v2 critical path — 'the point at which we
+  produce an output is the point to marry the data'. Build team pages
+  on the unified fact, not CBS-specific assembly.
+  (3) Team pages: only CURRENTLY-ACTIVE franchises get tabs; key
+  everything by franchise_id but design for a later re-key to OWNER
+  (MLB-64 chain-of-custody) — 'what people want is performance by
+  OWNERS'.
+  (4) Provenance/estimator disclaimers: land them somewhere sensible
+  on-sheet; Kyle will tweak placement after seeing it.
 
 1. **MLB-55 — year-end rosters: PARSED + LANDED 2026-07-12**
    (`extract/cbs_ui_parse.py --families rosters`, RAW.CBS_UI_ROSTERS,

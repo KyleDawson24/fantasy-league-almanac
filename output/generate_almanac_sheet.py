@@ -151,17 +151,18 @@ def main():
 
 
 def _run_points_league_almanac(args, parser):
-    """The points-league almanac path (MLB-66): home + team tabs from the
-    standings arc, record book, and captured rosters. Same preview /
-    dev-default / explicit-prod UX as the H2H path; the sheet resolves
-    from the league's registry sinks (MLB-58). --season-year /
-    --matchup-period are H2H concepts and are ignored here (the points
-    almanac's horizon comes from the data)."""
-    tabs = cbs_almanac_sheets.build_all_tabs()
-    preview_tabs = [(title, rows) for title, rows, _ in tabs]
-
-    if args.preview_dir:
-        _write_preview_dir(preview_tabs, args.preview_dir)
+    """The points-league almanac path (MLB-66 v2): the ESPN-architecture
+    workbook (nav-first Home + Records + Standings + Best-Lineup team
+    pages) on the unified fact family. Same preview / dev-default /
+    explicit-prod UX as the H2H path; the sheet resolves from the
+    league's registry sinks (MLB-58). --season-year / --matchup-period
+    are H2H concepts and are ignored here (the points almanac's horizon
+    comes from the data)."""
+    if args.preview_dir or args.no_sheets:
+        tabs = cbs_almanac_sheets.build_all_tabs()
+        preview_tabs = [(title, rows) for title, rows, _ in tabs]
+        if args.preview_dir:
+            _write_preview_dir(preview_tabs, args.preview_dir)
 
     if args.no_sheets:
         sheet_id, target_label = None, None
@@ -185,7 +186,9 @@ def _run_points_league_almanac(args, parser):
     else:
         print(f"[almanac] writing to dev sheet: {sheet_id}")
 
-    cbs_almanac_sheets.write_cbs_almanac(sheet_id, tabs)
+    # write_cbs_almanac builds its own tabs: the two-pass nav-link write
+    # needs the real sheet gids before Home's rows exist.
+    cbs_almanac_sheets.write_cbs_almanac(sheet_id)
 
 
 def _print_preview(tabs, print_all=False):

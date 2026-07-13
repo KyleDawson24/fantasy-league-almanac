@@ -176,20 +176,37 @@ with_slots as (
 ),
 
 eligibility as (
+    -- CBS display semantics, graded against the 2026 captures: DH is
+    -- universal and therefore UNLISTED unless it is the player's only
+    -- position (the captures show 'DH' alone for the fieldless class and
+    -- never alongside another position -- the pre-fix derived arrays
+    -- disagreed on 4,011 player-days, ALL of them earned-DH-plus-others).
+    -- The DH windows still exist upstream; this is presentation of the
+    -- array, and the DH/U SLOTS fill universally at the renderer anyway.
     select
-        d.league_key,
-        d.season_year,
-        d.game_date,
-        d.cbs_player_id,
-        array_agg(distinct s.cbs_position)
-            within group (order by s.cbs_position) as eligible_slots
-    from day_base d
-    inner join scoped_windows s
-        on d.league_key = s.league_key
-        and d.cbs_player_id = s.cbs_player_id
-        and d.season_year = s.season_year
-        and d.game_date >= s.eligible_from
-    group by 1, 2, 3, 4
+        league_key,
+        season_year,
+        game_date,
+        cbs_player_id,
+        iff(array_size(array_remove(raw_slots, to_variant('DH'))) > 0,
+            array_remove(raw_slots, to_variant('DH')),
+            raw_slots) as eligible_slots
+    from (
+        select
+            d.league_key,
+            d.season_year,
+            d.game_date,
+            d.cbs_player_id,
+            array_agg(distinct s.cbs_position)
+                within group (order by s.cbs_position) as raw_slots
+        from day_base d
+        inner join scoped_windows s
+            on d.league_key = s.league_key
+            and d.cbs_player_id = s.cbs_player_id
+            and d.season_year = s.season_year
+            and d.game_date >= s.eligible_from
+        group by 1, 2, 3, 4
+    )
 )
 
 select

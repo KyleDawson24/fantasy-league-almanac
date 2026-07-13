@@ -829,6 +829,57 @@ models:
         tests:
           - not_null
 
+  - name: mart_player_career_records
+    description: >
+      The player CAREER record book: top-10 all-time accumulations per
+      record-candidate stat -- the MLB-69 accumulation axis, sibling of
+      mart_player_season_records (the peak axis). Same source (the
+      calculated_ lens via int_cbs__player_season_stats), same dim_stat
+      candidacy and conventions; the Records tab renders the two side by
+      side. "Career" = league-era career (the source's data-driven 2001
+      floor), interim total lens with the season book's population caveats.
+      Two-way sentinels remain two players; ui-only- identities are
+      collision-free with real ids by construction, so careers never
+      double-count. first/last season + season count ride for display.
+      Rank unique 1..10; ties break on more recent last_season, then
+      player_id (byte-stable). Materialization: table.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - stat_name
+              - rank
+    columns:
+      - name: league_key
+        tests:
+          - not_null
+      - name: stat_name
+        tests:
+          - not_null
+      - name: rank
+        description: '1..10 within (league_key, stat_name).'
+        tests:
+          - not_null
+      - name: player_id
+        description: 'CBS player id of the record holder (two-way pseudo-ids and ui-only- synthetics included).'
+        tests:
+          - not_null
+      - name: seasons_played
+        description: 'Count of league-era seasons contributing to the total.'
+        tests:
+          - not_null
+      - name: first_season
+        tests:
+          - not_null
+      - name: last_season
+        tests:
+          - not_null
+      - name: stat_value
+        description: 'The career total.'
+        tests:
+          - not_null
+
   - name: mart_team_acquisition_channels
     description: >
       MLB-17: team production split by acquisition channel and departure type,

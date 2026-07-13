@@ -1,4 +1,95 @@
-# MLB-63 Walk-Back — Live Progress Log
+# MLB-63 Walk-Back + Almanac v2 — Live Progress Log
+
+## ALMANAC V2 (2026-07-13, per Kyle's re-sequenced approval — union first)
+
+- [x] V2-A: **Fielding sweep** — `mlb_stats.py --fielding` (yearByYear
+      group=fielding, one call/player over the 3,852-id crosswalk
+      population, idempotent) launched DETACHED; log:
+      `data/mlb_stats/fielding_extract_20260713.log`.
+      **BONUS DISCOVERY that saved a second sweep: the gamelog files ON
+      DISK already carry per-game `positionsPlayed`** (the loader just
+      never projected it) — so the "10 games this year" achievement
+      DATES need no re-fetch: new loader family `gamepos` re-walks the
+      same files → RAW.MLB_GAME_POSITIONS (1,931,131 rows / 3,855
+      players, loaded). Season-grain fielding remains the authority for
+      totals + pre-league seasons (the 2001 season's "20 games last
+      year" reads 2000).
+- [x] V2-B: **Shared eligibility model** — `int_cbs__eligibility_windows`:
+      the captured rule verbatim ("primary position, plus positions
+      played 20 games last year or 10 games this year"; "Everyone is
+      eligible at DH") as date-scoped AFTER-ACHIEVEMENT windows
+      (primary + prior-year-20 from opening day; in-season-10 from the
+      10th game's date, inclusive). Primary = DERIVED estimator
+      (prior-season argmax fielding games, current-season fallback) —
+      CBS serves no historic primary label; graded vs the 2026 captured
+      per-day eligible_positions (grade below). DH-for-all = slot
+      semantics, not stored windows; arrays floor to ['DH'] (matching
+      CBS's own display for fieldless hitters — and the Ohtani canary:
+      captured 900='DH' / 901='P', which the crosswalk scope guard
+      reproduces exactly).
+- [x] V2-C: **MLB-72 union layer LANDED** — `int_cbs__player_daily`
+      (CBS day-grain: attribution × engine, game→day aggregation, the
+      eligibility arrays, franchise names) UNION ALLs into
+      `int_player_daily`; the shared fact family
+      (fct_player_daily_performance → fct_player_position_pts) now
+      serves both leagues. Shared columns added both branches:
+      player_key (the cross-league grain — ui-only synthetics have no
+      numeric id), game_date, active_weight, provenance. New lenses on
+      fct_player_position_pts: weighted_active_pts (the CBS Best-Lineup
+      axis; ≡ active_pts wherever state is known) + rostered_pts (the
+      bench-ranking axis). Weekly facts take a matchup_period-is-not-
+      null guard (weekly grain needs platform periods; no-op for ESPN).
+      ESPN byte-neutrality verified: unit suite + almanac byte-diff
+      goldens (results below).
+- [x] V2-D: **Career-totals mart** — `mart_player_career_records`
+      (MLB-69 accumulation axis over int_cbs__player_season_stats,
+      top-10 per stat, seasons-span columns; sibling conventions of the
+      season book).
+- [ ] V2-E: **Renderer rebuild** (`output/cbs_almanac_sheets.py`) per the
+      approved blueprint — nav-first Home (#gid links, glossary,
+      All-League boards Season + All-Time), Records = best season ×
+      career, Standings = 2026 arc + 25y finishes, team pages = Best
+      Lineup current × all-time (slot template C/1B/2B/3B/SS/OF×3/DH/U/
+      P×9) + bench by rostered points; ACTIVE-franchise tabs only;
+      franchise_id-keyed with the aggregation isolated for the MLB-64
+      owner re-key.
+- [ ] V2-F: Dev render (`--league cbs-bsb`) for Kyle's eyeball — the
+      merge gate.
+
+### Eligibility grading (derived rule vs CBS's own 2026 captures)
+
+22,996 player-days compared (every captured roster-day with a priced
+game). First pass: 76.7% exact-set agreement — and the decomposition
+showed the misses were nearly all ONE thing: CBS lists DH only when
+it's a player's SOLE position (universal otherwise-unlisted), while we
+listed earned-DH alongside other positions (4,011 of the 4,054
+over-grant entries were exactly that). Fixed the array to CBS's display
+semantics (DH-unless-other-positions). Ohtani canary exact: 900 →
+['DH'], 901 → ['P'], matching CBS's cards. Post-fix re-grade: see the
+number below (re-run after the DH fix rebuild). The residual
+under-grant tail (~1,670 position-days: 1B 447, SS 362, OF 294, 2B 280,
+3B 262, C 24 — CBS granted, we didn't) is the primary-estimator +
+counting-timing class; SS 43 over-grants the reverse. Small enough that
+Best Lineups are barely sensitive; listed as question #6.
+
+### Almanac-v2 questions for Kyle (running list)
+
+6. **Primary-position estimator**: using fielding-argmax (last season,
+   else this season) for "primary position", NOT the year-end anchors'
+   primary_pos label (name-keyed, year-END timing, ambiguity class) —
+   the 2026 grading below measures how close that gets to CBS's actual
+   grants. Happy to switch to anchor-primary (or blend) if the grade
+   says otherwise.
+7. **Estimated-era Best Lineups are weighted**: 2004-2020 lineup slots
+   fill by weighted_active_pts = points × start-share estimator
+   (est-membership rows with NO estimator contribute 0 — conservative).
+   The team-page fidelity label states the era's provenance mix.
+8. **Rules-capture oddity** (no action needed for the almanac): the
+   2026-07-08 rules payload says add/drops DISABLED + trades NOT
+   allowed + weekly lineups — while 1,325 moves happened this season.
+   Likely a mid-break freeze snapshot (worth re-capturing at rollover
+   so the archived rules read true).
+
 
 Watch this file for real-time state:
 ```powershell

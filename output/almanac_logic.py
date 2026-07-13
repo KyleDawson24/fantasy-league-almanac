@@ -370,6 +370,13 @@ def get_optimal_team_selections(candidates, slot_caps):
     """
     from collections import defaultdict
 
+    def _identity(c):
+        # Used-tracking identity: player_key where present (the MLB-72
+        # cross-league grain -- CBS ui-only synthetics carry player_id
+        # NULL and would otherwise all collapse into one "player"),
+        # else player_id (pre-player_key callers and cached shapes).
+        return c.get('player_key') or c['player_id']
+
     # Group candidates by position. Input is already sorted by points
     # DESC within each position from the SQL ORDER BY.
     by_position = defaultdict(list)
@@ -405,7 +412,7 @@ def get_optimal_team_selections(candidates, slot_caps):
             cat = _slot_category(slot)
             eligible = [
                 c for c in by_position.get(slot, [])
-                if cat not in used[c['player_id']]
+                if cat not in used[_identity(c)]
             ]
             if not eligible:
                 continue
@@ -457,7 +464,7 @@ def get_optimal_team_selections(candidates, slot_caps):
         out['platform_points'] = best_player.get('position_pts')
         lineup.append(out)
 
-        used[best_player['player_id']].add(_slot_category(best_slot))
+        used[_identity(best_player)].add(_slot_category(best_slot))
         pending.remove(best_slot)  # removes one instance
 
     # Final sort: canonical baseball-card order. The selection above

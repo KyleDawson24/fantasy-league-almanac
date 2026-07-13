@@ -315,7 +315,7 @@ def get_all_league_team(season_year, matchup_period=None):
 # -------------------------------------------------------------------------
 
 
-_VALID_POINTS_TYPES = ('active', 'inactive', 'all')
+_VALID_POINTS_TYPES = ('active', 'inactive', 'all', 'weighted_active')
 
 
 def get_optimal_team_candidates(season_year=None, matchup_period=None,
@@ -359,6 +359,12 @@ def get_optimal_team_candidates(season_year=None, matchup_period=None,
         points_expr = 'sum(active_pts)'
     elif points_type == 'inactive':
         points_expr = 'sum(inactive_pts)'
+    elif points_type == 'weighted_active':
+        # The MLB-72 cross-era active lens: identical to 'active' where
+        # the state is known (ESPN; CBS captured/reconstructed eras),
+        # start-share-weighted on CBS's estimated era. The CBS almanac's
+        # Best Lineup axis.
+        points_expr = 'sum(weighted_active_pts)'
     else:  # 'all'
         points_expr = 'sum(active_pts + inactive_pts)'
 
@@ -377,7 +383,11 @@ def get_optimal_team_candidates(season_year=None, matchup_period=None,
 
     rows = query_snowflake(f"""
         SELECT
-            player_id,
+            -- player_key is the grain (MLB-72): 1:1 with player_id on ESPN
+            -- rows; the only identity on CBS ui-only synthetics (whose
+            -- player_id is NULL and would otherwise merge distinct players).
+            player_key,
+            MAX(player_id)    AS player_id,
             MAX(player_name)  AS player_name,
             MAX(display_name) AS display_name,
             MAX(pro_team)     AS pro_team,
@@ -385,9 +395,12 @@ def get_optimal_team_candidates(season_year=None, matchup_period=None,
             ROUND({points_expr}, 1) AS position_pts
         FROM fct_player_position_pts
         WHERE {where_sql}
-        GROUP BY player_id, position
+        GROUP BY player_key, position
         HAVING {points_expr} > 0
-        ORDER BY position, position_pts DESC, player_id
+        -- player_id first keeps the ESPN tie-break byte-identical (numeric
+        -- order, not the stringified key's); player_key settles CBS rows
+        -- whose player_id is NULL.
+        ORDER BY position, position_pts DESC, player_id, player_key
     """, params)
 
     return rows

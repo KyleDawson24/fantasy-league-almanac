@@ -176,6 +176,7 @@ SLOT_ORDER = {
     'RF': 90,
     'OF': 100,
     'DH': 110,
+    'U': 115,   # CBS's utility slot (ESPN spells it UTIL; ESPN rows never emit 'U')
     'UTIL': 120,
     'SP': 130,
     'RP': 140,

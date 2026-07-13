@@ -40,12 +40,20 @@ for the ESPN league.
   moves 2004–2020, so those years ride a Start%/Own% conditional
   estimator from the anchors' global start rates.
   `mart_team_points_reconciliation` grades the whole reconstruction
-  against 25 seasons of official finishes: **5–13% mean absolute error
-  2003–2019, 2.4–10.8% 2021–2025** (2001–2002 have no anchors and grade
-  honestly worse). The two systematic residuals — the estimator era
-  undershoots ~10–13%, the early lineup-log years overshoot ~8–10%
-  fading to ~0 by 2024–25 — are documented in the mart, not calibrated
-  away.
+  against 25 seasons of official finishes: **5–13.5% mean absolute error
+  2003–2019, 2.4–4.7% 2021–2025** (2001–2002 have no anchors and grade
+  honestly worse). The remaining systematic residuals — the estimator
+  era undershoots ~8–13% from 2011 on (roughly unbiased 2005–2010), and
+  2021–2023 official *pitching* runs ~8–11% below reconstructed while
+  hitting tracks within ~3–5% (the signature of a team-level pitching
+  cap CBS later removed: both disciplines converge in 2024–25 and the
+  current rules show `max_total: No Limit`) — are documented in the
+  mart, not calibrated away. The census honesty check: the transaction
+  log is nearly complete on drops — 8,473 of them close stints, and
+  only 33 true missing-departure cases remain across 25 years (a
+  window-before-filter pairing bug had initially made every drop
+  invisible as a closer; the reconciliation's own decomposition caught
+  it).
   - **Coverage extension:** the pre-archive population (year-end-roster
     names the FA-only archive never held — Bonds, Randy Johnson, and
     every star who retired before 2026) enters via a name→MLBAM

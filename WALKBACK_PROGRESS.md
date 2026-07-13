@@ -72,24 +72,33 @@ It is committed at every checkpoint, so the branch on GitHub mirrors it.
 3. (resolved) The `/teams/{id}` link space matches the franchise-id
    space after all — the 2015 'mismatch' was Kimball Drives genuinely
    changing ids across 2020.
-4. **Two SYSTEMATIC residuals in the report card — documented, not
-   calibrated away** (both are estimation-policy calls if you ever
-   want them tighter):
-   - The start-share era (2004-2020) UNDERSHOOTS ~10-13%, uniformly:
-     your Start%/Own% conditional estimator is conservative for THIS
-     league — a competitive 16-team league starts its rostered players
-     more than the global CBS average does. A league-level calibration
-     factor could close it, but that's a fudge-knob decision, not a
-     bug fix.
-   - The early lineup-log years (2021-2022) OVERSHOOT ~8-10% (14-16 of
-     16 teams over), fading to ~0 by 2024-25: older logs are lossier
-     (missed drops + missed reserve moves), so anchor_hold /
-     prior_inverse credit too many active days. The missing_departure
-     flag already marks the worst class; a tighter truncation policy
-     (e.g. end never-reacquired drops at last lineup event) is
-     possible but speculative.
-   Nothing needed from you unless you want either policy changed —
-   the almanac will carry the per-season grades as-is.
+4. **(SUPERSEDED 2026-07-13 — my "two systematic residuals" story was
+   half wrong, and your skepticism found the truth.)** Your questions
+   forced a discipline-split decomposition (hitting vs pitching, each
+   vs the UI standings' own split), which revealed:
+   - The 2021-22 "overshoot from lossier logs" was mostly **MY BUG**:
+     the stint-pairing lead() windowed over acquisitions only (the
+     WHERE ran before the window), so NO logged drop ever closed a
+     stint — every dropped player's FA-period games kept crediting
+     the old team (streamed pitchers = the churn class, which is why
+     it looked pitching-heavy). Fixed; the lineup era now grades
+     2.4-4.7% mean abs (was 2.4-10.8), and the "lossy on drops"
+     census collapsed from ~8,000 flags to **33 true missing
+     departures** in 25 years. The log is nearly complete.
+   - The residual that SURVIVES the fix: **2021-23 official PITCHING
+     runs ~8-11% below reconstructed pitching while hitting tracks
+     within ~3-5%, and both disciplines converge in 2024-25.** Our
+     credited pitching is flat across years; the OFFICIAL side
+     step-jumped +~550/team in 2024. That's the signature of a
+     team-level pitching cap (max games/innings) that was removed
+     for 2024 — the current rules show `max_total: "No Limit"` on
+     every slot, so the knob exists. **QUESTION FOR YOU: did the
+     league have a max-games/innings-pitched cap through 2023?**
+     If you can confirm (or check the rules page's year switcher,
+     like the rosters), we could even model it per-era and collapse
+     the 2021-23 deltas.
+   - Start-share era stands, with finer texture: roughly unbiased
+     2005-2010, undershooting ~8-13% from 2011 on.
 
 ## Log
 
@@ -157,6 +166,16 @@ It is committed at every checkpoint, so the branch on GitHub mirrors it.
   / 1,142 total pts (2002) now lead the book, as they should.
 - SHIP: schema docs + tests for all six models (grain uniqueness,
   provenance/state enums, key not_nulls) — 33/33 green.
+- **PAIRING FIX (2026-07-13, prompted by Kyle's error-decomposition
+  questions)**: `paired`'s lead() now windows over BOTH event kinds
+  before the acquisition filter — logged drops/trade_outs actually
+  close stints (8,473 + 658 of them; close_type was previously never
+  'drop'). Wheeler's "missing departure" was a logged 8/24 drop the
+  old code ignored. Report card after: **2003-2019 = 5.1-13.5%,
+  2021-25 = 2.4-4.7% mean abs**; anchor audit 99.83% (the 18
+  uncovered = real anchor_reopen_needed log gaps, previously masked);
+  missing_departure census 33 total. Remaining 2021-23 delta is
+  official-side pitching suppression (suspected cap — see issue #4).
 - BONUS — MLB-54's dual-source verify, run NOW instead of at rollover
   (the API snapshot + UI capture already overlap): 2026 swept
   full-season via start_row (1,325 moves / 45 pages), API log

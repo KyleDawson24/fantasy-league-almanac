@@ -990,16 +990,21 @@ models:
       per (league_key, season_year, franchise_id). The official total is
       what CBS actually awarded; reconstructed_active_fpts is what the
       walk-back attributes (sum of calculated_fpts x active_weight).
-      Post-coverage-extension grades: 5-13% mean absolute error 2003-2019,
-      2.4-7.5% 2021-2025 (2001-2002 have no roster anchors and grade
-      honestly worse). Two SYSTEMATIC residuals, both documented and
-      provenance-visible rather than calibrated away: the start-share era
-      (2004-2020) UNDERSHOOTS ~10-13% (the global Start%/Own% estimator is
-      conservative for a competitive league), and the early lineup-log
-      years (2021-2022) OVERSHOOT ~8-10% uniformly (lossier logs credit too
-      many active days via anchor_hold/prior_inverse), fading to ~0 by
-      2024-2025. CBS's sparse pre-2023 IRSTR also under-counts the OFFICIAL
-      side slightly (the MLB-62 finding).
+      Grades after the coverage extension AND the 2026-07-13 stint-pairing
+      fix: 5-13.5% mean absolute error 2003-2019, 2.4-4.7% 2021-2025
+      (2001-2002 have no roster anchors and grade honestly worse; 2020 is
+      the thin COVID season). Two SYSTEMATIC residuals, documented and
+      provenance-visible rather than calibrated away: (a) the start-share
+      era rides the estimator -- roughly unbiased 2005-2010, undershooting
+      ~8-13% 2011-2020 (the global Start%/Own% ratio runs conservative for
+      a competitive league in the later era); (b) 2021-2023 OFFICIAL
+      pitching runs ~8-11% below reconstructed pitching while hitting
+      tracks within ~3-5% and both disciplines converge in 2024-2025 --
+      the signature of a team-level pitching cap (max games/innings per
+      position; the current rules show max_total 'No Limit', so the knob
+      exists and was plausibly numeric through 2023 -- commissioner
+      confirmation pending). CBS's sparse pre-2023 IRSTR also
+      under-counts the OFFICIAL side slightly (the MLB-62 finding).
     tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:

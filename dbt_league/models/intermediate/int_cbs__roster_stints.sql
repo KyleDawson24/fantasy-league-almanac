@@ -165,23 +165,35 @@ changes as (
 ),
 
 paired as (
-    select
-        c.league_key,
-        c.season_year,
-        c.franchise_id,
-        c.name_key,
-        c.event_date   as stint_start,
-        c.event_detail as open_channel,
-        lead(c.event_date) over (
-            partition by c.league_key, c.season_year, c.franchise_id, c.name_key
-            order by c.event_date, c.row_seq desc, c.entry_seq desc
-        )              as next_change_date,
-        lead(c.event_detail) over (
-            partition by c.league_key, c.season_year, c.franchise_id, c.name_key
-            order by c.event_date, c.row_seq desc, c.entry_seq desc
-        )              as next_change_detail
-    from changes c
-    where c.event_kind = 'acquisition'
+    -- The lead() must see BOTH event kinds: changes strictly alternate,
+    -- so an acquisition's next change IS its departure (or stream end).
+    -- The acquisition filter therefore sits OUTSIDE the window --
+    -- filtering inside the same select would run lead() over
+    -- acquisitions only, skipping every departure, and no stint could
+    -- ever close on a drop (the 2026-07-13 pairing bug: all 20,003
+    -- stints closed season_end/next-add and missing_departure flooded
+    -- with false positives like a logged-and-ignored Wheeler drop).
+    select *
+    from (
+        select
+            c.league_key,
+            c.season_year,
+            c.franchise_id,
+            c.name_key,
+            c.event_kind,
+            c.event_date   as stint_start,
+            c.event_detail as open_channel,
+            lead(c.event_date) over (
+                partition by c.league_key, c.season_year, c.franchise_id, c.name_key
+                order by c.event_date, c.row_seq desc, c.entry_seq desc
+            )              as next_change_date,
+            lead(c.event_detail) over (
+                partition by c.league_key, c.season_year, c.franchise_id, c.name_key
+                order by c.event_date, c.row_seq desc, c.entry_seq desc
+            )              as next_change_detail
+        from changes c
+    )
+    where event_kind = 'acquisition'
 ),
 
 stints as (

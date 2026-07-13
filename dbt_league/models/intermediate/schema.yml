@@ -251,12 +251,16 @@ models:
       log leaves open. Openings the log never carries (drafts were never
       logged) are recovered implicitly: anchored players with no in-season
       acquisition, and departure-first players, get synthetic season-start
-      openings. 20,003 stints across 2001-2025; every one of the 10,449
-      year-end anchor states is reproduced by a season-end stint (the A3
-      audit, 100%). Fidelity flags ride per row and are never silently
-      resolved: the log is lossy on drops in every era (~8,000 open ends),
-      so missing_departure marks them and the effective view truncates at
-      the player's next acquisition elsewhere.
+      openings. 20,003 stints across 2001-2025; 99.83% of the 10,449
+      year-end anchor states are reproduced by a season-end stint (the A3
+      audit -- the 18 exceptions are anchor_reopen_needed rows, real
+      missed re-acquisitions). The log itself is nearly COMPLETE on
+      departures: after the 2026-07-13 pairing fix (lead() must window
+      over both event kinds before the acquisition filter -- filtering
+      first made every drop invisible as a closer), 8,473 drops + 658
+      trade_outs close their stints and only 33 true missing_departure
+      cases remain across 25 years; the effective view's next-acquisition
+      truncation stays as their bound.
     tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
@@ -297,7 +301,7 @@ models:
       - name: on_year_end_anchor
         description: 'The (season, franchise, player) appears on the year-end roster anchor.'
       - name: missing_departure
-        description: 'Anchored era (2003+), the stint runs to season_end but the player is NOT on the anchor: the log missed the departure. The effective view truncates these at the player''s next acquisition elsewhere; never-reacquired ones are the walk-back''s known overshoot residual.'
+        description: 'Anchored era (2003+), the stint runs to season_end but the player is NOT on the anchor: the log genuinely missed the departure. Rare -- 33 cases across 25 years post pairing-fix. The effective view truncates these at the player''s next acquisition elsewhere.'
       - name: anchor_reopen_needed
         description: 'The anchor shows the player but the log''s last word was a departure -- a missed re-acquisition, surfaced not invented.'
       - name: no_anchor_era
@@ -315,8 +319,9 @@ models:
       6/15 = out of the lineup 6/15), while season_end closes stay inclusive
       (+1 day). Single-rostering is then enforced by truncation:
       attribution_end_exclusive caps at the player's next acquisition
-      anywhere in the league (a player is on one roster at a time), which is
-      also what bounds the lossy-log missing_departure class.
+      anywhere in the league (a player is on one roster at a time), which
+      also bounds the rare true-missing_departure class (33 across 25
+      years).
     columns:
       - name: base_end_exclusive
         description: 'stint_end for drop/trade_out closes (departure day excluded), stint_end + 1 for season_end closes (anchor day included).'

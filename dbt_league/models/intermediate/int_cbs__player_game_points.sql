@@ -42,9 +42,12 @@
 -- Wide columns speak the league's own vocabulary (cbs_key, lowercased):
 -- r/rbi/bb/sb/tb for batting; w/s/hd/cg/qs/outs/irstr/k/ha/bbi/er for
 -- pitching (outs IS the INN category at pay granularity); gs/ir/irs ride
--- unpriced as derivation context. calculated_fpts = the game's total under
--- current rules -- current weights applied universally, historical rows
--- included, per the project's cross-season comparability convention.
+-- unpriced as derivation context. h/ab/hbp/sf (batting) and l (pitching)
+-- ride unpriced as DISPLAY context -- the shared daily contract renders
+-- slash lines (AVG/OBP/SLG, W-L-Sv) that CBS's scored categories alone
+-- can't compute. calculated_fpts = the game's total under current rules
+-- -- current weights applied universally, historical rows included, per
+-- the project's cross-season comparability convention.
 
 {{ config(materialized='view') }}
 
@@ -180,6 +183,15 @@ game_wide as (
         sum(case when canonical_key = 'inherited_runners'        then stat_value else 0 end) as ir,
         sum(case when canonical_key = 'inherited_runners_scored' then stat_value else 0 end) as irs,
 
+        -- Unpriced display context (slash-line inputs for the shared
+        -- daily contract; canonical keys are discipline-distinct in the
+        -- map, so no group guard is needed)
+        sum(case when canonical_key = 'hits'         then stat_value else 0 end) as h,
+        sum(case when canonical_key = 'at_bats'      then stat_value else 0 end) as ab,
+        sum(case when canonical_key = 'hit_by_pitch' then stat_value else 0 end) as hbp,
+        sum(case when canonical_key = 'sac_flies'    then stat_value else 0 end) as sf,
+        sum(case when canonical_key = 'losses'       then stat_value else 0 end) as l,
+
         -- Per-category point contributions
         sum(case when canonical_key = 'runs'         then stat_points else 0 end) as r_pts,
         sum(case when canonical_key = 'rbi'          then stat_points else 0 end) as rbi_pts,
@@ -227,6 +239,7 @@ select
     g.r, g.rbi, g.bb, g.sb, g.tb,
     g.w, g.s, g.hd, g.cg, g.qs, g.outs, g.irstr, g.k, g.ha, g.bbi, g.er,
     g.gs, g.ir, g.irs,
+    g.h, g.ab, g.hbp, g.sf, g.l,
     -- Unscored game-event flag for the record book / retrospective. An
     -- official individual no-hitter is a 9+ inning complete game with zero
     -- hits allowed -- pure same-line aggregates, no base-state needed.

@@ -53,8 +53,58 @@
       P×9) + bench by rostered points; ACTIVE-franchise tabs only;
       franchise_id-keyed with the aggregation isolated for the MLB-64
       owner re-key.
-- [ ] V2-F: Dev render (`--league cbs-bsb`) for Kyle's eyeball — the
-      merge gate.
+- [x] V2-F: Dev render (`--league cbs-bsb`) — 19 tabs on the dev sheet
+      2026-07-13; Kyle's first review same day: "promising, much better
+      shape than v1" + the make-it-ESPN-exact directive below.
+- [ ] **V2.1 (Kyle's review round 1, 2026-07-13): Home page ESPN-exact,
+      via the SHARED builders — approach (a) chosen ("get something
+      quickly", with the (b)-refactor gains documented in BRAINTHOUGHTS
+      Wishlist).** Landed this round:
+      * **Owner identity for CBS** (Kyle: "every team MUST have an owner
+        and ideally a sturdy owner id"): minted `cbs-` owner-id slugs in
+        the new `cbs_team_owners` seed, names on the SHARED
+        owner_nicknames seed, flowing through the SAME dim_owner →
+        dim_team_owner chain ESPN uses. Multi-owner display per Kyle's
+        spec: first names comma-joined ("Bob, Sanford" — Hot Dog
+        Junkies; "Jim, Sam"; "Patrick, Travis"). Current-era only;
+        history lands with MLB-64.
+      * **Franchise registry seed** (`cbs_franchises`, all 34 ids):
+        curated abbrevs because CBS's own capture abbrevs are UNUSABLE
+        as identity (T2 and T3 each appear on two teams; AH/KR are
+        stale pre-rename). Continuity pairs (13/30 Fulton, 22/28 Kline,
+        14/17 Bent Spokes, 26/31 VCF) deliberately share an abbrev.
+        Abbrevs are proposals — tweak the seed freely.
+      * **Union contract display columns filled**: the engine now carries
+        H/AB/HBP/SF/L as unpriced display context (slash-line inputs),
+        and CBS daily rows carry pro_team (captured MLB abbrevs),
+        team_abbrev (seed), owner_name (current era; era-honest NULL on
+        history) — no more contract-lying zeros/nulls.
+      * **Home boards through the ESPN builders**:
+        format_all_league_team_row_with_deviation + _deviation_by_slot
+        (+ a player_key identity fix so ui-only alternates surface) +
+        _merge_home_bands + home_nav_link. Season-to-Date board =
+        ESPN's exact 10-column shape (Slot|Team|Player|Fantasy
+        Team|Owner|Points|Slash|Stat Line|Total-Pts Best), plain Points
+        per Kyle (season-long numbers, no boxscore). All-Time board =
+        same shape with Kyle's column semantics: MLB Team =
+        current-or-blank (falls out of MAX_BY(pro_team, game_date) —
+        retired players' latest rows predate the capture era), Fantasy
+        Team = the player's franchises by weighted active points capped
+        at 3, Owner blank until MLB-64. Deviation lens = new
+        points_type='rostered' (≡ ESPN's 'all' where states are known;
+        additionally sees CBS's estimated era). Deviation label drops
+        "& FA" (no FA lens in CBS attribution — the one wording
+        deviation). Styling mirrors ESPN's restrained Home set
+        (bold-14/pale-blue/navy board headers/K+O number formats/ESPN
+        column widths) — the navy-everywhere v2 styling that read as
+        "random formatting noise" is gone.
+      * **platform_points question (Kyle #1) answered in code archaeology,
+        no change needed**: the board field named platform_points has
+        carried CALCULATED points since v1.1.1 (deliberate rename-debt,
+        tracked in BRAINTHOUGHTS) — so "use calculated where platform
+        ought to be" is already the design; CBS rows flow the same path.
+      * Records/Standings/team pages: NOT touched this round (Kyle:
+        "let's start there" = Home first).
 
 ### Eligibility grading (derived rule vs CBS's own 2026 captures)
 

@@ -130,9 +130,16 @@ seeds:
 
   - name: owner_nicknames
     description: >
-      Display name resolution for team owners. Maps ESPN's owner GUID to
-      a preferred_name override; defaults to first_name when preferred_name
+      Display name resolution for team owners -- THE preferred-names
+      source across platforms (Kyle, 2026-07-13). Maps an owner id to a
+      preferred_name override; defaults to first_name when preferred_name
       is empty. One row per league member.
+
+      Owner ids by platform: ESPN member GUIDs (platform-served via
+      stg_team_owners); CBS 'cbs-' slugs minted in the cbs_team_owners
+      seed (CBS serves no owner identity -- names here are the ONLY name
+      source for CBS owners, normalized from the year-end report's free
+      text: 'JACK KLINE' -> Joel Kimball).
 
       Joined into dim_owner (v1.2 owner-display work): owner_display =
       preferred_name when set, else proper-cased "First Last". The raw
@@ -140,16 +147,63 @@ seeds:
       facts unchanged; owner_display is the curated alternative.
     columns:
       - name: owner_id
-        description: 'ESPN GUID for the team owner. Stable across seasons.'
+        description: 'Owner id: ESPN GUID or CBS ''cbs-'' slug. Stable across seasons.'
         tests:
           - not_null
           - unique
       - name: first_name
-        description: 'First name as registered with ESPN.'
+        description: 'First name (ESPN: as registered; CBS: normalized from the year-end report). Drives the multi-owner comma display on CBS boards.'
       - name: last_name
-        description: 'Last name as registered with ESPN.'
+        description: 'Last name.'
       - name: preferred_name
         description: 'Override for first_name when the owner prefers a different rendering (nickname, alternate spelling). Empty means fall back to first_name.'
+
+  - name: cbs_franchises
+    description: >
+      The CBS franchise registry: one row per franchise_id ever seen in
+      the UI standings (34 ids, 2001-2025 + the 2026 actives), with the
+      CURATED display abbrev and the franchise's latest name for
+      reference. Curated because CBS's own team_abbr capture is unusable
+      as an identity ('T2' and 'T3' each appear twice; 'AH'/'KR' are
+      stale pre-rename values). Known id-discontinuity pairs
+      (Foster's Folly 13/30, Kimball Drives 22/28, Bent Spokes 14/17,
+      Victory Circle Firecrackers 26/31) deliberately SHARE an abbrev --
+      they are one franchise to the humans; MLB-64's continuity overlay
+      formalizes it. Abbrevs are display proposals -- tweak freely.
+    columns:
+      - name: league_key
+        tests:
+          - not_null
+      - name: franchise_id
+        tests:
+          - not_null
+      - name: abbrev
+        description: 'Short display code for boards and matrices (2-4 chars, ESPN-abbrev style). NOT unique by design (continuity pairs share).'
+        tests:
+          - not_null
+      - name: franchise_name
+        description: 'Latest known name, for human reference when editing this seed. Display names come from the season-keyed sources, not here.'
+
+  - name: cbs_team_owners
+    description: >
+      The CBS franchise -> owner bridge, CURRENT ERA ONLY (the era the
+      seed can attest -- historical custody is MLB-64). Minted 'cbs-'
+      owner_id slugs join the shared owner_nicknames seed for names.
+      Co-owned teams carry multiple rows (Junk Drawer All-Stars: Barry Sexton +
+      Solomon Delgado). Sourced from the 2025 year-end report's owner
+      strings; every ACTIVE franchise must have at least one row (the
+      boards render Owner from it).
+    columns:
+      - name: league_key
+        tests:
+          - not_null
+      - name: franchise_id
+        tests:
+          - not_null
+      - name: owner_id
+        description: 'FK into owner_nicknames.'
+        tests:
+          - not_null
 
   - name: player_nicknames
     description: >

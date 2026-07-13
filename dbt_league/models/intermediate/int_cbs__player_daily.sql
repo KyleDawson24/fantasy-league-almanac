@@ -46,6 +46,13 @@
 -- so (league, season, day, team, player) is unique too. A mid-day trade
 -- (two franchises credited on one date) stays two rows via team_id, same
 -- as ESPN's multi-slot days.
+--
+-- DAG-edge note (same class as the fct_cbs_player_game_attribution ref
+-- above): this intermediate reads two core dims -- dim_team_owner for the
+-- current-era owner display and the cbs_franchises seed for abbrevs --
+-- because the union contract denormalizes owner/abbrev onto daily rows
+-- exactly where ESPN's staging does. No cycle: neither dim reads the
+-- daily chain.
 
 {{ config(materialized='table') }}
 
@@ -101,12 +108,32 @@ franchise_names as (
     from {{ ref('stg_cbs__ui_standings') }}
 ),
 
--- 2026 captured deployed slot (the attribution fact carries the A/RS state
--- but not the slot itself).
+-- 2026 captured deployed slot + MLB team (the attribution fact carries the
+-- A/RS state but not the slot or the pro team).
 captured_slots as (
-    select league_key, roster_date, player_id, max(roster_pos) as roster_pos
+    select
+        league_key,
+        roster_date,
+        player_id,
+        max(roster_pos) as roster_pos,
+        max(pro_team)   as pro_team
     from {{ ref('stg_cbs__rosters') }}
     group by 1, 2, 3
+),
+
+franchises as (
+    select league_key, franchise_id, abbrev
+    from {{ ref('cbs_franchises') }}
+),
+
+-- Current-era owner display (dim_team_owner's CBS branch is
+-- current-season-only until MLB-64 brings custody history) -- so
+-- owner_name fills on current-season rows and stays era-honest NULL on
+-- historic ones, mirroring how ESPN rows carry their platform-served
+-- owner string.
+owners as (
+    select league_key, season_year, team_id, owner_display
+    from {{ ref('dim_team_owner') }}
 ),
 
 -- Game grain -> day grain. State/provenance are day-scoped upstream, so
@@ -135,6 +162,10 @@ day_base as (
         sum(e.k)     as k,     sum(e.ha)    as ha,    sum(e.bbi) as bbi,
         sum(e.er)    as er,    sum(e.nh)    as nh,
 
+        -- Unpriced display context (slash-line inputs)
+        sum(e.h)     as h,     sum(e.ab)    as ab,    sum(e.hbp) as hbp,
+        sum(e.sf)    as sf,    sum(e.l)     as l,
+
         sum(e.r_pts)    as r_pts,    sum(e.rbi_pts) as rbi_pts,
         sum(e.bb_pts)   as bb_pts,   sum(e.sb_pts)  as sb_pts,
         sum(e.tb_pts)   as tb_pts,
@@ -161,6 +192,7 @@ day_base as (
 with_slots as (
     select
         d.*,
+        cs.pro_team,
         case
             when d.provenance = 'captured'
                 then coalesce(cs.roster_pos, iff(d.active_weight = 1, 'ACT', 'RS'))
@@ -216,14 +248,14 @@ select
     to_number(to_char(d.game_date, 'YYYYMMDD'))  as scoring_period,
     d.franchise_id                               as team_id,
     coalesce(d.captured_team_name, fn.team_name) as team_name,
-    cast(null as varchar)                        as team_abbrev,
-    cast(null as varchar)                        as owner_name,
+    fr.abbrev                                    as team_abbrev,
+    ow.owner_display                             as owner_name,
     try_to_number(d.cbs_player_id)::integer      as player_id,
     d.cbs_player_name                            as player_name,
     d.cbs_player_name                            as display_name,
     coalesce(dp.position,
              iff(x.stat_group_scope = 'pitching', 'P', 'DH')) as position,
-    cast(null as varchar)                        as pro_team,
+    d.pro_team,
     coalesce(el.eligible_slots,
              iff(x.stat_group_scope = 'pitching',
                  array_construct('P'), array_construct('DH'))) as eligible_slots,
@@ -246,8 +278,10 @@ select
     cast(null as float)                          as platform_hitting_pts,
     cast(null as float)                          as platform_pitching_pts,
 
-    -- Hitting counting stats (CBS scores R/RBI/BB/SB/TB; the rest 0)
-    0 as h, 0 as ab, d.bb as b_bb, 0 as b_so, 0 as hbp, 0 as sf, 0 as hr,
+    -- Hitting counting stats (CBS scores R/RBI/BB/SB/TB; H/AB/HBP/SF ride
+    -- as unpriced display context for slash lines; the rest 0)
+    d.h as h, d.ab as ab, d.bb as b_bb, 0 as b_so, d.hbp as hbp,
+    d.sf as sf, 0 as hr,
     d.r as r, d.rbi as rbi, d.sb as sb, 0 as cs, d.tb as tb,
     0 as singles, 0 as doubles, 0 as triples, 0 as xbh, 0 as gdp,
     0 as b_ibb, 0 as cyc,
@@ -260,8 +294,9 @@ select
     0 as gdp_pts, 0 as b_ibb_pts, 0 as cyc_pts,
 
     -- Pitching counting stats (W/S->SV/HD->HLD/CG/QS/OUTS/K/HA->P_H/
-    -- BBI->P_BB/ER scored; IRSTR rides only in the totals; the rest 0)
-    d.w as w, 0 as l, d.k as k, d.er as er, d.outs as outs, d.qs as qs,
+    -- BBI->P_BB/ER scored; L rides as unpriced display context for the
+    -- W-L-Sv decision line; IRSTR rides only in the totals; the rest 0)
+    d.w as w, d.l as l, d.k as k, d.er as er, d.outs as outs, d.qs as qs,
     d.s as sv, d.hd as hld, d.ha as p_h, d.bbi as p_bb, 0 as p_hr, 0 as p_r,
     d.cg as cg, 0 as blk, 0 as wp, 0 as hbp_p, 0 as blsv, d.nh as nh,
     0 as pg, 0 as pk, 0 as sho,
@@ -289,6 +324,13 @@ left join franchise_names fn
     on d.league_key = fn.league_key
     and d.season_year = fn.season_year
     and d.franchise_id = fn.franchise_id
+left join franchises fr
+    on d.league_key = fr.league_key
+    and d.franchise_id = fr.franchise_id
+left join owners ow
+    on d.league_key = ow.league_key
+    and d.season_year = ow.season_year
+    and d.franchise_id = ow.team_id
 left join display_position dp
     on d.league_key = dp.league_key
     and d.cbs_player_id = dp.cbs_player_id

@@ -39,11 +39,27 @@ with owners as (
         partition by league_key, owner_id
         order by season_year desc
     ) = 1
+
+    union all
+
+    -- CBS owners (MLB-72 follow-on): the platform serves no owner
+    -- identity, so the spine rows come from the curated bridge and the
+    -- names ride entirely on the owner_nicknames seed (the coalesces
+    -- below). Distinct owner_ids by construction ('cbs-' slugs vs ESPN
+    -- member GUIDs), so the union can't collide.
+    select distinct
+        league_key,
+        owner_id,
+        cast(null as varchar) as first_name,
+        cast(null as varchar) as last_name
+    from {{ ref('stg_cbs__team_owners') }}
 ),
 
 nicknames as (
     select
         owner_id,
+        nullif(trim(first_name), '')     as first_name,
+        nullif(trim(last_name), '')      as last_name,
         nullif(trim(preferred_name), '') as preferred_name
     from {{ ref('owner_nicknames') }}
 )
@@ -51,8 +67,10 @@ nicknames as (
 select
     o.league_key,
     o.owner_id,
-    o.first_name,
-    o.last_name,
+    -- Seed names backfill platforms that serve none (CBS); a platform-served
+    -- name always wins, so ESPN rows are untouched.
+    coalesce(o.first_name, n.first_name) as first_name,
+    coalesce(o.last_name, n.last_name)   as last_name,
     n.preferred_name,
     -- Fallback (no preferred_name set) matches the extract's title-cased
     -- owner_name so unset owners don't regress: ESPN stores some names
@@ -62,7 +80,8 @@ select
     -- verbatim, so nicknames + intentional casing (McAvery) come through.
     coalesce(
         n.preferred_name,
-        initcap(trim(o.first_name)) || ' ' || initcap(trim(o.last_name))
+        initcap(trim(coalesce(o.first_name, n.first_name)))
+            || ' ' || initcap(trim(coalesce(o.last_name, n.last_name)))
     ) as owner_display
 from owners o
 left join nicknames n

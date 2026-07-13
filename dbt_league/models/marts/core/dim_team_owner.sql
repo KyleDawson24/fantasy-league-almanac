@@ -28,3 +28,25 @@ inner join {{ ref('dim_owner') }} do
     on sto.league_key = do.league_key
     and sto.owner_id = do.owner_id
 group by 1, 2, 3
+
+union all
+
+-- CBS branch (MLB-72 follow-on). Co-owner display per Kyle's 2026-07-13
+-- board spec: FIRST NAMES, comma-joined ("Bob, Sanford") -- CBS is the
+-- first league with co-owned teams, so this sets the multi-owner
+-- convention; a single owner shows their full preferred name, same as
+-- every ESPN row. Current-era rows only until MLB-64's chain-of-custody
+-- brings owner history.
+select
+    sto.league_key,
+    sto.season_year,
+    sto.team_id,
+    iff(count(*) > 1,
+        listagg(do.first_name, ', ')
+            within group (order by do.first_name),
+        max(do.owner_display)) as owner_display
+from {{ ref('stg_cbs__team_owners') }} sto
+inner join {{ ref('dim_owner') }} do
+    on sto.league_key = do.league_key
+    and sto.owner_id = do.owner_id
+group by 1, 2, 3

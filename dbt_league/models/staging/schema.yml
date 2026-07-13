@@ -416,6 +416,33 @@ models:
         tests:
           - not_null
 
+  - name: stg_cbs__team_owners
+    description: >
+      The CBS team -> owner bridge in stg_team_owners' exact grain, so the
+      shared owner dimension chain (dim_owner -> dim_team_owner) serves
+      both platforms. Seed-curated identity (CBS serves no owner ids;
+      'cbs-' slugs minted in cbs_team_owners, names on the shared
+      owner_nicknames seed). CURRENT-ERA ONLY: rows stamp the latest
+      captured season -- historical custody is MLB-64's chain-of-custody
+      work, which grows this staging per-season with no shape change.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - season_year
+              - team_id
+              - owner_id
+    columns:
+      - name: team_id
+        description: 'CBS franchise_id (the facts'' team_id).'
+        tests:
+          - not_null
+      - name: owner_id
+        description: 'Minted ''cbs-'' slug; FK into owner_nicknames via dim_owner.'
+        tests:
+          - not_null
+
   - name: stg_cbs__standings
     description: >
       CBS adapter (#2) F7 standings -- the platform-DELIVERED period-end

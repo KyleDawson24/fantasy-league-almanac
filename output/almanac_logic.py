@@ -656,6 +656,11 @@ def _deviation_by_slot(active_rows, all_rows):
     him to LF and someone else to DH). The column means "best at this slot
     incl. bench & FA," not "untapped value not already started elsewhere."
     """
+    def _identity(row):
+        # player_key where present (MLB-72: CBS ui-only synthetics carry
+        # player_id NULL), else player_id -- same fallback as the selector.
+        return row.get('player_key') or row.get('player_id')
+
     all_by_slot = {row.get('slot_label'): row for row in all_rows}
     deviations = {}
     for row in active_rows:
@@ -663,8 +668,8 @@ def _deviation_by_slot(active_rows, all_rows):
         alt = all_by_slot.get(label)
         if (
             alt
-            and alt.get('player_id') is not None
-            and alt.get('player_id') != row.get('player_id')
+            and _identity(alt) is not None
+            and _identity(alt) != _identity(row)
         ):
             deviations[label] = alt
     return deviations

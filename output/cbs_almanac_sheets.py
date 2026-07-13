@@ -58,7 +58,22 @@ import gspread
 import db
 from db import league_predicate, query_snowflake
 from almanac_data import get_optimal_team_candidates
-from almanac_logic import get_optimal_team_selections
+# Shared board machinery ((a) reuse per Kyle 2026-07-13): the CBS Home
+# mirrors the ESPN Home by CALLING its builders, not by imitating them.
+# The private imports are deliberate and noted in BRAINTHOUGHTS as the
+# (b)-refactor seam -- promoting these to a shared library module.
+from almanac_logic import (
+    _HOME_SCORING_CALLOUT,
+    _deviation_by_slot,
+    _merge_home_bands,
+    get_optimal_team_selections,
+)
+from almanac_render import (
+    HOME_DEVIATION_LABEL,
+    HOME_HEADER,
+    format_all_league_team_row_with_deviation,
+    home_nav_link,
+)
 from formatters import fmt_ip, format_top_scorer_stats_line
 from sheets_writer import _get_authorized_client
 
@@ -259,15 +274,18 @@ def _synthesize_universal_slots(candidates):
     return out
 
 
-def get_best_lineup(entity_id=None, season_year=None):
-    """The Best Lineup for a scope: weighted-active candidates from the
-    unified position fact -> the shared gap-based selector over the CBS
-    slot template -> CBS stat-line enrichment. entity_id=None gives the
-    league-wide All-League boards; season_year=None gives all-time."""
+def get_best_lineup(entity_id=None, season_year=None,
+                    points_type='weighted_active'):
+    """The Best Lineup for a scope: candidates from the unified position
+    fact -> the shared gap-based selector over the CBS slot template ->
+    CBS enrichment. entity_id=None gives the league-wide All-League
+    boards; season_year=None gives all-time. points_type
+    'weighted_active' is the display lineup; 'rostered' builds the
+    alternate lineup behind the Total-Pts Best deviation columns."""
     candidates = get_optimal_team_candidates(
         season_year=season_year,
         team_id=entity_id,
-        points_type='weighted_active',
+        points_type=points_type,
     )
     candidates = _synthesize_universal_slots(candidates)
     lineup = get_optimal_team_selections(candidates, CBS_SLOT_CAPS)
@@ -276,10 +294,19 @@ def get_best_lineup(entity_id=None, season_year=None):
 
 
 def _enrich_lineup(lineup, entity_id=None, season_year=None):
-    """Merge the CBS stat tail + games/ppg/season-span onto selected rows,
-    from the unified daily fact (one query per lineup). Weighted games
-    mirror the points lens (estimated days count fractionally)."""
+    """Merge the CBS stat tail + slash inputs + roster context onto
+    selected rows, from the unified daily fact (one query per lineup).
+    Weighted games mirror the points lens (estimated days count
+    fractionally). The MAX_BY(_, game_date) columns implement the boards'
+    current-vs-retired semantics for free: an active player's latest row
+    is a captured 2026 day (pro_team / owner filled), a retired player's
+    latest row predates the capture era (era-honest NULL -> blank cell).
+
+    period_label='Season' on every row keeps the shared formatter's
+    Points cell plain (season-long numbers carry no boxscore link)."""
     keys = [r.get('player_key') for r in lineup if r.get('player_key')]
+    for sel in lineup:
+        sel['period_label'] = 'Season'
     if not keys:
         return lineup
     quoted = ", ".join("'%s'" % k.replace("'", "''") for k in keys)
@@ -299,15 +326,21 @@ def _enrich_lineup(lineup, entity_id=None, season_year=None):
                                                       AS weighted_games,
             SUM(r) AS r, SUM(rbi) AS rbi, SUM(b_bb) AS b_bb,
             SUM(sb) AS sb, SUM(tb) AS tb,
-            SUM(k) AS k, SUM(w) AS w, SUM(sv) AS sv, SUM(hld) AS hld,
-            SUM(qs) AS qs, SUM(outs) AS outs, SUM(cg) AS cg, SUM(er) AS er,
+            SUM(h) AS h, SUM(ab) AS ab, SUM(hbp) AS hbp, SUM(sf) AS sf,
+            SUM(k) AS k, SUM(w) AS w, SUM(l) AS l, SUM(sv) AS sv,
+            SUM(hld) AS hld, SUM(qs) AS qs, SUM(outs) AS outs,
+            SUM(cg) AS cg, SUM(er) AS er,
+            SUM(p_h) AS p_h, SUM(p_bb) AS p_bb,
             SUM(r_pts) AS r_pts, SUM(rbi_pts) AS rbi_pts,
             SUM(b_bb_pts) AS b_bb_pts, SUM(sb_pts) AS sb_pts,
             SUM(tb_pts) AS tb_pts, SUM(k_pts) AS k_pts, SUM(w_pts) AS w_pts,
             SUM(sv_pts) AS sv_pts, SUM(hld_pts) AS hld_pts,
             SUM(qs_pts) AS qs_pts, SUM(outs_pts) AS outs_pts,
             SUM(cg_pts) AS cg_pts, SUM(er_pts) AS er_pts,
-            MAX_BY(team_name, game_date)              AS latest_team_name
+            MAX_BY(team_name, game_date)              AS latest_team_name,
+            MAX_BY(team_abbrev, game_date)            AS team_abbrev,
+            MAX_BY(owner_name, game_date)             AS owner_name,
+            MAX_BY(pro_team, game_date)               AS pro_team
         FROM fct_player_daily_performance
         WHERE {' AND '.join(filters)}
         GROUP BY player_key
@@ -318,6 +351,57 @@ def _enrich_lineup(lineup, entity_id=None, season_year=None):
         if extra:
             for k, v in extra.items():
                 sel.setdefault(k, v)
+        # The two-way pseudo identities display their CBS split name
+        # ("Shohei Ohtani (Batter)" -- MLB-68, reported as two players)
+        # but the bref search URL wants the human: the shared formatter
+        # builds the link from player_name and the text from
+        # display_name, so strip the suffix from the former only.
+        name = sel.get('player_name') or ''
+        if name.endswith(' (Batter)') or name.endswith(' (Pitcher)'):
+            sel.setdefault('display_name', name)
+            sel['player_name'] = name.rsplit(' (', 1)[0]
+    return lineup
+
+
+def _apply_alltime_board_context(lineup, top_n=3):
+    """All-Time board column semantics (Kyle, 2026-07-13): the Fantasy Team
+    cell lists every franchise the player earned active points for --
+    weighted-active order, capped at top_n; the Owner cell stays blank
+    (owner-by-era is MLB-64's chain-of-custody work); the MLB Team cell
+    keeps the enrichment's current-or-blank dynamic."""
+    keys = [r.get('player_key') for r in lineup if r.get('player_key')]
+    if not keys:
+        return lineup
+    quoted = ", ".join("'%s'" % k.replace("'", "''") for k in keys)
+    rows = query_snowflake(f"""
+        WITH per_franchise AS (
+            SELECT
+                player_key,
+                MAX_BY(team_abbrev, game_date)                 AS abbrev,
+                MAX_BY(team_name, game_date)                   AS name,
+                SUM(total_stat_pts * COALESCE(active_weight, 0)) AS pts
+            FROM fct_player_daily_performance
+            WHERE {league_predicate()} AND game_date IS NOT NULL
+              AND player_key IN ({quoted})
+            GROUP BY player_key, team_id
+            HAVING SUM(total_stat_pts * COALESCE(active_weight, 0)) > 0
+        )
+        SELECT player_key,
+               LISTAGG(COALESCE(abbrev, name), ', ')
+                   WITHIN GROUP (ORDER BY pts DESC) AS franchises
+        FROM (
+            SELECT *,
+                   ROW_NUMBER() OVER (PARTITION BY player_key
+                                      ORDER BY pts DESC) AS rn
+            FROM per_franchise
+        )
+        WHERE rn <= {int(top_n)}
+        GROUP BY player_key
+    """)
+    by_key = {r['player_key']: r['franchises'] for r in rows}
+    for sel in lineup:
+        sel['team_abbrev'] = by_key.get(sel.get('player_key'), '')
+        sel['owner_name'] = ''
     return lineup
 
 
@@ -526,108 +610,124 @@ def _lineup_block(lineup, all_time=False):
     return rows, headers
 
 
+# The one wording deviation from ESPN's deviation-column label: CBS
+# attribution has no FA lens, so "(incl. bench & FA)" would overclaim.
+_CBS_DEVIATION_LABEL = HOME_DEVIATION_LABEL.replace(' & FA', '')
+
+_CBS_GLOSSARY = [
+    ('Calculated Points', 'Universal MLB stats priced by the league\'s '
+                          'current scoring rules -- verified against CBS\'s '
+                          'own awarded totals.'),
+    ('Active Points', 'Produced while in the starting lineup (weighted by '
+                      'start-share estimates where 2004–2020 daily '
+                      'lineups aren\'t recoverable).'),
+    ('Rostered Points', 'Everything produced while on the roster, started '
+                        'or benched.'),
+]
+
+
 def build_home_rows(context, nav_targets=None):
-    """Home: left band = Navigate + points glossary; right band = the two
-    All-League Team boards (Season-to-Date + All-Time). nav_targets maps
-    tab title -> sheet gid for live links (None in previews -> plain
-    text, exactly the ESPN pattern)."""
+    """Home as the ESPN two-band dashboard, built by the SHARED board
+    machinery: left band (cols A-D) = navigation + team grid + points
+    glossary + the provenance sentence; right band (cols F+) = the two
+    All-League boards -- Season-to-Date and All-Time, each in ESPN's
+    exact column shape (Slot | Team | Player | Fantasy Team | Owner |
+    Points | Slash | Stat Line | Total-Pts Best) with the deviation
+    columns driven by the rostered-lens alternate lineup.
+
+    CBS exceptions to the ESPN shape, all Kyle-specified (2026-07-13):
+    no Team-of-the-Week board (no periods historically); Points cells
+    are plain numbers (season-long, no boxscore); the All-Time board's
+    Team column is current-MLB-team-or-blank, its Fantasy Team column
+    lists the player's top franchises by weighted active points (max 3),
+    and its Owner column stays blank until MLB-64 maps owner eras;
+    the deviation label drops "& FA" (no FA lens in CBS attribution).
+
+    nav_targets: {tab_title: gid} on the live write -> in-sheet
+    =HYPERLINK nav cells; None in previews -> plain text (ESPN pattern).
+    """
     season = context['season_year']
     league_name = db.league().display_name
     era = f"{context['first_season']}–{season}"
 
-    def _nav_cell(title):
-        if nav_targets and title in nav_targets:
-            gid = nav_targets[title]
-            return f'=HYPERLINK("#gid={gid}&range=A1", "{title}")'
-        return title
-
-    # ------------------------------------------------ left band (A..C)
-    left = [
-        ['Navigate', '', ''],
-        [_nav_cell(RECORDS_TAB), 'Best seasons & careers, all-time.', ''],
-        [_nav_cell(STANDINGS_TAB), f'{season} race + every finish since '
-                                   f'{context["first_season"]}.', ''],
-        ['Team Pages', 'Best lineups & benches, current + all-time.', ''],
+    # ------------------------------------------------ right band (F..O)
+    header = [*HOME_HEADER, _CBS_DEVIATION_LABEL, '']
+    season_dev = _deviation_by_slot(context['season_board'],
+                                    context['season_board_rostered'])
+    alltime_dev = _deviation_by_slot(context['alltime_board'],
+                                     context['alltime_board_rostered'])
+    right = [
+        [f'All-League Team Season-to-Date: {season}'],
+        [],
+        list(header),
     ]
+    right.extend(
+        format_all_league_team_row_with_deviation(
+            row, season_dev.get(row.get('slot_label')))
+        for row in context['season_board']
+    )
+    right.append([])
+    right.append([f'All-League Team: All-Time ({era})'])
+    right.append([])
+    right.append(list(header))
+    right.extend(
+        format_all_league_team_row_with_deviation(
+            row, alltime_dev.get(row.get('slot_label')))
+        for row in context['alltime_board']
+    )
+
+    # ------------------------------------------------ left band (A..D)
+    left = [['Navigate']]
+    left.append([home_nav_link(RECORDS_TAB, RECORDS_TAB, nav_targets),
+                 'Best seasons & careers, all-time.'])
+    left.append([home_nav_link(STANDINGS_TAB, STANDINGS_TAB, nav_targets),
+                 f'{season} race + every finish since '
+                 f'{context["first_season"]}.'])
+    left.append(['Team Pages', 'Best lineups & benches, current + all-time.'])
     team_titles = context['team_titles']
     for i in range(0, len(team_titles), 2):
-        pair = team_titles[i:i + 2]
-        left.append(['', *[_nav_cell(t) for t in pair]])
-    left += [
-        ['Draft Recap', 'Coming with the draft-history parse.', ''],
-        ['', '', ''],
-        ['Points Glossary', '', ''],
-        ['Calculated Points', 'Universal MLB stats priced by the league\'s '
-                              'CURRENT scoring rules -- one lens across all '
-                              f'{era}, verified against CBS\'s own awarded '
-                              'totals.', ''],
-        ['Active Points', 'Produced while in the starting lineup (weighted '
-                          'by start-share estimates where 2004–2020 daily '
-                          'lineups aren\'t recoverable).', ''],
-        ['Rostered Points', 'Everything produced while on the roster, '
-                            'started or benched.', ''],
-        ['', '', ''],
-        [_provenance_sentence(context['provenance_mix']), '', ''],
-    ]
-
-    # ------------------------------------------------ right band (E..)
-    right = [[f'All-League Team — {season} Season-to-Date', '', '', '', ''],
-             []]
-    season_hdr = ['Slot', 'Player', 'Fantasy Team', 'Points', 'Stat Line']
-    right.append(season_hdr)
-    for sel in context['season_board']:
-        right.append([
-            sel.get('slot_label') or '',
-            sel.get('display_name') or sel.get('player_name') or '—',
-            sel.get('latest_team_name') or '',
-            _pts(sel.get('position_pts')),
-            format_top_scorer_stats_line(sel) if sel.get('player_key') else '',
-        ])
-    right += [[], [f'All-League Team — All-Time ({era})', '', '', '', ''], []]
-    alltime_hdr = ['Slot', 'Player', 'Yrs', 'Points', 'ppg', 'Stat Line']
-    right.append(alltime_hdr)
-    for sel in context['alltime_board']:
-        games = sel.get('weighted_games') or sel.get('games')
-        right.append([
-            sel.get('slot_label') or '',
-            sel.get('display_name') or sel.get('player_name') or '—',
-            _span(sel),
-            _pts(sel.get('position_pts')),
-            _ppg(sel.get('position_pts'), games),
-            format_top_scorer_stats_line(sel) if sel.get('player_key') else '',
-        ])
-
-    body = _merge_bands(left, right, left_width=3, gap=1)
+        left.append(['', *(home_nav_link(t, t, nav_targets)
+                           for t in team_titles[i:i + 2])])
+    left.append(['Draft Recap', 'Coming with the draft-history parse.'])
+    left.append([])
+    left.append(['Points Glossary'])
+    left.extend([term, definition] for term, definition in _CBS_GLOSSARY)
+    left.append([])
+    left.append([_provenance_sentence(context['provenance_mix'])])
 
     rows = [
-        [f'{league_name} — League Almanac'],
-        [f'{era} · 16-team CBS points league · all points use current-season '
-         f'scoring across every timeframe — tell us if you\'d rather see '
-         f'them as awarded at the time.'],
+        [f'{league_name} Almanac'],
+        [_HOME_SCORING_CALLOUT],
         [],
-    ] + body
-
-    formats = [
-        {'range': 'A1:J1', 'format': {'textFormat': {'bold': True, 'fontSize': 14}}},
-        {'range': 'A2:J2', 'format': {'textFormat': {'italic': True},
-                                      'backgroundColor': _PALE_BLUE}},
-        {'range': 'A4:C4', 'format': {'textFormat': {'bold': True, 'foregroundColor': _WHITE},
-                                      'backgroundColor': _NAVY}},
-        {'range': 'E4:J4', 'format': {'textFormat': {'bold': True, 'foregroundColor': _WHITE},
-                                      'backgroundColor': _NAVY}},
+        *_merge_home_bands(left, right, 4, len(header)),
     ]
-    # Bold the board headers + the glossary section row (found by content).
-    for i, row in enumerate(rows):
-        if row[:1] and row[0] == 'Points Glossary':
-            formats.append({'range': f'A{i + 1}:C{i + 1}',
-                            'format': {'textFormat': {'bold': True, 'foregroundColor': _WHITE},
-                                       'backgroundColor': _NAVY}})
-        if len(row) > 4 and row[4] in ('Slot',):
-            formats.append({'range': f'E{i + 1}:J{i + 1}',
+
+    # ESPN-restrained styling (mirrors almanac_write._replace_home_tab +
+    # _home_label_formats): bold-14 title, pale-blue callout, bold left
+    # labels, navy board header rows, 1-decimal points columns.
+    last_col = _col(5 + len(header))
+    formats = [
+        {'range': f'A1:{last_col}1',
+         'format': {'textFormat': {'bold': True, 'fontSize': 14}}},
+        {'range': f'A2:{last_col}2',
+         'format': {'textFormat': {'italic': True},
+                    'backgroundColor': {'red': 0.90, 'green': 0.94, 'blue': 0.98}}},
+        {'range': 'K:K', 'format': {'numberFormat': {'type': 'NUMBER', 'pattern': '0.0'}}},
+        {'range': 'O:O', 'format': {'numberFormat': {'type': 'NUMBER', 'pattern': '0.0'}}},
+    ]
+    for i, row in enumerate(rows, 1):
+        first = row[0] if row else ''
+        right_cell = row[5] if len(row) > 5 else ''
+        if first in ('Navigate', 'Points Glossary'):
+            formats.append({'range': f'A{i}:D{i}',
                             'format': {'textFormat': {'bold': True}}})
-        if len(row) > 4 and str(row[4]).startswith('All-League Team'):
-            formats.append({'range': f'E{i + 1}:J{i + 1}',
-                            'format': {'textFormat': {'bold': True, 'foregroundColor': _WHITE},
+        if isinstance(right_cell, str) and right_cell.startswith('All-League Team'):
+            formats.append({'range': f'F{i}:{last_col}{i}',
+                            'format': {'textFormat': {'bold': True}}})
+        elif right_cell == 'Slot':
+            formats.append({'range': f'F{i}:{last_col}{i}',
+                            'format': {'textFormat': {'bold': True,
+                                                      'foregroundColor': _WHITE},
                                        'backgroundColor': _NAVY}})
     return rows, formats
 
@@ -965,8 +1065,15 @@ def build_all_tabs(nav_targets=None):
         ))
 
     context['team_titles'] = [title for title, _, _ in team_tabs]
+    # The display lineups (weighted-active lens) + the rostered-lens
+    # alternates that drive the Total-Pts Best deviation columns.
     context['season_board'] = get_best_lineup(entity_id=None, season_year=season)
-    context['alltime_board'] = get_best_lineup(entity_id=None, season_year=None)
+    context['season_board_rostered'] = get_best_lineup(
+        entity_id=None, season_year=season, points_type='rostered')
+    context['alltime_board'] = _apply_alltime_board_context(
+        get_best_lineup(entity_id=None, season_year=None))
+    context['alltime_board_rostered'] = get_best_lineup(
+        entity_id=None, season_year=None, points_type='rostered')
 
     home = build_home_rows(context, nav_targets=nav_targets)
     records = build_records_rows(context, get_season_records(),
@@ -1092,8 +1199,13 @@ def write_cbs_almanac(sheet_id):
                      lambda: spreadsheet.batch_update({'requests': requests}))
 
 
-_HOME_WIDTHS = [(0, 1, 150), (1, 2, 240), (2, 3, 140), (3, 4, 30),
-                (4, 5, 60), (5, 6, 190), (6, 7, 90), (7, 9, 70), (9, 10, 260)]
+# Mirrors almanac_write._apply_home_tab_dimensions (the ESPN Home): A-D
+# left band, E spacer, F-O right band; Slash/Stat Line (L/M) keep the
+# default width there and here.
+_HOME_WIDTHS = [(0, 1, 100), (1, 2, 125), (2, 3, 100), (3, 4, 50),
+                (4, 5, 100), (5, 6, 40), (6, 7, 40), (7, 8, 150),
+                (8, 9, 100), (9, 10, 125), (10, 11, 50),
+                (13, 14, 150), (14, 15, 50)]
 _RECORDS_WIDTHS = [(0, 1, 210), (1, 2, 180), (2, 5, 70), (5, 6, 30),
                    (6, 7, 180), (7, 8, 90), (8, 10, 70)]
 _STANDINGS_WIDTHS = [(0, 1, 190), (1, 2, 60)]

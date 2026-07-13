@@ -315,7 +315,7 @@ def get_all_league_team(season_year, matchup_period=None):
 # -------------------------------------------------------------------------
 
 
-_VALID_POINTS_TYPES = ('active', 'inactive', 'all', 'weighted_active')
+_VALID_POINTS_TYPES = ('active', 'inactive', 'all', 'weighted_active', 'rostered')
 
 
 def get_optimal_team_candidates(season_year=None, matchup_period=None,
@@ -365,6 +365,13 @@ def get_optimal_team_candidates(season_year=None, matchup_period=None,
         # start-share-weighted on CBS's estimated era. The CBS almanac's
         # Best Lineup axis.
         points_expr = 'sum(weighted_active_pts)'
+    elif points_type == 'rostered':
+        # The weight-independent total: everything produced while
+        # rostered. For ESPN rows this equals 'all' exactly (active +
+        # inactive); for CBS it additionally counts the estimated era's
+        # production, which the binary lenses can't see -- the honest
+        # "Total-Pts Best" comparison lens across the union.
+        points_expr = 'sum(rostered_pts)'
     else:  # 'all'
         points_expr = 'sum(active_pts + inactive_pts)'
 

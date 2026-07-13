@@ -292,13 +292,29 @@ def get_stat_sources():
     ]
 
 
+def _norm_name(s):
+    """Lowercase, drop the two-way discipline suffix, trim -- the key for
+    the current-roster name fallback."""
+    return (s or '').lower().rsplit(' (', 1)[0].strip()
+
+
 def get_current_rostered():
     """The currently-rostered player set (the 2026 capture of record) ->
     each player's CURRENT franchise abbrev + owner display. The all-time
     board reads this to answer 'is this player still active': if so, show
-    their current team + owner; if not, they read as a retired career."""
+    their current team + owner; if not, they read as a retired career.
+
+    Returns (by_key, by_name). by_key is the primary lookup (roster
+    player_id). by_name is an UNAMBIGUOUS-name fallback for the id-split
+    class: a rostered player whose all-time board identity is a ui-only
+    synthetic id (their history) rather than their real roster id -- keying
+    only that off player_key would wrongly read them as retired. Ambiguous
+    names (a shared current-roster name) are excluded from the fallback to
+    avoid a Will-Smith collision."""
+    from collections import Counter
     rows = query_snowflake(f"""
         SELECT r.player_id            AS player_key,
+               r.player_name          AS player_name,
                f.abbrev               AS abbrev,
                o.owner_display        AS owner
         FROM stg_cbs__rosters r
@@ -313,7 +329,11 @@ def get_current_rostered():
           AND r.roster_date = (SELECT MAX(roster_date) FROM stg_cbs__rosters
                                WHERE {league_predicate()})
     """)
-    return {r['player_key']: r for r in rows}
+    by_key = {r['player_key']: r for r in rows}
+    counts = Counter(_norm_name(r['player_name']) for r in rows)
+    by_name = {_norm_name(r['player_name']): r for r in rows
+               if counts[_norm_name(r['player_name'])] == 1}
+    return by_key, by_name
 
 
 def get_years_of_service(keys, entity_id=None):
@@ -597,7 +617,7 @@ def _enrich_lineup(lineup, entity_id=None, season_year=None,
     return lineup
 
 
-def _apply_alltime_board_context(lineup, current_rostered, years_map, top_n=3):
+def _apply_alltime_board_context(lineup, current_key, current_name, years_map, top_n=3):
     """All-Time board column semantics (Kyle, 2026-07-13):
 
       ACTIVE player (currently rostered): Fantasy Team = their CURRENT
@@ -644,7 +664,8 @@ def _apply_alltime_board_context(lineup, current_rostered, years_map, top_n=3):
         franchises = {r['player_key']: r['franchises'] for r in rows}
     for sel in lineup:
         key = sel.get('player_key')
-        current = current_rostered.get(key)
+        current = current_key.get(key) or current_name.get(
+            _norm_name(sel.get('display_name') or sel.get('player_name')))
         if current:
             sel['team_abbrev'] = current.get('abbrev') or ''
             sel['owner_name'] = current.get('owner') or ''
@@ -1005,7 +1026,8 @@ def build_home_rows(context, nav_targets=None):
             rows_.append(r)
             meta_.append({'k': 'data',
                           'retired': mode == 'alltime' and sel.get('_alltime_retired'),
-                          'years': mode == 'alltime'})
+                          'years': mode == 'alltime',
+                          'bench': is_bench})
         return rows_, meta_
 
     right, meta = [], []
@@ -1089,6 +1111,9 @@ def build_home_rows(context, nav_targets=None):
                                     'foregroundColor': {'red': 0.6, 'green': 0.6, 'blue': 0.6}}}})
             if m.get('years'):    # font-8 the years-of-service cell (N)
                 formats.append({'range': f'N{r}:N{r}',
+                                'format': {'textFormat': {'fontSize': 8}}})
+            if m.get('bench'):    # font-8 the "BE - Pos" slot label (F)
+                formats.append({'range': f'F{r}:F{r}',
                                 'format': {'textFormat': {'fontSize': 8}}})
     return rows, formats
 
@@ -1435,7 +1460,7 @@ def build_all_tabs(nav_targets=None):
         ))
 
     context['team_titles'] = [title for title, _, _ in team_tabs]
-    current_rostered = get_current_rostered()
+    current_key, current_name = get_current_rostered()
     # Three Home boards. Week = lightweight trailing-week team (no bench).
     # Season = weighted-active display lineup + reserve bench, with the
     # rostered-lens starters (no bench) driving Total-Pts Best. All-Time =
@@ -1453,7 +1478,7 @@ def build_all_tabs(nav_targets=None):
                               bench=_CBS_BENCH_SLOTS)
     alltime_keys = [s['player_key'] for s in alltime if s.get('player_key')]
     context['alltime_board'] = _apply_alltime_board_context(
-        alltime, current_rostered, get_years_of_service(alltime_keys))
+        alltime, current_key, current_name, get_years_of_service(alltime_keys))
 
     home = build_home_rows(context, nav_targets=nav_targets)
     records = build_records_rows(context, get_season_records(),
@@ -1585,6 +1610,7 @@ def write_cbs_almanac(sheet_id):
 _HOME_WIDTHS = [(0, 1, 100), (1, 2, 125), (2, 3, 100), (3, 4, 50),
                 (4, 5, 100), (5, 6, 40), (6, 7, 40), (7, 8, 150),
                 (8, 9, 100), (9, 10, 125), (10, 11, 50),
+                (11, 12, 125), (12, 13, 250),   # L Slash / M Stat Line (Kyle)
                 (13, 14, 150), (14, 15, 50)]
 _RECORDS_WIDTHS = [(0, 1, 210), (1, 2, 180), (2, 5, 70), (5, 6, 30),
                    (6, 7, 180), (7, 8, 90), (8, 10, 70)]

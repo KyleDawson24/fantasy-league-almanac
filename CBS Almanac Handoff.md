@@ -142,6 +142,23 @@ grade says so on the sheet). Historic ACTIVE-lens team pages ride that;
   `generate_almanac_sheet.py --league cbs-bsb`. Ledger:
   WALKBACK_PROGRESS.md carries the almanac-v2 section + the running
   Kyle-questions list (#6-#9).
+- **V2.1 (Kyle's review round 1, 2026-07-13): Home rebuilt ESPN-EXACT
+  via the SHARED builders — approach (a), his call ("make this look
+  like the ESPN equivalent where possible"; unified-renderer phase (b)
+  gains documented in BRAINTHOUGHTS Wishlist).** Both All-League boards
+  render through format_all_league_team_row_with_deviation in ESPN's
+  10-column shape incl. the Total-Pts Best deviation pair (rostered
+  lens; label drops '& FA'). New identity plumbing: CBS owner ids
+  minted in the `cbs_team_owners` seed + names on the SHARED
+  owner_nicknames seed → the same dim_owner/dim_team_owner chain ESPN
+  uses (multi-owner display = first names comma-joined: "Bob,
+  Sanford"); `cbs_franchises` seed = curated abbrevs for all 34 ids
+  (CBS's own abbrevs are unusable — T2/T3 duplicated, AH/KR stale).
+  Union contract now carries H/AB/HBP/SF/L (slash inputs) +
+  pro_team/team_abbrev/owner_name on CBS rows. All-Time board columns
+  per Kyle: MLB Team current-or-blank, Fantasy Team = top-3 franchises
+  by weighted active pts, Owner blank until MLB-64.
+  Records/Standings/team pages: next review rounds.
 
 1. **MLB-55 — year-end rosters: PARSED + LANDED 2026-07-12**
    (`extract/cbs_ui_parse.py --families rosters`, RAW.CBS_UI_ROSTERS,

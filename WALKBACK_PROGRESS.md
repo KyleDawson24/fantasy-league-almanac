@@ -190,6 +190,27 @@ It is committed at every checkpoint, so the branch on GitHub mirrors it.
   uncovered = real anchor_reopen_needed log gaps, previously masked);
   missing_departure census 33 total. Remaining 2021-23 delta is
   official-side pitching suppression (suspected cap — see issue #4).
+- **ROUND 2 OF KYLE'S DECOMPOSITION (2026-07-13): two more fixes.**
+  (1) ANCHOR-ARBITRATED TRADE VOIDS — the mirror-pair flags were
+  vetoed/reversed swaps the report still renders (2003 Reed/K-Rod: the
+  same deal logged BOTH directions under two effective dates). Rule:
+  the player's final trade leg is voided when the receiver's anchor
+  lacks him and the sender's holds him; genuine rentals never match.
+  (2) SUFFIX NORMALIZATION in cbs_name_key — the roster report drops
+  Jr/IV where the transaction report keeps it, splitting one player
+  into two identities: 2023 Vlad Jr's Meteors half attributed to
+  NOBODY. Post-fix his 2023 reads true: Meteors 3/30→7/10
+  (opening→trade_out), Kimball Drives 7/10→10/1 (trade_in→anchor). Also
+  a phantom-departure guard (a derived trade_out can't synthesize an
+  opening when the player demonstrably lived elsewhere earlier).
+  **Census now: 22 missing departures + 9 anchor-reopens in 25 years;
+  19,992 stints; lineup era grades 4.2/3.9/3.3/2.3/2.1% (2021→2025),
+  +1.0 mean signed.** ui- ids renamed ui-only- (Kyle: clearer that the
+  prefix marks identity-provenance). IRSTR wobble pattern for Kyle:
+  all top 2023-25 diffs are relievers at +2/+3 with OUR side higher —
+  consistent with pass-through inherited runners double-crediting
+  under IR−IRS (two relievers can both "strand" one runner) where
+  CBS's key credits the final strander once.
 - BONUS — MLB-54's dual-source verify, run NOW instead of at rollover
   (the API snapshot + UI capture already overlap): 2026 swept
   full-season via start_row (1,325 moves / 45 pages), API log

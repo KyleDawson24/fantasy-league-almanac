@@ -791,7 +791,7 @@ models:
     tests:
       - dbt_utils.expression_is_true:
           arguments:
-            expression: "not (match_method like '%\\_COLLISION' and cbs_player_id not like 'ui-%')"
+            expression: "not (match_method like '%\\_COLLISION' and cbs_player_id not like 'ui-only-%')"
     columns:
       - name: cbs_player_id
         description: 'CBS stable numeric player id (string-typed as CBS serves it). Two-way pseudo-ids included.'

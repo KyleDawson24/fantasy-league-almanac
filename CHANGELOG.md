@@ -40,8 +40,8 @@ for the ESPN league.
   moves 2004–2020, so those years ride a Start%/Own% conditional
   estimator from the anchors' global start rates.
   `mart_team_points_reconciliation` grades the whole reconstruction
-  against 25 seasons of official finishes: **5–13.5% mean absolute error
-  2003–2019, 2.4–4.7% 2021–2025** (2001–2002 have no anchors and grade
+  against 25 seasons of official finishes: **~5–13.5% mean absolute error
+  2003–2019, 2.1–4.2% 2021–2025** (2001–2002 have no anchors and grade
   honestly worse). The remaining systematic residuals — the estimator
   era undershoots ~8–13% from 2011 on (roughly unbiased 2005–2010), and
   2021–2023 official *pitching* runs ~8–11% below reconstructed while
@@ -50,10 +50,16 @@ for the ESPN league.
   current rules show `max_total: No Limit`) — are documented in the
   mart, not calibrated away. The census honesty check: the transaction
   log is nearly complete on drops — 8,473 of them close stints, and
-  only 33 true missing-departure cases remain across 25 years (a
-  window-before-filter pairing bug had initially made every drop
-  invisible as a closer; the reconciliation's own decomposition caught
-  it).
+  only 22 true missing-departure cases remain across 25 years. Three
+  correctness passes got it there, each caught by decomposing the
+  reconciliation's own residuals: a window-before-filter pairing bug
+  had made every drop invisible as a closer; anchor-refuted final trade
+  legs are now VOIDED (the report renders vetoed/reversed swaps as if
+  they stuck — genuine rentals never match the void signature); and
+  generational suffixes normalize in the shared name key (the roster
+  report drops Jr/IV where the transaction report keeps it, which had
+  split 2023 Vlad Jr into two identities and orphaned his pre-trade
+  months).
   - **Coverage extension:** the pre-archive population (year-end-roster
     names the FA-only archive never held — Bonds, Randy Johnson, and
     every star who retired before 2026) enters via a name→MLBAM

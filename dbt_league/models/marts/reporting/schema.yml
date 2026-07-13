@@ -991,7 +991,8 @@ models:
       what CBS actually awarded; reconstructed_active_fpts is what the
       walk-back attributes (sum of calculated_fpts x active_weight).
       Grades after the coverage extension AND the 2026-07-13 stint-pairing
-      fix: 5-13.5% mean absolute error 2003-2019, 2.4-4.7% 2021-2025
+      fixes (pairing + trade voids + suffix normalization): ~5-13.5% mean
+      absolute error 2003-2019, 2.1-4.2% 2021-2025
       (2001-2002 have no roster anchors and grade honestly worse; 2020 is
       the thin COVID season). Two SYSTEMATIC residuals, documented and
       provenance-visible rather than calibrated away: (a) the start-share

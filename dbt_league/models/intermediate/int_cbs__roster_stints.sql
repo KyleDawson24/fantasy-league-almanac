@@ -49,7 +49,7 @@ with season_bounds as (
 
 -- Move edges, identity-normalized. Trade-outs are derived rows: the
 -- counterparty of a trade_in loses the player at the same moment.
-moves as (
+moves_raw as (
     select
         league_key,
         season_year,
@@ -60,7 +60,8 @@ moves as (
         entry_seq,
         case when move_type in ('add', 'trade_in')
              then 'acquisition' else 'departure' end as event_kind,
-        move_type                                    as event_detail
+        move_type                                    as event_detail,
+        counterparty_franchise_id
     from {{ ref('stg_cbs__ui_transactions') }}
     where season_year between 2001 and 2025
         and move_type in ('add', 'trade_in', 'drop')
@@ -77,7 +78,8 @@ moves as (
         row_seq,
         entry_seq,
         'departure',
-        'trade_out'
+        'trade_out',
+        franchise_id
     from {{ ref('stg_cbs__ui_transactions') }}
     where season_year between 2001 and 2025
         and move_type = 'trade_in'
@@ -94,13 +96,58 @@ anchors as (
     group by 1, 2, 3, 4
 ),
 
+-- ANCHOR-ARBITRATED VOIDS (the mirror-pair class, 2026-07-13): the log
+-- carries trades that never stuck -- vetoed/reversed swaps, and one
+-- 2003 deal logged in BOTH directions under two effective dates. The
+-- signature: the player's chronologically LAST acquisition is a
+-- trade_in whose receiver's year-end anchor does NOT hold the player
+-- while the SENDER's anchor does. The anchor is ground truth, so that
+-- final leg is voided -- the trade_in row and its derived trade_out
+-- leave the stream together (they share row_seq). Genuine rentals
+-- (swap and swap back, both logged, anchor agreeing with the net
+-- result) never match the signature and pair normally.
+last_acquisitions as (
+    select *
+    from moves_raw
+    where event_kind = 'acquisition'
+    qualify row_number() over (
+        partition by league_key, season_year, name_key
+        order by event_date desc, row_seq asc, entry_seq asc
+    ) = 1
+),
+
+voided_legs as (
+    select l.league_key, l.season_year, l.name_key, l.row_seq
+    from last_acquisitions l
+    left join anchors recv
+        on recv.league_key = l.league_key and recv.season_year = l.season_year
+        and recv.franchise_id = l.franchise_id and recv.name_key = l.name_key
+    inner join anchors send
+        on send.league_key = l.league_key and send.season_year = l.season_year
+        and send.franchise_id = l.counterparty_franchise_id
+        and send.name_key = l.name_key
+    where l.event_detail = 'trade_in'
+        and recv.name_key is null
+),
+
+moves as (
+    select m.*
+    from moves_raw m
+    left join voided_legs v
+        on v.league_key = m.league_key and v.season_year = m.season_year
+        and v.name_key = m.name_key and v.row_seq = m.row_seq
+    where v.name_key is null
+),
+
 -- The state machine wants one ordered event stream per (season,
 -- franchise, player). Synthetic season-start acquisitions cover the
 -- unlogged opening rosters.
 first_events as (
     select
         league_key, season_year, franchise_id, name_key,
-        event_kind as first_kind
+        event_kind   as first_kind,
+        event_detail as first_detail,
+        event_date   as first_date
     from moves
     qualify row_number() over (
         partition by league_key, season_year, franchise_id, name_key
@@ -108,8 +155,8 @@ first_events as (
     ) = 1
 ),
 
-openings as (
-    -- Anchored, no acquisition-first history: on the roster since day 1.
+-- Anchored, no acquisition-first history: on the roster since day 1.
+anchored_openings as (
     select
         a.league_key, a.season_year, a.franchise_id, a.name_key,
         'opening' as opening_reason
@@ -118,15 +165,53 @@ openings as (
         on a.league_key = f.league_key and a.season_year = f.season_year
         and a.franchise_id = f.franchise_id and a.name_key = f.name_key
     where f.name_key is null
+),
+
+openings as (
+    select * from anchored_openings
 
     union all
 
     -- First recorded event is a DEPARTURE: they must have opened the
     -- season here (anchored or not -- covers 2001-2002 too).
+    -- PHANTOM GUARD (2026-07-13): when that first departure is a
+    -- DERIVED trade_out, it presumes the counterparty ever held the
+    -- player. If the player demonstrably opened or was acquired on a
+    -- DIFFERENT franchise on/before that date, the derived departure
+    -- is the residue of a voided/double-logged trade leg -- synthesizing
+    -- an opening here would hand a phantom stint the player's early
+    -- season (the 2003 Reed/K-Rod counter-legs). A real logged drop
+    -- stays a legitimate opening signal in every era.
     select
-        league_key, season_year, franchise_id, name_key, 'opening'
-    from first_events
-    where first_kind = 'departure'
+        f.league_key, f.season_year, f.franchise_id, f.name_key, 'opening'
+    from first_events f
+    where f.first_kind = 'departure'
+        and not (
+            f.first_detail = 'trade_out'
+            and (
+                exists (
+                    -- STRICTLY earlier: a same-day acquisition elsewhere
+                    -- is almost always this very trade's other leg (the
+                    -- derived pair shares the effective date) -- it must
+                    -- not suppress the opening its own trade_out implies
+                    -- (Vlad Jr's traded-mid-2023 Meteors half).
+                    select 1 from moves m2
+                    where m2.league_key = f.league_key
+                        and m2.season_year = f.season_year
+                        and m2.name_key = f.name_key
+                        and m2.franchise_id != f.franchise_id
+                        and m2.event_kind = 'acquisition'
+                        and m2.event_date < f.first_date
+                )
+                or exists (
+                    select 1 from anchored_openings ao
+                    where ao.league_key = f.league_key
+                        and ao.season_year = f.season_year
+                        and ao.name_key = f.name_key
+                        and ao.franchise_id != f.franchise_id
+                )
+            )
+        )
 ),
 
 events as (

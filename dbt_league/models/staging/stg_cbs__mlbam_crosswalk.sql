@@ -35,13 +35,14 @@ union all
 -- players the CBS archive universe never held, so NO CBS id exists
 -- anywhere -- identity is the display name (matched to MLBAM by the same
 -- evidence machinery). They join this staging under SYNTHETIC ids
--- ('ui-<mlbam>', collision-proof against real CBS ids) so the calculated_
+-- ('ui-only-<mlbam>', collision-proof against real CBS ids; the prefix
+-- reads as 'exists in the UI history ONLY -- no platform id anywhere') so the calculated_
 -- engine prices their games; the walk-back attribution keys by NAME, so
 -- the synthetic id never needs to match anything platform-side. Only
 -- mlbams the real crosswalk does NOT already carry enter -- a second
 -- identity for the same player would fan the engine's grain.
 select
-    'ui-' || u.mlbam_id     as cbs_player_id,
+    'ui-only-' || u.mlbam_id as cbs_player_id,
     u.cbs_name              as cbs_player_name,
     u.mlbam_id,
     u.mlbam_name,

@@ -1458,7 +1458,7 @@ models:
         tests:
           - not_null
       - name: cbs_player_id
-        description: "CBS player id; synthetic 'ui-<mlbam>' ids carry the UI-history population (players the archive universe never held -- no real CBS id exists anywhere)."
+        description: "CBS player id; synthetic 'ui-only-<mlbam>' ids carry the UI-history population (players the archive universe never held -- no real CBS id exists anywhere; the prefix marks identity provenance, not data source -- ALL historic rows use UI-captured data)."
         tests:
           - not_null
       - name: cbs_player_name

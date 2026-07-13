@@ -178,7 +178,15 @@ seeds:
         tests:
           - not_null
       - name: abbrev
-        description: 'Short display code for boards and matrices (2-4 chars, ESPN-abbrev style). NOT unique by design (continuity pairs share).'
+        description: >
+          Short display code for boards and matrices (2-4 chars,
+          ESPN-abbrev style). NOT unique by design (continuity pairs
+          share). THE collection point for owner abbrev preferences
+          (Kyle, 2026-07-13): edit freely as managers weigh in (e.g. the
+          numbers team -> MATT, its owner's first name, a good default
+          for ambiguous names; Junk Drawer All-Stars -> JUNK). A shared abbrev
+          is DISPLAY ONLY -- it does NOT aggregate the franchises'
+          records; true franchise continuity is MLB-64's overlay.
         tests:
           - not_null
       - name: franchise_name

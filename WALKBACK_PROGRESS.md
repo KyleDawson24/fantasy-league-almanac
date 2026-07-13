@@ -105,6 +105,16 @@
         ought to be" is already the design; CBS rows flow the same path.
       * Records/Standings/team pages: NOT touched this round (Kyle:
         "let's start there" = Home first).
+      * **Golden re-anchor, diagnosed before re-anchoring**: the byte-diff
+        + BBCode goldens drifted mid-round — root cause was NOT code: the
+        weekly ESPN extract ran 07:55 EST and re-landed scoring periods
+        95-103 with ESPN's overnight stat corrections (Abreu 139→138.1,
+        the Rocchio/Montgomery value-board reorder, League-This-Week
+        288.5→288.4), racing between the 04:31 EST baseline regen and
+        this round's rebuild. Verified: every fixture delta is a week-14
+        row or its season rollup, and ZERO CBS strings appear in any ESPN
+        fixture diff (the union stays clean). Baselines regenerated;
+        3/3 warehouse goldens green.
 
 ### Eligibility grading (derived rule vs CBS's own 2026 captures)
 

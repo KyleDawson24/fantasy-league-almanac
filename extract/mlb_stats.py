@@ -13,6 +13,14 @@ Reads raw.CBS_MLBAM_CROSSWALK for the MLBAM ids to fetch. Per player:
                                    inheritedRunners, and the game's team --
                                    which also closes the 21 crosswalk
                                    same-name collisions)
+  fielding/<mlbam>.json         yearByYear group=fielding (--fielding mode):
+                                games-by-position per season, ALL seasons in
+                                one call -- the eligibility input (CBS's
+                                captured rule prices positions by last-year/
+                                this-year games played there). Season grain
+                                deliberately: pre-league seasons ride free,
+                                and the per-game achievement dates come from
+                                the gamelog files' positionsPlayed instead.
 
 Landing: gitignored JSON under <repo>/data/mlb_stats/, append-only, plus a
 manifest. IDEMPOTENT -- a landed file is skipped, so rerun resumes (sleep-safe).
@@ -22,6 +30,7 @@ Usage:
     py extract/mlb_stats.py                 # full sweep (resumable)
     py extract/mlb_stats.py --limit 5       # smoke test: first 5 players
     py extract/mlb_stats.py --players 434378 592450
+    py extract/mlb_stats.py --fielding      # fielding sweep only (~1 call/player)
 """
 from __future__ import annotations
 
@@ -131,6 +140,10 @@ def main() -> None:
                     help="skip gamelog seasons before this year (the league "
                          "started 2001; pre-league games can never attribute, "
                          "and early-era veterans carry 15+ wasted seasons)")
+    ap.add_argument("--fielding", action="store_true",
+                    help="sweep ONLY yearByYear group=fielding (one call per "
+                         "player, all seasons) -- the games-by-position "
+                         "eligibility input")
     args = ap.parse_args()
 
     root = find_repo_root(Path(__file__).resolve().parent)
@@ -144,8 +157,36 @@ def main() -> None:
         if args.limit:
             players = players[:args.limit]
 
-    print("mlb_stats: %d players -> %s" % (len(players), out_dir), flush=True)
+    print("mlb_stats: %d players%s -> %s"
+          % (len(players), " (fielding)" if args.fielding else "", out_dir), flush=True)
     calls = seasons_fetched = players_done = skipped = 0
+    if args.fielding:
+        for i, pl in enumerate(players):
+            mid = pl["mlbam_id"]
+            ffile = out_dir / "fielding" / ("%d.json" % mid)
+            if ffile.is_file() and ffile.stat().st_size > 0 and not args.force:
+                skipped += 1
+            else:
+                payload = get("%s/people/%d/stats?stats=yearByYear&group=fielding"
+                              % (API, mid))
+                calls += 1
+                if payload is None:
+                    append_manifest(out_dir, {"ts": stamp, "mlbam": mid,
+                                              "note": "fielding fetch failed"})
+                    continue
+                write_json(ffile, {"fetched_at": stamp, "mlbam_id": mid,
+                                   "stat": "yearByYear", "group": "fielding",
+                                   "payload": payload})
+                seasons_fetched += 1
+            players_done += 1
+            if (i + 1) % 100 == 0:
+                print("  %d/%d players | %d calls | %d fielding files landed"
+                      % (i + 1, len(players), calls, seasons_fetched), flush=True)
+        print("done: %d players, %d fielding files landed, %d already-present, "
+              "%d API calls." % (players_done, seasons_fetched, skipped, calls),
+              flush=True)
+        return
+
     for i, pl in enumerate(players):
         mid = pl["mlbam_id"]
         # 1. Season (yearByYear) -- also tells us which (season, group) exist.

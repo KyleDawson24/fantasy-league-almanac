@@ -157,3 +157,12 @@ It is committed at every checkpoint, so the branch on GitHub mirrors it.
   / 1,142 total pts (2002) now lead the book, as they should.
 - SHIP: schema docs + tests for all six models (grain uniqueness,
   provenance/state enums, key not_nulls) — 33/33 green.
+- BONUS — MLB-54's dual-source verify, run NOW instead of at rollover
+  (the API snapshot + UI capture already overlap): 2026 swept
+  full-season via start_row (1,325 moves / 45 pages), API log
+  full-outer-joined vs UI on (franchise, player id, move type,
+  effective date) → **746/748 exact, zero UI-only**. The 2 misses are
+  one pre-season trade the UI report structurally omits (Torkelson +
+  Early, 3/25) — the walk-back's opening-recovery already absorbs that
+  class. UI pipeline verified end-to-end; MLB-54 and MLB-63 both
+  flipped Done in Linear with full result comments.

@@ -1,4 +1,4 @@
-# CBS Almanac — Universal-Stats Pivot Handoff (updated 2026-07-10)
+# CBS Almanac — Universal-Stats Pivot Handoff (updated 2026-07-12, post walk-back)
 
 Branch: `claude/modest-montalcini-3af8c4` (worktree `modest-montalcini-3af8c4`) —
 **the integration line**: main + everything CBS, one straight line (main is its
@@ -68,26 +68,51 @@ grade says so on the sheet). Historic ACTIVE-lens team pages ride that;
   full lineup logs (day-grain active sets); 2004-2020 membership moves
   only (adds/drops/trades — active approximated via Start%). 2001's 572
   'Signed' = likely the founding roster construction.**
-- NEXT: (a) staging normalization for the UI families (verbs→move types,
-  dates, names; MLB-54's remaining half — verify 2026 UI rows against
-  the API log's 197 entries, the one dual-source year) + UI-name→id
-  identity for rosters; (b) MLB-63 walk-back with the per-era grades
-  above; (c) the almanac v2 build on real history.
+- **MLB-63 WALK-BACK: COMPLETE + LANDED 2026-07-12 (3b88e95).** The
+  full chain is live in dbt (progress ledger: `WALKBACK_PROGRESS.md`):
+  `int_cbs__player_name_ids` (name→id dictionary, ambiguity flagged) →
+  `int_cbs__roster_stints` (20,003 stints 2001-2025; last-event-wins;
+  synthetic season-start openings; **100% of the 10,449 anchor states
+  reproduced**) → `int_cbs__roster_stints_effective` (departure-day
+  exclusive + single-rostering truncation) → `int_cbs__lineup_intervals`
+  (activate/reserve intervals INCLUDING the backward prior-inverse
+  half) → `fct_cbs_player_game_attribution` (every priced game
+  franchise-attributed, per-row provenance: captured /
+  reconstructed_day / estimated_startshare / estimated_membership) →
+  `mart_team_points_reconciliation` (THE REPORT CARD vs official
+  standings). **Grades: 5-13% mean abs error 2003-2019, 2.4-10.8%
+  2021-2025; 2001-02 ~80% (no anchors, log-only); 2020 21% (COVID).**
+  Coverage extension landed: UI-population crosswalk (2,736/2,753
+  names, 99.4%) + 1.2M gamelog rows under synthetic `ui-<mlbam>` ids;
+  record-book floor moved to the league's true 2001 start (Bonds 73 HR
+  / Big Unit 372 K + the 1,142-pt all-time season now lead). Two
+  SYSTEMATIC residuals documented, not calibrated: start-share era
+  undershoots ~10-13% (global estimator conservative); 2021-22
+  overshoot ~8-10% fading to 0 by 2024-25 (lossier early lineup logs).
+- **MLB-54 DUAL-SOURCE VERIFY: DONE 2026-07-12 (closed the ticket).**
+  2026 was start_row-swept full-season (1,325 moves / 45 pages; raw
+  now 55,980 player-actions), then the API log (197 txns / 748 moves)
+  full-outer-joined vs the UI rows on (franchise, player id, move
+  type, effective date): **746/748 exact, zero UI-only.** The 2 misses
+  = one PRE-SEASON trade (Torkelson + Connelly Early, 3/25) the UI
+  report STRUCTURALLY OMITS — a known-limitation class the walk-back
+  absorbs (pre-season acquisitions surface as season-start openings on
+  the correct team; only the channel label is coarser). Recorded in
+  sources.yml.
+- NEXT (the only remaining leg): **the almanac v2 content build** on
+  the blueprint below — all data prerequisites now exist.
 
 1. **MLB-55 — year-end rosters: PARSED + LANDED 2026-07-12**
    (`extract/cbs_ui_parse.py --families rosters`, RAW.CBS_UI_ROSTERS,
-   6,354 rows 2003-2025; Ohtani ownership trail matches Kyle's ground
-   truth). Era lessons baked into the parser: label-driven columns
-   (modern Own%/Start% vs early Eligible), 2012+ pages are LEAGUE-WIDE
-   (title rows delimit teams; sibling files deduped after verified
-   identical), franchise ids are ALL name-resolved (join the MLB-53
-   name→id map — the filename ids are lies). **⚠ CAPTURE GAP
-   DISCOVERED: 2003-2011 pages ignore the team id — the archive holds
-   ONLY the commissioner's (Aching Hippos) year-end roster for those
-   seasons.** Early-era anchors = 1 team/season; the other 15 teams'
-   pre-2012 membership must come from the transaction walk-back alone
-   (grade accordingly) — OR a live-UI re-probe with a different URL
-   form (Kyle-side call; CBS_WEB_COOKIES may need refresh).
+   **10,449 rows, ALL 16 teams every season 2003-2025** after the
+   same-day force re-sweep closed the early-era gap; Ohtani ownership
+   trail matches Kyle's ground truth). Era lessons baked into the
+   parser: label-driven columns (modern Own%/Start% vs early Eligible),
+   pages are LEAGUE-WIDE (title rows delimit teams; early renders split
+   teams into contiguous sibling tables — the parser consumes the run;
+   sibling files deduped after verified identical), franchise ids are
+   ALL name-resolved (join the MLB-53 name→id map — the filename ids
+   are lies).
 2. **MLB-53 — standings: PARSED + LANDED 2026-07-12**
    (RAW.CBS_UI_STANDINGS, 395 rows, 25 completed seasons 2001-2025,
    34 franchise ids, zero unresolved). THE CHAMPIONS LIST EXISTS:
@@ -97,24 +122,13 @@ grade says so on the sheet). Historic ACTIVE-lens team pages ride that;
    keyed. League shape: 16 teams except 15 (2002) and 12 (2020).
    2026's Final Standings card is legitimately empty (in progress).
 
-2b. **⚠ SECOND CAPTURE GAP — the transaction logs are WINDOWED
-   (blocks MLB-63's day-grain walk-back).** The captured
-   `/transactions/all/{filter}/{year}` pages hold only the LAST ~30
-   moves of each season (2021: Sep 20-29 only), and the page has NO
-   pagination controls — it's a fixed tail report. The GOOD news
-   baked in those 30-row samples: transaction rows carry REAL CBS
-   player ids (`/players/playerpage/{id}`), team ids (`/teams/{id}`),
-   clean verbs (Activated / Benched / presumably Added / Dropped /
-   Traded), a transaction timestamp AND a separate EFFECTIVE date.
-   If the full log is reachable at all, it's via a live probe:
-   try the `:param` table style (the sort links use
-   `?:sort_dir=&:sort_col=`, so `:page=` / `:rows=` variants are
-   plausible), ascending sort (doubles the window to first+last 30),
-   date-scoped URL forms, or the commissioner's edit-transactions
-   view (the page embeds a commish form; Kyle's login may lack it).
-   WITHOUT the full logs: no day-grain reconstruction — membership =
-   year-end anchors only (2012+ complete, pre-2012 commissioner-only),
-   fidelity-labeled, which still makes modern-era team pages real.
+2b. **(RESOLVED 2026-07-12) The "windowed transaction log" was a pager
+   illusion** — Kyle found the real pagination (`?start_row=N`; bare
+   URL = newest-first page 1). The full 2001-2026 history was swept,
+   parsed, staged, and consumed by the walk-back (see the landed
+   MLB-63 block above). Kept for the record: transaction rows carry
+   real CBS player ids (modern eras), team ids, clean verbs, and a
+   separate EFFECTIVE date — all of which the stint machine uses.
 3. **Almanac v2 per the approved blueprint** (Kyle's sign-offs
    2026-07-12, ESPN fixtures = ground truth for architecture —
    `tests/fixtures/almanac_v1_1_0/*.tsv`):

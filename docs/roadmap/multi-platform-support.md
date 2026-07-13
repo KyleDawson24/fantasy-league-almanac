@@ -92,7 +92,11 @@ verified vs real MLB history — BUT that first record book exposed a
 material scope flaw, see the pivot below) → MLB-62 per-game FPTS
 recompute reconciled to season anchors (residuals double as era-rule
 detection) → MLB-63 ownership + active-set reconstruction with
-per-season fidelity grades (the owner-story centerpiece) → MLB-64
+per-season fidelity grades (the owner-story centerpiece — **LANDED
+2026-07-12** with MLB-54/55: 20,003 stints, per-row provenance, graded
+vs 25 seasons of official standings at 5–13% mean absolute error
+2003–2019 / 2.4–10.8% 2021–2025; the 2026 dual-source verify closed
+MLB-54 at 746/748 exact) → MLB-64
 dim_franchise (rename-proof continuity; v1 may ship without).
 
 **STATS-SOURCE PIVOT (2026-07-09, with the maintainer).** The first CBS

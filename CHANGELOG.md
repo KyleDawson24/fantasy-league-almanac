@@ -22,6 +22,41 @@ for the ESPN league.
 
 ### Added
 
+- **The CBS walk-back: 25 years of day-by-day rosters reconstructed from
+  the transaction log, graded against the official standings (MLB-63).**
+  The UI-history captures (52,369 player-actions 2001–2026, 10,449
+  year-end anchor states 2003–2025) drive a last-event-wins state
+  machine: `int_cbs__roster_stints` assembles 20,003 membership stints
+  (acquisitions open, departures close, the year-end anchor closes what
+  the lossy log leaves open — every anchor state is reproduced by a
+  season-end stint, 100%), `int_cbs__lineup_intervals` turns
+  activate/reserve events into daily active-state intervals *including
+  the backward half* (state before a player's first event is that
+  event's inverse — without it, set-and-forget starters zero out), and
+  `fct_cbs_player_game_attribution` franchise-attributes every priced
+  player-game with a per-row provenance flag (`captured` /
+  `reconstructed_day` / `estimated_startshare` / `estimated_membership`)
+  — estimates are labeled, never laundered. CBS never logged lineup
+  moves 2004–2020, so those years ride a Start%/Own% conditional
+  estimator from the anchors' global start rates.
+  `mart_team_points_reconciliation` grades the whole reconstruction
+  against 25 seasons of official finishes: **5–13% mean absolute error
+  2003–2019, 2.4–10.8% 2021–2025** (2001–2002 have no anchors and grade
+  honestly worse). The two systematic residuals — the estimator era
+  undershoots ~10–13%, the early lineup-log years overshoot ~8–10%
+  fading to ~0 by 2024–25 — are documented in the mart, not calibrated
+  away.
+  - **Coverage extension:** the pre-archive population (year-end-roster
+    names the FA-only archive never held — Bonds, Randy Johnson, and
+    every star who retired before 2026) enters via a name→MLBAM
+    crosswalk (`--ui-population`, 2,736/2,753 = 99.4%) and synthetic
+    `ui-<mlbam>` engine ids; 1.2M new gamelog rows priced. The record
+    book's season floor moves from the platform archive's min (2004) to
+    the league's true first season per the UI standings (2001): Bonds's
+    73 HR / 867 hitting points (2001) and Randy Johnson's 372 K (2001)
+    now lead their boards, and Johnson's 2002 (1,142 points) is the
+    all-time fantasy season.
+
 - **Universal stats layer: the CBS record book's stats source pivoted to the
   MLB Stats API (MLB-70).** CBS's `league/stats` history is free-agent-only —
   every currently-rostered player is absent from all 20 "historical" years

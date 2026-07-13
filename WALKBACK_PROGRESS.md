@@ -71,6 +71,20 @@ under-grant tail (~1,670 position-days: 1B 447, SS 362, OF 294, 2B 280,
 3B 262, C 24 — CBS granted, we didn't) is the primary-estimator +
 counting-timing class; SS 43 over-grants the reverse. Small enough that
 Best Lineups are barely sensitive; listed as question #6.
+**POST-FIX GRADE: 93.26% exact-set agreement** (21,446 / 22,996
+player-days); the rest is the under-grant tail above.
+
+### ESPN byte-neutrality (the MLB-72 gate)
+
+Unit suite 210/210. Warehouse goldens: BBCode records/recap EXACT;
+almanac byte-diff EXACT on every tab except TWO cells in Advanced
+Standings' acquisition block — both VERIFIED dead-center rounding
+boundaries (HANG traded-away-active raw = 382.75 exactly; CYCL
+traded-away-rostered raw = 443.05 exactly): the mart rounds sums whose
+float accumulation order changes on any table rebuild, so those two
+cells coin-flip per rebuild — the same verified-ROUND-boundary class
+the MLB-57 landing re-anchored. Fixture re-anchored (one line: CYCL);
+byte-diff green against it.
 
 ### Almanac-v2 questions for Kyle (running list)
 
@@ -89,6 +103,15 @@ Best Lineups are barely sensitive; listed as question #6.
    allowed + weekly lineups — while 1,325 moves happened this season.
    Likely a mid-break freeze snapshot (worth re-capturing at rollover
    so the archived rules read true).
+9. **MLB-72's one unmet acceptance line** (Linear not updated from this
+   session — comment/flip when you review): "fct_team_season_performance
+   grows CBS team-season rows" is deliberately NOT met. That fact builds
+   through the weekly-active chain, which is period-keyed — CBS history
+   has no periods. CBS team-seasons live in
+   mart_team_points_reconciliation (already graded vs official
+   standings). If you want them in the shared spine too, the clean route
+   is a day-grain branch in fct_team_season_performance parallel to the
+   weekly one — a small follow-up ticket if you call for it.
 
 
 Watch this file for real-time state:

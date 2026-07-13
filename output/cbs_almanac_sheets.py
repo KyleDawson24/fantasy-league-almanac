@@ -321,11 +321,15 @@ def _enrich_lineup(lineup, entity_id=None, season_year=None):
     return lineup
 
 
-def get_roster_days(entity_id):
+def get_roster_days(entity_id, season_year=None):
     """Calendar days rostered per player for one franchise: historic stint
     spans (the walk-back's effective intervals, name_key-bridged to
-    player identity) + the current season's captured roster dates."""
+    player identity) + the current season's captured roster dates.
+    season_year scopes to one season (the team page's current side);
+    None spans the franchise's whole history."""
     name_key_expr = _name_key_sql('p.player_name')
+    stint_season = (f" AND season_year = {int(season_year)}"
+                    if season_year is not None else '')
     return query_snowflake(f"""
         WITH stint_days AS (
             SELECT name_key,
@@ -333,6 +337,7 @@ def get_roster_days(entity_id):
                        AS days
             FROM int_cbs__roster_stints_effective
             WHERE {league_predicate()} AND franchise_id = {int(entity_id)}
+                  {stint_season}
             GROUP BY name_key
         ),
         players AS (
@@ -345,6 +350,7 @@ def get_roster_days(entity_id):
             SELECT player_id AS player_key, COUNT(DISTINCT roster_date) AS days
             FROM stg_cbs__rosters
             WHERE {league_predicate()} AND team_id = '{int(entity_id)}'
+                  {stint_season}
             GROUP BY player_id
         )
         SELECT p.player_key,
@@ -835,16 +841,21 @@ def build_standings_rows(context, arc, finishes, active_franchises):
 
 
 def build_team_tab(context, franchise, current_lineup, alltime_lineup,
-                   bench_current, bench_alltime, roster_days, provenance_mix):
+                   bench_current, bench_alltime, days_current, days_alltime,
+                   provenance_mix):
     """One franchise page: Best Lineup current x all-time side by side,
     bench blocks, fidelity label."""
     season = context['season_year']
     era = f"{context['first_season']}–{season}"
     title = _safe_sheet_title(franchise['team_name'])
-    days_by_key = {r['player_key']: r['roster_days'] for r in roster_days}
-    for sel in current_lineup + alltime_lineup:
-        if sel.get('player_key') in days_by_key:
-            sel['roster_days'] = days_by_key[sel['player_key']]
+    cur_days = {r['player_key']: r['roster_days'] for r in days_current}
+    all_days = {r['player_key']: r['roster_days'] for r in days_alltime}
+    for sel in current_lineup:
+        if sel.get('player_key') in cur_days:
+            sel['roster_days'] = cur_days[sel['player_key']]
+    for sel in alltime_lineup:
+        if sel.get('player_key') in all_days:
+            sel['roster_days'] = all_days[sel['player_key']]
 
     left_rows, left_headers = _lineup_block(current_lineup, all_time=False)
     right_rows, right_headers = _lineup_block(alltime_lineup, all_time=True)
@@ -949,7 +960,8 @@ def build_all_tabs(nav_targets=None):
         team_tabs.append(build_team_tab(
             context, fr, current_lineup, alltime_lineup,
             bench_current, bench_alltime,
-            get_roster_days(fid), get_provenance_mix(fid),
+            get_roster_days(fid, season_year=season), get_roster_days(fid),
+            get_provenance_mix(fid),
         ))
 
     context['team_titles'] = [title for title, _, _ in team_tabs]

@@ -99,28 +99,49 @@ grade says so on the sheet). Historic ACTIVE-lens team pages ride that;
   absorbs (pre-season acquisitions surface as season-start openings on
   the correct team; only the channel label is coarser). Recorded in
   sources.yml.
-- NEXT: **almanac v2 build, re-sequenced per Kyle 2026-07-13 — the
-  UNION comes FIRST.** His calls, verbatim intent:
-  (1) NO CBS-only eligibility silo: eligibility lands in the SAME
-  shape ESPN's flows through, league-keyed — sources differ by
-  necessity (ESPN: platform-served daily eligible_slots; CBS: derived
-  from MLB fielding games-by-position + the captured rule 'primary +
-  20 games last yr or 10 this yr + DH-for-all'), the consuming shape
-  converges. Semantics = ESPN's: points count toward a position only
-  AFTER eligibility is achieved (date-scoped windows: primary from
-  opening day; earned positions from the 10th game this year / day
-  one if 20 last year). Needs the fielding sweep (statsapi
-  group=fielding yearByYear, ~4k calls, detached+idempotent).
-  (2) MLB-72 (CBS day-grain → int_player_daily → the shared fact
-  family) is now IN the v2 critical path — 'the point at which we
-  produce an output is the point to marry the data'. Build team pages
-  on the unified fact, not CBS-specific assembly.
-  (3) Team pages: only CURRENTLY-ACTIVE franchises get tabs; key
-  everything by franchise_id but design for a later re-key to OWNER
-  (MLB-64 chain-of-custody) — 'what people want is performance by
-  OWNERS'.
-  (4) Provenance/estimator disclaimers: land them somewhere sensible
-  on-sheet; Kyle will tweak placement after seeing it.
+- **ALMANAC V2: BUILT + DEV-RENDERED 2026-07-13 (this session), per the
+  re-sequenced approval — awaiting Kyle's eyeball (THE merge gate).**
+  All four of Kyle's calls landed as specified:
+  (1) Eligibility, no silo: `int_cbs__eligibility_windows` implements
+  the captured rule as date-scoped after-achievement windows (primary +
+  prior-year-20 from opening day; in-season-10 from the 10th game's
+  date) over a new fielding sweep (`mlb_stats.py --fielding`, 3,852
+  players, detached) + a NO-REFETCH discovery (the gamelog files on
+  disk already carry per-game positionsPlayed → loader family `gamepos`
+  = the achievement dates). Arrays ride the CBS day rows exactly where
+  ESPN's platform eligible_slots ride. **Graded vs CBS's own 2026
+  captures: 93.26% exact-set**; Ohtani canary exact (900→['DH'],
+  901→['P']); the DH-display rule (DH listed only when sole) came out
+  of the grading itself. Residual = a ~1,670-position-day under-grant
+  tail (primary-estimator/timing class), question #6 in the ledger.
+  (2) MLB-72 UNION LANDED FIRST: `int_cbs__player_daily` (attribution ×
+  engine at day grain, contract-identical) UNION ALLs inside
+  `int_player_daily`; the shared fact family serves both leagues.
+  Shared columns: player_key / game_date / active_weight / provenance.
+  Position fact gains weighted_active_pts + rostered_pts. ESPN
+  byte-neutrality PROVEN (unit 210/210, BBCode goldens exact, almanac
+  byte-diff exact except two VERIFIED dead-center rounding-boundary
+  cells — raw sums exactly 382.75/443.05 — re-anchored per the MLB-57
+  precedent). One acceptance line deliberately unmet (team-season rows
+  in fct_team_season_performance — structurally period-keyed; CBS
+  team-seasons live in mart_team_points_reconciliation): ledger q#9.
+  (3) Team pages: active-franchise tabs only; every franchise-scoped
+  aggregation routes through `_entity_where()` in
+  output/cbs_almanac_sheets.py — THE single seam for the MLB-64 owner
+  re-key.
+  (4) Provenance sentences render on Home + every team page (game-day
+  shares: captured / reconstructed / estimated) — placement is Kyle's
+  to tweak.
+  Also landed: `mart_player_career_records` (MLB-69 accumulation axis;
+  Pujols 703 HR / 11,824 pts lead) and the full renderer rebuild
+  (nav-first Home w/ two-pass #gid links + Season/All-Time All-League
+  boards; Records = best season × career; Standings = 2026 arc +
+  25-season finish matrix w/ champions; team pages = Best Lineup
+  current × all-time on C/1B/2B/3B/SS/OF×3/DH/U/P×9 + bench by
+  rostered pts). Dev sheet written via
+  `generate_almanac_sheet.py --league cbs-bsb`. Ledger:
+  WALKBACK_PROGRESS.md carries the almanac-v2 section + the running
+  Kyle-questions list (#6-#9).
 
 1. **MLB-55 — year-end rosters: PARSED + LANDED 2026-07-12**
    (`extract/cbs_ui_parse.py --families rosters`, RAW.CBS_UI_ROSTERS,

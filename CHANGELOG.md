@@ -80,6 +80,60 @@ for the ESPN league.
     now lead their boards, and Johnson's 2002 (1,142 points) is the
     all-time fantasy season.
 
+- **The union layer (MLB-72): CBS day-grain production flows through the
+  ESPN fact family.** `int_cbs__player_daily` re-expresses the walk-back's
+  attribution × the priced engine in `int_player_daily`'s exact column
+  contract, and the union means `fct_player_daily_performance` →
+  `fct_player_position_pts` serve both leagues from one shape. Shared
+  columns both branches fill: `player_key` (the cross-league grain),
+  `game_date`, `active_weight` (1/0 where the day's state is known, the
+  start-share estimator on 2004–2020), `provenance`. New lenses on the
+  position fact: `weighted_active_pts` (≡ active points wherever state is
+  known — the CBS Best-Lineup axis) and `rostered_pts` (the bench-ranking
+  axis). Weekly facts assert their own precondition (`matchup_period IS
+  NOT NULL` — weekly grain needs platform periods; a no-op for ESPN).
+  **ESPN byte-neutrality held**: BBCode goldens exact; the almanac
+  byte-diff drifted on exactly two cells whose raw sums sit at dead-center
+  rounding boundaries (382.75 / 443.05 — the coin-flip-per-rebuild class),
+  verified and re-anchored.
+
+- **CBS position eligibility as a shared, date-scoped model.** The league's
+  own captured rule ("Players are eligible at their primary position, plus
+  positions they've played 20 games last year or 10 games this year";
+  "Everyone is eligible at DH") lands as after-achievement windows in
+  `int_cbs__eligibility_windows`: primary + prior-year-20 open on opening
+  day, in-season-10 opens ON the 10th game's date. Inputs are a new
+  fielding sweep (`mlb_stats.py --fielding`: yearByYear games-by-position,
+  all careers — pre-league seasons feed the league's first years) and a
+  no-refetch discovery: the gamelog files on disk already carry per-game
+  `positionsPlayed`, so a new loader family (`gamepos` →
+  `MLB_GAME_POSITIONS`, 1.9M rows) dates every in-season achievement.
+  Eligibility arrays ride the CBS day rows exactly where ESPN's
+  platform-served `eligible_slots` ride theirs — no CBS silo. Graded
+  against CBS's own 2026 per-day captured eligibility: **93.26% exact-set
+  agreement** (the DH-display rule — DH listed only when it's the sole
+  position — came straight out of the grading's miss decomposition), with
+  the Ohtani pseudo-id canary exact (900 → `['DH']`, 901 → `['P']` via the
+  crosswalk's scope guard).
+
+- **`mart_player_career_records`** — the accumulation axis (MLB-69):
+  top-10 league-era career totals per record-candidate stat, the Records
+  tab's second column next to the best-season book. Pujols's 703 HR and
+  11,824 calculated points lead; ui-only identities are collision-free by
+  construction so careers never double-count.
+
+- **The CBS almanac v2 renderer** (`output/cbs_almanac_sheets.py`,
+  rebuilt): the workbook now mirrors the ESPN almanac's architecture on
+  the unified facts — nav-first Home (live `#gid` links, two-pass write)
+  with Season-to-Date + All-Time All-League boards, Records = best season
+  × best career side by side, Standings = the 2026 period arc + a
+  25-season finish matrix with champions marked, and one page per
+  currently-active franchise: Best Lineup (weighted active points per
+  eligible position, CBS's slot template C/1B/2B/3B/SS/OF×3/DH/U/P×9)
+  current season × all-time, bench blocks ranked by rostered points, and
+  a provenance sentence on every page. Franchise scoping is isolated
+  behind one seam (`_entity_where`) for the future owner re-key (MLB-64).
+
 - **Universal stats layer: the CBS record book's stats source pivoted to the
   MLB Stats API (MLB-70).** CBS's `league/stats` history is free-agent-only —
   every currently-rostered player is absent from all 20 "historical" years

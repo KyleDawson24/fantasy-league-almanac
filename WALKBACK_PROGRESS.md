@@ -116,6 +116,41 @@
         fixture diff (the union stays clean). Baselines regenerated;
         3/3 warehouse goldens green.
 
+- [ ] **V2.2 (Kyle's review round 2, 2026-07-13 — Home FINISH):** all
+      render-side except the seed abbrevs:
+      * **Team of the Week board** at the TOP of the right band (his
+        lean: Week / Season / All-Time). Lightweight — trailing 7 days
+        (Jul 1–7), weighted-active lens, date-windowed candidate query
+        against the daily fact directly (fct_player_position_pts is
+        season-grain for CBS); no bench, no deviation.
+      * **Bench/reserve spots**: 11 (reserve count) on Season + All-Time
+        via the `_CBS_BENCH_SLOTS` knob (BE 1..11 = best players not in
+        the starting 19); week omits them. Flippable per his "y/n" ask.
+      * **All-Time active/retired split**: ACTIVE (currently rostered)
+        players → current abbrev + Owner; RETIRED → top-3 career
+        franchises by active pts (gray) + blank Owner. Years-of-Service
+        column ("14: 2012–2018, 2020–2026", font 8) REPLACES the
+        deviation on all-time; also threaded onto team-page all-time
+        lineups. Points render whole (rounded value + '0' format).
+      * **Glossary** → "Points Glossary & Documentation" (+ Wasted
+        Points) + a "Stat sources" table: From Mar 25 2026 (3%) /
+        2001–2003, 2021–2025 (27%) / 2004–2020 (71%), from the
+        provenance mix; estimated row references the Almanac User Guide.
+      * **Seed abbrevs**: 34 → MATT (owner first name — the ambiguous
+        default), 4 → JUNK. Seed = the abbrev-request collection point.
+        Shared abbrevs are DISPLAY-ONLY (no record aggregation — MLB-64).
+      * **Almanac User Guide ticket tree**: MLB-74 + MLB-75..79.
+      * Answered Qs: (1) calc_ was always the lens — only the
+        `platform_points` FIELD NAME is stale; (2) CBS serves NO owner
+        member-id, the `cbs-<name>` slug is synthetic + swappable; (3)
+        T2/T3 were CBS's OWN colliding capture abbrevs.
+      * OPEN interpretation flags (all reversible): retired Fantasy Team
+        grayed; Years column at N (freed by dropping all-time deviation),
+        not O; "this week" = trailing 7 days; bench = best weighted-active
+        leftover.
+- **REQUEST LIST (running)**: team abbrev preferences collect in the
+  cbs_franchises seed (MATT, JUNK so far).
+
 ### Eligibility grading (derived rule vs CBS's own 2026 captures)
 
 22,996 player-days compared (every captured roster-day with a priced

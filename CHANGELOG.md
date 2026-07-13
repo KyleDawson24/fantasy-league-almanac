@@ -22,6 +22,15 @@ for the ESPN league.
 
 ### Added
 
+- **`docs/known-data-issues.md`** — the permanent log of source-data
+  defects that are documented and bounded rather than fixed (the
+  warehouse doesn't control the source): CBS's season-grain IRSTR key
+  disagreeing with its own per-game rates (root-caused, ±3, both
+  signs), the UI transaction report's structural pre-season-trade
+  omission, the suspected 2021–23 team pitching cap (open commissioner
+  question), the residual walk-back flags, and the era coverage
+  floors. Each entry carries its full evidence chain.
+
 - **The CBS walk-back: 25 years of day-by-day rosters reconstructed from
   the transaction log, graded against the official standings (MLB-63).**
   The UI-history captures (52,369 player-actions 2001–2026, 10,449

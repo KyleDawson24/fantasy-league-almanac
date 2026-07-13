@@ -148,6 +148,30 @@
         grayed; Years column at N (freed by dropping all-time deviation),
         not O; "this week" = trailing 7 days; bench = best weighted-active
         leftover.
+- [ ] **V2.3 (Kyle's review round 3, 2026-07-13):**
+      * **Team of the Week → Team of the MONTH** (most recent completed
+        calendar month = June 2026). Root cause: CBS periods carry NO
+        date boundaries anywhere (standings track period ids + cumulative
+        points, never day windows) and roster captures are DAILY (105
+        distinct dates, not weekly) — so a "period X" team has nothing to
+        date-scope against. Month is his offered fallback; clean +
+        honestly derivable.
+      * **Bench lens → TOTAL (rostered) points**, universal with the team
+        pages (Kyle: "starters by active, benches by total"). Confirmed
+        4.1: weighted_active INCLUDES the estimated-era fractional active
+        production (2004-2020 active_weight averages ~0.70, not 0/1).
+      * **Bench labels "BE 1..11" → "BE - Pos"** (ESPN team-page style);
+        Pos = primary/current display position (MAX_BY(position,
+        game_date)); lineup_slot repointed to the discipline so bench
+        pitchers render W-L/ERA not an empty batting slash;
+        platform_points carried across so bench Points populate.
+      * **FLAGGED for Kyle**: the all-league bench comes out ~10/11
+        PITCHERS — pitchers own the highest raw totals, so "bench by
+        total points" league-wide is pitcher-dominated. Faithful to the
+        spec; surfaced in case he wants position balance or a different
+        all-league bench lens.
+      * **Kyle's breakage list**: he flagged "a small list of breakages"
+        and asked whether to send now — I said send them now; awaiting.
 - **REQUEST LIST (running)**: team abbrev preferences collect in the
   cbs_franchises seed (MATT, JUNK so far).
 

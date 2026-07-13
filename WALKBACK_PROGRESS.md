@@ -231,6 +231,30 @@
         OWNER all-time" — which implies TEAM/OWNER grain, not player,
         and swaps player-career for owner-aggregate. Asked him to
         confirm the two columns + grain before building.
+- [x] **RECORDS PAGE v2 BUILT (Kyle's round-5 spec, 2026-07-13):**
+      ESPN-shaped, auto-cataloged, rendered + dev-written.
+      * **Auto-catalog** (`get_cbs_record_catalog`): the record set derives
+        from dim_stat.is_record_candidate × CBS scoring settings +
+        auto_tracked — CBS surfaces its own scored categories from the
+        same machinery ESPN uses. 19 candidates catalog cleanly.
+      * **Two lenses**: Best Season (top single team/player-season
+        all-time) × By Owner (franchise career totals, current-owner-
+        labeled top-3 list "Owner: total · …", the MLB-64 caveat).
+      * **Both sections** (Kyle): Player Records + Team Records, hitting
+        then pitching; Score Records (points) on top. TEAM records carry
+        a **contributors** detail (top-3 players behind the team-season,
+        e.g. HDJ 1,920 K 2017 → "Chris Sale: 308, …").
+      * All leaders from ONE pass over the attributed union fact
+        (best team-season, best player-season, player-team-season for
+        contributors, franchise-career). db.py lowercases result keys —
+        access stat columns as stat.lower() (bug caught + fixed).
+      * FLAGGED for Kyle's review: (1) covers the SCORED stats the union
+        fact attributes; marquee non-scored overrides (HR/XBH — Bonds 73)
+        need the season-stats attribution path (follow-up). (2) by-owner
+        totals are the ROSTERED-total lens (incl bench) → LARGE numbers
+        (269k career pts); active-lens is an easy swap. (3) player Best
+        Season uses attributed (rostered) production for one-source
+        consistency vs the earlier all-production record book.
 - **REQUEST LIST (running)**: team abbrev preferences collect in the
   cbs_franchises seed (MATT, JUNK so far).
 

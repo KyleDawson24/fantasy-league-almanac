@@ -172,6 +172,32 @@
         all-league bench lens.
       * **Kyle's breakage list**: he flagged "a small list of breakages"
         and asked whether to send now — I said send them now; awaiting.
+- [ ] **V2.4 (Kyle's review round 4, 2026-07-13 — Home polish):**
+      * **Team of the Month → RUNNING with an 8th-of-month rollover**:
+        from the 8th on, the current month as it accrues; in a month's
+        first week, retrospect on the previous completed month. THE one
+        deliberately-live board — reads `date.today()` (NOT just
+        warehouse state) so it turns over with the calendar ("feels
+        alive"). Window caps at the latest game date; steps back if the
+        chosen month has no data. Label carries "(rolls over on the 8th
+        of each new month)". Determinism note: this board is
+        intentionally non-deterministic; CBS has no goldens so nothing
+        breaks. Today (Jul 13, past the 8th) → July 2026 running.
+      * **Month board gains the Total-Pts Best deviation**
+        (get_window_lineup parameterized weighted=True/False).
+      * **Blank buffer row** between starters and the reserve bench.
+      * **Retired Fantasy Team list → font 8** (+ existing gray).
+      * **McCutchen probe — VALIDATED, no bug**: he's legitimately the
+        #3 all-time OF by weighted-active (Trout 6338 / Beltrán 6136 /
+        Cutch 5966 / Betts 5830 / Holliday 5249 … Ichiro #8 at 5007 /
+        Braun way down at 4053). Longevity + a power/OBP/SB profile that
+        scores well here. NO data lost to defunct franchises — the
+        league-wide sum spans every team_id, and the leaders each touched
+        10-13 franchises (proof the aggregation is complete). Ichiro's
+        singles/steals game scores low in this HR/RBI-weighted league.
+      * **Column widths**: the CBS Home `_HOME_WIDTHS` already MIRROR
+        ESPN's `_apply_home_tab_dimensions` exactly (same col→px). If
+        specific columns still look off vs ESPN, need the specifics.
 - **REQUEST LIST (running)**: team abbrev preferences collect in the
   cbs_franchises seed (MATT, JUNK so far).
 

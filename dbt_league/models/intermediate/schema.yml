@@ -162,10 +162,11 @@ models:
       (QS/IRSTR/NH season counts + CALCULATED_POINTS and its
       hitting/pitching splits from int_cbs__player_game_points; PG
       deliberately absent -- underivable from this feed). Seasons
-      floored to the platform archive's first season (data-driven, 2004);
-      interim TOTAL lens until MLB-63 membership scopes it; pre-2011
-      population thin (CBS pruned old universes -- early players enter the
-      crosswalk only via career overlap).
+      floored to the LEAGUE ERA (data-driven: the UI-history standings'
+      first season, 2001; platform-archive min as fallback); interim
+      TOTAL lens until MLB-63 membership scopes it; early-era population
+      coverage rides the MLB-63 UI-history crosswalk (year-end-roster
+      names), so never-anchored pass-throughs are absent.
     tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
@@ -186,7 +187,7 @@ models:
       - name: cbs_player_name
         description: 'CBS player name, discipline-suffixed for the two-way pseudo-ids.'
       - name: season_year
-        description: 'MLB season year, within the platform archive era (2004+).'
+        description: 'MLB season year, within the league era (2001+, the UI-history standings floor).'
         tests:
           - not_null
       - name: stat_name
@@ -199,3 +200,163 @@ models:
         description: 'The season value (counting sum, derived count, or calculated points).'
         tests:
           - not_null
+
+  # ------------------------------------------------------------------
+  # MLB-63 walk-back chain: name identity -> membership stints ->
+  # effective (attribution-ready) windows -> daily lineup state. The
+  # per-game attribution fact (marts/core) joins the chain to the
+  # priced engine; mart_team_points_reconciliation grades the whole
+  # reconstruction against the official standings.
+  # ------------------------------------------------------------------
+
+  - name: int_cbs__player_name_ids
+    description: >
+      The name -> CBS-player-id dictionary, built ONLY from the league's own
+      id-bearing rows (modern UI transactions, 2026 daily rosters, the
+      archive crosswalk): one row per (league_key, name_key), where name_key
+      is the shared cbs_name_key() normalization every walk-back join speaks.
+      n_ids > 1 marks a name genuinely shared by multiple CBS ids (the Will
+      Smith / Luis Garcia class) -- downstream flags ambiguity and never
+      guesses; n_ids = 1 yields resolved identity via any_id.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - name_key
+    columns:
+      - name: league_key
+        tests:
+          - not_null
+      - name: name_key
+        description: 'cbs_name_key() of the display name: periods stripped, packed POS+TEAM tokens stripped, Last-First flipped, lowered, whitespace-collapsed. Two-way (Batter)/(Pitcher) suffixes survive by design.'
+        tests:
+          - not_null
+      - name: cbs_player_ids
+        description: 'All distinct CBS ids observed under this name (array).'
+      - name: n_ids
+        description: 'Count of distinct ids; > 1 = ambiguous name, flagged downstream.'
+        tests:
+          - not_null
+      - name: any_id
+        description: 'Deterministic representative id (max); only meaningful when n_ids = 1.'
+
+  - name: int_cbs__roster_stints
+    description: >
+      THE WALK-BACK (MLB-63): continuous rostered intervals per (league_key,
+      season_year, franchise_id, name_key), assembled from the normalized
+      UI-transaction moves as a last-event-wins state machine -- acquisitions
+      (add, trade_in) open, departures (drop, derived trade_out for the
+      sending side) close, and the year-end roster anchor closes what the
+      log leaves open. Openings the log never carries (drafts were never
+      logged) are recovered implicitly: anchored players with no in-season
+      acquisition, and departure-first players, get synthetic season-start
+      openings. 20,003 stints across 2001-2025; every one of the 10,449
+      year-end anchor states is reproduced by a season-end stint (the A3
+      audit, 100%). Fidelity flags ride per row and are never silently
+      resolved: the log is lossy on drops in every era (~8,000 open ends),
+      so missing_departure marks them and the effective view truncates at
+      the player's next acquisition elsewhere.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - season_year
+              - franchise_id
+              - name_key
+              - stint_index
+    columns:
+      - name: league_key
+        tests:
+          - not_null
+      - name: season_year
+        description: 'League season, 2001-2025.'
+        tests:
+          - not_null
+      - name: franchise_id
+        description: 'CBS franchise id (the /teams/{id} space), resolved per-season by the UI-standings name map.'
+        tests:
+          - not_null
+      - name: name_key
+        description: 'cbs_name_key() of the player name -- the walk-back keys by NAME (anchors carry no ids).'
+        tests:
+          - not_null
+      - name: stint_index
+        description: 'Ordinal of this stint within the (season, franchise, player) group -- players can leave and return.'
+      - name: stint_start
+        description: 'First rostered day (acquisition effective date, or the synthetic season-start opening).'
+        tests:
+          - not_null
+      - name: stint_end
+        description: 'Last observed day: departure effective date, or the season-end anchor date for open stints.'
+      - name: open_channel
+        description: 'How the stint opened: add | trade_in | season_start (the recovered opening).'
+      - name: close_type
+        description: 'How it closed: drop | trade_out | season_end.'
+      - name: on_year_end_anchor
+        description: 'The (season, franchise, player) appears on the year-end roster anchor.'
+      - name: missing_departure
+        description: 'Anchored era (2003+), the stint runs to season_end but the player is NOT on the anchor: the log missed the departure. The effective view truncates these at the player''s next acquisition elsewhere; never-reacquired ones are the walk-back''s known overshoot residual.'
+      - name: anchor_reopen_needed
+        description: 'The anchor shows the player but the log''s last word was a departure -- a missed re-acquisition, surfaced not invented.'
+      - name: no_anchor_era
+        description: '2001-2002: no roster-report pages exist, so no year-end anchor closes the season -- membership rides the log alone (the report card grades these honestly).'
+      - name: is_ambiguous_name
+        description: 'The name maps to multiple CBS ids (int_cbs__player_name_ids.n_ids > 1).'
+      - name: resolved_cbs_player_id
+        description: 'The CBS id when the name is unambiguous; NULL otherwise.'
+
+  - name: int_cbs__roster_stints_effective
+    description: >
+      Attribution-ready stint windows: int_cbs__roster_stints with the
+      end-exclusive arithmetic applied. CBS effective-date semantics make a
+      departure DAY belong to the receiving side (drop/trade_out effective
+      6/15 = out of the lineup 6/15), while season_end closes stay inclusive
+      (+1 day). Single-rostering is then enforced by truncation:
+      attribution_end_exclusive caps at the player's next acquisition
+      anywhere in the league (a player is on one roster at a time), which is
+      also what bounds the lossy-log missing_departure class.
+    columns:
+      - name: base_end_exclusive
+        description: 'stint_end for drop/trade_out closes (departure day excluded), stint_end + 1 for season_end closes (anchor day included).'
+      - name: next_acquisition_start
+        description: 'The player''s next stint_start anywhere in the league that season (lead over name_key).'
+      - name: attribution_end_exclusive
+        description: 'least(base_end_exclusive, next_acquisition_start) -- the window the attribution fact actually joins on.'
+      - name: was_truncated
+        description: 'The next acquisition cut this stint short (a missed departure made concrete).'
+
+  - name: int_cbs__lineup_intervals
+    description: >
+      Daily active/reserve state for the lineup-log eras (2001-2003, 2021+),
+      as [state_start, state_end_exclusive) intervals per (league_key,
+      season_year, franchise_id, name_key) -- activate/reserve/slot events
+      ordered last-event-wins (same-day by report row order). Includes THE
+      BACKWARD HALF: the state before a player's first lineup event is the
+      INVERSE of what that event sets (a first 'Benched' proves they were
+      active until then) -- without it, set-and-forget starters have no
+      events and the forward walk alone zeroes them out (the first report
+      card's -30%..-99% modern-era failure). Players with NO lineup events
+      at all take their year-end anchor status downstream (anchor_hold).
+      2004-2020 lineup moves were never logged by CBS; those years ride the
+      start-share estimator instead.
+    columns:
+      - name: state_start
+        description: 'First day the state holds (0001-01-01 for the backward prior-inverse interval).'
+        tests:
+          - not_null
+      - name: state_end_exclusive
+        description: 'Day the NEXT event takes over (9999-12-31 for the last interval).'
+      - name: state
+        description: 'A (active) or RS (reserve).'
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['A', 'RS']
+      - name: state_source
+        description: 'lineup_event (a logged move set this state) or prior_inverse (the backward half).'
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['lineup_event', 'prior_inverse']

@@ -30,14 +30,15 @@
 --      from merely no-hit (see the engine's derivation note).
 --
 -- POPULATION AND LENS (the honest label): crosswalked players' TOTAL MLB
--- production, seasons within the platform archive's span (data-driven
--- floor: min season of stg_cbs__player_season_stats = 2004; gamelogs reach
--- 1991 but pre-archive seasons aren't league seasons). This is the interim
--- "total" lens -- production regardless of rostered/active status --
--- until MLB-63's membership reconstruction scopes it. Two known biases,
--- both almanac-labeled: (a) pre-2011 population is thin (CBS pruned old
--- universes, so early-era players enter the crosswalk only via career
--- overlap with later archives); (b) a player's production counts even in
+-- production, seasons within the LEAGUE ERA (data-driven floor: the
+-- league's own first season per the UI-history standings -- 2001 -- with
+-- the platform archive's min as fallback; gamelogs reach 1991 but
+-- pre-league seasons aren't league seasons). This is the interim "total"
+-- lens -- production regardless of rostered/active status -- until
+-- MLB-63's membership reconstruction scopes it. Two known biases, both
+-- almanac-labeled: (a) early-era population coverage rides the MLB-63
+-- UI-history crosswalk (year-end-roster names), so never-anchored
+-- pass-throughs are absent; (b) a player's production counts even in
 -- seasons nobody rostered them.
 --
 -- league_key fans from the engine/scoring settings -- each league's book
@@ -46,9 +47,17 @@
 {{ config(materialized='view') }}
 
 with archive_floor as (
-    -- The platform archive's first season = the league era the book covers.
-    select min(season_year) as first_season
-    from {{ ref('stg_cbs__player_season_stats') }}
+    -- The league era the book covers. The UI-history standings carry the
+    -- league's true first season (2001); the platform archive's min (2004)
+    -- is the fallback for a league without a captured UI history.
+    select min(first_season) as first_season
+    from (
+        select min(season_year) as first_season
+        from {{ ref('stg_cbs__ui_standings') }}
+        union all
+        select min(season_year)
+        from {{ ref('stg_cbs__player_season_stats') }}
+    )
 ),
 
 crosswalked_games as (

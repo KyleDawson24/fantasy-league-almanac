@@ -982,3 +982,66 @@ models:
         description: 'platform_fpts - platform_recomputed_fpts. ~0 = the platform total is self-consistent under today''s rules (the 587/587 anchor property), so fpts_delta is stat-VALUE-driven (feed gaps); large = the total was computed under different rules (era-rule detection).'
       - name: drivers
         description: 'Per-category divergence object keyed by CBS category ({calculated, platform, pts_delta}); zero-delta categories omitted. Platform NULLs (untracked categories, e.g. early-year IRSTR) compare as 0 -- exactly the gap this report exists to surface.'
+
+  - name: mart_team_points_reconciliation
+    description: >
+      THE WALK-BACK'S REPORT CARD (MLB-63): reconstructed team-season points
+      vs the OFFICIAL final standings -- 25 seasons of ground truth, one row
+      per (league_key, season_year, franchise_id). The official total is
+      what CBS actually awarded; reconstructed_active_fpts is what the
+      walk-back attributes (sum of calculated_fpts x active_weight).
+      Post-coverage-extension grades: 5-13% mean absolute error 2003-2019,
+      2.4-7.5% 2021-2025 (2001-2002 have no roster anchors and grade
+      honestly worse). Two SYSTEMATIC residuals, both documented and
+      provenance-visible rather than calibrated away: the start-share era
+      (2004-2020) UNDERSHOOTS ~10-13% (the global Start%/Own% estimator is
+      conservative for a competitive league), and the early lineup-log
+      years (2021-2022) OVERSHOOT ~8-10% uniformly (lossier logs credit too
+      many active days via anchor_hold/prior_inverse), fading to ~0 by
+      2024-2025. CBS's sparse pre-2023 IRSTR also under-counts the OFFICIAL
+      side slightly (the MLB-62 finding).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - season_year
+              - franchise_id
+    columns:
+      - name: league_key
+        tests:
+          - not_null
+      - name: season_year
+        description: 'League season, 2001-2025 (2026 settles at season end).'
+        tests:
+          - not_null
+      - name: franchise_id
+        description: 'CBS franchise id from the standings page.'
+        tests:
+          - not_null
+      - name: team_name
+        description: 'The season''s team name (names drift and get reused; the per-season map is the truth).'
+      - name: standings_rank
+        description: 'Official final finish.'
+      - name: is_champion
+        description: 'rank = 1.'
+      - name: official_total_points
+        description: 'CBS''s awarded season total -- the ground truth the reconstruction is graded against.'
+        tests:
+          - not_null
+      - name: reconstructed_active_fpts
+        description: 'Sum of calculated_fpts x active_weight across the franchise''s attributed player-games.'
+      - name: fpts_delta
+        description: 'reconstructed - official.'
+      - name: fpts_delta_pct
+        description: 'Delta as a percent of official (div0-guarded).'
+      - name: rostered_fpts
+        description: 'ALL production while rostered, weight-blind -- the from-above bound on the season.'
+      - name: unattributed_fpts
+        description: 'Production by rostered players whose activity weight is UNKNOWN (estimated_membership) -- what the weighted total cannot see.'
+      - name: confirmed_active_fpts
+        description: 'The captured + reconstructed_day share of the total (confirmed-grade provenance).'
+      - name: estimated_active_fpts
+        description: 'The estimated_startshare share of the total.'
+      - name: players_attributed
+        description: 'Distinct players contributing any attributed game.'

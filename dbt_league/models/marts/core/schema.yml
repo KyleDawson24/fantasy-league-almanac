@@ -1424,3 +1424,91 @@ models:
           - accepted_values:
               arguments:
                 values: ['TRADED_AWAY', 'DROPPED']
+
+  - name: fct_cbs_player_game_attribution
+    description: >
+      THE HISTORIC ACTIVE LENS (MLB-63): every priced player-game
+      (int_cbs__player_game_points) attributed to the franchise that
+      rostered the player that day, with the day's active-state weight and
+      a PER-ROW provenance flag saying how we know -- captured (2026 daily
+      roster captures), reconstructed_day (walk-back membership AND
+      lineup-log state, 2001-2003 / 2021-2025), estimated_startshare
+      (2004-2020: membership from the walk-back, weight from the year-end
+      anchor's global Start%/Own% conditional estimator), or
+      estimated_membership (membership confirmed, activity unknowable --
+      weight NULL). The interactive surface filters on provenance; the
+      Sheets almanac uses everything and explains. FA games don't exist
+      here by construction; ambiguity and inferred ends ride as flags,
+      never silent guesses. One attribution per game row is guaranteed:
+      an ambiguous name matching two teams' stints resolves
+      position-aware (anchored position vs the game's discipline), then
+      most-recent-stint, with losers surfaced via attribution_contested.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - cbs_player_id
+              - stat_group
+              - game_pk
+              - game_date
+              - game_index
+    columns:
+      - name: league_key
+        tests:
+          - not_null
+      - name: cbs_player_id
+        description: "CBS player id; synthetic 'ui-<mlbam>' ids carry the UI-history population (players the archive universe never held -- no real CBS id exists anywhere)."
+        tests:
+          - not_null
+      - name: cbs_player_name
+        description: 'Display name; the walk-back join keys on its cbs_name_key().'
+      - name: mlbam_id
+        description: 'MLBAM id from the crosswalk -- the universal stats spine key.'
+      - name: season_year
+        tests:
+          - not_null
+      - name: stat_group
+        description: 'hitting | pitching -- the engine grain leg (two-way players carry both).'
+      - name: game_date
+        tests:
+          - not_null
+      - name: game_pk
+        description: 'MLB Stats API game id.'
+      - name: game_index
+        description: 'Disambiguates doubleheader legs sharing a date.'
+      - name: franchise_id
+        description: 'The attributed franchise (per-season name map for reconstructed rows; team_id for captured rows).'
+        tests:
+          - not_null
+      - name: team_name
+        description: 'Captured-era team name; NULL on reconstructed rows (join dim at read time).'
+      - name: provenance
+        description: "Kyle's per-row fidelity rule: captured | reconstructed_day | estimated_startshare | estimated_membership."
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['captured', 'reconstructed_day', 'estimated_startshare', 'estimated_membership']
+      - name: state_source
+        description: 'Which mechanism produced the active state: captured | lineup_event | prior_inverse | anchor_hold | startshare; NULL when unknowable (estimated_membership).'
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['captured', 'lineup_event', 'prior_inverse', 'anchor_hold', 'startshare']
+      - name: is_active
+        description: 'Boolean where the day''s state is KNOWN; NULL where estimated or unknowable.'
+      - name: active_weight
+        description: 'The scoring weight: 1/0 where known, the start-share estimator in 2004-2020, NULL where unknowable. Team-season sums of fpts x weight are what the reconciliation mart grades.'
+      - name: is_ambiguous_name
+        description: 'The name maps to multiple CBS ids -- attribution resolved position-aware, flagged not guessed.'
+      - name: membership_end_inferred
+        description: 'The stint end was truncated (next acquisition) or the departure record is missing -- membership beyond the log''s word.'
+      - name: attribution_contested
+        description: 'Multiple stints matched this game before the tie-break.'
+      - name: calculated_fpts
+        description: 'The game''s priced value under current CBS rules (calculated_ lens).'
+      - name: calculated_hitting_pts
+        description: 'Hitting-side split of calculated_fpts.'
+      - name: calculated_pitching_pts
+        description: 'Pitching-side split of calculated_fpts.'

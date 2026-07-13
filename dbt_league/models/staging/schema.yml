@@ -788,6 +788,10 @@ models:
       column turns the suffix into a join predicate so hitting gamelogs
       feed the batter id and pitching gamelogs the pitcher id, while
       unsuffixed players (scope NULL) take both groups.
+    tests:
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "not (match_method like '%\\_COLLISION' and cbs_player_id not like 'ui-%')"
     columns:
       - name: cbs_player_id
         description: 'CBS stable numeric player id (string-typed as CBS serves it). Two-way pseudo-ids included.'
@@ -803,13 +807,7 @@ models:
       - name: mlbam_name
         description: 'Player name as statsapi spells it.'
       - name: match_method
-        description: 'How the crosswalk matched this player (the build script''s full non-collision vocabulary). A _COLLISION-suffixed method would mean an unreviewed shared id survived the build -- deliberately NOT accepted here so it fails loudly.'
-        tests:
-          - accepted_values:
-              arguments:
-                values: ['name_unique', 'name_evidence_override', 'name_team_season',
-                         'name_season_overlap', 'name_ambiguous', 'fuzzy_unique',
-                         'fuzzy_team_season', 'fuzzy_overlap']
+        description: 'How the crosswalk matched this player; ui_-prefixed methods mark the name-keyed UI-history population. A _COLLISION suffix on a REAL CBS id would mean an unreviewed shared id survived the build (fails the model-level expression test loudly); on ui_ rows collisions are expected -- era spellings of one player -- and staging already dedupes them to one identity per mlbam.'
       - name: stat_group_scope
         description: 'NULL = this CBS id takes both stat groups (the normal case). ''hitting''/''pitching'' = discipline pseudo-id; only that group''s gamelog rows feed it.'
         tests:

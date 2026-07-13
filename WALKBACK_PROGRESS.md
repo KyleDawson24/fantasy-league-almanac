@@ -46,11 +46,13 @@ It is committed at every checkpoint, so the branch on GitHub mirrors it.
       attribution per game guaranteed (position-aware tie-break)
 - [x] C1: `mart_team_points_reconciliation` — reconstructed vs OFFICIAL
       standings, 25 seasons × 16 teams
-- [ ] D: COVERAGE EXTENSION (new critical path — see log) — identity +
-      gamelog extract for the UI-history population, then re-measure
-      2003-2020
-- [ ] Ship: schema docs + grain tests for the five new models, catalog,
-      Linear, handoff (deferred to post-D — the models churn again)
+- [x] D: COVERAGE EXTENSION — **LANDED. 2003-2019 collapsed from
+      80-99% error to 5-13% mean absolute error** (2008: 5.1%, 2003:
+      6.6%). 1.2M new gamelog rows; the record book is now era-complete
+      (Bonds 73 HR '01 and Randy Johnson 372 K '01 take their thrones;
+      Big Unit's 2002 = 1,142 is the all-time fantasy season).
+- [x] Ship: schema docs + grain/enum tests for all six walk-back models
+      (33/33 green), catalog, Linear, handoff
 
 ## Questions / Issues for Kyle (collected as encountered)
 
@@ -70,6 +72,24 @@ It is committed at every checkpoint, so the branch on GitHub mirrors it.
 3. (resolved) The `/teams/{id}` link space matches the franchise-id
    space after all — the 2015 'mismatch' was Kimball Drives genuinely
    changing ids across 2020.
+4. **Two SYSTEMATIC residuals in the report card — documented, not
+   calibrated away** (both are estimation-policy calls if you ever
+   want them tighter):
+   - The start-share era (2004-2020) UNDERSHOOTS ~10-13%, uniformly:
+     your Start%/Own% conditional estimator is conservative for THIS
+     league — a competitive 16-team league starts its rostered players
+     more than the global CBS average does. A league-level calibration
+     factor could close it, but that's a fudge-knob decision, not a
+     bug fix.
+   - The early lineup-log years (2021-2022) OVERSHOOT ~8-10% (14-16 of
+     16 teams over), fading to ~0 by 2024-25: older logs are lossier
+     (missed drops + missed reserve moves), so anchor_hold /
+     prior_inverse credit too many active days. The missing_departure
+     flag already marks the worst class; a tighter truncation policy
+     (e.g. end never-reacquired drops at last lineup event) is
+     possible but speculative.
+   Nothing needed from you unless you want either policy changed —
+   the almanac will carry the per-season grades as-is.
 
 ## Log
 
@@ -116,3 +136,24 @@ It is committed at every checkpoint, so the branch on GitHub mirrors it.
   can never attribute. mlb_stats gained --min-season 2001; sweep
   restarted (idempotent — the hour already landed stays), now fetching
   only league-era seasons per player. Projection ~2-3h.
+- D LANDED: 16,732 gamelog season-files swept; 1,203,556 rows loaded
+  (MLB_GAMELOGS now 1.8M rows / 3,855 players). Crosswalk staging
+  admits the UI population under synthetic 'ui-' ids (only mlbams the
+  real crosswalk lacks); full downstream rebuilt 45/45 green.
+- **THE FULL-ERA REPORT CARD** (mean absolute error vs official
+  standings): 2003-2019 = **5-13%** (was 80-99% before D); 2021-2025 =
+  2.4-10.8%; 2001-2002 = ~80% (no roster anchors exist — log-only,
+  graded honestly); 2020 = 21% (COVID short season, thin log).
+- Phantom-identity check on 2021 (error rose 7.5%→10.8% after D):
+  NOT phantoms — the new contributors are Wainwright/Cruz/Posey-class
+  stars who retired before 2026, invisible to the FA-only archive, so
+  the UI population is their only route in. Legitimate coverage
+  unmasked active-state generosity that missing coverage had been
+  cancelling out.
+- RECORD-BOOK FLOOR FIX: the season floor was the platform archive's
+  min (2004) — a pre-UI-history proxy that walled off 2001-2003.
+  Now floored by the league's own first season per the UI standings
+  (2001). Bonds 73 HR / 867 hitting pts (2001) and Randy Johnson 372 K
+  / 1,142 total pts (2002) now lead the book, as they should.
+- SHIP: schema docs + tests for all six models (grain uniqueness,
+  provenance/state enums, key not_nulls) — 33/33 green.

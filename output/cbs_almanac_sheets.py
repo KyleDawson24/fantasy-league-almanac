@@ -71,6 +71,7 @@ from almanac_logic import (
 from almanac_render import (
     HOME_DEVIATION_LABEL,
     HOME_HEADER,
+    _bref_player_cell,
     format_all_league_team_row,
     format_all_league_team_row_with_deviation,
     home_nav_link,
@@ -96,6 +97,24 @@ _RECORDS_POINTS = ['CALCULATED_POINTS', 'CALCULATED_HITTING_PTS',
                    'CALCULATED_PITCHING_PTS']
 _RECORDS_HITTING = ['R', 'RBI', 'B_BB', 'SB', 'TB', 'HR', 'H', 'XBH']
 _RECORDS_PITCHING = ['K', 'W', 'SV', 'HLD', 'QS', 'CG', 'IRSTR', 'NH']
+
+# Records v2 (Kyle 2026-07-13): the record catalog auto-derives from what
+# the league SCORES (get_cbs_record_catalog below); these maps say which
+# union-fact column carries each cataloged stat's per-franchise, per-day
+# production -- the substrate for the best-season / by-owner / contributor
+# leaders. Only stats the attributed union fact carries are recordable at
+# team/owner grain (that's exactly the scored set); non-scored marquee
+# overrides (HR / XBH) need the season-stats path and are a follow-up.
+_REC_POINTS_COL = {
+    'CALCULATED_POINTS': 'total_stat_pts',
+    'CALCULATED_HITTING_PTS': 'total_hitting_stat_pts',
+    'CALCULATED_PITCHING_PTS': 'total_pitching_stat_pts',
+}
+_REC_STAT_COL = {
+    'R': 'r', 'RBI': 'rbi', 'B_BB': 'b_bb', 'SB': 'sb', 'TB': 'tb', 'H': 'h',
+    'W': 'w', 'SV': 'sv', 'HLD': 'hld', 'CG': 'cg', 'QS': 'qs', 'OUTS': 'outs',
+    'K': 'k', 'P_H': 'p_h', 'P_BB': 'p_bb', 'ER': 'er',
+}
 
 _NAVY = {'red': 0.12, 'green': 0.20, 'blue': 0.30}
 _WHITE = {'red': 1, 'green': 1, 'blue': 1}
@@ -228,6 +247,138 @@ def get_career_records():
         f" WHERE {league_predicate()} AND stat_name IN ({wanted})"
         f" ORDER BY stat_name, rank"
     )
+
+
+# ---------------------------------------------------------------------------
+# Records v2 -- the auto-cataloged, ESPN-shaped record book
+# ---------------------------------------------------------------------------
+
+def get_cbs_record_catalog():
+    """AUTO-CATALOG (Kyle 2026-07-13): the records to display, derived from
+    what the league SCORES -- dim_stat.is_record_candidate joined to CBS's
+    scoring settings, plus dim_stat.auto_tracked overrides -- intersected
+    with the union-fact-carryable stats (the scored set). Returns
+    {stat_name: {display_name, stat_category, polarity}} so a league that
+    scores different categories catalogs different records from the same
+    code. Points records are handled as their own section, not here."""
+    carryable = ", ".join(f"'{n}'" for n in _REC_STAT_COL)
+    rows = query_snowflake(f"""
+        SELECT DISTINCT d.leaderboard_name AS stat_name, d.display_name,
+               d.stat_category, d.polarity
+        FROM dim_stat d
+        LEFT JOIN stg_cbs__scoring_settings s
+            ON s.canonical_key = d.canonical_key
+            AND {league_predicate('s')}
+        WHERE d.is_record_candidate
+          AND d.leaderboard_name IN ({carryable})
+          AND (s.canonical_key IS NOT NULL OR d.auto_tracked)
+    """)
+    return {r['stat_name']: r for r in rows}
+
+
+def _rec_agg(group_cols, extra_selects=''):
+    """Wide per-group SUM of every recordable stat + points column, over the
+    attributed CBS union fact (all rostered production -- the total lens the
+    record book uses). group_cols sets the grain (season+team, season+player,
+    season+team+player)."""
+    cols = ", ".join(
+        f'ROUND(SUM({c}), 1) AS "{n}"'
+        for n, c in {**_REC_STAT_COL, **_REC_POINTS_COL}.items())
+    return query_snowflake(f"""
+        SELECT {group_cols}{extra_selects}, {cols}
+        FROM fct_player_daily_performance
+        WHERE {league_predicate()} AND game_date IS NOT NULL
+        GROUP BY {group_cols}
+    """)
+
+
+def _franchise_owner_labels():
+    """franchise_id -> the label the by-owner column shows: current owner
+    display where known (dim_team_owner, current era), else the franchise
+    abbrev. The MLB-64 owner-history re-key later makes this per-era."""
+    rows = query_snowflake(f"""
+        SELECT f.franchise_id, f.abbrev,
+               MAX_BY(o.owner_display, o.season_year) AS owner
+        FROM cbs_franchises f
+        LEFT JOIN dim_team_owner o
+            ON f.league_key = o.league_key AND f.franchise_id = o.team_id
+        WHERE {league_predicate('f')}
+        GROUP BY f.franchise_id, f.abbrev
+    """)
+    return {int(r['franchise_id']): (r['owner'] or r['abbrev'] or f"#{r['franchise_id']}")
+            for r in rows}
+
+
+def get_cbs_records_data():
+    """Assemble every record leader in one pass over the union fact: the
+    best single team-season and player-season per stat (the 'Best Season'
+    column), the top-3 franchises by career total, current-owner-labeled
+    (the 'By Owner' column), and the contributors behind each team-season
+    record. Points stats ride alongside the cataloged scored stats."""
+    stat_names = list(_REC_STAT_COL) + list(_REC_POINTS_COL)
+    owner_label = _franchise_owner_labels()
+
+    team_season = _rec_agg(
+        'season_year, team_id',
+        ', MAX(team_abbrev) AS team_abbrev, MAX(team_name) AS team_name')
+    player_season = _rec_agg(
+        'season_year, player_key',
+        ', MAX(display_name) AS display_name, MAX(player_name) AS player_name,'
+        ' MAX(team_abbrev) AS team_abbrev')
+    player_team_season = _rec_agg(
+        'season_year, team_id, player_key',
+        ', MAX(display_name) AS display_name')
+
+    def _fnum(v):
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _best(rows, col, most=True):
+        best = None
+        for r in rows:
+            v = _fnum(r.get(col))
+            if v == 0:
+                continue
+            if best is None or (v > _fnum(best.get(col)) if most
+                                else v < _fnum(best.get(col))):
+                best = r
+        return best
+
+    # db.py lowercases result keys, so a stat's value column is stat.lower().
+    # By-owner: franchise career totals per stat -> top-3 owner-labeled.
+    career = {}
+    for r in team_season:
+        fid = r.get('team_id')
+        if fid is None:
+            continue
+        acc = career.setdefault(int(fid), {})
+        for stat in stat_names:
+            acc[stat] = acc.get(stat, 0.0) + _fnum(r.get(stat.lower()))
+
+    data = {}
+    for stat in stat_names:
+        col = stat.lower()
+        bt = _best(team_season, col)
+        bp = _best(player_season, col)
+        contribs = []
+        if bt:
+            same = [r for r in player_team_season
+                    if r.get('season_year') == bt.get('season_year')
+                    and r.get('team_id') == bt.get('team_id')
+                    and _fnum(r.get(col)) > 0]
+            same.sort(key=lambda r: -_fnum(r.get(col)))
+            contribs = [(r.get('display_name'), _fnum(r.get(col))) for r in same[:3]]
+        owners = sorted(
+            ((owner_label.get(fid, f'#{fid}'), acc.get(stat, 0.0))
+             for fid, acc in career.items() if acc.get(stat, 0.0) > 0),
+            key=lambda t: -t[1])[:3]
+        data[stat] = {
+            'team_season': bt, 'player_season': bp,
+            'contributors': contribs, 'owners': owners,
+        }
+    return data
 
 
 def get_provenance_mix(entity_id=None):
@@ -1118,91 +1269,119 @@ def build_home_rows(context, nav_targets=None):
     return rows, formats
 
 
-def build_records_rows(context, season_records, career_records):
-    """Records: PLAYER records only -- Best Season x Best Career Totals,
-    side by side. Marquee fantasy-point boards top-10; counting stats one
-    row per stat (#1 each side)."""
+def _rec_value(stat, value):
+    """Record value display: IP for OUTS, else whole number."""
+    if value is None:
+        return ''
+    if stat == 'OUTS':
+        return fmt_ip(value)
+    return f'{float(value):,.0f}'
+
+
+def _owner_list(stat, owners):
+    """The By-Owner cell: 'Owner1: T1 · Owner2: T2 · Owner3: T3' (career
+    totals, current-owner-labeled), mirroring the all-time board's
+    top-franchise lists."""
+    return ' · '.join(f'{name}: {_rec_value(stat, v)}' for name, v in owners)
+
+
+def _contributor_detail(stat, contributors):
+    """Team-record Details = the top players behind that team-season."""
+    return ', '.join(f'{nm}: {_rec_value(stat, v)}' for nm, v in contributors)
+
+
+def build_records_rows(context, catalog, data):
+    """Records v2 (Kyle 2026-07-13): ESPN-shaped, auto-cataloged from what
+    the league scores, with two lenses -- Best Season (all-time) and By
+    Owner (all-time career totals) -- and a Player section + a Team
+    section (team records carry a contributors detail). Uses the same
+    record machinery/format as the ESPN page; the record SET differs
+    because it auto-derives from CBS's scored categories."""
     era = f"{context['first_season']}–{context['season_year']}"
-    by_stat_season = {}
-    for r in season_records:
-        by_stat_season.setdefault(r['stat_name'], []).append(r)
-    by_stat_career = {}
-    for r in career_records:
-        by_stat_career.setdefault(r['stat_name'], []).append(r)
+    HDR = ['Record', 'Holder', 'Value', 'Year', 'Details', '',
+           'By Owner (all-time career totals)']
 
     rows = [
-        ['League Records — Players'],
-        [f'Calculated lens, {era}. Records count TOTAL production in '
-         f'league-era seasons (rostered or not) until the ownership-scoped '
-         f'book lands. Two-way players appear as their CBS split identities.'],
+        ['League Records'],
+        [f'Auto-cataloged from the categories this league scores, {era}. '
+         f'"Best Season" is the top single season all-time; "By Owner" sums '
+         f'each franchise\'s career total, labeled by its current owner '
+         f'(true owner-by-era arrives with the ownership re-key). Total '
+         f'(calculated) lens.'],
         [],
     ]
     formats = [
-        {'range': 'A1:L1', 'format': {'textFormat': {'bold': True, 'fontSize': 14}}},
-        {'range': 'A2:L2', 'format': {'textFormat': {'italic': True},
+        {'range': 'A1:G1', 'format': {'textFormat': {'bold': True, 'fontSize': 14}}},
+        {'range': 'A2:G2', 'format': {'textFormat': {'italic': True},
                                       'backgroundColor': _PALE_BLUE}},
     ]
 
     def _section(label):
         rows.append([label])
-        formats.append({'range': f'A{len(rows)}:L{len(rows)}',
+        formats.append({'range': f'A{len(rows)}:G{len(rows)}',
                         'format': {'textFormat': {'bold': True, 'foregroundColor': _WHITE},
                                    'backgroundColor': _NAVY}})
 
-    def _header(cells):
-        rows.append(cells)
-        formats.append({'range': f'A{len(rows)}:L{len(rows)}',
+    def _header():
+        rows.append(list(HDR))
+        formats.append({'range': f'A{len(rows)}:G{len(rows)}',
                         'format': {'textFormat': {'bold': True}}})
 
-    marquee_label = {
-        'CALCULATED_POINTS': 'BEST FANTASY SEASONS & CAREERS — TOTAL POINTS',
-        'CALCULATED_HITTING_PTS': 'HITTING POINTS',
-        'CALCULATED_PITCHING_PTS': 'PITCHING POINTS',
+    def _player_row(label, stat):
+        d = data.get(stat, {})
+        bp = d.get('player_season')
+        holder = _bref_player_cell(bp) if bp else ''
+        return [
+            label, holder,
+            _rec_value(stat, bp and bp.get(stat.lower())),
+            _num(bp and bp.get('season_year')),
+            '', '',
+            _owner_list(stat, d.get('owners', [])),
+        ]
+
+    def _team_row(label, stat):
+        d = data.get(stat, {})
+        bt = d.get('team_season')
+        holder = bt and (bt.get('team_abbrev') or bt.get('team_name')) or ''
+        return [
+            label, holder,
+            _rec_value(stat, bt and bt.get(stat.lower())),
+            _num(bt and bt.get('season_year')),
+            _contributor_detail(stat, d.get('contributors', [])), '',
+            _owner_list(stat, d.get('owners', [])),
+        ]
+
+    # ---- Score Records (points): team + player point marquees
+    _section('SCORE RECORDS')
+    _header()
+    _point_labels = {
+        'CALCULATED_POINTS': 'Total Points',
+        'CALCULATED_HITTING_PTS': 'Hitting Points',
+        'CALCULATED_PITCHING_PTS': 'Pitching Points',
     }
-    marquee_depth = {'CALCULATED_POINTS': 10,
-                     'CALCULATED_HITTING_PTS': 3,
-                     'CALCULATED_PITCHING_PTS': 3}
-    for stat in _RECORDS_POINTS:
-        _section(marquee_label[stat])
-        _header(['#', 'Best Season', 'Year', 'Points', '',
-                 '#', 'Best Career', 'Yrs', 'Seasons', 'Points'])
-        depth = marquee_depth[stat]
-        seasons = by_stat_season.get(stat, [])[:depth]
-        careers = by_stat_career.get(stat, [])[:depth]
-        for i in range(max(len(seasons), len(careers))):
-            s = seasons[i] if i < len(seasons) else None
-            c = careers[i] if i < len(careers) else None
-            rows.append([
-                _num(s and s['rank']), s and s['player_name'] or '',
-                _num(s and s['season_year']), _pts(s and s['stat_value']), '',
-                _num(c and c['rank']), c and c['player_name'] or '',
-                (f"{_num(c['first_season'])}–{_num(c['last_season'])}"
-                 if c else ''),
-                _num(c and c['seasons_played']), _pts(c and c['stat_value']),
-            ])
-        rows.append([])
+    for stat, label in _point_labels.items():
+        rows.append(_team_row(f'Best Team {label}', stat))
+        rows.append(_player_row(f'Best Player {label}', stat))
+    rows.append([])
 
-    def _counting_section(label, stats):
-        _section(label)
-        _header(['Record', 'Best Season', 'Year', 'Value', '',
-                 '', 'Best Career', 'Yrs', 'Seasons', 'Value'])
-        for stat in stats:
-            s = (by_stat_season.get(stat) or [None])[0]
-            c = (by_stat_career.get(stat) or [None])[0]
-            label_txt = (s and s['display_name']) or (c and c['display_name']) or stat
-            rows.append([
-                label_txt,
-                s and s['player_name'] or '', _num(s and s['season_year']),
-                _pts(s and s['stat_value']), '', '',
-                c and c['player_name'] or '',
-                (f"{_num(c['first_season'])}–{_num(c['last_season'])}"
-                 if c else ''),
-                _num(c and c['seasons_played']), _pts(c and c['stat_value']),
-            ])
-        rows.append([])
+    # ---- Player + Team sections, auto-cataloged, hitting then pitching
+    hitting = [s for s, m in catalog.items() if m['stat_category'] == 'hitting']
+    pitching = [s for s, m in catalog.items() if m['stat_category'] == 'pitching']
 
-    _counting_section('HITTING RECORDS', _RECORDS_HITTING)
-    _counting_section('PITCHING RECORDS', _RECORDS_PITCHING)
+    def _order(stats):
+        return sorted(stats, key=lambda s: catalog[s]['display_name'])
+
+    for grain, row_fn in (('Player', _player_row), ('Team', _team_row)):
+        for cat_label, stats in (('Hitting', _order(hitting)),
+                                 ('Pitching', _order(pitching))):
+            if not stats:
+                continue
+            _section(f'{grain.upper()} RECORDS — {cat_label.upper()}')
+            _header()
+            for stat in stats:
+                rows.append(row_fn(catalog[stat]['display_name'], stat))
+            rows.append([])
+
     return rows, formats
 
 
@@ -1481,8 +1660,8 @@ def build_all_tabs(nav_targets=None):
         alltime, current_key, current_name, get_years_of_service(alltime_keys))
 
     home = build_home_rows(context, nav_targets=nav_targets)
-    records = build_records_rows(context, get_season_records(),
-                                 get_career_records())
+    records = build_records_rows(context, get_cbs_record_catalog(),
+                                 get_cbs_records_data())
     standings = build_standings_rows(context, arc, finishes, franchises)
 
     return ([(HOME_TAB, *home), (RECORDS_TAB, *records),
@@ -1612,8 +1791,9 @@ _HOME_WIDTHS = [(0, 1, 100), (1, 2, 125), (2, 3, 100), (3, 4, 50),
                 (8, 9, 100), (9, 10, 125), (10, 11, 50),
                 (11, 12, 125), (12, 13, 250),   # L Slash / M Stat Line (Kyle)
                 (13, 14, 150), (14, 15, 50)]
-_RECORDS_WIDTHS = [(0, 1, 210), (1, 2, 180), (2, 5, 70), (5, 6, 30),
-                   (6, 7, 180), (7, 8, 90), (8, 10, 70)]
+# v2 records layout: Record | Holder | Value | Year | Details | (gap) | By Owner
+_RECORDS_WIDTHS = [(0, 1, 175), (1, 2, 165), (2, 3, 60), (3, 4, 50),
+                   (4, 5, 230), (5, 6, 20), (6, 7, 300)]
 _STANDINGS_WIDTHS = [(0, 1, 190), (1, 2, 60)]
 _TEAM_WIDTHS = [(0, 1, 55), (1, 2, 170), (2, 7, 62), (7, 12, 46), (12, 13, 30),
                 (13, 14, 55), (14, 15, 170), (15, 16, 62), (16, 21, 62),

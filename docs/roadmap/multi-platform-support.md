@@ -171,5 +171,9 @@ record book landed 2026-07-09, then the stats-source pivot) · MLB-70
 universal MLB stats extract + CBS↔MLBAM crosswalk (the new stats spine,
 2026-07-09) · MLB-62 FPTS recompute (now universal-sourced) · MLB-63
 reconstruction · MLB-64 dim_franchise · MLB-65 marts · MLB-66 almanac
-v1 · MLB-14 Yahoo access spike ·
+v1 · MLB-72 union layer (CBS player-days into int_player_daily → the
+one shared fact family; seeded 2026-07-13 off Kyle's uniform-table
+directive — closes plumbing gap #1) · MLB-73 draft results as
+acquisition evidence (corroborate walk-back openings, recover the
+invisible dropped-before-any-event class) · MLB-14 Yahoo access spike ·
 MLB-42 Fantrax access spike (needs a dummy league)

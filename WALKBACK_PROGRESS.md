@@ -99,6 +99,20 @@ It is committed at every checkpoint, so the branch on GitHub mirrors it.
      the 2021-23 deltas.
    - Start-share era stands, with finer texture: roughly unbiased
      2005-2010, undershooting ~8-13% from 2011 on.
+5. **The 33 + 18 residual flags decoded (2026-07-13): the dominant
+   pattern is MIRROR-PAIR TRADES** — the two lists share names on
+   swapped teams with matching dates (Hardy↔Hawpe 7/14/08,
+   Kemp↔Bumgarner 8/16/10, Utley↔Morneau 6/9/14, Reed↔K-Rod
+   7/28/03...). The 2003 case study shows the log carrying the SAME
+   trade in BOTH directions with two effective dates (7/21 + 7/28) +
+   double activations — a swap-and-swap-back (rental?) or re-done
+   deal. The machine can't know which leg wins by date alone, so it
+   flags rather than guesses. DO YOU REMEMBER these — were they
+   vetoed/reversed trades, or one-week rentals? Your read decides the
+   policy (e.g. void-detection when A→B and B→A legs coexist). The
+   remainder are true log silences (Machado '12, Vlad Jr '23 class).
+   Full lists: `missing_departure` / `anchor_reopen_needed` flags in
+   int_cbs__roster_stints.
 
 ## Log
 

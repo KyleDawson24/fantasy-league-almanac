@@ -162,9 +162,11 @@ day_base as (
         sum(e.k)     as k,     sum(e.ha)    as ha,    sum(e.bbi) as bbi,
         sum(e.er)    as er,    sum(e.nh)    as nh,
 
-        -- Unpriced display context (slash-line inputs)
+        -- Unpriced display context (slash-line inputs + the auto-tracked
+        -- non-scored counting records HR/2B/3B)
         sum(e.h)     as h,     sum(e.ab)    as ab,    sum(e.hbp) as hbp,
         sum(e.sf)    as sf,    sum(e.l)     as l,
+        sum(e.hr)    as hr,    sum(e.doubles) as doubles, sum(e.triples) as triples,
 
         sum(e.r_pts)    as r_pts,    sum(e.rbi_pts) as rbi_pts,
         sum(e.bb_pts)   as bb_pts,   sum(e.sb_pts)  as sb_pts,
@@ -278,12 +280,14 @@ select
     cast(null as float)                          as platform_hitting_pts,
     cast(null as float)                          as platform_pitching_pts,
 
-    -- Hitting counting stats (CBS scores R/RBI/BB/SB/TB; H/AB/HBP/SF ride
-    -- as unpriced display context for slash lines; the rest 0)
+    -- Hitting counting stats (CBS scores R/RBI/BB/SB/TB; H/AB/HBP/SF +
+    -- HR/2B/3B ride as unpriced context -- the last three feed the
+    -- auto-tracked records; XBH derives; the rest 0)
     d.h as h, d.ab as ab, d.bb as b_bb, 0 as b_so, d.hbp as hbp,
-    d.sf as sf, 0 as hr,
+    d.sf as sf, d.hr as hr,
     d.r as r, d.rbi as rbi, d.sb as sb, 0 as cs, d.tb as tb,
-    0 as singles, 0 as doubles, 0 as triples, 0 as xbh, 0 as gdp,
+    0 as singles, d.doubles as doubles, d.triples as triples,
+    (d.doubles + d.triples + d.hr) as xbh, 0 as gdp,
     0 as b_ibb, 0 as cyc,
 
     -- Hitting point contributions

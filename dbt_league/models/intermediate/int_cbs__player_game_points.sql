@@ -185,12 +185,18 @@ game_wide as (
 
         -- Unpriced display context (slash-line inputs for the shared
         -- daily contract; canonical keys are discipline-distinct in the
-        -- map, so no group guard is needed)
+        -- map, so no group guard is needed). HR/2B/3B ride here too: CBS
+        -- doesn't SCORE them (TB captures them) but the records page
+        -- auto-tracks them, and records need them attributed + active-
+        -- weightable, which only the daily fact provides.
         sum(case when canonical_key = 'hits'         then stat_value else 0 end) as h,
         sum(case when canonical_key = 'at_bats'      then stat_value else 0 end) as ab,
         sum(case when canonical_key = 'hit_by_pitch' then stat_value else 0 end) as hbp,
         sum(case when canonical_key = 'sac_flies'    then stat_value else 0 end) as sf,
         sum(case when canonical_key = 'losses'       then stat_value else 0 end) as l,
+        sum(case when canonical_key = 'home_runs'    then stat_value else 0 end) as hr,
+        sum(case when canonical_key = 'doubles'      then stat_value else 0 end) as doubles,
+        sum(case when canonical_key = 'triples'      then stat_value else 0 end) as triples,
 
         -- Per-category point contributions
         sum(case when canonical_key = 'runs'         then stat_points else 0 end) as r_pts,
@@ -239,7 +245,7 @@ select
     g.r, g.rbi, g.bb, g.sb, g.tb,
     g.w, g.s, g.hd, g.cg, g.qs, g.outs, g.irstr, g.k, g.ha, g.bbi, g.er,
     g.gs, g.ir, g.irs,
-    g.h, g.ab, g.hbp, g.sf, g.l,
+    g.h, g.ab, g.hbp, g.sf, g.l, g.hr, g.doubles, g.triples,
     -- Unscored game-event flag for the record book / retrospective. An
     -- official individual no-hitter is a 9+ inning complete game with zero
     -- hits allowed -- pure same-line aggregates, no base-state needed.

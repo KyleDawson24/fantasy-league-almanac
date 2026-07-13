@@ -2,9 +2,9 @@ stat_name,espn_stat_id,stat_category,espn_stat_label,display_name,abbrev,is_coun
 AB,0,hitting,At Bats,At Bats,AB,true,false,,false,true,positive,,,,at_bats
 H,1,hitting,Hits,Hits,H,true,false,,true,true,positive,,,Phase 6.3.3: not in scoring_settings but a universal counting stat -- always surface as records.,hits
 AVG,2,hitting,Batting Average,Batting Average,AVG,false,false,,false,true,neutral,ab,225,,batting_avg
-2B,3,hitting,Doubles,Doubles,2B,true,false,,false,true,positive,,,,doubles
-3B,4,hitting,Triples,Triples,3B,true,false,,false,true,positive,,,,triples
-HR,5,hitting,Home Runs,Home Runs,HR,true,false,,false,true,positive,,,,home_runs
+2B,3,hitting,Doubles,Doubles,2B,true,false,,true,true,positive,,,Auto-tracked for records even where unscored (CBS scores TB not 2B); ESPN already scores it so this is ESPN-neutral.,doubles
+3B,4,hitting,Triples,Triples,3B,true,false,,true,true,positive,,,Auto-tracked for records even where unscored; ESPN-neutral.,triples
+HR,5,hitting,Home Runs,Home Runs,HR,true,false,,true,true,positive,,,Auto-tracked for records even where unscored (CBS scores TB not HR); ESPN already scores it so this is ESPN-neutral.,home_runs
 XBH,6,hitting,Extra Base Hits,Extra Base Hits,XBH,true,false,,true,true,positive,,,Phase 6.3.3: not in scoring_settings but a universal counting stat -- always surface as records.,extra_base_hits
 1B,7,hitting,Singles,Singles,1B,true,false,,false,true,positive,,,,singles
 TB,8,hitting,Total Bases,Total Bases,TB,true,false,,true,true,positive,,,Phase 6.3.3: not in scoring_settings but a universal counting stat -- always surface as records.,total_bases

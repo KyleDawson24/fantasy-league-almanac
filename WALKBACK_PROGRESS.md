@@ -255,6 +255,33 @@
         (269k career pts); active-lens is an easy swap. (3) player Best
         Season uses attributed (rostered) production for one-source
         consistency vs the earlier all-production record book.
+- [ ] **RECORDS v2.1 — ESPN-shape REBUILD (Kyle round 6, 2026-07-13):**
+      He flagged v2's shape as a wrong blueprint; rebuilt toward the ESPN
+      Records layout he shared.
+      * **FORMAT** now mirrors ESPN: Record | [Season: Holder|Owner|Value|
+        Year|Details] | gap | [All-Time Total: Holder|Owner|Value|Yrs|
+        Details]. "Season" = best single season (replaces ESPN's current-
+        season/weekly); "All-Time Total" = best career accumulation
+        (replaces ESPN's all-time/weekly). Player sections LEAD (this
+        league's nature), team sections follow with a contributors detail;
+        Score Records on top. Owner column = current owner of the holding
+        franchise (MLB-64 caveat).
+      * **ACTIVE LENS — the mission** ("real baseball league": if a player
+        wasn't started, it didn't happen). ALL records now active-weighted
+        (× active_weight), not rostered-total. HR record = Judge's ACTIVE
+        62 (2022), not a benched 73. This is the DEFAULT everywhere now
+        (Kyle: active-only except where explicitly stated).
+      * **AUTO-TRACK non-scored counting stats**: HR/2B/3B set
+        auto_tracked=true in stat_classification (H/XBH already were), and
+        plumbed HR/doubles/triples through int_cbs__player_game_points +
+        int_cbs__player_daily (unpriced display context, like H/AB) so
+        they're attributed + active-weightable. ESPN already SCORES these
+        so the seed flag is ESPN-neutral (goldens gate it).
+      * **HYPERLINK FIX**: Records + team tabs wrote RAW → bref =HYPERLINK
+        cells showed as literal text; now USER_ENTERED (like Home) so they
+        parse.
+      * db.py lowercases result keys — record getters access stat columns
+        via stat.lower() (the v2 bug, kept fixed).
 - **REQUEST LIST (running)**: team abbrev preferences collect in the
   cbs_franchises seed (MATT, JUNK so far).
 

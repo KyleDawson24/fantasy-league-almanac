@@ -198,6 +198,39 @@
       * **Column widths**: the CBS Home `_HOME_WIDTHS` already MIRROR
         ESPN's `_apply_home_tab_dimensions` exactly (same col→px). If
         specific columns still look off vs ESPN, need the specifics.
+- [ ] **V2.5 (Kyle review round 5, 2026-07-13):**
+      * **Active-star grayed-out report (Goldschmidt/Sale/Altuve)**:
+        COULD NOT REPRODUCE on current code — all three (and every
+        rostered player) render ACTIVE, verified 4 ways (repro, prev9,
+        full-board mismatch sweep, name-match sweep = 0 mismatches).
+        Likely an earlier sheet state. HARDENED anyway: get_current_
+        rostered now also returns an unambiguous-NAME index, so a
+        rostered player whose all-time board key is a ui-only synthetic
+        (their history) still reads active. Ambiguous names excluded
+        (Will-Smith guard). No output change on current data.
+      * Column widths L (Slash) 125 / M (Stat Line) 250; bench "BE - Pos"
+        slot-label cells font 8.
+- **NEXT BIG PIECE — RECORDS PAGE (design engaged, NOT yet built,
+  awaiting Kyle's confirmation on the column/grain fork):**
+      * The auto-catalog machinery ALREADY EXISTS and is data-driven:
+        `get_scored_record_specs()` builds the record list from
+        dim_stat.is_record_candidate + "does the league score it"
+        (scoring-settings join) + dim_stat.auto_tracked overrides. So
+        records auto-adapt per league — CBS will show ITS 16 scored
+        categories, ESPN its own, same code. ONE wiring gap:
+        stg_scoring_settings is ESPN-only; CBS scoring is in
+        stg_cbs__scoring_settings — the catalog join needs the CBS
+        scoring unioned in.
+      * mart_stat_leaderboard (the record source) is WEEKLY-grain +
+        ESPN-only (fed by the weekly active facts). CBS has no weekly
+        grain → needs NEW season-grain + owner-grain record leaderboards.
+      * THE CONFLICT Kyle flagged: earlier blueprint = "PLAYER records
+        only: Best Season × Best Career" (already built:
+        mart_player_season_records + mart_player_career_records + the
+        Records tab). NOW Kyle says columns = "by SEASON all-time × by
+        OWNER all-time" — which implies TEAM/OWNER grain, not player,
+        and swaps player-career for owner-aggregate. Asked him to
+        confirm the two columns + grain before building.
 - **REQUEST LIST (running)**: team abbrev preferences collect in the
   cbs_franchises seed (MATT, JUNK so far).
 

@@ -208,9 +208,12 @@ It is committed at every checkpoint, so the branch on GitHub mirrors it.
   +1.0 mean signed.** ui- ids renamed ui-only- (Kyle: clearer that the
   prefix marks identity-provenance). IRSTR wobble pattern for Kyle:
   all top 2023-25 diffs are relievers at +2/+3 with OUR side higher —
-  consistent with pass-through inherited runners double-crediting
-  under IR−IRS (two relievers can both "strand" one runner) where
-  CBS's key credits the final strander once.
+  initially suspected pass-through double-crediting — REFUTED
+  2026-07-13 by CBS's own per-game IRPCT strand rates: Milner 2025
+  agrees with our IR/IRS on all 30 inherited-runner games, so CBS's
+  SEASON key disagrees with CBS's OWN gamelogs. The wobble is
+  internal to their season aggregation; distribution 2023-25 =
+  1,110 exact / 81 at +1 / 26 at +2 / 5 at +3 / 4 at −1.
 - BONUS — MLB-54's dual-source verify, run NOW instead of at rollover
   (the API snapshot + UI capture already overlap): 2026 swept
   full-season via start_row (1,325 moves / 45 pages), API log

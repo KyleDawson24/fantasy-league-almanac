@@ -137,7 +137,7 @@ models:
       - name: qs
         description: 'Derived quality start flag: games_started_pitching = 1 AND outs >= 18 AND earned runs <= 3.'
       - name: irstr
-        description: 'Derived inherited runners stranded: ir - irs (statsapi has no direct strand key; CBS''s own direct IRSTR key exists only at season grain and anchors reconciliation instead).'
+        description: 'Derived inherited runners stranded: ir - irs (statsapi publishes the components, not a single strand key -- MLB''s own box scores print the same pair). Corroborated by CBS''s OWN per-game IRPCT strand rates: Milner 2025 agrees 30/30 games, so the small season-grain wobble (0 diff on 1,110 of 1,226 player-seasons 2023-25; max +/-3) is INTERNAL to CBS -- their season key disagrees with their own gamelogs. CBS''s direct season IRSTR anchors reconciliation, nothing else.'
       - name: gs
         description: 'Games started (pitching) -- QS derivation context, unpriced.'
       - name: ir

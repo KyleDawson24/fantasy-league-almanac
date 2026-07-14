@@ -129,14 +129,22 @@ select
     end                                              as move_type,
     t.action_raw,
 
-    -- Slot transitions where the era states them.
+    -- Slot transitions where the era states them. to_slot was DOUBLY broken
+    -- until 2026-07-14 (Law 2 made it load-bearing): the WHEN gate matched
+    -- neither pattern for 'Moved from X to Y' (no leading space; doesn't
+    -- START with 'Moved to'), and the old regex used a non-capture group
+    -- (?:...) that Snowflake's engine rejects -- it errored on any row the
+    -- gate DID pass. The ' to (\\S+)$' form is POSIX-safe and covers all
+    -- three verb shapes (Moved from X to Y | Moved to Y | ... and Moved to Y).
     case
         when t.action_raw ilike 'Moved from % to %'
             then trim(regexp_substr(t.action_raw, 'Moved from (\\S+) to', 1, 1, 'ie'))
     end                                              as from_slot,
     case
-        when t.action_raw ilike '% Moved to %' or t.action_raw ilike 'Moved to %'
-            then trim(regexp_substr(t.action_raw, 'Moved (?:from \\S+ )?to (\\S+)$', 1, 1, 'ie'))
+        when t.action_raw ilike 'Moved from % to %'
+          or t.action_raw ilike '% Moved to %'
+          or t.action_raw ilike 'Moved to %'
+            then trim(regexp_substr(t.action_raw, ' to (\\S+)$', 1, 1, 'ie'))
     end                                              as to_slot,
 
     -- Trade counterparty ('Traded from X' names the SENDING team, in that

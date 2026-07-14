@@ -1522,11 +1522,11 @@ models:
               arguments:
                 values: ['captured', 'reconstructed_day', 'estimated_startshare', 'estimated_membership']
       - name: state_source
-        description: 'Which mechanism produced the active state: captured | lineup_event | prior_inverse | anchor_hold | startshare; NULL when unknowable (estimated_membership).'
+        description: 'Which mechanism produced the active state: captured | lineup_event | prior_inverse | prior_direct (a first slot_move''s from_slot, observed not inferred) | anchor_hold | startshare; NULL when unknowable (estimated_membership).'
         tests:
           - accepted_values:
               arguments:
-                values: ['captured', 'lineup_event', 'prior_inverse', 'anchor_hold', 'startshare']
+                values: ['captured', 'lineup_event', 'prior_inverse', 'prior_direct', 'anchor_hold', 'startshare']
       - name: is_active
         description: 'Boolean where the day''s state is KNOWN; NULL where estimated or unknowable.'
       - name: active_weight

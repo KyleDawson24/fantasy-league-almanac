@@ -24,6 +24,23 @@
 --     ON at season end without anchor confirmation -> missing_departure
 --     flag (2003-2025; the 2001-2002 no-anchor era can't check).
 --
+--   LAW 2 (Kyle, 2026-07-14): you cannot lineup-move a player you don't
+--   roster -- every lineup event (activate/reserve/slot_move) is
+--   MEMBERSHIP EVIDENCE at its date, though never an acquisition or
+--   departure verb. Two mechanisms ride it:
+--     lineup_opening   the player-season's first event ANYWHERE is a
+--                      lineup event -> he was already rostered when the
+--                      log opens -> season-start opening on that
+--                      franchise. The draft-and-hold class the membership
+--                      verbs alone lose entirely (Randy Johnson 2001-02:
+--                      one P->SP move, no add, no anchor -> NO stint, his
+--                      1,142-pt 2002 invisible to the active lens).
+--     lineup_evidence  a lineup event while this franchise's membership
+--                      state machine says OFF -> a log-missed
+--                      (re-)acquisition, reopening AT the evidence date
+--                      (not season start: his earlier season may belong
+--                      to another franchise).
+--
 -- Chronology: effective_date wins over txn_date (retroactive edits);
 -- same-day event ORDER falls back to the report's reverse row order
 -- (row_seq walks newest-first). Season bounds = the MLB season's actual
@@ -139,6 +156,77 @@ moves as (
     where v.name_key is null
 ),
 
+-- LAW 2 membership evidence: lineup events carry the acting franchise
+-- directly (no derived/phantom class), so each one proves the player was
+-- on that roster that day.
+lineup_events as (
+    select
+        league_key,
+        season_year,
+        franchise_id,
+        {{ cbs_name_key('player_name_raw') }}        as name_key,
+        coalesce(effective_date, txn_date)           as event_date,
+        row_seq,
+        entry_seq
+    from {{ ref('stg_cbs__ui_transactions') }}
+    where season_year between 2001 and 2025
+        and move_type in ('activate', 'reserve', 'slot_move')
+        and franchise_id is not null
+),
+
+-- (a) First event of the player-season ANYWHERE is a lineup event ->
+-- rostered since the log opened -> season-start opening there. row_seq
+-- 999999 loses same-day ties to the anchored/departure openings' 1000000
+-- (row_seq walks DESC) so double-opened players resolve deterministically.
+lineup_openings as (
+    select league_key, season_year, franchise_id, name_key,
+           'lineup_opening' as opening_reason
+    from (
+        select league_key, season_year, franchise_id, name_key,
+               event_date, row_seq, entry_seq, 'evidence' as kind
+        from lineup_events
+        union all
+        select league_key, season_year, franchise_id, name_key,
+               event_date, row_seq, entry_seq, 'move'
+        from moves
+    )
+    qualify row_number() over (
+        partition by league_key, season_year, name_key
+        order by event_date, row_seq desc, entry_seq desc
+    ) = 1 and kind = 'evidence'
+),
+
+-- (b) Lineup evidence while this franchise's membership state is OFF (or
+-- never established) -> reopen at the evidence date. The alternation
+-- machine downstream dedupes overlap with (a)'s season-start opening and
+-- collapses consecutive evidence rows to the first.
+lineup_reopens as (
+    select league_key, season_year, franchise_id, name_key,
+           event_date, row_seq, entry_seq
+    from (
+        select
+            e.*,
+            last_value(case when e.kind != 'evidence' then e.kind end)
+                ignore nulls over (
+                    partition by e.league_key, e.season_year,
+                                 e.franchise_id, e.name_key
+                    order by e.event_date, e.row_seq desc, e.entry_seq desc
+                    rows between unbounded preceding and 1 preceding
+                ) as prev_membership_kind
+        from (
+            select league_key, season_year, franchise_id, name_key,
+                   event_date, row_seq, entry_seq, event_kind as kind
+            from moves
+            union all
+            select league_key, season_year, franchise_id, name_key,
+                   event_date, row_seq, entry_seq, 'evidence'
+            from lineup_events
+        ) e
+    )
+    where kind = 'evidence'
+        and coalesce(prev_membership_kind, 'departure') = 'departure'
+),
+
 -- The state machine wants one ordered event stream per (season,
 -- franchise, player). Synthetic season-start acquisitions cover the
 -- unlogged opening rosters.
@@ -169,6 +257,11 @@ anchored_openings as (
 
 openings as (
     select * from anchored_openings
+
+    union all
+
+    -- LAW 2(a): first event of the player-season is a lineup move.
+    select * from lineup_openings
 
     union all
 
@@ -224,9 +317,19 @@ events as (
 
     select
         o.league_key, o.season_year, o.franchise_id, o.name_key,
-        b.season_start, 1000000, 0, 'acquisition', o.opening_reason
+        b.season_start,
+        iff(o.opening_reason = 'lineup_opening', 999999, 1000000),
+        0, 'acquisition', o.opening_reason
     from openings o
     inner join season_bounds b on o.season_year = b.season_year
+
+    union all
+
+    -- LAW 2(b): evidence-backed reopenings at the evidence date.
+    select
+        r.league_key, r.season_year, r.franchise_id, r.name_key,
+        r.event_date, r.row_seq, r.entry_seq, 'acquisition', 'lineup_evidence'
+    from lineup_reopens r
 ),
 
 -- Last-event-wins: keep only state CHANGES, giving a strictly

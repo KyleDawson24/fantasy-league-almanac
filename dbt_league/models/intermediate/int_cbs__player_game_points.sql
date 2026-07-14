@@ -223,6 +223,32 @@ game_wide as (
         sum(stat_points)                                                      as calculated_fpts
     from scored_long
     group by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14
+),
+
+-- LAW 1 (Kyle, 2026-07-14): discipline scopes scoring -- an active hitter
+-- accrues hitting points ONLY and an active pitcher pitching points ONLY;
+-- slots are irrelevant to the bucket because neither discipline can occupy
+-- the other's slots. CBS's own architecture says the same thing twice: it
+-- serves pitchers NO batting line (Arrieta 2015 verified -- our +29 phantom
+-- hitting points made his 1,020 outrank Verlander's real 1,010), and it
+-- splits the one true two-way into discipline-pure assets (900/901,
+-- scope-guarded at the crosswalk join below). So an UNSPLIT player-season
+-- carrying BOTH stat groups is arbitrated by dominance -- innings pitched
+-- vs at-bats -- and the off-discipline rows DROP, exactly as the scope
+-- guard drops them for the split ids: an NL pitcher's batting line and a
+-- position player's mop-up inning never happened for the fantasy layer.
+-- (Scoped ids bypass the arbiter: their rows are already discipline-pure,
+-- and mlbam-grain dominance would misjudge Ohtani's halves.)
+discipline as (
+    select
+        mlbam_id,
+        season_year,
+        iff(sum(iff(stat_group = 'pitching', outs, 0))
+                >= 3 * sum(iff(stat_group = 'hitting', ab, 0)),
+            'pitching', 'hitting') as discipline
+    from game_wide
+    group by 1, 2
+    having count(distinct stat_group) > 1
 )
 
 select
@@ -272,3 +298,12 @@ from game_wide g
 inner join {{ ref('stg_cbs__mlbam_crosswalk') }} cw
     on g.mlbam_id = cw.mlbam_id
     and (cw.stat_group_scope is null or cw.stat_group_scope = g.stat_group)
+left join discipline d
+    on g.mlbam_id = d.mlbam_id
+    and g.season_year = d.season_year
+-- LAW 1 enforcement: scoped ids are already discipline-pure; single-group
+-- seasons have nothing to arbitrate; both-group seasons keep only their
+-- discipline's rows.
+where cw.stat_group_scope is not null
+    or d.mlbam_id is null
+    or g.stat_group = d.discipline

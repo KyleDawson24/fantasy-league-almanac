@@ -419,7 +419,7 @@ models:
       - name: stint_end
         description: 'Last observed day: departure effective date, or the season-end anchor date for open stints.'
       - name: open_channel
-        description: 'How the stint opened: add | trade_in | season_start (the recovered opening).'
+        description: 'How the stint opened: add | trade_in | opening (the recovered season-start opening) | lineup_opening (Law 2a: the player-season''s first event anywhere is a lineup move -- rostered since the log opened) | lineup_evidence (Law 2b: a lineup event while the membership machine said OFF -- a log-missed re-acquisition, reopened at the evidence date).'
       - name: close_type
         description: 'How it closed: drop | trade_out | season_end.'
       - name: on_year_end_anchor
@@ -461,15 +461,22 @@ models:
       Daily active/reserve state for the lineup-log eras (2001-2003, 2021+),
       as [state_start, state_end_exclusive) intervals per (league_key,
       season_year, franchise_id, name_key) -- activate/reserve/slot events
-      ordered last-event-wins (same-day by report row order). Includes THE
-      BACKWARD HALF: the state before a player's first lineup event is the
-      INVERSE of what that event sets (a first 'Benched' proves they were
-      active until then) -- without it, set-and-forget starters have no
-      events and the forward walk alone zeroes them out (the first report
-      card's -30%..-99% modern-era failure). Players with NO lineup events
-      at all take their year-end anchor status downstream (anchor_hold).
-      2004-2020 lineup moves were never logged by CBS; those years ride the
-      start-share estimator instead.
+      ordered last-event-wins (same-day by report row order). Law 2 (Kyle
+      2026-07-14): slot_move events are STATE OBSERVATIONS, not mere
+      repositioning -- to_slot sets the state after the boundary and
+      from_slot directly observes the state before it (every censused slot
+      token is an active lineup slot; bench/IL exits ride Activate/
+      Reserve). Includes THE BACKWARD HALF: the state before a player's
+      first lineup event -- a first slot_move's from_slot observes it
+      directly (prior_direct); a first activate/reserve implies the
+      INVERSE of what it sets (prior_inverse: a first 'Benched' proves
+      they were active until then). Without the backward half,
+      set-and-forget starters have no events and the forward walk alone
+      zeroes them out (the first report card's -30%..-99% modern-era
+      failure). Players with NO lineup events at all take their year-end
+      anchor status downstream (anchor_hold). 2004-2020 lineup moves were
+      never logged by CBS; those years ride the start-share estimator
+      instead.
     columns:
       - name: state_start
         description: 'First day the state holds (0001-01-01 for the backward prior-inverse interval).'
@@ -484,8 +491,8 @@ models:
               arguments:
                 values: ['A', 'RS']
       - name: state_source
-        description: 'lineup_event (a logged move set this state) or prior_inverse (the backward half).'
+        description: 'lineup_event (a logged move set this state), prior_inverse (backward half, inferred as the inverse of a first activate/reserve), or prior_direct (backward half, OBSERVED by a first slot_move''s from_slot).'
         tests:
           - accepted_values:
               arguments:
-                values: ['lineup_event', 'prior_inverse']
+                values: ['lineup_event', 'prior_inverse', 'prior_direct']

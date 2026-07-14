@@ -814,16 +814,22 @@ def get_cbs_records_data():
     data['_slots'] = slot_data
 
     # ---- Wasted Hall of Shame (Kyle 2026-07-14): top 25 players by career
-    # INACTIVE (benched) points -- production left rotting on a bench. The
-    # Breakdown decomposes their whole league output: unrostered (sat on the
-    # wire, never owned) / benched / active. Franchise column = the team that
-    # benched them the most. (Interim: 'unrostered' leans on the season-stats
-    # total minus what they were rostered for; refine if the split looks off.)
+    # WASTED points -- unrostered (on the wire) OR benched (rostered, sat).
+    # Built from the DAILY fact (the HoF's substrate): active = pts x weight,
+    # benched = pts x (1 - weight) -- the estimator's complement covers
+    # 2004-2020, so benched there is an estimate like active is. NOT from
+    # fct_player_position_pts (its known-state active_pts column is empty for
+    # the estimated era, and it full-credits every eligible position -- the
+    # 2026-07-14 Verlander false-87%-unrostered lesson). Unrostered = record-
+    # book career total minus everything attributed while rostered. Sentinel
+    # (####) rows count as rostered/active but never as the shame franchise.
     hos_rows = query_snowflake(f"""
         SELECT player_key, team_id, MAX(display_name) AS display_name,
-               ROUND(SUM(active_pts), 1) AS act, ROUND(SUM(inactive_pts), 1) AS inact
-        FROM fct_player_position_pts
-        WHERE {league_predicate()}
+               ROUND(SUM(total_stat_pts * COALESCE(active_weight, 0)), 1) AS act,
+               ROUND(SUM(total_stat_pts * (1 - COALESCE(active_weight, 0))), 1)
+                   AS benched
+        FROM fct_player_daily_performance
+        WHERE {league_predicate()} AND game_date IS NOT NULL
         GROUP BY player_key, team_id
     """)
     total_by_pk = {r['cbs_player_id']: _rec_fnum(r['pts']) for r in query_snowflake(f"""
@@ -835,28 +841,34 @@ def get_cbs_records_data():
     hos = {}
     for r in hos_rows:
         ab = _abbrev_of.get(_fid(r.get('team_id')))
-        if not ab or ab == '####':
-            continue
         e = hos.setdefault(r['player_key'], {'name': r.get('display_name'),
                            'act': 0.0, 'inact': 0.0, 'bench_by': {}})
         e['act'] += _rec_fnum(r.get('act'))
-        e['inact'] += _rec_fnum(r.get('inact'))
-        e['bench_by'][ab] = e['bench_by'].get(ab, 0.0) + _rec_fnum(r.get('inact'))
+        e['inact'] += _rec_fnum(r.get('benched'))
+        if ab and ab != '####':
+            e['bench_by'][ab] = e['bench_by'].get(ab, 0.0) + _rec_fnum(r.get('benched'))
     hos_list = []
     for pk, e in hos.items():
-        if e['inact'] <= 0:
-            continue
         total = total_by_pk.get(pk, e['act'] + e['inact'])
         unrostered = max(0.0, total - e['act'] - e['inact'])
-        shame = max(e['bench_by'].items(), key=lambda kv: kv[1])[0]
+        wasted = unrostered + e['inact']   # inactive = unrostered OR benched
+        if wasted <= 0:
+            continue
+        shame = ''
+        if e['bench_by']:
+            shame_ab, shame_pts = max(e['bench_by'].items(), key=lambda kv: kv[1])
+            if shame_pts > 0:
+                shame = f"{shame_ab} ({int(round(shame_pts)):,})"
+        pct = (wasted / total * 100) if total else 0.0
         nm = pname.get(pk, (None, None))
         hos_list.append({
             'display_name': nm[0] or e['name'], 'player_name': nm[1],
-            'abbrev': shame, 'inact': e['inact'],
-            'details': (f"{int(round(unrostered)):,} pts unrostered · "
-                        f"{int(round(e['inact'])):,} pts benched · "
-                        f"{int(round(e['act'])):,} pts active")})
-    data['_hos'] = sorted(hos_list, key=lambda e: -e['inact'])[:25]
+            'shame': shame, 'wasted': wasted,
+            'details': (f"{int(round(unrostered)):,} unrostered · "
+                        f"{int(round(e['inact'])):,} benched · "
+                        f"{int(round(e['act'])):,} active · "
+                        f"{pct:.0f}% of career unused")})
+    data['_hos'] = sorted(hos_list, key=lambda e: -e['wasted'])[:25]
     return data
 
 
@@ -1942,32 +1954,37 @@ def build_records_rows(context, catalog, data):
             _emit_stat(f'Most {_disp(stat)} (Team)', stat, player=False)
     rows.append([])
 
-    # ---- Franchise Hall of Fame: the top 25 (player × franchise) career
-    # active-point runs -- a single ranked list, not a two-scope record.
+    # ---- Franchise Hall of Fame (left) | Wasted Hall of Shame (right), side by
+    # side with the Shame aligned to the All-Time block (Kyle 2026-07-14). Both
+    # are 25-deep player lists; HoF = career active pts with one franchise, HoS
+    # = career WASTED (unrostered + benched) pts.
     hof = data.get('_hof') or []
-    if hof:
-        rows.append(['Franchise Hall of Fame — top 25 careers WITH a single '
-                     'franchise, by active points'])
-        _band()
-        rows.append(['Rank', 'Player', 'Franchise', 'Active Points', 'Years of Service'])
-        _band()
-        for i, e in enumerate(hof, 1):
-            rows.append([i, _bref_player_cell(e), e.get('abbrev', ''),
-                         _pts(e.get('pts')), e.get('span', '')])
-        rows.append([])
-
-    # ---- Wasted Hall of Shame: mirror of the HoF, ranked by benched points.
     hos = data.get('_hos') or []
-    if hos:
-        rows.append(['Wasted Hall of Shame — top 25 by career benched '
-                     '(inactive) points'])
-        _band()
-        rows.append(['Rank', 'Player', 'Benched Most By', 'Inactive Points',
-                     'Breakdown'])
-        _band()
-        for i, e in enumerate(hos, 1):
-            rows.append([i, _bref_player_cell(e), e.get('abbrev', ''),
-                         _pts(e.get('inact')), e.get('details', '')])
+    if hof or hos:
+        def _wide_band():
+            formats.append({'range': f'A{len(rows)}:L{len(rows)}',
+                            'format': {'textFormat': {'bold': True},
+                                       'backgroundColor': _POWDER}})
+        rows.append(['Franchise Hall of Fame — top 25 careers with one franchise',
+                     '', '', '', '', '', '',
+                     'Wasted Hall of Shame — top 25 by career wasted points'])
+        _wide_band()
+        rows.append(['Rank', 'Player', 'Franchise', 'Active Points', 'Years of Service',
+                     '', '',
+                     'Rank', 'Player', 'Benched Most By', 'Wasted Points', 'Breakdown'])
+        _wide_band()
+        for i in range(max(len(hof), len(hos))):
+            left = ['', '', '', '', '']
+            if i < len(hof):
+                e = hof[i]
+                left = [i + 1, _bref_player_cell(e), e.get('abbrev', ''),
+                        _pts(e.get('pts')), e.get('span', '')]
+            right = ['', '', '', '', '']
+            if i < len(hos):
+                e = hos[i]
+                right = [i + 1, _bref_player_cell(e), e.get('shame', ''),
+                         _pts(e.get('wasted')), e.get('details', '')]
+            rows.append(left + ['', ''] + right)
         rows.append([])
 
     return rows, formats

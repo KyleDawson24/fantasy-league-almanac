@@ -418,6 +418,30 @@
         2001/all_but_lineup; unconfirmed other seasons + the `all` filter).
         Documented in extract/cbs_ui_capture.py next to the start_row pager
         it supersedes.
+- [ ] **LAWS IMPLEMENTED (2026-07-14, commit 7d53029) — rebuild + verify in
+      flight:**
+      * Law 1: `int_cbs__player_game_points` discipline arbiter — both-group
+        (hitting+pitching) player-seasons classify pitcher iff outs >= 3×AB
+        (IP >= AB: NL aces land pitcher, mop-up catchers land hitter);
+        off-discipline rows DROP, mirroring the crosswalk scope guard that
+        already does this for Ohtani's 900/901. Scoped ids bypass the
+        arbiter (mlbam-grain dominance would misjudge the halves).
+      * Law 2: `int_cbs__roster_stints` + `int_cbs__lineup_intervals` —
+        lineup_opening / lineup_evidence membership (see the Laws entry
+        above); slot_move state observation forward (to_slot) + backward
+        (from_slot, new state_source 'prior_direct'); deterministic
+        tie-break vs anchored openings (row_seq 999999 vs 1000000).
+      * **BONUS BUG:** stg_cbs__ui_transactions.to_slot NEVER worked — the
+        WHEN gate matched neither ilike pattern for 'Moved from X to Y',
+        AND the regex used a (?:...) non-capture group Snowflake rejects
+        (it errored on the compound-verb rows the gate did pass; unseen
+        because nothing consumed to_slot until Law 2). POSIX-safe
+        ' to (\\S+)$' now covers all three verb shapes.
+      * Verify plan: RJ 2001+2002 attribution rows exist, full-weight
+        active, pitching-only; Arrieta 2015 1020→991 (Verlander 2019
+        becomes best total AND best pitching); stint counts by
+        open_channel; ESPN goldens (float-order re-anchor class may recur
+        on the shared-fact rebuild); CBS dev re-render.
 - **REQUEST LIST (running)**: team abbrev preferences collect in the
   cbs_franchises seed (MATT, JUNK so far).
 

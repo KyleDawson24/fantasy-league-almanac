@@ -297,6 +297,57 @@
   untouched. (Byte-diff not re-run: 2h18m warehouse contention this
   cycle; the fixture is a byte-identical copy of the render, and the
   render only READS the built table, so it's deterministic on re-read.)
+- [x] **RECORDS v3 — FULL ESPN-MIRROR (Kyle round 7, 2026-07-13):** round-6
+      output "still looked almost nothing like the ESPN version"; the data
+      layer (season/career, active lens, contributors, abbrev holders) was
+      already right — the gap was entirely rendering. Rebuilt
+      `build_records_rows` + the data helpers against the pinned ESPN golden
+      (`tests/fixtures/almanac_v1_1_0/Records.tsv`):
+      * **Powder-blue #f2f7fc header bands** (`_POWDER`) replace the navy;
+        scope labels now sit OVER their blocks — "Season" at col B, "All-Time
+        Total" at col H (the round-6 bug had them at H/K, over the wrong
+        columns).
+      * **Negative Records** (ESPN's polar Worst block): Worst Team Total/
+        Hitting/Pitching Points, single completed SEASON. Gated so artifacts
+        can't own "fewest points": full-length seasons only (season max
+        team-total ≥ 60% of the median — auto-drops 2001-2002 coin-flip +
+        2020 COVID, no hardcoding), roster-complete team-seasons (≥20 active
+        players), closed seasons only (live 2026 excluded via ui_standings).
+        Career-worst dropped — "fewest career points" is longevity, not
+        futility. Gate self-heals as Track B rebuilds the early era.
+      * **Orange recency wash** (`_ORANGE` #fce5cd) on any side whose record
+        is held in the live season (31 career leaders still active in 2026).
+      * **Player Details stat-lines** (were blank): top-3 marquee counting
+        stats, headline first ("62 HR, 177 …" etc.), from `_STAT_LINE_ORDER`.
+      * **CATALOG BUG FIXED — 2B/3B were silently missing.**
+        `get_cbs_record_catalog` filtered+keyed on `leaderboard_name`, but
+        that diverges from stat_name for doubles/triples (2B→DOUBLES,
+        3B→TRIPLES) so they never matched `_REC_STAT_COL`. Now keys on
+        stat_name (== the union-fact / data-pipeline identity). Catalog went
+        18→20; Doubles (Freeman 59, 2023) + Triples (Granderson 22, 2007)
+        now render. HR/2B/3B auto_tracked re-confirmed ESPN-NEUTRAL by a
+        fresh trace: `get_scored_record_specs` gates on `is_record_candidate
+        AND (ESPN-scores-it OR auto_tracked)`, and ESPN already scores all
+        three (the pre-change golden lists them), so the flag only newly
+        surfaces them in the CBS catalog.
+      * Spot-checks all real: Judge 62 HR (2022), A-Rod 154 RBI (2007),
+        Bonds 230 BB (2004), Cole 309 K (2019), Reyes 77 SB (2007). Dev
+        render clean (19 tabs, exit 0).
+- [x] **TRACK B — 2001-2002 backfill worklist HANDED OFF (2026-07-13):**
+      season-end roster capture starts 2003, so the walk-back has no anchor
+      for 2001-2002; it reconstructs from the transaction log, which covers
+      any player who was added/dropped/traded/reserved. The gap is drafted-
+      and-held stars who never generated a move. Delivered that gap as a
+      fillable seed `dbt_league/seeds/cbs_early_anchors_backfill.csv` (146
+      never-transacted producers >100 pts, 66/2001 + 80/2002, tiered
+      star>300 / tail, `active_status` pre-set A since never-transacted ⟹
+      never-reserved) + legend `CBS_EARLY_ANCHORS_BACKFILL.md` (abbrev ↔ era
+      team name; names changed, abbrev is the stable key). The name match
+      needed the cbs_name_key FLIP (log stores "Bonds, Barry" vs record book
+      "Barry Bonds") — without it the list was a bogus 272/309. Two build-
+      side loose ends noted: 2002's vanished Armonk Artillery (TGUN) + an
+      unmapped Nightowls franchise bucket. Kyle fills teams manually while
+      Track A ran; ingest → synthetic anchors → re-run walk-back is next.
 - **REQUEST LIST (running)**: team abbrev preferences collect in the
   cbs_franchises seed (MATT, JUNK so far).
 

@@ -117,10 +117,21 @@ _REC_STAT_COL = {
     'K': 'k', 'P_H': 'p_h', 'P_BB': 'p_bb', 'ER': 'er',
 }
 
+# The player-record Details stat-line: marquee counting stats, headline first.
+# A hitter's pitching cells are zero and vice-versa, so one combined order
+# serves both; XBH/points are excluded (derived / shown as the Value).
+_STAT_LINE_ORDER = ['HR', 'RBI', 'R', 'SB', 'W', 'SV', 'K', 'QS', 'HLD', 'CG',
+                    '2B', '3B', 'H', 'TB']
+_STAT_LINE_LABELS = {s: s for s in _STAT_LINE_ORDER}
+
 _NAVY = {'red': 0.12, 'green': 0.20, 'blue': 0.30}
 _WHITE = {'red': 1, 'green': 1, 'blue': 1}
 _PALE_BLUE = {'red': 0.95, 'green': 0.97, 'blue': 0.99}
 _GOLD = {'red': 1.0, 'green': 0.95, 'blue': 0.75}
+# ESPN Records palette (Kyle 2026-07-13): powder-blue #f2f7fc section/scope
+# headers, and a light-orange recency wash for records held in the live season.
+_POWDER = {'red': 0.949, 'green': 0.969, 'blue': 0.988}   # #f2f7fc
+_ORANGE = {'red': 0.988, 'green': 0.898, 'blue': 0.804}   # #fce5cd
 
 # Inline twin of the dbt cbs_name_key macro (macros/cbs_name_key.sql) --
 # KEEP IN SYNC. Used once, to bridge the stint machine's name_key grain
@@ -262,16 +273,19 @@ def get_cbs_record_catalog():
     {stat_name: {display_name, stat_category, polarity}} so a league that
     scores different categories catalogs different records from the same
     code. Points records are handled as their own section, not here."""
+    # Key on stat_name, not leaderboard_name: the union fact and _REC_STAT_COL
+    # both identify a stat by stat_name (2B/3B/HR/...), whereas leaderboard_name
+    # diverges for some (2B->DOUBLES, 3B->TRIPLES) and would silently drop them.
     carryable = ", ".join(f"'{n}'" for n in _REC_STAT_COL)
     rows = query_snowflake(f"""
-        SELECT DISTINCT d.leaderboard_name AS stat_name, d.display_name,
+        SELECT DISTINCT d.stat_name, d.display_name,
                d.stat_category, d.polarity
         FROM dim_stat d
         LEFT JOIN stg_cbs__scoring_settings s
             ON s.canonical_key = d.canonical_key
             AND {league_predicate('s')}
         WHERE d.is_record_candidate
-          AND d.leaderboard_name IN ({carryable})
+          AND d.stat_name IN ({carryable})
           AND (s.canonical_key IS NOT NULL OR d.auto_tracked)
     """)
     return {r['stat_name']: r for r in rows}
@@ -379,6 +393,38 @@ def get_cbs_records_data():
     team_career = _careers(team_season, 'team_id')
     player_career = _careers(player_season, 'player_key')
 
+    # Negative Records eligibility. Three artifacts would otherwise own every
+    # 'fewest points' line, none of them actual futility: (1) short/anomalous
+    # seasons where the whole league scored less -- the 2020 COVID 60-gamer,
+    # the 2001-2002 coin-flip era; (2) under-attributed team-seasons (a partly
+    # reconstructed roster); (3) short-lived franchises, trivially lowest on
+    # any career SUM (longevity, not futility). So worst-SEASON is gated to
+    # full-length seasons (season max team-total within 60% of the median) AND
+    # roster-complete team-seasons; worst-CAREER is dropped (no honest
+    # single-number analog). The season gate self-heals as Track B rebuilds
+    # the early era, with no per-year hardcoding.
+    _ROSTER_FLOOR = 20
+    _rsize = {}
+    for r in player_team_season:
+        _rsize.setdefault((r['season_year'], r.get('team_id')), set()).add(r['player_key'])
+    _season_max = {}
+    for r in team_season:
+        s = int(r['season_year'])
+        _season_max[s] = max(_season_max.get(s, 0.0), _rec_fnum(r.get('calculated_points')))
+    _maxes = sorted(_season_max.values())
+    _median_max = _maxes[len(_maxes) // 2] if _maxes else 0.0
+    _full_len = {s for s, m in _season_max.items() if m >= 0.6 * _median_max}
+    # Completed seasons only: the live season is half-played, so its trailing
+    # teams are trivially low. Year-end standings exist only for closed seasons.
+    _closed = {int(r['season_year']) for r in query_snowflake(
+        f"SELECT DISTINCT season_year FROM stg_cbs__ui_standings"
+        f" WHERE {league_predicate()}")}
+    team_season_complete = [
+        r for r in team_season
+        if int(r['season_year']) in _full_len
+        and int(r['season_year']) in _closed
+        and len(_rsize.get((r['season_year'], r.get('team_id')), ())) >= _ROSTER_FLOOR]
+
     def _best_row(rows, col):
         best = None
         for r in rows:
@@ -395,6 +441,26 @@ def get_cbs_records_data():
                 best = (eid, a)
         return best
 
+    # Negative Records (Kyle 2026-07-13): the futility mirror of the best
+    # block -- the fewest points in a completed full season. Team grain only
+    # (a career SUM just measures longevity), over the gated season set built
+    # below.
+    def _worst_row(rows, col):
+        worst = None
+        for r in rows:
+            v = _rec_fnum(r.get(col))
+            if worst is None or v < _rec_fnum(worst.get(col)):
+                worst = r
+        return worst
+
+    # A player's season/career stat-line detail (ESPN shows one on every
+    # player record): the top marquee counting stats they posted, most first.
+    def _player_line(statvals):
+        picks = [(_STAT_LINE_LABELS[s], statvals.get(s, 0.0))
+                 for s in _STAT_LINE_ORDER if statvals.get(s, 0.0) >= 1]
+        picks.sort(key=lambda t: -t[1])
+        return ', '.join(f'{int(round(v))} {lbl}' for lbl, v in picks[:3])
+
     def _contribs(rows_filter, col):
         agg = {}
         for r in rows_filter:
@@ -406,23 +472,40 @@ def get_cbs_records_data():
             agg[k] = (nm, tot + v)
         return sorted(agg.values(), key=lambda t: -t[1])[:3]
 
+    def _season_statvals(row):
+        return {s: _rec_fnum(row.get(s.lower())) for s in stat_names}
+
+    def _team_side(row, col):
+        """A team record's 5-cell payload for one season row."""
+        return {
+            'holder': row.get('team_abbrev') or '',
+            'owner': _owner(row.get('team_id')),
+            'value': _rec_fnum(row.get(col)), 'period': _num(row.get('season_year')),
+            'year': _fid(row.get('season_year')),
+            'details': _contribs(
+                [r for r in player_team_season
+                 if r['season_year'] == row['season_year']
+                 and r.get('team_id') == row.get('team_id')], col),
+        }
+
+    def _team_career_side(entry, stat, col):
+        fid, a = entry
+        return {
+            'holder': _abbrev(fid), 'owner': _owner(fid),
+            'value': a.get(stat, 0.0), 'period': _span_from_years(a['seasons']),
+            'last_season': max(a['seasons']),
+            'details': _contribs(
+                [r for r in player_team_season if r.get('team_id') == fid], col),
+        }
+
     data = {}
     for stat in stat_names:
         col = stat.lower()
         # season-scope leaders
         bts = _best_row(team_season, col)
         bps = _best_row(player_season, col)
-        season_team = season_player = None
-        if bts:
-            season_team = {
-                'holder': bts.get('team_abbrev') or '',
-                'owner': _owner(bts.get('team_id')),
-                'value': _rec_fnum(bts.get(col)), 'period': _num(bts.get('season_year')),
-                'details': _contribs(
-                    [r for r in player_team_season
-                     if r['season_year'] == bts['season_year']
-                     and r.get('team_id') == bts.get('team_id')], col),
-            }
+        season_team = _team_side(bts, col) if bts else None
+        season_player = None
         if bps:
             mt = main_team.get((bps['season_year'], bps['player_key']), (None, 0))
             season_player = {
@@ -430,20 +513,14 @@ def get_cbs_records_data():
                 'player_name': bps.get('player_name'),
                 'value': _rec_fnum(bps.get(col)),
                 'owner': _owner(mt[0]), 'period': _num(bps.get('season_year')),
+                'year': _fid(bps.get('season_year')),
+                'details': _player_line(_season_statvals(bps)),
             }
         # career-scope leaders
         btc = _best_career(team_career, stat)
         bpc = _best_career(player_career, stat)
-        career_team = career_player = None
-        if btc:
-            fid, a = btc
-            career_team = {
-                'holder': _abbrev(fid),
-                'owner': _owner(fid), 'value': a.get(stat, 0.0),
-                'period': _span_from_years(a['seasons']),
-                'details': _contribs(
-                    [r for r in player_team_season if r.get('team_id') == fid], col),
-            }
+        career_team = _team_career_side(btc, stat, col) if btc else None
+        career_player = None
         if bpc:
             pk, a = bpc
             nm = pname.get(pk, (None, None))
@@ -451,10 +528,19 @@ def get_cbs_records_data():
                 'display_name': nm[0], 'player_name': nm[1],
                 'value': a.get(stat, 0.0), 'owner': '',
                 'period': _span_from_years(a['seasons']),
+                'last_season': max(a['seasons']),
+                'details': _player_line(a),
             }
+        # worst-scope leader (Negative Records; single SEASON, roster-complete
+        # post-coin-flip only). Career-worst is intentionally omitted.
+        wts = _worst_row(team_season_complete, col)
+        worst_team_season = _team_side(wts, col) if wts else None
+        worst_team_career = None
         data[stat] = {
             'season_team': season_team, 'season_player': season_player,
             'career_team': career_team, 'career_player': career_player,
+            'worst_team_season': worst_team_season,
+            'worst_team_career': worst_team_career,
         }
     return data
 
@@ -1375,7 +1461,8 @@ def _rec_side(cell, stat, player=False):
     if not cell:
         return ['', '', '', '', '']
     holder = _bref_player_cell(cell) if player else cell.get('holder', '')
-    details = '' if player else _contributor_detail(stat, cell.get('details'))
+    details = (cell.get('details') or '') if player else \
+        _contributor_detail(stat, cell.get('details'))
     return [holder, cell.get('owner', ''), _rec_value(stat, cell.get('value')),
             cell.get('period', ''), details]
 
@@ -1388,24 +1475,29 @@ _REC_LAST_COL = 'L'
 
 
 def build_records_rows(context, catalog, data):
-    """Records, rebuilt to the ESPN two-scope shape (Kyle 2026-07-13):
-    every record shows its best single SEASON and its best ALL-TIME TOTAL
-    (career), at both player and team grain, auto-cataloged from what the
-    league scores, ACTIVE-weighted (the 'real baseball league' lens).
-    Player sections lead (this league's nature); team sections follow with
-    a contributors detail."""
+    """Records, mirrored on the ESPN Records page (Kyle 2026-07-13): a
+    two-scope matrix -- best single SEASON | best ALL-TIME TOTAL (career) --
+    at team and player grain, auto-cataloged from what the league scores,
+    ACTIVE-weighted (the 'real baseball league' lens). Powder-blue #f2f7fc
+    scope/column headers with the scope labels sat over their blocks; a
+    light-orange wash on any side whose record is held in the live season;
+    Score Records carries the polar Best/Worst point marquees, then per-stat
+    Player and Team sections."""
     era = f"{context['first_season']}–{context['season_year']}"
+    latest = int(context['season_year']) if context.get('season_year') is not None else None
     HDR = ['Record', 'Holder', 'Owner', 'Value', 'Year', 'Details', '',
            'Holder', 'Owner', 'Value', 'Yrs', 'Details']
 
     rows = [
         ['League Records'],
-        [f'Active-lineup production only (if a player wasn\'t started, it '
-         f'didn\'t happen for the league), {era}. Auto-cataloged from the '
+        [f'Active-lineup production only — if a player wasn\'t started, it '
+         f'didn\'t happen for the league ({era}). Auto-cataloged from the '
          f'categories this league scores plus tracked counting stats. '
          f'"Season" = best single season all-time; "All-Time Total" = best '
-         f'career accumulation. Owner is the current owner of the holding '
-         f'franchise (true owner-by-era arrives with the ownership re-key).'],
+         f'career accumulation. Worst rows show the fewest points in a '
+         f'completed, full-length season. Records held in the live {latest} '
+         f'season are shaded orange. Owner is the holding franchise\'s current '
+         f'owner (true owner-by-era arrives with the ownership re-key).'],
         [],
     ]
     formats = [
@@ -1415,39 +1507,62 @@ def build_records_rows(context, catalog, data):
          'format': {'textFormat': {'italic': True}, 'backgroundColor': _PALE_BLUE}},
     ]
 
-    def _section(label):
-        rows.append([label, '', '', '', '', '', '', 'Season', '', '',
-                     'All-Time Total'])
+    def _band():
         formats.append({'range': f'A{len(rows)}:{_REC_LAST_COL}{len(rows)}',
-                        'format': {'textFormat': {'bold': True, 'foregroundColor': _WHITE},
-                                   'backgroundColor': _NAVY}})
+                        'format': {'textFormat': {'bold': True},
+                                   'backgroundColor': _POWDER}})
+
+    def _section(label):
+        # Scope labels sit OVER their blocks: 'Season' at col B (the first
+        # Holder), 'All-Time Total' at col H (the second Holder).
+        rows.append([label, 'Season', '', '', '', '', '',
+                     'All-Time Total', '', '', '', ''])
+        _band()
 
     def _header():
         rows.append(list(HDR))
-        formats.append({'range': f'A{len(rows)}:{_REC_LAST_COL}{len(rows)}',
-                        'format': {'textFormat': {'bold': True}}})
+        _band()
 
-    def _record_row(label, stat, player):
+    def _emit(label, season_cell, career_cell, stat, player):
+        rows.append([label, *_rec_side(season_cell, stat, player), '',
+                     *_rec_side(career_cell, stat, player)])
+        r = len(rows)
+        if latest and season_cell and season_cell.get('year') == latest:
+            formats.append({'range': f'B{r}:F{r}',
+                            'format': {'backgroundColor': _ORANGE}})
+        if latest and career_cell and career_cell.get('last_season') == latest:
+            formats.append({'range': f'H{r}:L{r}',
+                            'format': {'backgroundColor': _ORANGE}})
+
+    def _emit_stat(label, stat, player):
         d = data.get(stat, {})
-        season = d.get('season_player' if player else 'season_team')
-        career = d.get('career_player' if player else 'career_team')
-        return [label, *_rec_side(season, stat, player), '',
-                *_rec_side(career, stat, player)]
+        _emit(label, d.get('season_player' if player else 'season_team'),
+              d.get('career_player' if player else 'career_team'), stat, player)
 
-    # ---- Score Records (points): team + player point marquees
-    _section('SCORE RECORDS')
-    _header()
     _point_labels = {
         'CALCULATED_POINTS': 'Total Points',
         'CALCULATED_HITTING_PTS': 'Hitting Points',
         'CALCULATED_PITCHING_PTS': 'Pitching Points',
     }
+
+    # ---- Score Records: polar point marquees. Best block (all teams, then
+    # all players), then the Worst block -- ESPN's Score Records layout.
+    # Worst is team-grain (teams play full seasons, so 'fewest points' is a
+    # real record); player futility needs a min-starts qualifier -> follow-up.
+    _section('Score Records')
+    _header()
     for stat, label in _point_labels.items():
-        rows.append(_record_row(f'Best Team {label}', stat, player=False))
-        rows.append(_record_row(f'Best Player {label}', stat, player=True))
+        _emit_stat(f'Best Team {label}', stat, player=False)
+    for stat, label in _point_labels.items():
+        _emit_stat(f'Best Player {label}', stat, player=True)
+    rows.append([])
+    for stat, label in _point_labels.items():
+        d = data.get(stat, {})
+        _emit(f'Worst Team {label}', d.get('worst_team_season'),
+              d.get('worst_team_career'), stat, player=False)
     rows.append([])
 
-    # ---- Player sections lead, then Team sections (Kyle: lean into player)
+    # ---- Per-stat sections: Player leads, then Team (Kyle: lean into player)
     hitting = sorted((s for s, m in catalog.items() if m['stat_category'] == 'hitting'),
                      key=lambda s: catalog[s]['display_name'])
     pitching = sorted((s for s, m in catalog.items() if m['stat_category'] == 'pitching'),
@@ -1457,10 +1572,10 @@ def build_records_rows(context, catalog, data):
         for cat_label, stats in (('Hitting', hitting), ('Pitching', pitching)):
             if not stats:
                 continue
-            _section(f'{grain.upper()} RECORDS — {cat_label.upper()}')
+            _section(f'{grain} {cat_label} Records')
             _header()
             for stat in stats:
-                rows.append(_record_row(catalog[stat]['display_name'], stat, player))
+                _emit_stat(catalog[stat]['display_name'], stat, player)
             rows.append([])
 
     return rows, formats

@@ -442,6 +442,40 @@
         becomes best total AND best pitching); stint counts by
         open_channel; ESPN goldens (float-order re-anchor class may recur
         on the shared-fact rebuild); CBS dev re-render.
+- [ ] **ACTIVE-WEIGHTING REVIEW + SEASON-GRAIN ESTIMATOR (Kyle walkthrough,
+      2026-07-14):** Kyle audited the era model end-to-end; his mental model
+      and the warehouse now agree, with these confirmations + one fix:
+      * **Era map (his framing, verified):** 2001-02 log-only (1/0 states
+        from the lineup log; never-transacted → the #### sentinel plan,
+        still to build); 2003 + 2021-25 anchor+lineup reconstruction, 1/0,
+        no estimator; **2004-2020 is the ONLY estimated window** (rates
+        exist every year incl. 2004/2006 — his page-walkthrough gaps were
+        misreads he confirmed); 2026 captured. Estimator semantics
+        verified: production counts only on the player's REAL membership
+        days, scaled by Start%/Own% (started-given-owned; start_pct >
+        own_pct violations across 9,969 anchor rows: ZERO — Start% is
+        out of ALL leagues, as he read it).
+      * **Anchor field census (vs his page walkthrough):** 2003 no rates +
+        eligibility list; 2004 rates + eligibility; 2005+ rates, no
+        eligibility; mlb_status parses 2003+; the page's Pos column is the
+        season-end LINEUP SLOT (vocab shift 2020: U + bare P appear) —
+        captured as roster_pos, distinct from primary_pos.
+      * **2021-25 lineup-log completeness (his challenge):** the lineup
+        moves live in the ALL filter (~2,740-5,100 events/season), NOT
+        all_but_lineup (his 2-'Moved'-rows view); modern verbs are
+        Benched/Activated. **print_rows=9999 CONFIRMED on the all filter**
+        (his check) — the capture script can drop start_row batching.
+      * **SEASON-GRAIN ESTIMATOR (2e31c08):** Own%/Start% are player-season
+        stats, not franchise stats, so the estimator join's franchise
+        scoping silently zeroed mid-season stints on teams the player
+        didn't finish with — 26,588 days / ~107k pts (4.3%/3.8% of the
+        era). Now joins at (season, player) grain; anchor_STATUS stays
+        franchise-scoped. **Still dark: ~10.7% of days / 8.4% of
+        production** — players on NO year-end anchor that season. Autopsy:
+        the head is season-ending injuries to stars (Trout 2019 638,
+        Strasburg Shutdown 609, Sale/deGrom/Santana), ~75% of dark
+        production in 100+pt stints; a future adjacent-season borrow could
+        cover them (Kyle-decision, not taken).
 - **REQUEST LIST (running)**: team abbrev preferences collect in the
   cbs_franchises seed (MATT, JUNK so far).
 

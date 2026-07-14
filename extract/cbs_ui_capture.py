@@ -106,6 +106,16 @@ class UiClient:
         # start_row=1 (newest first); offsets walk back through the season;
         # rows-per-page varies by year. The ?page= param above was the
         # older guess -- CBS ignores it (kept for manifest continuity).
+        #
+        # BETTER, DON'T-PAGINATE PATH (maintainer, 2026-07-14): the
+        # transaction report honours ?print_rows=N -- print_rows=9999 returns
+        # the ENTIRE season's log on one page (even this hyperactive league
+        # stays well under 9999 rows/season), so a single GET replaces the
+        # whole start_row walk. Verified on 2001/all_but_lineup; NOT yet
+        # confirmed for other seasons or the `all` filter (the one that
+        # carries the lineup/slot moves the walk-back needs) -- try it there
+        # before falling back to start_row batching. Left unwired here so the
+        # switch is a deliberate, verified change, not a silent one.
         extra_start = kwargs.get("start_row")
         if extra_start and int(extra_start) > 1:
             url += "?start_row=%d" % int(extra_start)

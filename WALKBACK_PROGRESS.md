@@ -373,6 +373,51 @@
         stats (ERA/K9/BB9/K:BB computable now, AVG/OBP/SLG/OPS need AB
         plumbed); all-time-only-for-active-teams (career-by-abbrev question);
         unclaimed 2001-2002 players → active on sentinel team.
+- [ ] **UNIVERSAL WALK-BACK LAWS (Kyle, 2026-07-14 — codified from the
+      Arrieta/Randy Johnson digs; these are GENERAL rules, not per-player
+      patches):**
+      * **LAW 1 — discipline scopes scoring; slots are irrelevant to the
+        bucket.** Every rosterable entity is a hitter or a pitcher (CBS's
+        two-way split ids 900/901 make Ohtani two single-discipline
+        entities). Hitters cannot occupy pitching slots and pitchers cannot
+        occupy hitting slots, so: active hitter → hitting points ONLY;
+        active pitcher → pitching points ONLY. A pitcher's batting line and
+        a position player's mop-up inning NEVER score. This is ESPN's
+        architecture, recycled. Scale of today's violation: every pitcher
+        who batted (all NL pitchers 2001-2021) carries phantom hitting
+        points — Arrieta 2015 (+29 → false best-total 1020 over Verlander)
+        is one instance of a universal engine bug, verified against CBS's
+        own feed (no batting line for Arrieta; PLATFORM_POINTS is
+        pitching-only; the Ohtani split is the architectural tell).
+      * **LAW 2 — the transaction log is a state machine; every event is a
+        boundary observation (team, date, from_state, to_state).** Any
+        event proves membership on that team that day. A player whose
+        FIRST event of a season is a lineup move was on that roster since
+        at least the season's earliest recorded transaction (you cannot
+        lineup-move a player you don't roster). from_slot classifies the
+        state BEFORE the boundary, holding back to the prior boundary or
+        the membership start; to_slot classifies the state AFTER, holding
+        to the next boundary. Active slots (C/1B/…/OF/DH/U/P/SP/RP) =
+        active; BE/RS/IL/DL = inactive. So inactive→active, active→active
+        (RJ's P→SP: active the whole way), active→inactive all resolve
+        with zero assumptions.
+      * **What Law 2 exposed:** int_cbs__roster_stints seeds membership
+        from move_type in ('add','trade_in','drop') ONLY — slot/activate/
+        reserve events create no stint, so a 2001-2002 draft-and-hold ace
+        with only lineup moves (Randy Johnson: one P→SP move, KCM) has NO
+        stint, NO anchor (anchors start 2003), and is attributed NOWHERE:
+        his 1,142-pt 2002 (the true best season, raw) is absent from the
+        active lens entirely. NOT a coin-flip halving — a total drop. The
+        elite-pitcher cohort is 99-100% logged (verb mix: reserve 47 /
+        activate 42 / slot 24 vs add 4 across the 2001 aces), so Law 2
+        recovers effectively all of them; the zero-event residue (Bonds,
+        Sosa) is exactly the Track B manual sheet — the two sets are
+        disjoint by construction.
+      * **CBS API note (Kyle, 2026-07-14):** the transaction report honours
+        `?print_rows=9999` — the ENTIRE season's log in one GET (verified
+        2001/all_but_lineup; unconfirmed other seasons + the `all` filter).
+        Documented in extract/cbs_ui_capture.py next to the start_row pager
+        it supersedes.
 - **REQUEST LIST (running)**: team abbrev preferences collect in the
   cbs_franchises seed (MATT, JUNK so far).
 

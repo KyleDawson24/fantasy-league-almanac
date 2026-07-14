@@ -431,9 +431,13 @@ models:
       - name: no_anchor_era
         description: '2001-2002: no roster-report pages exist, so no year-end anchor closes the season -- membership rides the log alone (the report card grades these honestly).'
       - name: is_ambiguous_name
-        description: 'The name maps to multiple CBS ids (int_cbs__player_name_ids.n_ids > 1).'
+        description: 'The name resolves to >1 mlbam that played this season (dim_player_identity.is_ambiguous) -- genuine homonyms (Will Smith, the three Luis Garcias); the attribution fact keeps the name-join + discipline tie-break for these.'
       - name: resolved_cbs_player_id
-        description: 'The CBS id when the name is unambiguous; NULL otherwise.'
+        description: 'The CBS id when the name is unambiguous; NULL otherwise (kept as the ambiguity-diff reference; superseded for the join path by mlbam_id).'
+      - name: mlbam_id
+        description: 'MLB-81 identity spine: the mlbam this season''s name form resolves to (dim_player_identity), NULL when ambiguous/uncandidated. The join key the attribution fact uses id-first, falling back to name_key only where NULL.'
+      - name: stat_group_scope
+        description: 'hitting | pitching | NULL. From the resolver: a two-way split entry carries its discipline; a unified entry (or single-discipline player) is NULL = matches either at the seam guard.'
 
   - name: int_cbs__roster_stints_effective
     description: >
@@ -478,6 +482,10 @@ models:
       never logged by CBS; those years ride the start-share estimator
       instead.
     columns:
+      - name: mlbam_id
+        description: 'MLB-81: the event''s resolved mlbam (dim_player_identity). The interval timeline is derived at (franchise, mlbam, scope) grain so two era name-forms of one player merge into one A/RS timeline; NULL falls back to name_key.'
+      - name: stat_group_scope
+        description: 'hitting | pitching | NULL -- keeps a two-way player''s two disciplines as separate interval streams.'
       - name: state_start
         description: 'First day the state holds (0001-01-01 for the backward prior-inverse interval).'
         tests:

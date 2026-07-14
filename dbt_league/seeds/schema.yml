@@ -380,3 +380,28 @@ seeds:
                 values: ['mapped', 'rate', 'notation', 'duplicate', 'display', 'no_canonical']
       - name: notes
         description: 'Scoring role, derivation inputs, verification notes.'
+
+  - name: player_alias
+    description: >
+      Hard name aliases for the identity resolver (MLB-81): renames whose forms
+      share no normalized token, so the crosswalk's cbs_name/mlbam_name and the
+      generated variants can't bridge them (Fausto Carmona -> Roberto Hernandez;
+      Mike/Michael Stanton -> Giancarlo). Baseball-truth and platform-independent
+      -- these feed dim_player_identity's candidate set and apply to every
+      platform. One row = one (name_key -> mlbam) assertion; the resolver's
+      season + game-presence gate keeps same-name different-people apart (the
+      reliever Stanton vs Giancarlo), so no season columns are needed yet (add
+      them here if a genuinely overlapping alias ever surfaces). Reseed with
+      `dbt seed --full-refresh -s player_alias`.
+    columns:
+      - name: name_key
+        description: 'cbs_name_key()-normalized old/variant name form (e.g. ''fausto carmona'').'
+        tests:
+          - not_null
+          - unique
+      - name: mlbam_id
+        description: 'The MLBAM id that name form actually denotes.'
+        tests:
+          - not_null
+      - name: note
+        description: 'Why the alias exists + how the season/presence gate keeps any same-name other person apart.'

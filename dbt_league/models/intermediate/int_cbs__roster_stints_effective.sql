@@ -23,8 +23,17 @@ with base as (
              then s.stint_end
              else dateadd(day, 1, s.stint_end)
         end as base_end_exclusive,
+        -- Single-rostering runs on the PLAYER, so partition by the MLB-81
+        -- identity (mlbam), not the name form: K-Rod's 'francisco rodriguez'
+        -- and 'francisco j rodriguez' stints are one player and must dedupe
+        -- as one. NULL mlbam (ambiguous/uncandidated) falls back to the name
+        -- key -- today's behaviour. The scope term keeps a two-way player's
+        -- two halves (Ohtani 2025: batter on one franchise, pitcher on
+        -- another) as INDEPENDENT single-rostering streams.
         lead(s.stint_start) over (
-            partition by s.league_key, s.season_year, s.name_key
+            partition by s.league_key, s.season_year,
+                         coalesce(to_varchar(s.mlbam_id), 'name:' || s.name_key),
+                         coalesce(s.stat_group_scope, '')
             order by s.stint_start, s.franchise_id
         ) as next_acquisition_start
     from {{ ref('int_cbs__roster_stints') }} s

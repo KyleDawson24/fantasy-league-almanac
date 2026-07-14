@@ -544,6 +544,47 @@
       Verlander false-87% lesson). Then: slot-records rework (primary-pos
       dark years, dynamic template, caveat/details placement per Kyle), HoS
       unheld, team-pages 1:1 sprint (CAL.tsv target).
+- [x] **MLB-81 LANDED (2026-07-14) — the identity-dim gate.** The walk-back's
+      four name-join seams (games↔stints, stints↔lineup, stints↔anchors, anchor
+      estimator) + the sentinel now attribute id-first on the mlbam spine
+      instead of by fragile `cbs_name_key` equality.
+      * **`dim_player_identity`** (new marts/core, PLATFORM-GENERAL per Kyle —
+        one map for every future platform, `platform='cbs'` today; a shareable
+        cross-platform name/id↔MLBAM artifact in its own right). Grain
+        (platform, name_key, season_year); candidates from crosswalk cbs_name +
+        mlbam_name + generated variants (middle-initial strip, two-way
+        paren-strip) + log-id + captures + the new `player_alias` seed;
+        season × MLB-game-presence disambiguates homonyms. Two-way handled by
+        data-driven `stat_group_scope` (no Ohtani literal). `player_alias` seed
+        = hard renames only (Carmona→433584, Mike/Michael Stanton→519317);
+        Kendrick/Morales auto-bridge via mlbam_name.
+      * **Rewire**: stints/lineup carry mlbam+scope; single-rostering + lineup
+        intervals re-keyed to the mlbam ident (+scope so a two-way player's
+        halves stay separate streams — Ohtani 2025 batter fr18 / pitcher fr34).
+        Anchor CTEs RE-AGGREGATED to mlbam grain (not decorated) so the LEFT
+        JOINs can't silently fan out (the QUALIFY would hide it). S1 =
+        `mlbam(+scope) OR (mlbam NULL → name)` = strict superset. Sentinel =
+        anti-join of `reconstructed` on the game grain = its exact complement
+        (no hand-synced predicate; also dodges a Snowflake decorrelation error).
+      * **Canaries (rebuilt fact, 977k rows, all dbt tests green + new
+        `assert_cbs_attribution_no_fanout`)**: K-Rod 501→**6,831** attributed
+        fpts (6%→~88%, whole Angels peak back — now the single-season Saves
+        record, 60 SV 2008); middle-initial class 36.3%→**67.3%** (was an
+        outlier, now at the league-wide ~70% norm); Stanton 2010-11 + Ohtani
+        2018-24 (unified-entry era) now attribute, halves split; Verlander
+        UNCHANGED (control); the ambiguous class still attributes via the name
+        fallback (2 Will Smiths, 3 Luis Garcias — the only 18 ambiguous names,
+        all genuine homonyms); **attribution_contested 0 / 977,264** (no
+        fan-out). Reconciliation vs official standings in-line-to-better
+        (2024 1.2% / 2025 1.9% mean abs).
+      * **ESPN neutrality**: unit suite 210 pass; almanac byte-diff re-anchored
+        exactly ONE cell (CHIN, Palencia ppg 3.75→3.74 — the documented
+        float-order class, verified same-player/±0.01/no-CBS-strings); BBCode
+        goldens untouched. Pre-existing `test_stat_catalog` staleness surfaced
+        (HR/2B/3B auto_tracked committed but the test's expected set wasn't
+        updated — unrelated to MLB-81, flagged as a separate task).
+      * CBS dev re-rendered for Kyle's eyeball (the merge gate). NEXT: HoS
+        render unheld, slot-records rework, team-pages 1:1 (all still queued).
 - **REQUEST LIST (running)**: team abbrev preferences collect in the
   cbs_franchises seed (MATT, JUNK so far).
 

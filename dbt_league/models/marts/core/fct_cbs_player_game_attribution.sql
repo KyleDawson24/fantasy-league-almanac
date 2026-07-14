@@ -84,65 +84,97 @@ captured as (
 ),
 
 -- ------------------------------------------------- 2001-2025 walk-back
+-- ident = the MLB-81 join spine: mlbam where the season's name form resolved,
+-- else the name key (ambiguous/uncandidated -> today's name-join fallback).
+-- scope_key splits a two-way player's two disciplines.
 stints as (
-    select * from {{ ref('int_cbs__roster_stints_effective') }}
+    select
+        se.*,
+        coalesce(to_varchar(se.mlbam_id), 'name:' || se.name_key) as ident,
+        coalesce(se.stat_group_scope, '')                         as scope_key
+    from {{ ref('int_cbs__roster_stints_effective') }} se
+),
+
+-- Year-end anchors, MLB-81 identity-resolved then RE-AGGREGATED to mlbam
+-- grain (ident, scope_key). Grouping to the identity -- not decorating
+-- name-keyed rows -- is what stops the LEFT JOINs below from fanning out
+-- silently when two era name-forms of one player each carry an anchor row
+-- (the QUALIFY would hide the duplicate while corrupting active_weight /
+-- attribution_contested). Two-way splits (Ohtani 2025: batter + pitcher
+-- anchor rows) stay separate via scope_key.
+anchors_resolved as (
+    select
+        r.league_key,
+        r.season_year,
+        r.franchise_id,
+        {{ cbs_name_key('r.player_name_raw') }}                    as name_key,
+        r.est_start_share,
+        r.primary_pos,
+        r.roster_status,
+        pid.mlbam_id,
+        coalesce(to_varchar(pid.mlbam_id),
+                 'name:' || {{ cbs_name_key('r.player_name_raw') }}) as ident,
+        coalesce(pid.stat_group_scope, '')                        as scope_key
+    from {{ ref('stg_cbs__ui_rosters') }} r
+    left join {{ ref('dim_player_identity') }} pid
+        on pid.platform = 'cbs'
+        and pid.name_key = {{ cbs_name_key('r.player_name_raw') }}
+        and pid.season_year = r.season_year
 ),
 
 anchors_est as (
     select
-        league_key, season_year, franchise_id,
-        {{ cbs_name_key('player_name_raw') }} as name_key,
-        max(est_start_share)                  as est_start_share,
-        max(primary_pos)                      as primary_pos,
-        max(roster_status)                    as anchor_status
-    from {{ ref('stg_cbs__ui_rosters') }}
-    group by 1, 2, 3, 4
+        league_key, season_year, franchise_id, ident, scope_key,
+        max(mlbam_id)        as mlbam_id,
+        max(name_key)        as name_key,
+        max(est_start_share) as est_start_share,
+        max(primary_pos)     as primary_pos,
+        max(roster_status)   as anchor_status
+    from anchors_resolved
+    group by 1, 2, 3, 4, 5
 ),
 
 -- The estimator at SEASON grain (Kyle, 2026-07-14): Own%/Start% are global
 -- CBS stats about the PLAYER, not the franchise, so the ratio from any
 -- year-end anchor row covers every stint that season -- a mid-season stint
 -- on Team A borrows the ratio the player finished with on Team B.
--- (Franchise-scoping the estimator was needless caution; it silently
--- zeroed ~4% of 2004-2020 production. anchor_STATUS stays franchise-
--- scoped above: a year-end A/RS on Team B says nothing about Team A.)
+-- (anchor_STATUS stays franchise-scoped in anchors_est above.)
 anchors_est_season as (
     select
-        league_key, season_year,
-        {{ cbs_name_key('player_name_raw') }} as name_key,
-        max(est_start_share)                  as est_start_share
-    from {{ ref('stg_cbs__ui_rosters') }}
-    group by 1, 2, 3
+        league_key, season_year, ident, scope_key,
+        max(est_start_share) as est_start_share
+    from anchors_resolved
+    group by 1, 2, 3, 4
 ),
 
 -- Adjacent-anchor borrow (Kyle, 2026-07-14): a 2004-2020 stint whose player
 -- sits on NO year-end anchor THAT season (dropped and gone by year's end --
--- the season-ending-injury head of the dark pool: Trout '19, the Strasburg
--- Shutdown, Sale/deGrom) borrows the ratio from his NEAREST anchored season,
--- previous or next; an equidistant tie breaks to the HIGHER ratio (credit the
--- better version of himself). No anchored season anywhere in the capture ->
--- a true scrub who fell out of the league, left dark (weight NULL). Applied
--- only when the same-season estimator is absent (coalesce order below).
+-- Trout '19, the Strasburg Shutdown, Sale/deGrom) borrows the ratio from his
+-- NEAREST anchored season, previous or next; an equidistant tie breaks to the
+-- HIGHER ratio. No anchored season anywhere -> left dark (weight NULL).
+-- Keyed on the mlbam ident so a player's seasons connect across name-form drift.
 anchors_adjacent as (
-    select league_key, season_year, name_key, borrowed_ratio
+    select league_key, season_year, ident, scope_key, borrowed_ratio
     from (
         select
             st.league_key,
             st.season_year,
-            st.name_key,
+            st.ident,
+            st.scope_key,
             ar.est_start_share as borrowed_ratio,
             row_number() over (
-                partition by st.league_key, st.name_key, st.season_year
+                partition by st.league_key, st.ident, st.scope_key, st.season_year
                 order by abs(ar.season_year - st.season_year) asc,
                          ar.est_start_share desc
             ) as rn
         from (
-            select distinct league_key, season_year, name_key
+            select distinct league_key, season_year, ident, scope_key
             from stints where season_year between 2004 and 2020
         ) st
         join anchors_est_season ar
             on ar.league_key = st.league_key
-            and ar.name_key = st.name_key
+            and ar.ident = st.ident
+            and ar.scope_key = st.scope_key
             and ar.season_year != st.season_year
             and ar.est_start_share is not null
     )
@@ -210,32 +242,53 @@ reconstructed as (
         g.calculated_hitting_pts,
         g.calculated_pitching_pts
     from games g
+    -- S1 games <-> stints: id-first on the mlbam spine (fixes K-Rod's Angels
+    -- peak, the middle-initial class, Ohtani 2018-24, Stanton 2010-11), with
+    -- the ORIGINAL name-join kept as a fallback for stints whose name is
+    -- ambiguous that season (mlbam NULL) -- so this is a strict superset of
+    -- the prior behaviour, never a regression. The scope guard splits a
+    -- two-way player's disciplines (a unified entry carries scope NULL and
+    -- matches either).
     inner join stints s
         on g.league_key = s.league_key
         and g.season_year = s.season_year
-        and {{ cbs_name_key('g.cbs_player_name') }} = s.name_key
+        and (
+            (s.mlbam_id is not null
+                and g.mlbam_id = s.mlbam_id
+                and (s.stat_group_scope is null or s.stat_group_scope = g.stat_group))
+            or
+            (s.mlbam_id is null
+                and {{ cbs_name_key('g.cbs_player_name') }} = s.name_key)
+        )
         and g.game_date >= s.stint_start
         and g.game_date < s.attribution_end_exclusive
+    -- S2/S3/S4 stint <-> lineup/anchors: both sides now carry the mlbam ident,
+    -- so join on it (+ scope). Symmetric ident = mlbam where resolved, name
+    -- key where not -- preserving today's name match for the ambiguous class.
     left join {{ ref('int_cbs__lineup_intervals') }} li
         on s.league_key = li.league_key
         and s.season_year = li.season_year
         and s.franchise_id = li.franchise_id
-        and s.name_key = li.name_key
+        and s.ident = coalesce(to_varchar(li.mlbam_id), 'name:' || li.name_key)
+        and s.scope_key = coalesce(li.stat_group_scope, '')
         and g.game_date >= li.state_start
         and g.game_date < li.state_end_exclusive
     left join anchors_est ae
         on s.league_key = ae.league_key
         and s.season_year = ae.season_year
         and s.franchise_id = ae.franchise_id
-        and s.name_key = ae.name_key
+        and s.ident = ae.ident
+        and s.scope_key = ae.scope_key
     left join anchors_est_season aes
         on s.league_key = aes.league_key
         and s.season_year = aes.season_year
-        and s.name_key = aes.name_key
+        and s.ident = aes.ident
+        and s.scope_key = aes.scope_key
     left join anchors_adjacent adj
         on s.league_key = adj.league_key
         and s.season_year = adj.season_year
-        and s.name_key = adj.name_key
+        and s.ident = adj.ident
+        and s.scope_key = adj.scope_key
     where g.season_year between 2001 and 2025
     -- One attribution per game row, ALWAYS: an ambiguous name (two real
     -- players sharing it) can match two teams' stints -- prefer the
@@ -288,11 +341,20 @@ sentinel as (
         g.calculated_pitching_pts
     from games g
     where g.season_year in (2001, 2002)
+      -- Complement of the reconstructed attribution BY CONSTRUCTION (X1): a
+      -- 2001-2002 game gets a sentinel row iff the walk-back did NOT already
+      -- attribute it. Anti-joining reconstructed on the game grain (rather than
+      -- re-deriving S1's identity predicate) keeps sentinel and reconstructed
+      -- exactly mutually exclusive with no hand-synced second copy, and avoids
+      -- the multi-correlated NOT EXISTS Snowflake can't decorrelate.
       and not exists (
-          select 1 from stints s
-          where s.league_key = g.league_key
-            and s.season_year = g.season_year
-            and s.name_key = {{ cbs_name_key('g.cbs_player_name') }}
+          select 1 from reconstructed rc
+          where rc.league_key = g.league_key
+            and rc.cbs_player_id = g.cbs_player_id
+            and rc.stat_group = g.stat_group
+            and rc.game_pk = g.game_pk
+            and rc.game_date = g.game_date
+            and rc.game_index = g.game_index
       )
 )
 

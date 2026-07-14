@@ -1,0 +1,4 @@
+name_key,mlbam_id,note
+fausto carmona,433584,Renamed to Roberto Hernandez in 2012 (mlbam 433584). CBS log/record use the Carmona form for 2006-2011 while the crosswalk carries only Roberto Hernandez so no shared token bridges them. The pre-rename reliever Roberto Hernandez (a different mlbam absent from this crosswalk) is kept apart by the season and game-presence resolver.
+mike stanton,519317,Giancarlo Stanton went by Mike Stanton as a 2010-11 rookie (mlbam 519317). The 1989-2007 reliever Mike Stanton is a different person with a different mlbam; the season and game-presence resolver separates them since Giancarlo has no games before 2010.
+michael stanton,519317,Giancarlo Stanton other rookie-era name form in 2010 (mlbam 519317). Same rationale as the mike stanton row.

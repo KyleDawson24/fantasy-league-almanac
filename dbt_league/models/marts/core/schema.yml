@@ -6,6 +6,54 @@ version: 2
 # in ../reporting.
 
 models:
+  - name: dim_player_identity
+    description: >
+      PLATFORM-GENERAL player identity resolver (MLB-81): every name form a
+      fantasy platform writes -> the universal MLBAM id, so the historic
+      walk-back attributes id-first instead of by fragile name equality.
+      Grain (platform, name_key, season_year); season-scoped because
+      disambiguation is inherently seasonal (the 1989-2007 reliever "Mike
+      Stanton" vs now-Giancarlo, one name, two mlbams, split by which one
+      played that year). One identity map for every platform (only the
+      candidate block is platform-specific), doubling as a shareable
+      cross-platform name/id <-> MLBAM artifact. Resolvable-to-one ->
+      mlbam_id set, is_ambiguous=false; overlapping homonyms -> mlbam_id
+      NULL + is_ambiguous=true (the seam keeps its name-join tie-break, never
+      guesses); none-that-season -> no row (seam name-fallback). scope rides
+      from the source name's crosswalk scope; a unified two-way entry that
+      pulls both disciplines collapses to NULL = "either" (Ohtani + any
+      future two-way, data-driven, no per-player literal).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - platform
+              - name_key
+              - season_year
+    columns:
+      - name: platform
+        description: 'Fantasy platform namespace (''cbs'' today; ''yahoo''/''espn''/... as they land).'
+        tests:
+          - not_null
+      - name: name_key
+        description: 'cbs_name_key()-normalized name form (+ middle-initial / parenthetical variants) this row resolves.'
+        tests:
+          - not_null
+      - name: season_year
+        description: 'The season this resolution holds for (disambiguation is seasonal).'
+        tests:
+          - not_null
+      - name: mlbam_id
+        description: 'Resolved MLBAM id when exactly one candidate played that season; NULL when the name is ambiguous that season (seam falls back to the name-join).'
+      - name: stat_group_scope
+        description: 'hitting | pitching | NULL. NULL = matches either discipline (a unified two-way entry, or a single-discipline player -- both safe at the seam guard).'
+      - name: platform_player_id
+        description: 'Representative platform player id for the resolved mlbam (cbs_player_id for CBS rows); artifact metadata, not a seam key.'
+      - name: is_ambiguous
+        description: 'True when >1 mlbam maps to this name and played this season (genuine homonyms) -- the seam name-fallback + discipline tie-break resolve these, flagged not guessed.'
+      - name: n_mlbam
+        description: 'Distinct mlbams mapping to this (name_key, season) that played that year; 1 = resolved, >1 = ambiguous.'
+
   - name: dim_stat
     description: >
       Consumer-facing dimension for stat metadata. Thin view over the

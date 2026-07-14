@@ -27,7 +27,7 @@
 
 {{ config(materialized='view') }}
 
-with lineup_events as (
+with raw_events as (
     select
         league_key,
         season_year,
@@ -61,15 +61,35 @@ with lineup_events as (
         and season_year between 2001 and 2025
 ),
 
+-- MLB-81: resolve each event's mlbam so the interval timeline is derived at
+-- PLAYER (mlbam) grain, not name-form grain -- two era name-forms of one
+-- player (K-Rod's 'francisco rodriguez' + 'francisco j rodriguez') merge into
+-- ONE coherent A/RS timeline instead of two overlapping ones. NULL mlbam
+-- (ambiguous / uncandidated) falls back to the name key = today's behaviour;
+-- scope_key keeps a two-way player's two disciplines as separate streams.
+lineup_events as (
+    select
+        e.*,
+        pid.mlbam_id,
+        pid.stat_group_scope,
+        coalesce(to_varchar(pid.mlbam_id), 'name:' || e.name_key) as ident,
+        coalesce(pid.stat_group_scope, '')                        as scope_key
+    from raw_events e
+    left join {{ ref('dim_player_identity') }} pid
+        on pid.platform = 'cbs'
+        and pid.name_key = e.name_key
+        and pid.season_year = e.season_year
+),
+
 with_next as (
     select
         e.*,
         lead(e.event_date) over (
-            partition by e.league_key, e.season_year, e.franchise_id, e.name_key
+            partition by e.league_key, e.season_year, e.franchise_id, e.ident, e.scope_key
             order by e.event_date, e.row_seq desc, e.entry_seq desc
         ) as next_event_date,
         row_number() over (
-            partition by e.league_key, e.season_year, e.franchise_id, e.name_key
+            partition by e.league_key, e.season_year, e.franchise_id, e.ident, e.scope_key
             order by e.event_date, e.row_seq desc, e.entry_seq desc
         ) as event_order
     from lineup_events e
@@ -80,6 +100,8 @@ select
     season_year,
     franchise_id,
     name_key,
+    mlbam_id,
+    stat_group_scope,
     event_date                    as state_start,
     coalesce(next_event_date, '9999-12-31'::date) as state_end_exclusive,
     state,
@@ -98,6 +120,8 @@ select
     season_year,
     franchise_id,
     name_key,
+    mlbam_id,
+    stat_group_scope,
     '0001-01-01'::date,
     event_date,
     prior_state,

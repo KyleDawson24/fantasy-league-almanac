@@ -434,7 +434,14 @@ select
         and s.season_year >= 2003)                     as missing_departure,
     (s.on_year_end_anchor and not f.ends_on_roster)    as anchor_reopen_needed,
     (s.season_year < 2003)                             as no_anchor_era,
-    (d.n_ids > 1)                                      as is_ambiguous_name,
+    -- MLB-81 identity: mlbam is the join spine downstream (name equality
+    -- silently broke K-Rod's Angels peak, the middle-initial class, etc.).
+    -- pid resolves the season's name form to its mlbam; NULL where the name
+    -- is ambiguous that season or has no candidate -- the attribution fact
+    -- falls back to the name-join for exactly those rows.
+    pid.mlbam_id,
+    pid.stat_group_scope,
+    coalesce(pid.is_ambiguous, false)                  as is_ambiguous_name,
     case when d.n_ids = 1 then d.any_id end            as resolved_cbs_player_id
 from stints s
 inner join flags f
@@ -442,3 +449,7 @@ inner join flags f
     and s.franchise_id = f.franchise_id and s.name_key = f.name_key
 left join {{ ref('int_cbs__player_name_ids') }} d
     on s.league_key = d.league_key and s.name_key = d.name_key
+left join {{ ref('dim_player_identity') }} pid
+    on pid.platform = 'cbs'
+    and pid.name_key = s.name_key
+    and pid.season_year = s.season_year

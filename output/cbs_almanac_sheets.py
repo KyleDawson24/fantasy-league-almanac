@@ -1769,8 +1769,26 @@ def build_standings_rows(context, arc, finishes, active_franchises):
 def build_team_tab(context, franchise, current_lineup, alltime_lineup,
                    bench_current, bench_alltime, days_current, days_alltime,
                    provenance_mix):
-    """One franchise page: Best Lineup current x all-time side by side,
-    bench blocks, fidelity label."""
+    """One franchise page: a two-scope Best Lineup (LEFT current season,
+    RIGHT all-time cumulative). BOTH sides are THIS franchise's OWN best
+    lineup -- not the all-league team (Kyle, 2026-07-14):
+
+      Starters  the optimal lineup (slot template) maximizing ACTIVE points
+                scored FOR THIS TEAM. Left = among players it started this
+                season; right = among players it EVER started, all at once
+                ("the best team this franchise could assemble from every
+                piece it's had").
+      Bench     next players by TOTAL points on this team's roster (active +
+                inactive -- points available, used or not), starters removed.
+      Others    everyone else it rostered (that scope), by total points;
+                capped on the all-time side (25-year league).
+
+    So a player recurs across pages: Freeman is on BP's CURRENT lineup (BP
+    rosters him, his best 1B this year) AND CAL's ALL-TIME lineup (CAL's
+    best-ever 1B though he left). The Tm columns (small-font, cols A & P)
+    say where the player is rostered NOW: '*' on this page's team, the team
+    abbrev on another, blank when unclaimed. Mirrors the ESPN team tab
+    (tests/fixtures/almanac_v1_1_0/*.tsv). See project_cbs_team_pages memory."""
     season = context['season_year']
     era = f"{context['first_season']}–{season}"
     title = _safe_sheet_title(franchise['team_name'])

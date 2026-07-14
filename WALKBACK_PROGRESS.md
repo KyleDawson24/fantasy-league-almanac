@@ -487,17 +487,21 @@
       * **Team-page styling**: navy scope headers -> powder-blue (matches
         Records + ESPN). Bench already capped 8/10; years-of-service
         already present on the all-time board.
-      * **TEAM-PAGE 1:1 STATUS — honest:** the CBS pages are STRUCTURALLY
-        the ESPN shape (two-scope Best Lineup + bench + years-of-service)
-        but NOT column-exact. Remaining for tomorrow's finetuning: the
-        `Tm` (whose-player) + `Team` (MLB) columns; slash-line columns
-        (Avg/OBP/Slg/HR/SB, W-L-Sv/ERA/WHIP/K/BB -- needs AB/H/ER/outs
-        plumbed into the lineup selection like the Records rate stats); the
-        `Bench/IL Points` column; the "Other" overflow section (capped 100);
-        and a DECISION Kyle owes: is the all-time board THIS team's
-        all-time best lineup, or the all-league all-time team annotated
-        with '*' (the ESPN CAL.tsv shows other teams' players on the
-        all-time side -- semantics to confirm before mirroring).
+      * **TEAM-PAGE SEMANTICS — RESOLVED (Kyle, 2026-07-14; full spec in the
+        project_cbs_team_pages memory + build_team_tab docstring):** BOTH
+        sides are THIS franchise's OWN best lineup (current-season vs
+        all-time cumulative), NOT the all-league team. Starters = optimal by
+        ACTIVE points for this team; bench + others = TOTAL points on
+        roster. The Tm cols (A & P) = where the player is rostered NOW
+        (`*` this team / abbrev another / blank unclaimed) -- which is why
+        CAL's all-time page shows Freeman with Tm='BP' (CAL's best-ever 1B,
+        now on BP). Players recur across pages by design.
+      * **TEAM-PAGE 1:1 STATUS:** structurally the ESPN shape (two-scope
+        Best Lineup + bench + years-of-service, powder-blue headers) but not
+        yet column-exact. Remaining: the `Tm` + MLB-`Team` columns;
+        slash-line columns (Avg/OBP/Slg/HR/SB, W-L-Sv/ERA/WHIP/K/BB -- need
+        AB/H/ER/outs plumbed into the lineup selection like the Records rate
+        stats); the `Bench/IL Points` column; the capped "Others" overflow.
 - **REQUEST LIST (running)**: team abbrev preferences collect in the
   cbs_franchises seed (MATT, JUNK so far).
 

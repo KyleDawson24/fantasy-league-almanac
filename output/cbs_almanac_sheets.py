@@ -1805,14 +1805,14 @@ def build_team_tab(context, franchise, current_lineup, alltime_lineup,
                                       'backgroundColor': _PALE_BLUE}},
         {'range': 'A3:V3', 'format': {'textFormat': {'italic': True, 'fontSize': 9}}},
         {'range': f'A5:{_col(left_width)}5',
-         'format': {'textFormat': {'bold': True, 'foregroundColor': _WHITE},
-                    'backgroundColor': _NAVY}},
+         'format': {'textFormat': {'bold': True},
+                    'backgroundColor': _POWDER}},
     ]
     right_start_col = left_width + 2
     right_end_col = right_start_col + len(right_rows[0]) - 1
     formats.append({'range': f'{_col(right_start_col)}5:{_col(right_end_col)}5',
-                    'format': {'textFormat': {'bold': True, 'foregroundColor': _WHITE},
-                               'backgroundColor': _NAVY}})
+                    'format': {'textFormat': {'bold': True},
+                               'backgroundColor': _POWDER}})
 
     body_start = len(rows)
     body = _merge_bands(left_rows, right_rows, left_width, gap=1)

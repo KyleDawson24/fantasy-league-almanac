@@ -476,6 +476,28 @@
         Strasburg Shutdown 609, Sale/deGrom/Santana), ~75% of dark
         production in 100+pt stints; a future adjacent-season borrow could
         cover them (Kyle-decision, not taken).
+- [ ] **END-OF-DAY BATCH (Kyle greenlit, 2026-07-14):**
+      * **Adjacent-anchor borrow** (`estimated_adjacent`, commit cb5e341):
+        2004-2020 dark stints borrow the nearest anchored season's ratio
+        (prev/next; tie -> higher); scrubs (no anchor anywhere) stay dark.
+      * **Sentinel #### team** (fid 9999, cb5e341): 2001-2002 zero-event
+        players parked assume-active so they surface in PLAYER records;
+        fenced from TEAM records (team_season filter) + team pages (not
+        active); retired by the backfill. cbs_franchises seed row added.
+      * **Team-page styling**: navy scope headers -> powder-blue (matches
+        Records + ESPN). Bench already capped 8/10; years-of-service
+        already present on the all-time board.
+      * **TEAM-PAGE 1:1 STATUS — honest:** the CBS pages are STRUCTURALLY
+        the ESPN shape (two-scope Best Lineup + bench + years-of-service)
+        but NOT column-exact. Remaining for tomorrow's finetuning: the
+        `Tm` (whose-player) + `Team` (MLB) columns; slash-line columns
+        (Avg/OBP/Slg/HR/SB, W-L-Sv/ERA/WHIP/K/BB -- needs AB/H/ER/outs
+        plumbed into the lineup selection like the Records rate stats); the
+        `Bench/IL Points` column; the "Other" overflow section (capped 100);
+        and a DECISION Kyle owes: is the all-time board THIS team's
+        all-time best lineup, or the all-league all-time team annotated
+        with '*' (the ESPN CAL.tsv shows other teams' players on the
+        all-time side -- semantics to confirm before mirroring).
 - **REQUEST LIST (running)**: team abbrev preferences collect in the
   cbs_franchises seed (MATT, JUNK so far).
 

@@ -17,13 +17,24 @@
 --                          stats, not franchise stats -- Kyle 2026-07-14 --
 --                          so a mid-season Team A stint borrows the ratio
 --                          he finished with on Team B). ESTIMATE.
---   estimated_membership   2004-2020 stints with no usable estimator
---                          (own_pct 0/null, or the player on NO year-end
---                          anchor that season -- dropped and out of the
---                          league by year's end, the season-ending-injury
---                          class): membership confirmed, activity unknown
---                          -- weight NULL. The interactive surface filters
---                          these; the almanac explains them.
+--   estimated_adjacent     2004-2020: membership from the walk-back, but the
+--                          player is on NO year-end anchor that season, so
+--                          the weight is BORROWED from his nearest anchored
+--                          season (prev or next; equidistant ties -> the
+--                          higher ratio). Covers the dropped-mid-season-star
+--                          class (Trout '19, the Strasburg Shutdown).
+--                          ESTIMATE (cross-season).
+--   estimated_membership   2004-2020 stints with no usable estimator at all
+--                          (own_pct 0/null, AND no anchor in ANY season --
+--                          the true scrub who fell out of the league):
+--                          membership confirmed, activity unknown -- weight
+--                          NULL. Interactive surface filters; almanac explains.
+--   sentinel               2001-2002 zero-event players (production but NO
+--                          stint -- never transacted, no log line, no anchor
+--                          era): assume-active (weight 1) on the synthetic
+--                          holding-pen franchise 9999 '####', so they surface
+--                          in PLAYER records. FENCED out of TEAM records + team
+--                          pages; retired when the backfill reassigns them.
 --
 -- is_active is boolean where the day's state is KNOWN, NULL where
 -- estimated; active_weight is the scoring weight either way (1/0 or
@@ -104,6 +115,40 @@ anchors_est_season as (
     group by 1, 2, 3
 ),
 
+-- Adjacent-anchor borrow (Kyle, 2026-07-14): a 2004-2020 stint whose player
+-- sits on NO year-end anchor THAT season (dropped and gone by year's end --
+-- the season-ending-injury head of the dark pool: Trout '19, the Strasburg
+-- Shutdown, Sale/deGrom) borrows the ratio from his NEAREST anchored season,
+-- previous or next; an equidistant tie breaks to the HIGHER ratio (credit the
+-- better version of himself). No anchored season anywhere in the capture ->
+-- a true scrub who fell out of the league, left dark (weight NULL). Applied
+-- only when the same-season estimator is absent (coalesce order below).
+anchors_adjacent as (
+    select league_key, season_year, name_key, borrowed_ratio
+    from (
+        select
+            st.league_key,
+            st.season_year,
+            st.name_key,
+            ar.est_start_share as borrowed_ratio,
+            row_number() over (
+                partition by st.league_key, st.name_key, st.season_year
+                order by abs(ar.season_year - st.season_year) asc,
+                         ar.est_start_share desc
+            ) as rn
+        from (
+            select distinct league_key, season_year, name_key
+            from stints where season_year between 2004 and 2020
+        ) st
+        join anchors_est_season ar
+            on ar.league_key = st.league_key
+            and ar.name_key = st.name_key
+            and ar.season_year != st.season_year
+            and ar.est_start_share is not null
+    )
+    where rn = 1
+),
+
 reconstructed as (
     select
         g.league_key,
@@ -123,6 +168,9 @@ reconstructed as (
                  and aes.est_start_share is not null
                                              then 'estimated_startshare'
             when s.season_year between 2004 and 2020
+                 and adj.borrowed_ratio is not null
+                                             then 'estimated_adjacent'
+            when s.season_year between 2004 and 2020
                                              then 'estimated_membership'
             when ae.anchor_status is not null then 'reconstructed_day'
             else 'estimated_membership'   -- lineup era, no events, no anchor
@@ -132,6 +180,9 @@ reconstructed as (
             when s.season_year between 2004 and 2020
                  and aes.est_start_share is not null
                                              then 'startshare'
+            when s.season_year between 2004 and 2020
+                 and adj.borrowed_ratio is not null
+                                             then 'adjacent'
             when s.season_year not between 2004 and 2020
                  and ae.anchor_status is not null
                                              then 'anchor_hold'
@@ -145,7 +196,7 @@ reconstructed as (
         case
             when li.state is not null        then iff(li.state = 'A', 1.0, 0.0)
             when s.season_year between 2004 and 2020
-                                             then aes.est_start_share
+                 then coalesce(aes.est_start_share, adj.borrowed_ratio)
             when ae.anchor_status is not null then iff(ae.anchor_status = 'A', 1.0, 0.0)
         end                              as active_weight,
         coalesce(s.is_ambiguous_name, false)               as is_ambiguous_name,
@@ -181,6 +232,10 @@ reconstructed as (
         on s.league_key = aes.league_key
         and s.season_year = aes.season_year
         and s.name_key = aes.name_key
+    left join anchors_adjacent adj
+        on s.league_key = adj.league_key
+        and s.season_year = adj.season_year
+        and s.name_key = adj.name_key
     where g.season_year between 2001 and 2025
     -- One attribution per game row, ALWAYS: an ambiguous name (two real
     -- players sharing it) can match two teams' stints -- prefer the
@@ -196,8 +251,53 @@ reconstructed as (
                  else g.stat_group = 'hitting' end, 0, 1),
             s.stint_start desc
     ) = 1
+),
+
+-- SENTINEL (Kyle, 2026-07-14): the 2001-2002 zero-event players -- real
+-- gamelog production but NO stint at all (never transacted, no log line, no
+-- year-end anchor to bootstrap membership). Parked on a synthetic holding-pen
+-- franchise (9999, '####') at weight 1 -- assume-active until the backfill
+-- learns otherwise -- so their production surfaces in PLAYER/league records
+-- now. The record book FENCES 9999 out of every TEAM aggregation (a holding
+-- pen isn't a franchise) and it gets no team page (not in the active set);
+-- the 2001-2002 real teams' team records stay incomplete until the backfill
+-- reassigns these players off ####. Law 1 already applied upstream, so a
+-- sentinel pitcher carries pitching rows only.
+sentinel as (
+    select
+        g.league_key,
+        g.cbs_player_id,
+        g.cbs_player_name,
+        g.mlbam_id,
+        g.season_year,
+        g.stat_group,
+        g.game_date,
+        g.game_pk,
+        g.game_index,
+        9999                             as franchise_id,
+        cast('####' as varchar)          as team_name,
+        'sentinel'                       as provenance,
+        'sentinel'                       as state_source,
+        true                             as is_active,
+        1.0::float                       as active_weight,
+        false                            as is_ambiguous_name,
+        false                            as membership_end_inferred,
+        false                            as attribution_contested,
+        g.calculated_fpts,
+        g.calculated_hitting_pts,
+        g.calculated_pitching_pts
+    from games g
+    where g.season_year in (2001, 2002)
+      and not exists (
+          select 1 from stints s
+          where s.league_key = g.league_key
+            and s.season_year = g.season_year
+            and s.name_key = {{ cbs_name_key('g.cbs_player_name') }}
+      )
 )
 
 select * from captured
 union all
 select * from reconstructed
+union all
+select * from sentinel

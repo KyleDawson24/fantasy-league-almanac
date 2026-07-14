@@ -117,6 +117,11 @@ _REC_STAT_COL = {
     'K': 'k', 'P_H': 'p_h', 'P_BB': 'p_bb', 'ER': 'er',
 }
 
+# The synthetic holding-pen franchise for 2001-2002 zero-event players (see
+# fct_cbs_player_game_attribution). Fenced out of team records + team pages;
+# its players still surface in player/league records.
+_CBS_SENTINEL_FID = 9999
+
 # The player-record Details stat-line: marquee counting stats, headline first.
 # A hitter's pitching cells are zero and vice-versa, so one combined order
 # serves both; XBH/points are excluded (derived / shown as the Value).
@@ -366,6 +371,13 @@ def get_cbs_records_data():
     owner_label = _franchise_owner_labels()
 
     team_season = _rec_agg('season_year, team_id', ', MAX(team_abbrev) AS team_abbrev')
+    # FENCE the sentinel holding-pen franchise (9999, '####') out of every TEAM
+    # aggregation: it holds the 2001-2002 zero-event stars at 100% and would
+    # otherwise landslide the best/worst team records. Its players still count
+    # in PLAYER records (player_season is franchise-blind) and its stint drives
+    # their main_team below, so it stays in player_team_season.
+    team_season = [r for r in team_season
+                   if _rec_fnum(r.get('team_id')) != _CBS_SENTINEL_FID]
     player_season = _rec_agg(
         'season_year, player_key',
         ', MAX(display_name) AS display_name, MAX(player_name) AS player_name')

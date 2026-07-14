@@ -53,7 +53,7 @@ models:
         tests:
           - accepted_values:
               arguments:
-                values: ['captured', 'reconstructed_day', 'estimated_startshare', 'estimated_membership']
+                values: ['captured', 'reconstructed_day', 'estimated_startshare', 'estimated_adjacent', 'estimated_membership', 'sentinel']
       - name: lineup_slot
         description: 'Slot the player occupied on this scoring_period (ESPN: 1B/SP/BE/FA/etc. CBS: the captured deployed slot for 2026, ACT/RS for reconstructed history, EST for the estimated era). Part of the grain because a player can appear in multiple slots within a matchup_period.'
         tests:
@@ -181,7 +181,7 @@ models:
           - not_null
           - accepted_values:
               arguments:
-                values: ['captured', 'reconstructed_day', 'estimated_startshare', 'estimated_membership']
+                values: ['captured', 'reconstructed_day', 'estimated_startshare', 'estimated_adjacent', 'estimated_membership', 'sentinel']
       - name: eligible_slots
         description: 'Date-scoped derived eligibility array as of this day (int_cbs__eligibility_windows through the crosswalk scope guard), CBS vocabulary, alphabetically ordered for determinism, floored to the identity''s universal position when no window has opened.'
         tests:

@@ -348,6 +348,31 @@
       side loose ends noted: 2002's vanished Armonk Artillery (TGUN) + an
       unmapped Nightowls franchise bucket. Kyle fills teams manually while
       Track A ran; ingest → synthetic anchors → re-run walk-back is next.
+- [ ] **RECORDS v3.1 (Kyle review round 8, 2026-07-13) — partial batch:**
+      * **Best/worst by polarity** (his correction): stats route by
+        dim_stat.polarity. Positive → main 'best' sections; negative
+        (ER, Hits Allowed, Walks Allowed) → Negative Records as 'Most ...'.
+        No more negative-polarity stats masquerading as positive records.
+      * **Box-score stat order** (`_HIT_ORDER` Hits/2B/3B/HR/XBH/TB/…) not
+        alphabetical; **"RBI"** not "RBIs" (CBS-side `_DISPLAY_FIX`).
+      * **Owner inherits across re-registrations**: the 16 current franchises
+        carry owners; a defunct id that shares an abbrev with a live one
+        (FULT 13→30, KD 22→28) inherits it. Multi-owner joins with **" & "**
+        (a comma read as Last,First). Confirmed clean split: owned == last
+        seen 2025; the 18 blanks all last seen 2003-2022 (genuinely defunct).
+      * **ESPN records column widths** applied (A175/B150/C125/F400/G25/L400,
+        second panel symmetric).
+      * **Formatting-reset fix**: `worksheet.clear()` drops values but NOT
+        cell format, so every re-render was layering colours over stale ones.
+        Added a full-sheet userEnteredFormat reset as the first style request
+        → each render starts clean (Kyle stripped the sheet to diagnose this).
+      * STILL OPEN this round (next batch): Arrieta dig verdict (coin-flip
+        active-weight deflates the 2001-2002 aces — Randy Johnson 2002's raw
+        1142 halves below Arrieta's 1020; the real best season is RJ, not
+        Arrieta — a 2001-2002 active-weight fix, not a scoring bug); rate
+        stats (ERA/K9/BB9/K:BB computable now, AVG/OBP/SLG/OPS need AB
+        plumbed); all-time-only-for-active-teams (career-by-abbrev question);
+        unclaimed 2001-2002 players → active on sentinel team.
 - **REQUEST LIST (running)**: team abbrev preferences collect in the
   cbs_franchises seed (MATT, JUNK so far).
 

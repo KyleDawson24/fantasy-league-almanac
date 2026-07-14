@@ -124,6 +124,16 @@ _STAT_LINE_ORDER = ['HR', 'RBI', 'R', 'SB', 'W', 'SV', 'K', 'QS', 'HLD', 'CG',
                     '2B', '3B', 'H', 'TB']
 _STAT_LINE_LABELS = {s: s for s in _STAT_LINE_ORDER}
 
+# Records section stat order (Kyle round 7): mirror the natural box-score order
+# rather than alphabetical. Hits, 2B, 3B, HR, XBH, then TB, then the rest.
+# Negative-polarity pitching stats (ER, Hits/Walks Allowed) live in Negative
+# Records as "Most ...", never as a positive record.
+_HIT_ORDER = ['H', '2B', '3B', 'HR', 'XBH', 'TB', 'R', 'RBI', 'SB', 'B_BB']
+_PIT_ORDER = ['W', 'QS', 'K', 'SV', 'HLD', 'CG', 'OUTS']
+_NEG_ORDER = ['ER', 'P_H', 'P_BB']
+# Display-name fixups over dim_stat (kept CBS-side to avoid ESPN golden drift).
+_DISPLAY_FIX = {'RBIs': 'RBI'}
+
 _NAVY = {'red': 0.12, 'green': 0.20, 'blue': 0.30}
 _WHITE = {'red': 1, 'green': 1, 'blue': 1}
 _PALE_BLUE = {'red': 0.95, 'green': 0.97, 'blue': 0.99}
@@ -311,9 +321,13 @@ def _rec_agg(group_cols, extra_selects=''):
 
 def _franchise_owner_labels():
     """franchise_id -> {abbrev, owner}. abbrev is the record Holder for team
-    records; owner is the Owner column (current-era owner, blank for
-    franchises with no current owner -- the MLB-64 re-key makes it
-    per-era)."""
+    records; owner is the Owner column. Only the 16 current franchises carry a
+    dim_team_owner row, but the same team gets re-registered under new
+    franchise_ids across renames (BENT = 14 & 17, FULT = 13 & 30, ...). Since
+    the abbrev is the stable identity, a historical id inherits its abbrev's
+    current owner -- so a record held under an old id still shows an owner
+    (current-era; the true per-era owner arrives with the MLB-64 re-key).
+    Multi-owner names join with ' & ' (a comma read as 'Last, First')."""
     rows = query_snowflake(f"""
         SELECT f.franchise_id, f.abbrev,
                MAX_BY(o.owner_display, o.season_year) AS owner
@@ -323,8 +337,14 @@ def _franchise_owner_labels():
         WHERE {league_predicate('f')}
         GROUP BY f.franchise_id, f.abbrev
     """)
-    return {int(r['franchise_id']): {'abbrev': r['abbrev'], 'owner': r['owner'] or ''}
-            for r in rows}
+    labels = {int(r['franchise_id']):
+              {'abbrev': r['abbrev'], 'owner': (r['owner'] or '').replace(', ', ' & ')}
+              for r in rows}
+    owner_by_abbrev = {m['abbrev']: m['owner'] for m in labels.values() if m['owner']}
+    for m in labels.values():
+        if not m['owner']:
+            m['owner'] = owner_by_abbrev.get(m['abbrev'], '')
+    return labels
 
 
 def _rec_fnum(v):
@@ -1545,10 +1565,28 @@ def build_records_rows(context, catalog, data):
         'CALCULATED_PITCHING_PTS': 'Pitching Points',
     }
 
-    # ---- Score Records: polar point marquees. Best block (all teams, then
-    # all players), then the Worst block -- ESPN's Score Records layout.
-    # Worst is team-grain (teams play full seasons, so 'fewest points' is a
-    # real record); player futility needs a min-starts qualifier -> follow-up.
+    def _disp(stat):
+        d = catalog[stat]['display_name']
+        return _DISPLAY_FIX.get(d, d)
+
+    def _ordered(stats, order):
+        idx = {s: i for i, s in enumerate(order)}
+        return sorted(stats, key=lambda s: (idx.get(s, 999), _disp(s)))
+
+    # Route by polarity (Kyle round 7): positive stats are 'best' records in
+    # the main sections; negative-polarity pitching stats (Earned Runs, Hits
+    # Allowed, Walks Allowed) are futility -> the Negative Records section.
+    hitting = _ordered([s for s, m in catalog.items()
+                        if m['stat_category'] == 'hitting' and m['polarity'] == 'positive'],
+                       _HIT_ORDER)
+    pitching = _ordered([s for s, m in catalog.items()
+                         if m['stat_category'] == 'pitching' and m['polarity'] == 'positive'],
+                        _PIT_ORDER)
+    negatives = _ordered([s for s, m in catalog.items() if m['polarity'] == 'negative'],
+                         _NEG_ORDER)
+
+    # ---- Score Records: the point marquees, best only (worst moves to the
+    # Negative Records section below).
     _section('Score Records')
     _header()
     for stat, label in _point_labels.items():
@@ -1556,18 +1594,8 @@ def build_records_rows(context, catalog, data):
     for stat, label in _point_labels.items():
         _emit_stat(f'Best Player {label}', stat, player=True)
     rows.append([])
-    for stat, label in _point_labels.items():
-        d = data.get(stat, {})
-        _emit(f'Worst Team {label}', d.get('worst_team_season'),
-              d.get('worst_team_career'), stat, player=False)
-    rows.append([])
 
-    # ---- Per-stat sections: Player leads, then Team (Kyle: lean into player)
-    hitting = sorted((s for s, m in catalog.items() if m['stat_category'] == 'hitting'),
-                     key=lambda s: catalog[s]['display_name'])
-    pitching = sorted((s for s, m in catalog.items() if m['stat_category'] == 'pitching'),
-                      key=lambda s: catalog[s]['display_name'])
-
+    # ---- Per-stat 'best' sections: Player leads, then Team.
     for grain, player in (('Player', True), ('Team', False)):
         for cat_label, stats in (('Hitting', hitting), ('Pitching', pitching)):
             if not stats:
@@ -1575,8 +1603,23 @@ def build_records_rows(context, catalog, data):
             _section(f'{grain} {cat_label} Records')
             _header()
             for stat in stats:
-                _emit_stat(catalog[stat]['display_name'], stat, player)
+                _emit_stat(_disp(stat), stat, player)
             rows.append([])
+
+    # ---- Negative Records: worst team point-seasons, then 'Most ...' of each
+    # negative-polarity stat (Player then Team).
+    _section('Negative Records')
+    _header()
+    for stat, label in _point_labels.items():
+        _emit(f'Worst Team {label}', data.get(stat, {}).get('worst_team_season'),
+              None, stat, player=False)
+    if negatives:
+        rows.append([])
+        for stat in negatives:
+            _emit_stat(f'Most {_disp(stat)} (Player)', stat, player=True)
+        for stat in negatives:
+            _emit_stat(f'Most {_disp(stat)} (Team)', stat, player=False)
+    rows.append([])
 
     return rows, formats
 
@@ -1990,12 +2033,14 @@ _HOME_WIDTHS = [(0, 1, 100), (1, 2, 125), (2, 3, 100), (3, 4, 50),
                 (8, 9, 100), (9, 10, 125), (10, 11, 50),
                 (11, 12, 125), (12, 13, 250),   # L Slash / M Stat Line (Kyle)
                 (13, 14, 150), (14, 15, 50)]
-# v2.1 records layout (ESPN two-scope): Record | [Holder|Owner|Value|Year|
-# Details] | gap | [Holder|Owner|Value|Yrs|Details]
-_RECORDS_WIDTHS = [(0, 1, 175), (1, 2, 150), (2, 3, 110), (3, 4, 55),
-                   (4, 5, 50), (5, 6, 230), (6, 7, 20),
-                   (7, 8, 150), (8, 9, 110), (9, 10, 55), (10, 11, 60),
-                   (11, 12, 230)]
+# Records widths: mirror the ESPN almanac's _apply_records_tab_dimensions
+# (Kyle round 7 -- try the ESPN widths before hand-tuning). A Record 175,
+# B/H Holder 150, C/I Owner 125, F/L Details 400, G buffer 25; Value/Year
+# default. The second panel is set symmetric to the first (ESPN leaves H/I
+# default, but the CBS second scope is a full peer, not a thin band).
+_RECORDS_WIDTHS = [(0, 1, 175), (1, 2, 150), (2, 3, 125),
+                   (5, 6, 400), (6, 7, 25),
+                   (7, 8, 150), (8, 9, 125), (11, 12, 400)]
 _STANDINGS_WIDTHS = [(0, 1, 190), (1, 2, 60)]
 _TEAM_WIDTHS = [(0, 1, 55), (1, 2, 170), (2, 7, 62), (7, 12, 46), (12, 13, 30),
                 (13, 14, 55), (14, 15, 170), (15, 16, 62), (16, 21, 62),
@@ -2004,9 +2049,17 @@ _TEAM_WIDTHS = [(0, 1, 55), (1, 2, 170), (2, 7, 62), (7, 12, 46), (12, 13, 30),
 
 def _tab_style_requests(sheet_gid, title, formats):
     """Every non-value mutation for one tab as raw batch_update requests:
-    frozen header band, the builder's cell formats (converted from the
-    gspread batch_format shape), column widths."""
+    a full-sheet format RESET (worksheet.clear() drops values but NOT cell
+    formatting, so without this every re-render layers new colours over the
+    old and stale artifacts accumulate -- Kyle round 7), then the frozen
+    header band, the builder's cell formats, and column widths."""
     requests = [{
+        'repeatCell': {
+            'range': {'sheetId': sheet_gid},   # whole sheet
+            'cell': {},
+            'fields': 'userEnteredFormat',
+        },
+    }, {
         'updateSheetProperties': {
             'properties': {
                 'sheetId': sheet_gid,

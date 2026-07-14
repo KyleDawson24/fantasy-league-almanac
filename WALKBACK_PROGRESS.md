@@ -534,6 +534,16 @@
       * **HoF Years of Service**: swapped the flat span for the stint-list
         format (Lester/HH "4: 2009-2010, 2013-2014"). Confirmed no player-
         dedup rule (Freeman/Kershaw recur across franchises at rank 26+).
+- [ ] **SESSION HANDOFF (2026-07-14): see `HANDOFF_IDENTITY_DIM_AND_TEAM_PAGES.md`**
+      — the comprehensive state + next-steps doc. Gate = **MLB-81** (player
+      identity dimension; the middle-initial/alias name bridge: 58 players /
+      114k pts / 48% attributed; K-Rod smoking gun; id audit: txn ids
+      0%/57%/100% by era, anchors id-less, three id spaces incl.
+      ui-only-<mlbam> synthetics). HoS render HELD behind it (lens bug fixed
+      in e8f46f3 — daily fact, not position-fact known-state columns; the
+      Verlander false-87% lesson). Then: slot-records rework (primary-pos
+      dark years, dynamic template, caveat/details placement per Kyle), HoS
+      unheld, team-pages 1:1 sprint (CAL.tsv target).
 - **REQUEST LIST (running)**: team abbrev preferences collect in the
   cbs_franchises seed (MATT, JUNK so far).
 

@@ -812,6 +812,51 @@ def get_cbs_records_data():
                   'details': ''}
         slot_data[pos] = {'season_player': sp, 'career_team': ct}
     data['_slots'] = slot_data
+
+    # ---- Wasted Hall of Shame (Kyle 2026-07-14): top 25 players by career
+    # INACTIVE (benched) points -- production left rotting on a bench. The
+    # Breakdown decomposes their whole league output: unrostered (sat on the
+    # wire, never owned) / benched / active. Franchise column = the team that
+    # benched them the most. (Interim: 'unrostered' leans on the season-stats
+    # total minus what they were rostered for; refine if the split looks off.)
+    hos_rows = query_snowflake(f"""
+        SELECT player_key, team_id, MAX(display_name) AS display_name,
+               ROUND(SUM(active_pts), 1) AS act, ROUND(SUM(inactive_pts), 1) AS inact
+        FROM fct_player_position_pts
+        WHERE {league_predicate()}
+        GROUP BY player_key, team_id
+    """)
+    total_by_pk = {r['cbs_player_id']: _rec_fnum(r['pts']) for r in query_snowflake(f"""
+        SELECT cbs_player_id, SUM(stat_value) AS pts
+        FROM int_cbs__player_season_stats
+        WHERE {league_predicate()} AND stat_name = 'CALCULATED_POINTS'
+        GROUP BY cbs_player_id
+    """)}
+    hos = {}
+    for r in hos_rows:
+        ab = _abbrev_of.get(_fid(r.get('team_id')))
+        if not ab or ab == '####':
+            continue
+        e = hos.setdefault(r['player_key'], {'name': r.get('display_name'),
+                           'act': 0.0, 'inact': 0.0, 'bench_by': {}})
+        e['act'] += _rec_fnum(r.get('act'))
+        e['inact'] += _rec_fnum(r.get('inact'))
+        e['bench_by'][ab] = e['bench_by'].get(ab, 0.0) + _rec_fnum(r.get('inact'))
+    hos_list = []
+    for pk, e in hos.items():
+        if e['inact'] <= 0:
+            continue
+        total = total_by_pk.get(pk, e['act'] + e['inact'])
+        unrostered = max(0.0, total - e['act'] - e['inact'])
+        shame = max(e['bench_by'].items(), key=lambda kv: kv[1])[0]
+        nm = pname.get(pk, (None, None))
+        hos_list.append({
+            'display_name': nm[0] or e['name'], 'player_name': nm[1],
+            'abbrev': shame, 'inact': e['inact'],
+            'details': (f"{int(round(unrostered)):,} pts unrostered · "
+                        f"{int(round(e['inact'])):,} pts benched · "
+                        f"{int(round(e['act'])):,} pts active")})
+    data['_hos'] = sorted(hos_list, key=lambda e: -e['inact'])[:25]
     return data
 
 
@@ -1724,29 +1769,35 @@ def _contributor_detail(stat, contributors):
     return ', '.join(f'{nm}: {_rec_value(stat, v)}' for nm, v in (contributors or []))
 
 
-def _rec_side(cell, stat, player=False):
+def _rec_side(cell, stat, player=False, with_period=True):
     """One scope's 5 cells (ESPN shape): Holder | Owner | Value | Period |
     Details. Player holders link to baseball-reference; team holders show
     the franchise abbrev with a contributor detail."""
     if not cell:
-        return ['', '', '', '', '']
+        return ['', '', '', '', ''] if with_period else ['', '', '', '']
     holder = _bref_player_cell(cell) if player else cell.get('holder', '')
     # Rate cells carry a pre-formatted display value + a min-sample qualifier
     # as details (both grains), so they bypass _rec_value / _contributor_detail.
     if cell.get('is_rate'):
-        return [holder, cell.get('owner', ''), cell.get('value', ''),
-                cell.get('period', ''), cell.get('details', '')]
-    details = (cell.get('details') or '') if player else \
-        _contributor_detail(stat, cell.get('details'))
-    return [holder, cell.get('owner', ''), _rec_value(stat, cell.get('value')),
-            cell.get('period', ''), details]
+        value, details = cell.get('value', ''), cell.get('details', '')
+    else:
+        value = _rec_value(stat, cell.get('value'))
+        details = (cell.get('details') or '') if player else \
+            _contributor_detail(stat, cell.get('details'))
+    # with_period=False drops the span cell -- the All-Time side has no 'Yrs'
+    # column (Kyle 2026-07-14: readability over the rare useful span).
+    side = [holder, cell.get('owner', ''), value]
+    if with_period:
+        side.append(cell.get('period', ''))
+    side.append(details)
+    return side
 
 
 # Records v2.1 layout: Record | [Season: Holder|Owner|Value|Year|Details]
 # | gap | [All-Time Total: Holder|Owner|Value|Yrs|Details] -- the ESPN
 # two-scope Records shape, Season replacing "Current Season" and All-Time
 # Total replacing "All-Time".
-_REC_LAST_COL = 'L'
+_REC_LAST_COL = 'K'
 
 
 def build_records_rows(context, catalog, data):
@@ -1759,7 +1810,7 @@ def build_records_rows(context, catalog, data):
     and Team sections."""
     era = f"{context['first_season']}–{context['season_year']}"
     HDR = ['Record', 'Holder', 'Owner', 'Value', 'Year', 'Details', '',
-           'Holder', 'Owner', 'Value', 'Yrs', 'Details']
+           'Holder', 'Owner', 'Value', 'Details']
 
     rows = [
         ['League Records'],
@@ -1788,7 +1839,7 @@ def build_records_rows(context, catalog, data):
         # Scope labels sit OVER their blocks: 'Season' at col B (the first
         # Holder), 'All-Time Total' at col H (the second Holder).
         rows.append([label, 'Season', '', '', '', '', '',
-                     'All-Time Total', '', '', '', ''])
+                     'All-Time Total', '', '', ''])
         _band()
 
     def _header():
@@ -1797,7 +1848,7 @@ def build_records_rows(context, catalog, data):
 
     def _emit(label, season_cell, career_cell, stat, player):
         rows.append([label, *_rec_side(season_cell, stat, player), '',
-                     *_rec_side(career_cell, stat, player)])
+                     *_rec_side(career_cell, stat, player, with_period=False)])
 
     def _emit_stat(label, stat, player):
         d = data.get(stat, {})
@@ -1872,7 +1923,8 @@ def build_records_rows(context, catalog, data):
             d = slots.get(pos) or {}
             if d.get('season_player') or d.get('career_team'):
                 rows.append([pos, *_rec_side(d.get('season_player'), pos, player=True),
-                             '', *_rec_side(d.get('career_team'), pos, player=False)])
+                             '', *_rec_side(d.get('career_team'), pos, player=False,
+                                            with_period=False)])
         rows.append([])
 
     # ---- Negative Records: worst team point-seasons, then 'Most ...' of each
@@ -1902,6 +1954,20 @@ def build_records_rows(context, catalog, data):
         for i, e in enumerate(hof, 1):
             rows.append([i, _bref_player_cell(e), e.get('abbrev', ''),
                          _pts(e.get('pts')), e.get('span', '')])
+        rows.append([])
+
+    # ---- Wasted Hall of Shame: mirror of the HoF, ranked by benched points.
+    hos = data.get('_hos') or []
+    if hos:
+        rows.append(['Wasted Hall of Shame — top 25 by career benched '
+                     '(inactive) points'])
+        _band()
+        rows.append(['Rank', 'Player', 'Benched Most By', 'Inactive Points',
+                     'Breakdown'])
+        _band()
+        for i, e in enumerate(hos, 1):
+            rows.append([i, _bref_player_cell(e), e.get('abbrev', ''),
+                         _pts(e.get('inact')), e.get('details', '')])
         rows.append([])
 
     return rows, formats
@@ -2334,14 +2400,12 @@ _HOME_WIDTHS = [(0, 1, 100), (1, 2, 125), (2, 3, 100), (3, 4, 50),
                 (8, 9, 100), (9, 10, 125), (10, 11, 50),
                 (11, 12, 125), (12, 13, 250),   # L Slash / M Stat Line (Kyle)
                 (13, 14, 150), (14, 15, 50)]
-# Records widths: mirror the ESPN almanac's _apply_records_tab_dimensions
-# (Kyle round 7 -- try the ESPN widths before hand-tuning). A Record 175,
-# B/H Holder 150, C/I Owner 125, F/L Details 400, G buffer 25; Value/Year
-# default. The second panel is set symmetric to the first (ESPN leaves H/I
-# default, but the CBS second scope is a full peer, not a thin band).
+# Records widths: A Record 175, B/H Holder 150, C/I Owner 125, F Details 400,
+# G buffer 25, K Details2 400. The All-Time side dropped its 'Yrs' column
+# (Kyle 2026-07-14), so the second Details is now col K (index 10).
 _RECORDS_WIDTHS = [(0, 1, 175), (1, 2, 150), (2, 3, 125),
                    (5, 6, 400), (6, 7, 25),
-                   (7, 8, 150), (8, 9, 125), (11, 12, 400)]
+                   (7, 8, 150), (8, 9, 125), (10, 11, 400)]
 _STANDINGS_WIDTHS = [(0, 1, 190), (1, 2, 60)]
 _TEAM_WIDTHS = [(0, 1, 55), (1, 2, 170), (2, 7, 62), (7, 12, 46), (12, 13, 30),
                 (13, 14, 55), (14, 15, 170), (15, 16, 62), (16, 21, 62),

@@ -521,12 +521,19 @@
         career active-point runs (Lester/HH 2401, Freeman/SED 2278); abbrev-
         keyed, #### excluded, defunct franchises allowed.
       * **Orange recency highlighting removed** (Kyle wasn't sure what it did).
-      * **STILL OPEN — Lineup Slot Records** (task 10): left = best player-
-        season by active pts per slot; right = franchise with most all-time
-        active pts per slot; literal 2004-2020 "no lineup-slot data, only
-        DH/U/P reliable" asterisk. Needs the fct_player_position_pts slot-
-        attribution check (does the estimated era force DH/U/P or spread
-        across eligible?) before building.
+      * **Lineup Slot Records** (LANDED): left = best player-SEASON by active
+        pts per slot (C/1B/2B/3B/SS/OF/DH/P), right = the active FRANCHISE
+        with the most all-time active pts per slot (abbrev-combined). Built
+        from fct_player_position_pts (its `position` column is eligibility-
+        derived; 2004-2020 is estimate-only -- caveated with a literal
+        asterisk row: "only P and DH reliable"). Verified: C Raleigh 697/25,
+        3B A-Rod 786/07 + SS A-Rod 754/01 (dual-position, correct), OF Bonds
+        867/01, P Randy Johnson 1112/02, DH Ohtani (Batter). The fancy
+        eligibility-spread option (divide points across eligible slots) is
+        deferred as Kyle's-call, more-trouble-than-worth for now.
+      * **HoF Years of Service**: swapped the flat span for the stint-list
+        format (Lester/HH "4: 2009-2010, 2013-2014"). Confirmed no player-
+        dedup rule (Freeman/Kershaw recur across franchises at rank 26+).
 - **REQUEST LIST (running)**: team abbrev preferences collect in the
   cbs_franchises seed (MATT, JUNK so far).
 

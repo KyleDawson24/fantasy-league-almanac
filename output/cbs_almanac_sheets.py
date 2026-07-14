@@ -145,6 +145,9 @@ _RATE_QUAL = {
     ('hitting', True): ('ab', 350), ('hitting', False): ('ab', 1500),
     ('pitching', True): ('outs', 300), ('pitching', False): ('outs', 1200),
 }
+# Lineup Slot Records order (fct_player_position_pts vocabulary: LF/CF/RF ->
+# OF, SP/RP -> P, no U).
+_SLOT_ORDER = ['C', '1B', '2B', '3B', 'SS', 'OF', 'DH', 'P']
 
 
 def _dot(rate3):
@@ -754,8 +757,61 @@ def get_cbs_records_data():
     for e in hof.values():
         nm = pname.get(e['pk'], (None, None))
         e['display_name'], e['player_name'] = nm[0], nm[1]
-        e['span'] = _span_from_years(e['seasons'])
+        e['span'] = _years_of_service(e['seasons'])   # stint list, not a flat span
     data['_hof'] = sorted(hof.values(), key=lambda e: -e['pts'])[:25]
+
+    # ---- Lineup Slot Records (Kyle 2026-07-14): left = best player-SEASON by
+    # active points at each slot; right = the active FRANCHISE with the most
+    # all-time active points from that slot (abbrev-combined). 2004-2020 slots
+    # are eligibility estimates (no lineup log) -- caveated at render.
+    slot_rows = query_snowflake(f"""
+        SELECT position, season_year, team_id, player_key,
+               MAX(display_name) AS display_name,
+               ROUND(SUM(weighted_active_pts), 1) AS pts
+        FROM fct_player_position_pts
+        WHERE {league_predicate()} AND weighted_active_pts IS NOT NULL
+        GROUP BY position, season_year, team_id, player_key
+    """)
+    ps, pf = {}, {}   # (pos,season,player)->best; (pos,abbrev)->career
+    for r in slot_rows:
+        pos = r.get('position')
+        if not pos:
+            continue
+        pts = _rec_fnum(r.get('pts'))
+        pk, sy, fid = r['player_key'], int(r['season_year']), _fid(r.get('team_id'))
+        e = ps.setdefault((pos, sy, pk),
+                          {'pts': 0.0, 'name': r.get('display_name'), 'main': (None, 0.0)})
+        e['pts'] += pts
+        if pts > e['main'][1]:
+            e['main'] = (fid, pts)
+        ab = _abbrev_of.get(fid)
+        if ab and ab != '####' and ab in active_abbrevs:
+            f = pf.setdefault((pos, ab), {'pts': 0.0, 'seasons': set()})
+            f['pts'] += pts
+            f['seasons'].add(sy)
+    best_ps, best_pf = {}, {}
+    for (pos, sy, pk), e in ps.items():
+        if pos not in best_ps or e['pts'] > best_ps[pos][2]['pts']:
+            best_ps[pos] = (sy, pk, e)
+    for (pos, ab), f in pf.items():
+        if pos not in best_pf or f['pts'] > best_pf[pos][1]['pts']:
+            best_pf[pos] = (ab, f)
+    slot_data = {}
+    for pos in _SLOT_ORDER:
+        sp = ct = None
+        if pos in best_ps:
+            sy, pk, e = best_ps[pos]
+            nm = pname.get(pk, (None, None))
+            sp = {'display_name': nm[0] or e['name'], 'player_name': nm[1],
+                  'value': e['pts'], 'owner': _owner(e['main'][0]),
+                  'period': sy, 'details': ''}
+        if pos in best_pf:
+            ab, f = best_pf[pos]
+            ct = {'holder': ab, 'owner': owner_by_abbrev.get(ab, ''),
+                  'value': f['pts'], 'period': _span_from_years(f['seasons']),
+                  'details': ''}
+        slot_data[pos] = {'season_player': sp, 'career_team': ct}
+    data['_slots'] = slot_data
     return data
 
 
@@ -1802,6 +1858,23 @@ def build_records_rows(context, catalog, data):
                 _emit_stat(_rate_label[rk], rk, player)
             rows.append([])
 
+    # ---- Lineup Slot Records: best player-SEASON (left) | active FRANCHISE
+    # all-time (right) by slot. 2004-2020 slots are eligibility estimates.
+    slots = data.get('_slots') or {}
+    if any((slots.get(p) or {}).get('season_player') for p in _SLOT_ORDER):
+        _section('Lineup Slot Records')
+        _header()
+        rows.append(['* 2004–2020 has no lineup-slot data — positions there are '
+                     'eligibility estimates; only P and DH are reliable.'])
+        formats.append({'range': f'A{len(rows)}:{_REC_LAST_COL}{len(rows)}',
+                        'format': {'textFormat': {'italic': True, 'fontSize': 9}}})
+        for pos in _SLOT_ORDER:
+            d = slots.get(pos) or {}
+            if d.get('season_player') or d.get('career_team'):
+                rows.append([pos, *_rec_side(d.get('season_player'), pos, player=True),
+                             '', *_rec_side(d.get('career_team'), pos, player=False)])
+        rows.append([])
+
     # ---- Negative Records: worst team point-seasons, then 'Most ...' of each
     # negative-polarity stat (Player then Team).
     _section('Negative Records')
@@ -1824,7 +1897,7 @@ def build_records_rows(context, catalog, data):
         rows.append(['Franchise Hall of Fame — top 25 careers WITH a single '
                      'franchise, by active points'])
         _band()
-        rows.append(['Rank', 'Player', 'Franchise', 'Active Points', 'Seasons'])
+        rows.append(['Rank', 'Player', 'Franchise', 'Active Points', 'Years of Service'])
         _band()
         for i, e in enumerate(hof, 1):
             rows.append([i, _bref_player_cell(e), e.get('abbrev', ''),

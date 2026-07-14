@@ -11,14 +11,19 @@
 --                          from the lineup-log intervals. Confirmed
 --                          (reconstruction-grade).
 --   estimated_startshare   2004-2020: membership from the walk-back;
---                          active WEIGHT estimated as the anchor's
---                          global Start%/Own% ratio. ESTIMATE.
+--                          active WEIGHT estimated as the player's global
+--                          Start%/Own% ratio from ANY of that season's
+--                          year-end anchors (the rates are player-season
+--                          stats, not franchise stats -- Kyle 2026-07-14 --
+--                          so a mid-season Team A stint borrows the ratio
+--                          he finished with on Team B). ESTIMATE.
 --   estimated_membership   2004-2020 stints with no usable estimator
---                          (own_pct 0/null, or the player missing from
---                          the year-end anchor): membership confirmed,
---                          activity unknown -- weight NULL. The
---                          interactive surface filters these; the
---                          almanac explains them.
+--                          (own_pct 0/null, or the player on NO year-end
+--                          anchor that season -- dropped and out of the
+--                          league by year's end, the season-ending-injury
+--                          class): membership confirmed, activity unknown
+--                          -- weight NULL. The interactive surface filters
+--                          these; the almanac explains them.
 --
 -- is_active is boolean where the day's state is KNOWN, NULL where
 -- estimated; active_weight is the scoring weight either way (1/0 or
@@ -83,6 +88,22 @@ anchors_est as (
     group by 1, 2, 3, 4
 ),
 
+-- The estimator at SEASON grain (Kyle, 2026-07-14): Own%/Start% are global
+-- CBS stats about the PLAYER, not the franchise, so the ratio from any
+-- year-end anchor row covers every stint that season -- a mid-season stint
+-- on Team A borrows the ratio the player finished with on Team B.
+-- (Franchise-scoping the estimator was needless caution; it silently
+-- zeroed ~4% of 2004-2020 production. anchor_STATUS stays franchise-
+-- scoped above: a year-end A/RS on Team B says nothing about Team A.)
+anchors_est_season as (
+    select
+        league_key, season_year,
+        {{ cbs_name_key('player_name_raw') }} as name_key,
+        max(est_start_share)                  as est_start_share
+    from {{ ref('stg_cbs__ui_rosters') }}
+    group by 1, 2, 3
+),
+
 reconstructed as (
     select
         g.league_key,
@@ -99,7 +120,7 @@ reconstructed as (
         case
             when li.state is not null        then 'reconstructed_day'
             when s.season_year between 2004 and 2020
-                 and ae.est_start_share is not null
+                 and aes.est_start_share is not null
                                              then 'estimated_startshare'
             when s.season_year between 2004 and 2020
                                              then 'estimated_membership'
@@ -109,7 +130,7 @@ reconstructed as (
         case
             when li.state is not null        then li.state_source
             when s.season_year between 2004 and 2020
-                 and ae.est_start_share is not null
+                 and aes.est_start_share is not null
                                              then 'startshare'
             when s.season_year not between 2004 and 2020
                  and ae.anchor_status is not null
@@ -124,7 +145,7 @@ reconstructed as (
         case
             when li.state is not null        then iff(li.state = 'A', 1.0, 0.0)
             when s.season_year between 2004 and 2020
-                                             then ae.est_start_share
+                                             then aes.est_start_share
             when ae.anchor_status is not null then iff(ae.anchor_status = 'A', 1.0, 0.0)
         end                              as active_weight,
         coalesce(s.is_ambiguous_name, false)               as is_ambiguous_name,
@@ -156,6 +177,10 @@ reconstructed as (
         and s.season_year = ae.season_year
         and s.franchise_id = ae.franchise_id
         and s.name_key = ae.name_key
+    left join anchors_est_season aes
+        on s.league_key = aes.league_key
+        and s.season_year = aes.season_year
+        and s.name_key = aes.name_key
     where g.season_year between 2001 and 2025
     -- One attribution per game row, ALWAYS: an ambiguous name (two real
     -- players sharing it) can match two teams' stints -- prefer the

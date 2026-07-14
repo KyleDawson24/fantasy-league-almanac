@@ -1464,10 +1464,14 @@ models:
       a PER-ROW provenance flag saying how we know -- captured (2026 daily
       roster captures), reconstructed_day (walk-back membership AND
       lineup-log state, 2001-2003 / 2021-2025), estimated_startshare
-      (2004-2020: membership from the walk-back, weight from the year-end
-      anchor's global Start%/Own% conditional estimator), or
-      estimated_membership (membership confirmed, activity unknowable --
-      weight NULL). The interactive surface filters on provenance; the
+      (2004-2020: membership from the walk-back, weight from the player's
+      global Start%/Own% conditional estimator off ANY of that season's
+      year-end anchors -- the rates are player-season stats, not franchise
+      stats, so a mid-season stint borrows the ratio the player finished
+      the season with elsewhere), or estimated_membership (membership
+      confirmed, activity unknowable -- the player sits on NO year-end
+      anchor that season, the dropped-and-gone / season-ending-injury
+      class -- weight NULL). The interactive surface filters on provenance; the
       Sheets almanac uses everything and explains. FA games don't exist
       here by construction; ambiguity and inferred ends ride as flags,
       never silent guesses. One attribution per game row is guaranteed:

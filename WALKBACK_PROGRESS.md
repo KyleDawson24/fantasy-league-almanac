@@ -502,6 +502,31 @@
         slash-line columns (Avg/OBP/Slg/HR/SB, W-L-Sv/ERA/WHIP/K/BB -- need
         AB/H/ER/outs plumbed into the lineup selection like the Records rate
         stats); the `Bench/IL Points` column; the capped "Others" overflow.
+- [ ] **RECORDS POLISH (Kyle round 9, 2026-07-14):**
+      * **Rate stats via the REUSED ESPN helpers** (Kyle: no separate CBS
+        method): the shared fact already carries every component
+        (h/ab/hbp/sf/tb/er/outs/p_h/p_bb — the crosswalk + MLB-72 union put
+        CBS's numbers in ESPN's columns), so we pass them straight through
+        `_hitting_rate`/`_pitching_rate`. Added AVG/OBP/SLG/OPS (hitting) +
+        ERA/WHIP/K9/BB9/K:BB (pitching) to the player + team sections. Only
+        plumbing was adding AB/HBP/SF/L to the CBS aggregation (never needed
+        before). Verified real: Bonds .609 OBP / 1.422 OPS (2004), Kershaw
+        0.72 WHIP / 15.63 K:BB (2016). Interim min-sample qualifiers
+        (hitting ≥350 AB season / ≥1500 career; pitching ≥300 / ≥1200 outs);
+        **MLB-80** owns the rigorous fantasy-scale thresholds.
+      * **Career TEAM records → active franchises only, keyed by ABBREV**
+        (item 6.1): re-registrations combine (FULT 13+30 → one 2001-2026
+        career); defunct BENT/NYN/VCF gone.
+      * **Franchise Hall of Fame** section: top 25 (player × franchise)
+        career active-point runs (Lester/HH 2401, Freeman/SED 2278); abbrev-
+        keyed, #### excluded, defunct franchises allowed.
+      * **Orange recency highlighting removed** (Kyle wasn't sure what it did).
+      * **STILL OPEN — Lineup Slot Records** (task 10): left = best player-
+        season by active pts per slot; right = franchise with most all-time
+        active pts per slot; literal 2004-2020 "no lineup-slot data, only
+        DH/U/P reliable" asterisk. Needs the fct_player_position_pts slot-
+        attribution check (does the estimated era force DH/U/P or spread
+        across eligible?) before building.
 - **REQUEST LIST (running)**: team abbrev preferences collect in the
   cbs_franchises seed (MATT, JUNK so far).
 

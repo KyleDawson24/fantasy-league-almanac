@@ -72,6 +72,8 @@ from almanac_render import (
     HOME_DEVIATION_LABEL,
     HOME_HEADER,
     _bref_player_cell,
+    _hitting_rate,
+    _pitching_rate,
     format_all_league_team_row,
     format_all_league_team_row_with_deviation,
     home_nav_link,
@@ -116,6 +118,96 @@ _REC_STAT_COL = {
     'W': 'w', 'SV': 'sv', 'HLD': 'hld', 'CG': 'cg', 'QS': 'qs', 'OUTS': 'outs',
     'K': 'k', 'P_H': 'p_h', 'P_BB': 'p_bb', 'ER': 'er',
 }
+# Extra components summed for the rate-stat records (AVG/OBP/SLG/OPS,
+# ERA/WHIP/K9/BB9/K:BB). The rest of each rate's inputs (h/tb/b_bb/outs/er/
+# p_h/p_bb/k) already ride _REC_STAT_COL; these four don't otherwise appear.
+_REC_RATE_COL = {'AB': 'ab', 'HBP': 'hbp', 'SF': 'sf', 'L': 'l'}
+
+# Rate-stat records (Kyle 2026-07-14): pass CBS's numbers through ESPN's own
+# _hitting_rate/_pitching_rate (same components, same display) -- no CBS rate
+# math. OPS/K9/BB9/K:BB are the small inline extras the ESPN helper doesn't
+# cover. (key, display, category, higher_is_better).
+_RATE_SPECS = [
+    ('AVG', 'Batting Average', 'hitting', True),
+    ('OBP', 'On-Base %', 'hitting', True),
+    ('SLG', 'Slugging %', 'hitting', True),
+    ('OPS', 'OPS', 'hitting', True),
+    ('ERA', 'ERA', 'pitching', False),
+    ('WHIP', 'WHIP', 'pitching', False),
+    ('K9', 'K/9', 'pitching', True),
+    ('BB9', 'BB/9', 'pitching', False),
+    ('KBB', 'K:BB', 'pitching', True),
+]
+# Interim min-sample qualifiers on the ACTIVE-weighted sums (hitting gates on
+# AB, pitching on IP-as-outs; season floor / career floor). MLB-80 makes these
+# rigorous for the fantasy scale; for now a "real full-time contributor" bar.
+_RATE_QUAL = {
+    ('hitting', True): ('ab', 350), ('hitting', False): ('ab', 1500),
+    ('pitching', True): ('outs', 300), ('pitching', False): ('outs', 1200),
+}
+
+
+def _dot(rate3):
+    """'.294' from ESPN's no-dot 3-digit '294'; empty stays empty."""
+    return f'.{rate3}' if rate3 else ''
+
+
+def _rate_num_disp(row, key):
+    """(numeric value for ranking, display string) for one rate stat, reusing
+    ESPN's _hitting_rate/_pitching_rate for the shared ones so CBS and ESPN
+    read identically. row keys are lowercase (season agg rows, or a lowercased
+    career accumulation)."""
+    ab = _rec_fnum(row.get('ab')); h = _rec_fnum(row.get('h'))
+    bb = _rec_fnum(row.get('b_bb')); hbp = _rec_fnum(row.get('hbp'))
+    sf = _rec_fnum(row.get('sf')); tb = _rec_fnum(row.get('tb'))
+    outs = _rec_fnum(row.get('outs')); er = _rec_fnum(row.get('er'))
+    ph = _rec_fnum(row.get('p_h')); pbb = _rec_fnum(row.get('p_bb'))
+    k = _rec_fnum(row.get('k')); ip = outs / 3.0
+    pa = ab + bb + hbp + sf
+    if key == 'AVG':
+        return (h / ab if ab else None, _dot(_hitting_rate(row, 'avg')))
+    if key == 'OBP':
+        return ((h + bb + hbp) / pa if pa else None, _dot(_hitting_rate(row, 'obp')))
+    if key == 'SLG':
+        return (tb / ab if ab else None, _dot(_hitting_rate(row, 'slg')))
+    if key == 'OPS':
+        if not (pa and ab):
+            return (None, '')
+        ops = (h + bb + hbp) / pa + tb / ab
+        return (ops, f'{ops:.3f}'.lstrip('0') or '.000')
+    if key == 'ERA':
+        return (er * 9 / ip if ip else None, _pitching_rate(row, 'era'))
+    if key == 'WHIP':
+        return ((pbb + ph) / ip if ip else None, _pitching_rate(row, 'whip'))
+    if key == 'K9':
+        return (k * 9 / ip if ip else None, f'{k * 9 / ip:.2f}' if ip else '')
+    if key == 'BB9':
+        return (pbb * 9 / ip if ip else None, f'{pbb * 9 / ip:.2f}' if ip else '')
+    if key == 'KBB':
+        return (k / pbb if pbb else None, f'{k / pbb:.2f}' if pbb else '')
+    return (None, '')
+
+
+def _rate_qual_detail(row, category):
+    """The min-sample the rate cleared, ESPN-style: '512 AB' / '182.0 IP'."""
+    if category == 'hitting':
+        return f"{int(_rec_fnum(row.get('ab')))} AB"
+    return f"{fmt_ip(_rec_fnum(row.get('outs')))} IP"
+
+
+def _best_rate(items, key, higher, qual_col, qual_min):
+    """The best qualifying (min-sample) group for a rate stat. Returns
+    (row, display) or (None, None)."""
+    best = best_num = best_disp = None
+    for row in items:
+        if _rec_fnum(row.get(qual_col)) < qual_min:
+            continue
+        num, disp = _rate_num_disp(row, key)
+        if num is None:
+            continue
+        if best is None or (num > best_num if higher else num < best_num):
+            best, best_num, best_disp = row, num, disp
+    return (best, best_disp) if best is not None else (None, None)
 
 # The synthetic holding-pen franchise for 2001-2002 zero-event players (see
 # fct_cbs_player_game_attribution). Fenced out of team records + team pages;
@@ -315,7 +407,7 @@ def _rec_agg(group_cols, extra_selects=''):
     player)."""
     cols = ", ".join(
         f'ROUND(SUM({c} * COALESCE(active_weight, 0)), 1) AS "{n}"'
-        for n, c in {**_REC_STAT_COL, **_REC_POINTS_COL}.items())
+        for n, c in {**_REC_STAT_COL, **_REC_RATE_COL, **_REC_POINTS_COL}.items())
     return query_snowflake(f"""
         SELECT {group_cols}{extra_selects}, {cols}
         FROM fct_player_daily_performance
@@ -367,7 +459,7 @@ def get_cbs_records_data():
     records -- the contributing players. 'Season' is ESPN's current-season
     column re-aimed at best-single-season; 'All-Time Total' is the career
     axis this deep-history league leans on."""
-    stat_names = list(_REC_STAT_COL) + list(_REC_POINTS_COL)
+    stat_names = list(_REC_STAT_COL) + list(_REC_RATE_COL) + list(_REC_POINTS_COL)
     owner_label = _franchise_owner_labels()
 
     team_season = _rec_agg('season_year, team_id', ', MAX(team_abbrev) AS team_abbrev')
@@ -422,7 +514,22 @@ def get_cbs_records_data():
             for s in stat_names:
                 a[s] = a.get(s, 0.0) + _rec_fnum(r.get(s.lower()))
         return acc
-    team_career = _careers(team_season, 'team_id')
+    # Career TEAM records: currently-active franchises only, keyed by ABBREV so
+    # a franchise's re-registrations (FULT 13 + 30) combine into one career
+    # (Kyle item 6.1). Season records stay fid-grained; sentinel already fenced.
+    _abbrev_of = {f: m['abbrev'] for f, m in owner_label.items()}
+    active_fids = {int(r['team_id']) for r in query_snowflake(
+        f"SELECT DISTINCT team_id FROM stg_cbs__rosters WHERE {league_predicate()}"
+        f" AND roster_date = (SELECT MAX(roster_date) FROM stg_cbs__rosters"
+        f"                    WHERE {league_predicate()})")}
+    active_abbrevs = {_abbrev_of[f] for f in active_fids if f in _abbrev_of}
+    owner_by_abbrev = {m['abbrev']: m['owner'] for m in owner_label.values() if m['owner']}
+    for r in team_season:
+        r['_abbrev'] = _abbrev_of.get(_fid(r.get('team_id')))
+    for r in player_team_season:
+        r['_abbrev'] = _abbrev_of.get(_fid(r.get('team_id')))
+    team_career = _careers(
+        [r for r in team_season if r.get('_abbrev') in active_abbrevs], '_abbrev')
     player_career = _careers(player_season, 'player_key')
 
     # Negative Records eligibility. Three artifacts would otherwise own every
@@ -531,13 +638,13 @@ def get_cbs_records_data():
         }
 
     def _team_career_side(entry, stat, col):
-        fid, a = entry
+        ab, a = entry   # career is abbrev-keyed (active franchises only)
         return {
-            'holder': _abbrev(fid), 'owner': _owner(fid),
+            'holder': ab, 'owner': owner_by_abbrev.get(ab, ''),
             'value': a.get(stat, 0.0), 'period': _span_from_years(a['seasons']),
             'last_season': max(a['seasons']),
             'details': _contribs(
-                [r for r in player_team_season if r.get('team_id') == fid], col),
+                [r for r in player_team_season if r.get('_abbrev') == ab], col),
         }
 
     data = {}
@@ -584,6 +691,71 @@ def get_cbs_records_data():
             'worst_team_season': worst_team_season,
             'worst_team_career': worst_team_career,
         }
+
+    # ---- Rate-stat records (reuse the ESPN rate helpers; MLB-80 thresholds).
+    def _career_rows(acc):
+        rows_ = []
+        for eid, a in acc.items():
+            row = {k.lower(): v for k, v in a.items() if k != 'seasons'}
+            row['_eid'] = eid
+            row['_seasons'] = a['seasons']
+            rows_.append(row)
+        return rows_
+    team_career_rows = _career_rows(team_career)
+    player_career_rows = _career_rows(player_career)
+
+    for key, _label, cat, higher in _RATE_SPECS:
+        qc_s, qm_s = _RATE_QUAL[(cat, True)]
+        qc_c, qm_c = _RATE_QUAL[(cat, False)]
+        bps, dsp = _best_rate(player_season, key, higher, qc_s, qm_s)
+        rate_sp = None
+        if bps:
+            mt = main_team.get((bps['season_year'], bps['player_key']), (None, 0))
+            rate_sp = {'display_name': bps.get('display_name'),
+                       'player_name': bps.get('player_name'), 'value': dsp,
+                       'owner': _owner(mt[0]), 'period': _num(bps.get('season_year')),
+                       'details': _rate_qual_detail(bps, cat), 'is_rate': True}
+        bts, dst = _best_rate(team_season, key, higher, qc_s, qm_s)
+        rate_st = None
+        if bts:
+            rate_st = {'holder': bts.get('team_abbrev') or '',
+                       'owner': _owner(bts.get('team_id')), 'value': dst,
+                       'period': _num(bts.get('season_year')),
+                       'details': _rate_qual_detail(bts, cat), 'is_rate': True}
+        bpc, dcp = _best_rate(player_career_rows, key, higher, qc_c, qm_c)
+        rate_cp = None
+        if bpc:
+            nm = pname.get(bpc['_eid'], (None, None))
+            rate_cp = {'display_name': nm[0], 'player_name': nm[1], 'value': dcp,
+                       'owner': '', 'period': _span_from_years(bpc['_seasons']),
+                       'details': _rate_qual_detail(bpc, cat), 'is_rate': True}
+        btc, dct = _best_rate(team_career_rows, key, higher, qc_c, qm_c)
+        rate_ct = None
+        if btc:
+            rate_ct = {'holder': btc['_eid'], 'owner': owner_by_abbrev.get(btc['_eid'], ''),
+                       'value': dct, 'period': _span_from_years(btc['_seasons']),
+                       'details': _rate_qual_detail(btc, cat), 'is_rate': True}
+        data[key] = {'season_team': rate_st, 'season_player': rate_sp,
+                     'career_team': rate_ct, 'career_player': rate_cp,
+                     'worst_team_season': None, 'worst_team_career': None}
+
+    # ---- Franchise Hall of Fame (Kyle 2026-07-14): top 25 (player × franchise)
+    # career ACTIVE points -- a player's run WITH one team, not his whole career.
+    # Keyed by abbrev (re-registrations combine); the #### holding pen excluded.
+    hof = {}
+    for r in player_team_season:
+        ab = r.get('_abbrev')
+        if not ab or ab == '####':
+            continue
+        e = hof.setdefault((r['player_key'], ab),
+                           {'abbrev': ab, 'pts': 0.0, 'seasons': set(), 'pk': r['player_key']})
+        e['pts'] += _rec_fnum(r.get('calculated_points'))
+        e['seasons'].add(int(r['season_year']))
+    for e in hof.values():
+        nm = pname.get(e['pk'], (None, None))
+        e['display_name'], e['player_name'] = nm[0], nm[1]
+        e['span'] = _span_from_years(e['seasons'])
+    data['_hof'] = sorted(hof.values(), key=lambda e: -e['pts'])[:25]
     return data
 
 
@@ -1503,6 +1675,11 @@ def _rec_side(cell, stat, player=False):
     if not cell:
         return ['', '', '', '', '']
     holder = _bref_player_cell(cell) if player else cell.get('holder', '')
+    # Rate cells carry a pre-formatted display value + a min-sample qualifier
+    # as details (both grains), so they bypass _rec_value / _contributor_detail.
+    if cell.get('is_rate'):
+        return [holder, cell.get('owner', ''), cell.get('value', ''),
+                cell.get('period', ''), cell.get('details', '')]
     details = (cell.get('details') or '') if player else \
         _contributor_detail(stat, cell.get('details'))
     return [holder, cell.get('owner', ''), _rec_value(stat, cell.get('value')),
@@ -1521,12 +1698,10 @@ def build_records_rows(context, catalog, data):
     two-scope matrix -- best single SEASON | best ALL-TIME TOTAL (career) --
     at team and player grain, auto-cataloged from what the league scores,
     ACTIVE-weighted (the 'real baseball league' lens). Powder-blue #f2f7fc
-    scope/column headers with the scope labels sat over their blocks; a
-    light-orange wash on any side whose record is held in the live season;
-    Score Records carries the polar Best/Worst point marquees, then per-stat
-    Player and Team sections."""
+    scope/column headers with the scope labels sat over their blocks; Score
+    Records carries the polar Best/Worst point marquees, then per-stat Player
+    and Team sections."""
     era = f"{context['first_season']}–{context['season_year']}"
-    latest = int(context['season_year']) if context.get('season_year') is not None else None
     HDR = ['Record', 'Holder', 'Owner', 'Value', 'Year', 'Details', '',
            'Holder', 'Owner', 'Value', 'Yrs', 'Details']
 
@@ -1537,9 +1712,8 @@ def build_records_rows(context, catalog, data):
          f'categories this league scores plus tracked counting stats. '
          f'"Season" = best single season all-time; "All-Time Total" = best '
          f'career accumulation. Worst rows show the fewest points in a '
-         f'completed, full-length season. Records held in the live {latest} '
-         f'season are shaded orange. Owner is the holding franchise\'s current '
-         f'owner (true owner-by-era arrives with the ownership re-key).'],
+         f'completed, full-length season. Owner is the holding franchise\'s '
+         f'current owner (true owner-by-era arrives with the ownership re-key).'],
         [],
     ]
     formats = [
@@ -1568,13 +1742,6 @@ def build_records_rows(context, catalog, data):
     def _emit(label, season_cell, career_cell, stat, player):
         rows.append([label, *_rec_side(season_cell, stat, player), '',
                      *_rec_side(career_cell, stat, player)])
-        r = len(rows)
-        if latest and season_cell and season_cell.get('year') == latest:
-            formats.append({'range': f'B{r}:F{r}',
-                            'format': {'backgroundColor': _ORANGE}})
-        if latest and career_cell and career_cell.get('last_season') == latest:
-            formats.append({'range': f'H{r}:L{r}',
-                            'format': {'backgroundColor': _ORANGE}})
 
     def _emit_stat(label, stat, player):
         d = data.get(stat, {})
@@ -1618,6 +1785,11 @@ def build_records_rows(context, catalog, data):
     rows.append([])
 
     # ---- Per-stat 'best' sections: Player leads, then Team.
+    # Rate records close each per-stat section (counting stats first, then the
+    # rates -- Kyle 2026-07-14). ERA/WHIP/etc. reuse the ESPN rate helpers.
+    _rate_by_cat = {'Hitting': [k for k, _l, c, _h in _RATE_SPECS if c == 'hitting'],
+                    'Pitching': [k for k, _l, c, _h in _RATE_SPECS if c == 'pitching']}
+    _rate_label = {k: l for k, l, _c, _h in _RATE_SPECS}
     for grain, player in (('Player', True), ('Team', False)):
         for cat_label, stats in (('Hitting', hitting), ('Pitching', pitching)):
             if not stats:
@@ -1626,6 +1798,8 @@ def build_records_rows(context, catalog, data):
             _header()
             for stat in stats:
                 _emit_stat(_disp(stat), stat, player)
+            for rk in _rate_by_cat[cat_label]:
+                _emit_stat(_rate_label[rk], rk, player)
             rows.append([])
 
     # ---- Negative Records: worst team point-seasons, then 'Most ...' of each
@@ -1642,6 +1816,20 @@ def build_records_rows(context, catalog, data):
         for stat in negatives:
             _emit_stat(f'Most {_disp(stat)} (Team)', stat, player=False)
     rows.append([])
+
+    # ---- Franchise Hall of Fame: the top 25 (player × franchise) career
+    # active-point runs -- a single ranked list, not a two-scope record.
+    hof = data.get('_hof') or []
+    if hof:
+        rows.append(['Franchise Hall of Fame — top 25 careers WITH a single '
+                     'franchise, by active points'])
+        _band()
+        rows.append(['Rank', 'Player', 'Franchise', 'Active Points', 'Seasons'])
+        _band()
+        for i, e in enumerate(hof, 1):
+            rows.append([i, _bref_player_cell(e), e.get('abbrev', ''),
+                         _pts(e.get('pts')), e.get('span', '')])
+        rows.append([])
 
     return rows, formats
 

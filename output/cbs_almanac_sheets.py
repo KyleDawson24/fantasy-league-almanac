@@ -439,10 +439,20 @@ def get_cbs_records_data():
     _closed = {int(r['season_year']) for r in query_snowflake(
         f"SELECT DISTINCT season_year FROM stg_cbs__ui_standings"
         f" WHERE {league_predicate()}")}
+    # Attribution-complete seasons only: a team's total is only its 'fewest
+    # points' worth if the WHOLE roster is attributed to it. The no-anchor era
+    # (2001-2002) still has its zero-event draft-and-hold stars unplaced (the
+    # Track B backfill), so those team totals under-count and would trivially
+    # own every worst line. Gate on anchor presence -- self-healing: the
+    # moment the backfill lands 2001-2002 anchors, those seasons qualify.
+    _anchored = {int(r['season_year']) for r in query_snowflake(
+        f"SELECT DISTINCT season_year FROM stg_cbs__ui_rosters"
+        f" WHERE {league_predicate()}")}
     team_season_complete = [
         r for r in team_season
         if int(r['season_year']) in _full_len
         and int(r['season_year']) in _closed
+        and int(r['season_year']) in _anchored
         and len(_rsize.get((r['season_year'], r.get('team_id')), ())) >= _ROSTER_FLOOR]
 
     def _best_row(rows, col):

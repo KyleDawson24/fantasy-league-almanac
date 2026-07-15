@@ -680,6 +680,26 @@
         the four HoS columns now land on the Records All-Time shape (Player H /
         Benched Most By I / Wasted J / **Breakdown K**, the wide 400px Details
         column). Breakdown reinstated by construction.
+- [x] **RECORDS-PAGE REWORK (Kyle review, 2026-07-14) — render-side, no dbt.**
+      * All-time PLAYER record Details -> a franchise team-list ("Albert Pujols
+        3,027 H: SED 572, FULT 368, CSC 354, fourteen other teams 1,734"): top-3
+        abbrevs + N-spelled-out bucket; a LONE extra team is named, never
+        bucketed; the #### sentinel counts as an owner here (fenced only from
+        TEAM records) so the split reconciles to the headline.
+      * **Lineup Slot Records = OPTIMIZE-LINEUP over player-SEASONS.** Reuses the
+        team-page selector (`get_optimal_team_selections`) but keys each season
+        as its own asset ('pk|season'), so repeat PLAYERS are fine (A-Rod 3B +
+        SS, two seasons) but no season fills two slots -> U is the best REMAINING
+        hitter (Ohtani, not an echo of the best OF). Current-roster shape
+        (C/1B/2B/3B/SS, OF x3, U, DH, P x9); left = statline detail, right =
+        "All-Time Team Totals" contributors; the estimate caveat rides at I77.
+      * Negative Records EXCISED (ESPN symmetry). Rate-record Details -> their
+        COMPONENTS (AVG "254 hits in 683 AB"; OBP hits/walks/HBP in PA; SLG the
+        1B/2B/3B/HR mix; OPS its two parts; pitching analogues).
+      * Shared fixes: bref search URLs strip periods ("Francisco J. Rodriguez"
+        now resolves; ESPN + CBS); OPS/SLG >= 1.000 format as "1.###" not
+        ".1###" (`_dotted_rate` + `_dot`). ESPN byte-diff re-anchored (bref
+        period-strip only, no CBS strings); BBCode goldens untouched; unit 210.
 - **REQUEST LIST (running)**: team abbrev preferences collect in the
   cbs_franchises seed (MATT, JUNK so far).
 

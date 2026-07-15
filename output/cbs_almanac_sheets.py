@@ -145,14 +145,38 @@ _RATE_QUAL = {
     ('hitting', True): ('ab', 350), ('hitting', False): ('ab', 1500),
     ('pitching', True): ('outs', 300), ('pitching', False): ('outs', 1200),
 }
-# Lineup Slot Records order (fct_player_position_pts vocabulary: LF/CF/RF ->
-# OF, SP/RP -> P, no U).
-_SLOT_ORDER = ['C', '1B', '2B', '3B', 'SS', 'OF', 'DH', 'P']
+# Lineup Slot Records: the fct_player_position_pts position vocabulary
+# (LF/CF/RF -> OF, SP/RP -> P, no U -- U is synthesized from the best hitter).
+_SLOT_POSITIONS = ['C', '1B', '2B', '3B', 'SS', 'OF', 'DH', 'P']
+# The CURRENT-roster slot template (Kyle 2026-07-14): (display slot, source
+# position, 0-based rank). Multi-slots take the 2nd/3rd/... best at that
+# position, so the section reads as the all-time best possible active lineup.
+# 'U' is synthesized (see the slot builder). 2026 active-slot census: 3 OF, 9 P.
+_ROSTER_SLOTS = (
+    [('C', 'C', 0), ('1B', '1B', 0), ('2B', '2B', 0), ('3B', '3B', 0), ('SS', 'SS', 0)]
+    + [('OF', 'OF', i) for i in range(3)]
+    + [('U', 'U', 0), ('DH', 'DH', 0)]
+    + [('P', 'P', i) for i in range(9)]
+)
+_HIT_SLOT_POSITIONS = ['C', '1B', '2B', '3B', 'SS', 'OF', 'DH']
+
+_NUM_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven',
+              'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen',
+              'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty']
+
+
+def _spell(n):
+    """Small non-negative integer as an English word ('four'); digits above the
+    table (a player on 20+ franchises never happens in a 16-team league)."""
+    return _NUM_WORDS[n] if 0 <= n < len(_NUM_WORDS) else str(n)
 
 
 def _dot(rate3):
-    """'.294' from ESPN's no-dot 3-digit '294'; empty stays empty."""
-    return f'.{rate3}' if rate3 else ''
+    """'.294' from a no-dot integer-scaled rate; a >=1.000 value ('1422' for a
+    1.422 SLG/OPS) dots after the ones place ('1.422'), not '.1422'."""
+    if not rate3:
+        return ''
+    return f'{rate3[:-3]}.{rate3[-3:]}' if len(rate3) > 3 else f'.{rate3}'
 
 
 def _rate_num_disp(row, key):
@@ -196,6 +220,43 @@ def _rate_qual_detail(row, category):
     if category == 'hitting':
         return f"{int(_rec_fnum(row.get('ab')))} AB"
     return f"{fmt_ip(_rec_fnum(row.get('outs')))} IP"
+
+
+def _rate_component_detail(row, key):
+    """A rate record's Details = the raw components behind the ratio (Kyle
+    2026-07-14): AVG '254 hits in 683 At Bats'; OBP 'H Hits, W Walks, X HBP in
+    N Plate Appearances'; SLG the extra-base mix; OPS its two parts. The volume
+    (AB / PA / IP) subsumes the old min-sample qualifier."""
+    def _i(c):
+        return int(round(_rec_fnum(row.get(c))))
+    ab, h, bb, hbp, sf = _i('ab'), _i('h'), _i('b_bb'), _i('hbp'), _i('sf')
+    pa = ab + bb + hbp + sf
+    if key == 'AVG':
+        return f'{h:,} hits in {ab:,} At Bats'
+    if key == 'OBP':
+        return f'{h:,} Hits, {bb:,} Walks, {hbp:,} HBP in {pa:,} Plate Appearances'
+    if key == 'SLG':
+        # _rec_agg aliases columns by their map KEY, so doubles/triples land in
+        # '2b'/'3b' (not 'doubles'/'triples').
+        d, t, hr = _i('2b'), _i('3b'), _i('hr')
+        singles = max(0, h - d - t - hr)
+        return f'{singles:,} 1B, {d:,} 2B, {t:,} 3B, {hr:,} HR in {pa:,} PA'
+    if key == 'OPS':
+        return (f"OBP {_dot(_hitting_rate(row, 'obp'))}, "
+                f"SLG {_dot(_hitting_rate(row, 'slg'))}")
+    ip = fmt_ip(_rec_fnum(row.get('outs')))
+    er, ph, pbb, k = _i('er'), _i('p_h'), _i('p_bb'), _i('k')
+    if key == 'ERA':
+        return f'{er:,} ER in {ip} IP'
+    if key == 'WHIP':
+        return f'{ph:,} Hits, {pbb:,} Walks in {ip} IP'
+    if key == 'K9':
+        return f'{k:,} K in {ip} IP'
+    if key == 'BB9':
+        return f'{pbb:,} Walks in {ip} IP'
+    if key == 'KBB':
+        return f'{k:,} K, {pbb:,} Walks'
+    return ''
 
 
 def _best_rate(items, key, higher, qual_col, qual_min):
@@ -624,6 +685,33 @@ def get_cbs_records_data():
             agg[k] = (nm, tot + v)
         return sorted(agg.values(), key=lambda t: -t[1])[:3]
 
+    def _player_team_list(pk, stat, col):
+        """An all-time PLAYER record's Details = where he earned it: franchises
+        named with their totals, top-first. Beyond the top 3, a LONE remaining
+        team is still named (Kyle: never bucket a single team); 2+ collapse to
+        '[N spelled out] other teams: [remaining]'. The #### sentinel counts as
+        an owner here (unknown-team 2001-02 production) -- it's fenced only from
+        TEAM records -- so the breakdown reconciles to the headline value."""
+        agg = {}
+        for r in player_team_season:
+            if r['player_key'] != pk:
+                continue
+            ab = r.get('_abbrev')
+            if not ab:
+                continue
+            v = _rec_fnum(r.get(col))
+            if v > 0:
+                agg[ab] = agg.get(ab, 0.0) + v
+        ranked = sorted(agg.items(), key=lambda t: -t[1])
+        head, rest = ranked[:3], ranked[3:]
+        if len(rest) == 1:                      # name a lone extra, don't bucket 1
+            head, rest = ranked[:4], []
+        parts = [f'{ab}: {_rec_value(stat, v)}' for ab, v in head]
+        if rest:
+            rem = sum(v for _, v in rest)
+            parts.append(f'{_spell(len(rest))} other teams: {_rec_value(stat, rem)}')
+        return ', '.join(parts)
+
     def _season_statvals(row):
         return {s: _rec_fnum(row.get(s.lower())) for s in stat_names}
 
@@ -681,7 +769,7 @@ def get_cbs_records_data():
                 'value': a.get(stat, 0.0), 'owner': '',
                 'period': _span_from_years(a['seasons']),
                 'last_season': max(a['seasons']),
-                'details': _player_line(a),
+                'details': _player_team_list(pk, stat, col),
             }
         # worst-scope leader (Negative Records; single SEASON, roster-complete
         # post-coin-flip only). Career-worst is intentionally omitted.
@@ -717,27 +805,27 @@ def get_cbs_records_data():
             rate_sp = {'display_name': bps.get('display_name'),
                        'player_name': bps.get('player_name'), 'value': dsp,
                        'owner': _owner(mt[0]), 'period': _num(bps.get('season_year')),
-                       'details': _rate_qual_detail(bps, cat), 'is_rate': True}
+                       'details': _rate_component_detail(bps, key), 'is_rate': True}
         bts, dst = _best_rate(team_season, key, higher, qc_s, qm_s)
         rate_st = None
         if bts:
             rate_st = {'holder': bts.get('team_abbrev') or '',
                        'owner': _owner(bts.get('team_id')), 'value': dst,
                        'period': _num(bts.get('season_year')),
-                       'details': _rate_qual_detail(bts, cat), 'is_rate': True}
+                       'details': _rate_component_detail(bts, key), 'is_rate': True}
         bpc, dcp = _best_rate(player_career_rows, key, higher, qc_c, qm_c)
         rate_cp = None
         if bpc:
             nm = pname.get(bpc['_eid'], (None, None))
             rate_cp = {'display_name': nm[0], 'player_name': nm[1], 'value': dcp,
                        'owner': '', 'period': _span_from_years(bpc['_seasons']),
-                       'details': _rate_qual_detail(bpc, cat), 'is_rate': True}
+                       'details': _rate_component_detail(bpc, key), 'is_rate': True}
         btc, dct = _best_rate(team_career_rows, key, higher, qc_c, qm_c)
         rate_ct = None
         if btc:
             rate_ct = {'holder': btc['_eid'], 'owner': owner_by_abbrev.get(btc['_eid'], ''),
                        'value': dct, 'period': _span_from_years(btc['_seasons']),
-                       'details': _rate_qual_detail(btc, cat), 'is_rate': True}
+                       'details': _rate_component_detail(btc, key), 'is_rate': True}
         data[key] = {'season_team': rate_st, 'season_player': rate_sp,
                      'career_team': rate_ct, 'career_player': rate_cp,
                      'worst_team_season': None, 'worst_team_career': None}
@@ -772,7 +860,7 @@ def get_cbs_records_data():
         WHERE {league_predicate()} AND weighted_active_pts IS NOT NULL
         GROUP BY position, season_year, team_id, player_key
     """)
-    ps, pf = {}, {}   # (pos,season,player)->best; (pos,abbrev)->career
+    ps, pf = {}, {}   # (pos,sy,pk)->season agg; (pos,abbrev)->franchise career
     for r in slot_rows:
         pos = r.get('position')
         if not pos:
@@ -786,32 +874,97 @@ def get_cbs_records_data():
             e['main'] = (fid, pts)
         ab = _abbrev_of.get(fid)
         if ab and ab != '####' and ab in active_abbrevs:
-            f = pf.setdefault((pos, ab), {'pts': 0.0, 'seasons': set()})
+            f = pf.setdefault((pos, ab), {'pts': 0.0, 'seasons': set(), 'contrib': {}})
             f['pts'] += pts
             f['seasons'].add(sy)
-    best_ps, best_pf = {}, {}
-    for (pos, sy, pk), e in ps.items():
-        if pos not in best_ps or e['pts'] > best_ps[pos][2]['pts']:
-            best_ps[pos] = (sy, pk, e)
+            cn, cp = f['contrib'].get(pk, (r.get('display_name'), 0.0))
+            f['contrib'][pk] = (cn, cp + pts)
+
+    # Franchise ranking per position -- the RIGHT ("All-Time Team Totals") side;
+    # top-N feeds OF x3 / P x9. Plus a hitter-total aggregate for the U column.
+    ranked_pf = {}
     for (pos, ab), f in pf.items():
-        if pos not in best_pf or f['pts'] > best_pf[pos][1]['pts']:
-            best_pf[pos] = (ab, f)
-    slot_data = {}
-    for pos in _SLOT_ORDER:
-        sp = ct = None
-        if pos in best_ps:
-            sy, pk, e = best_ps[pos]
-            nm = pname.get(pk, (None, None))
-            sp = {'display_name': nm[0] or e['name'], 'player_name': nm[1],
-                  'value': e['pts'], 'owner': _owner(e['main'][0]),
-                  'period': sy, 'details': ''}
-        if pos in best_pf:
-            ab, f = best_pf[pos]
-            ct = {'holder': ab, 'owner': owner_by_abbrev.get(ab, ''),
-                  'value': f['pts'], 'period': _span_from_years(f['seasons']),
-                  'details': ''}
-        slot_data[pos] = {'season_player': sp, 'career_team': ct}
-    data['_slots'] = slot_data
+        ranked_pf.setdefault(pos, []).append((ab, f))
+    for lst in ranked_pf.values():
+        lst.sort(key=lambda t: -t[1]['pts'])
+    _u_agg = {}
+    for pos in _HIT_SLOT_POSITIONS:
+        for ab, f in ranked_pf.get(pos, []):
+            g = _u_agg.setdefault(ab, {'pts': 0.0, 'seasons': set(), 'contrib': {}})
+            g['pts'] += f['pts']
+            g['seasons'] |= f['seasons']
+            for pk, (cn, cp) in f['contrib'].items():
+                pn, pp = g['contrib'].get(pk, (cn, 0.0))
+                g['contrib'][pk] = (pn, pp + cp)
+    u_pf = sorted(_u_agg.items(), key=lambda t: -t[1]['pts'])
+
+    # The LEFT ("Season") side is a true OPTIMIZE-LINEUP over all-time player-
+    # SEASONS (Kyle 2026-07-14): the SAME selector the team pages use, but the
+    # pool is individual seasons, each keyed as its own asset (player_key =
+    # 'pk|season'). Repeat PLAYERS are fine (A-Rod's best 3B year AND his best
+    # SS year), but no single season fills two slots -- so U is the best
+    # REMAINING hitter, never an echo of the best OF. Hitters get U + DH
+    # eligibility rows; pruned to the top per position for speed.
+    season_pos = {}
+    for (pos, sy, pk), e in ps.items():
+        d = season_pos.setdefault((sy, pk),
+                                  {'pos': {}, 'name': e['name'], 'main': (None, 0.0)})
+        d['pos'][pos] = e['pts']
+        if e['pts'] > d['main'][1]:
+            d['main'] = e['main']
+    raw_cands = []
+    for (sy, pk), d in season_pos.items():
+        base = {'player_key': f'{pk}|{sy}', 'player_id': f'{pk}|{sy}',
+                'sy': sy, 'pk': pk, 'name': d['name'], 'main_fid': d['main'][0]}
+        positions = set(d['pos'])
+        if 'P' in positions:
+            raw_cands.append({**base, 'position': 'P', 'position_pts': d['pos']['P']})
+        hit = positions - {'P'}
+        if hit:
+            hit_pts = max(d['pos'][p] for p in hit)
+            for p in hit:
+                raw_cands.append({**base, 'position': p, 'position_pts': d['pos'][p]})
+            for extra in ('U', 'DH'):        # every hitter is U- and DH-eligible
+                if extra not in hit:
+                    raw_cands.append({**base, 'position': extra, 'position_pts': hit_pts})
+    by_pos = {}
+    for c in raw_cands:
+        by_pos.setdefault(c['position'], []).append(c)
+    candidates = []
+    for lst in by_pos.values():
+        lst.sort(key=lambda c: -c['position_pts'])
+        candidates.extend(lst[:40])          # a 19-slot fill never reaches deeper
+    candidates.sort(key=lambda c: (c['position'], -c['position_pts']))
+    slot_caps = {'C': 1, '1B': 1, '2B': 1, '3B': 1, 'SS': 1,
+                 'OF': 3, 'U': 1, 'DH': 1, 'P': 9}
+    opt_by_slot = {(r.get('lineup_slot'), r.get('slot_rank')): r
+                   for r in get_optimal_team_selections(candidates, slot_caps)}
+
+    season_statvals_by = {(int(r['season_year']), r['player_key']): _season_statvals(r)
+                          for r in player_season}
+
+    def _opt_season_cell(row):
+        sy, pk = row['sy'], row['pk']
+        nm = pname.get(pk, (None, None))
+        return {'display_name': nm[0] or row.get('name'), 'player_name': nm[1],
+                'value': row.get('position_pts'), 'owner': _owner(row.get('main_fid')),
+                'period': sy, 'details': _player_line(season_statvals_by.get((sy, pk), {}))}
+
+    def _slot_career_cell(ab, f):
+        return {'holder': ab, 'owner': owner_by_abbrev.get(ab, ''),
+                'value': f['pts'], 'period': _span_from_years(f['seasons']),
+                'details': sorted(f['contrib'].values(), key=lambda t: -t[1])[:3]}
+
+    slots = []
+    for label, src, rank in _ROSTER_SLOTS:
+        opt = opt_by_slot.get((src, rank + 1))
+        pool_pf = u_pf if src == 'U' else ranked_pf.get(src, [])
+        slots.append({
+            'label': label, 'pos': 'DH' if src == 'U' else src,
+            'season_player': _opt_season_cell(opt) if opt and opt.get('pk') is not None else None,
+            'career_team': _slot_career_cell(*pool_pf[rank]) if rank < len(pool_pf) else None,
+        })
+    data['_slots'] = slots
 
     # ---- Wasted Hall of Shame (Kyle 2026-07-14): top 25 players by career
     # WASTED points -- unrostered (on the wire) OR benched (rostered, sat).
@@ -1830,8 +1983,7 @@ def build_records_rows(context, catalog, data):
          f'didn\'t happen for the league ({era}). Auto-cataloged from the '
          f'categories this league scores plus tracked counting stats. '
          f'"Season" = best single season all-time; "All-Time Total" = best '
-         f'career accumulation. Worst rows show the fewest points in a '
-         f'completed, full-length season. Owner is the holding franchise\'s '
+         f'career accumulation. Owner is the holding franchise\'s '
          f'current owner (true owner-by-era arrives with the ownership re-key).'],
         [],
     ]
@@ -1921,38 +2073,34 @@ def build_records_rows(context, catalog, data):
                 _emit_stat(_rate_label[rk], rk, player)
             rows.append([])
 
-    # ---- Lineup Slot Records: best player-SEASON (left) | active FRANCHISE
-    # all-time (right) by slot. 2004-2020 slots are eligibility estimates.
-    slots = data.get('_slots') or {}
-    if any((slots.get(p) or {}).get('season_player') for p in _SLOT_ORDER):
-        _section('Lineup Slot Records')
+    # ---- Lineup Slot Records (Kyle 2026-07-14): the CURRENT-roster shape --
+    # C/1B/2B/3B/SS, OF x3, U, DH, P x9 -- each slot filled with the best
+    # available player-SEASON (left, statline detail) and the ranked active
+    # FRANCHISE all-time (right = "All-Time Team Totals", contributor detail).
+    # 2004-2020 positions are eligibility estimates.
+    slots = data.get('_slots') or []
+    if any(s.get('season_player') or s.get('career_team') for s in slots):
+        # Custom header: the All-Time side is TEAM totals here, and the estimate
+        # caveat rides beside it at col I instead of a separate row (Kyle: I77).
+        rows.append(['Lineup Slot Records', 'Season', '', '', '', '', '',
+                     'All-Time Team Totals',
+                     '* 2004–2020 positions are eligibility estimates '
+                     '(no lineup log); only P and DH reliable.', '', ''])
+        _band()
+        formats.append({'range': f'I{len(rows)}',
+                        'format': {'textFormat': {'bold': False, 'italic': True,
+                                                  'fontSize': 9}}})
         _header()
-        rows.append(['* 2004–2020 has no lineup-slot data — positions there are '
-                     'eligibility estimates; only P and DH are reliable.'])
-        formats.append({'range': f'A{len(rows)}:{_REC_LAST_COL}{len(rows)}',
-                        'format': {'textFormat': {'italic': True, 'fontSize': 9}}})
-        for pos in _SLOT_ORDER:
-            d = slots.get(pos) or {}
-            if d.get('season_player') or d.get('career_team'):
-                rows.append([pos, *_rec_side(d.get('season_player'), pos, player=True),
-                             '', *_rec_side(d.get('career_team'), pos, player=False,
-                                            with_period=False)])
+        for s in slots:
+            rows.append([s['label'],
+                         *_rec_side(s.get('season_player'), s['pos'], player=True), '',
+                         *_rec_side(s.get('career_team'), s['pos'], player=False,
+                                    with_period=False)])
         rows.append([])
 
-    # ---- Negative Records: worst team point-seasons, then 'Most ...' of each
-    # negative-polarity stat (Player then Team).
-    _section('Negative Records')
-    _header()
-    for stat, label in _point_labels.items():
-        _emit(f'Worst Team {label}', data.get(stat, {}).get('worst_team_season'),
-              None, stat, player=False)
-    if negatives:
-        rows.append([])
-        for stat in negatives:
-            _emit_stat(f'Most {_disp(stat)} (Player)', stat, player=True)
-        for stat in negatives:
-            _emit_stat(f'Most {_disp(stat)} (Team)', stat, player=False)
-    rows.append([])
+    # ---- Negative Records: EXCISED (Kyle 2026-07-14) for symmetry with the
+    # ESPN records page, which has no futility block. The worst-* data is still
+    # computed upstream (harmless, unused) so re-adding is render-only.
 
     # ---- Franchise Hall of Fame (left) | Wasted Hall of Shame (right), side by
     # side with the Shame aligned to the All-Time block (Kyle 2026-07-14). Both

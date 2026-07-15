@@ -448,9 +448,13 @@ def _all_league_slash_line(row):
 
 
 def _dotted_rate(rate):
-    """Prefix a leading dot to a no-dot 3-digit rate ('294' -> '.294').
+    """Format a no-dot integer-scaled rate ('294' -> '.294'). Values that reach
+    or pass 1.000 arrive as 4+ digits ('1422' for a 1.422 SLG/OPS) and take the
+    dot after the ones place ('1.422') rather than a bogus leading '.1422'.
     Empty stays empty so a no-AB hitter still renders '//', not './/.'."""
-    return f".{rate}" if rate else ''
+    if not rate:
+        return ''
+    return f'{rate[:-3]}.{rate[-3:]}' if len(rate) > 3 else f'.{rate}'
 
 
 def format_all_league_team_row(row, league_id=None):
@@ -1022,8 +1026,13 @@ def _bref_link(official_name, display_text):
     if not official_name:
         return display
     safe = display.replace('"', '""')
+    # bref's name search chokes on the periods in disambiguation initials --
+    # "Francisco J. Rodriguez" / "Chris B. Young" return nothing, but
+    # "Francisco J Rodriguez" / "Chris B Young" resolve (and dotless leading
+    # initials like "CC Sabathia" work either way). Strip periods from the
+    # search KEY only; the visible label keeps them.
     url = ('https://www.baseball-reference.com/search/search.fcgi?search='
-           + urllib.parse.quote_plus(str(official_name)))
+           + urllib.parse.quote_plus(str(official_name).replace('.', '')))
     return f'=HYPERLINK("{url}", "{safe}")'
 
 

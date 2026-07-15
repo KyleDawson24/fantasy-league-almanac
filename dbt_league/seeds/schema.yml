@@ -158,6 +158,65 @@ seeds:
       - name: preferred_name
         description: 'Override for first_name when the owner prefers a different rendering (nickname, alternate spelling). Empty means fall back to first_name.'
 
+  - name: cbs_franchise_lineage
+    description: >
+      MLB-64 franchise-continuity overlay, HARVESTED from the historian's
+      continuity sheet (harvest_continuity_sheet.py) -- edit the sheet, not
+      this file. Override-only: one row per franchise_id the human linked or
+      renamed; unlisted ids resolve to themselves in dim_franchise.
+      canonical_franchise_id is the earliest id in the lineage. name/abbrev
+      are optional display overrides (blank -> use the anchor's).
+    config:
+      column_types:
+        league_key: varchar
+        franchise_id: varchar
+        canonical_franchise_id: varchar
+        canonical_name: varchar
+        canonical_abbrev: varchar
+    columns:
+      - name: franchise_id
+        tests: [not_null]
+      - name: canonical_franchise_id
+        tests: [not_null]
+
+  - name: cbs_owner_alias
+    description: >
+      MLB-64 owner-identity merges, harvested from the continuity sheet's
+      Owners tab. owner_id -> canonical_owner_id (collapses Dave/Desmond Foster
+      etc.; a current-era owner slug wins the anchor). preferred_name is an
+      optional display override. Override-only.
+    config:
+      column_types:
+        league_key: varchar
+        owner_id: varchar
+        canonical_owner_id: varchar
+        preferred_name: varchar
+    columns:
+      - name: owner_id
+        tests: [not_null]
+      - name: canonical_owner_id
+        tests: [not_null]
+
+  - name: cbs_owner_by_year
+    description: >
+      MLB-64 per-season owner OVERRIDES, harvested from the continuity sheet's
+      Team-Owner-by-Year tab (the historian's Owner 1/2/3 entries; one row per
+      owner). Downstream takes COALESCE(this, stg_cbs__ui_rosters.owner_name),
+      so this need only carry corrections + the pre-2007 years the pages don't.
+    config:
+      column_types:
+        league_key: varchar
+        season_year: varchar
+        franchise_id: varchar
+        owner_name: varchar
+    columns:
+      - name: season_year
+        tests: [not_null]
+      - name: franchise_id
+        tests: [not_null]
+      - name: owner_name
+        tests: [not_null]
+
   - name: cbs_franchises
     description: >
       The CBS franchise registry: one row per franchise_id ever seen in

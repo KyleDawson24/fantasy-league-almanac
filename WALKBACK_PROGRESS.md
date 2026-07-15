@@ -1,5 +1,33 @@
 # MLB-63 Walk-Back + Almanac v2 — Live Progress Log
 
+## MLB-64 CONTINUITY INGESTION — warehouse (2026-07-15)
+
+Kyle took a first pass at the sheet (3 lineage links, 3 owner-alias merges,
+324 owner-year fills) and green-lit threading canonical franchise **everywhere**
+(the plumbing is stable; the links are just editable seed data).
+
+- [x] **`output/harvest_continuity_sheet.py`** — reads the filled sheet →
+      three dbt seeds. Union-find on `Same As` (mutual/chained pointers
+      collapse to the earliest-id anchor; a current-era owner slug wins the
+      owner anchor). Fuzzy header match (Kyle already retitled a header + added
+      a preferred-abbrev column). Re-runnable after every editing pass.
+- [x] **Seeds** (override-only, varchar-pinned so empty override columns don't
+      infer numeric — that bug cast 'Firefly Lake Vandals' to a number):
+      `cbs_franchise_lineage` (3), `cbs_owner_alias` (3), `cbs_owner_by_year`
+      (424, the historian's Owner 1/2/3; downstream COALESCEs with
+      `stg_cbs__ui_rosters.owner_name`).
+- [x] **`dim_franchise`** (marts/core, view) — franchise_id →
+      canonical_franchise_id (earliest anchor) + canonical name/abbrev; unlinked
+      + #### map to self. **34 ids → 31 canonical franchises.** 5 dbt tests
+      green (unique grain, not-null canon/name).
+- [ ] **NEXT — owner models:** grow `dim_owner` to all-time (parsed owners +
+      alias resolution) and a per-season team-owner model
+      (`COALESCE(cbs_owner_by_year, stg_cbs__ui_rosters.owner_name)` → resolve
+      names to canonical owner ids).
+- [ ] **NEXT — thread canonical franchise** through team-grain facts/marts +
+      the almanac renderers (team pages span renames/ids; records/standings by
+      canonical franchise). Incremental; hold the ESPN goldens (float-only).
+
 ## MLB-64 CONTINUITY MAPPING SHEET (2026-07-14)
 
 - [x] **`output/build_continuity_sheet.py`** — a platform-agnostic generator

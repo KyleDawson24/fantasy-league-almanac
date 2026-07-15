@@ -227,6 +227,38 @@ models:
         tests:
           - not_null
 
+  - name: dim_franchise
+    description: >
+      Canonical franchise identity (MLB-64). Collapses the platform's
+      re-minted team ids into one continuous franchise via the curated
+      cbs_franchise_lineage seed (harvested from the historian's continuity
+      sheet): franchise_id -> canonical_franchise_id (the earliest id in a
+      lineage) plus the canonical display name/abbrev (the anchor's, unless
+      the seed overrides). Unlinked franchises and the #### sentinel map to
+      themselves. The join every team-grain surface uses to tell a
+      franchise's story across renames and re-mints.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - franchise_id
+    columns:
+      - name: franchise_id
+        description: 'Platform team id (per league). Part of the grain.'
+        tests:
+          - not_null
+      - name: canonical_franchise_id
+        description: >
+          The franchise's anchor id (earliest id in its lineage); equals
+          franchise_id for a standalone franchise.
+        tests:
+          - not_null
+      - name: canonical_name
+        description: 'Display name of the canonical franchise.'
+        tests:
+          - not_null
+
   - name: dim_owner
     description: >
       Owner dimension. One row per (league_key, owner_id), spined off

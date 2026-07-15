@@ -986,22 +986,15 @@ def get_cbs_records_data():
                 r['player_key'], r.get('display_name'), _rec_fnum(r.get('pts')))
 
     # Franchise ranking per position -- the RIGHT ("All-Time Team Totals") side;
-    # top-N feeds OF x3 / P x9. Plus a hitter-total aggregate for the U column.
+    # top-N feeds OF x3 / P x9. U is a REAL captured slot now (the 2026 daily
+    # 'U' lineup_slot), so it ranks on its OWN actual-slot total like every
+    # other slot -- NOT the old sum-of-every-hitter-position, which inflated the
+    # single U slot ~7x (Kyle 2026-07-15).
     ranked_pf = {}
     for (pos, ab), f in pf.items():
         ranked_pf.setdefault(pos, []).append((ab, f))
     for lst in ranked_pf.values():
         lst.sort(key=lambda t: -t[1]['pts'])
-    _u_agg = {}
-    for pos in _HIT_SLOT_POSITIONS:
-        for ab, f in ranked_pf.get(pos, []):
-            g = _u_agg.setdefault(ab, {'pts': 0.0, 'seasons': set(), 'contrib': {}})
-            g['pts'] += f['pts']
-            g['seasons'] |= f['seasons']
-            for pk, (cn, cp) in f['contrib'].items():
-                pn, pp = g['contrib'].get(pk, (cn, 0.0))
-                g['contrib'][pk] = (pn, pp + cp)
-    u_pf = sorted(_u_agg.items(), key=lambda t: -t[1]['pts'])
 
     # The LEFT ("Season") side is a true OPTIMIZE-LINEUP over all-time player-
     # SEASONS (Kyle 2026-07-14): the SAME selector the team pages use, but the
@@ -1063,7 +1056,7 @@ def get_cbs_records_data():
     slots = []
     for label, src, rank in _ROSTER_SLOTS:
         opt = opt_by_slot.get((src, rank + 1))
-        pool_pf = u_pf if src == 'U' else ranked_pf.get(src, [])
+        pool_pf = ranked_pf.get(src, [])
         slots.append({
             'label': label, 'pos': 'DH' if src == 'U' else src,
             'season_player': _opt_season_cell(opt) if opt and opt.get('pk') is not None else None,

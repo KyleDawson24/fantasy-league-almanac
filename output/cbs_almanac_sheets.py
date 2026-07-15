@@ -50,6 +50,7 @@ Determinism: no wall-clock timestamps -- every cell is a pure function
 of warehouse state, so TSV previews stay golden-able.
 """
 
+import re
 import time
 from datetime import date
 
@@ -889,18 +890,26 @@ def get_cbs_records_data():
     # records use, so it reads identically.
     _HOF_LINE_COLS = ['h', 'ab', 'b_bb', 'hbp', 'sf', 'tb', '2b', '3b', 'hr',
                       'r', 'rbi', 'sb', 'outs', 'er', 'p_h', 'p_bb', 'k',
-                      'w', 'sv', 'hld', 'qs', 'cg']
+                      'w', 'l', 'sv', 'hld', 'qs', 'cg']
 
     def _hof_line(agg):
         pitcher = _rec_fnum(agg.get('outs')) > _rec_fnum(agg.get('ab'))
         if pitcher:
-            slash = ' / '.join(d for d in (_rate_num_disp(agg, 'ERA')[1],
-                                           _rate_num_disp(agg, 'WHIP')[1]) if d)
+            # Kyle 2026-07-15: pitcher slash leads with the W-L record, then
+            # LABELED ERA / WHIP (a deliberate break from the usual bare slash).
+            parts = [f"{int(round(_rec_fnum(agg.get('w'))))}W - "
+                     f"{int(round(_rec_fnum(agg.get('l'))))}L"]
+            era, whip = _rate_num_disp(agg, 'ERA')[1], _rate_num_disp(agg, 'WHIP')[1]
+            if era:
+                parts.append(f"{era} ERA")
+            if whip:
+                parts.append(f"{whip} WHIP")
+            slash = ' / '.join(parts)
         else:
             trip = [_rate_num_disp(agg, k)[1] for k in ('AVG', 'OBP', 'SLG')]
             slash = '/'.join(trip) if trip[0] else ''
         statvals = {s: _rec_fnum(agg.get(s.lower(), 0.0)) for s in _STAT_LINE_ORDER}
-        return ' | '.join(p for p in (slash, _player_line(statvals)) if p)
+        return ' || '.join(p for p in (slash, _player_line(statvals)) if p)
 
     hof = {}
     for r in player_team_season:
@@ -917,7 +926,7 @@ def get_cbs_records_data():
     for e in hof.values():
         nm = pname.get(e['pk'], (None, None))
         e['display_name'], e['player_name'] = nm[0], nm[1]
-        e['span'] = _years_of_service(e['seasons'])   # stint list, not a flat span
+        e['span'] = len(e['seasons'])   # Kyle 2026-07-15: just the count, centered
         e['statline'] = _hof_line(e['agg'])
     data['_hof'] = sorted(hof.values(), key=lambda e: -e['pts'])[:25]
 
@@ -2240,7 +2249,8 @@ def build_records_rows(context, catalog, data):
                      '(unrostered + benched)'])
         _wide_band()
         rows.append(['Rank', 'Player', 'Franchise', 'Active Points',
-                     'Years of Service', 'Slash | Stat Line', '',
+                     'Years of Service',
+                     'Slash | Stat Line (While Active for Listed Team)', '',
                      'Pitchers', 'Benched Most By', 'Wasted Points', 'Breakdown',
                      'Hitters', 'Benched Most By', 'Wasted Points', 'Breakdown'])
         _wide_band()
@@ -2267,6 +2277,9 @@ def build_records_rows(context, catalog, data):
             formats.append({'range': f'{col}{first_data}:{col}{len(rows)}',
                             'format': {'horizontalAlignment': 'CENTER',
                                        'textFormat': {'fontSize': 8}}})
+        # Years of Service (col E): just the count, centered.
+        formats.append({'range': f'E{first_data}:E{len(rows)}',
+                        'format': {'horizontalAlignment': 'CENTER'}})
         rows.append([])
 
     return rows, formats
@@ -2530,6 +2543,15 @@ def build_all_tabs(nav_targets=None):
         key=lambda f: latest.get(f['team_id'], {}).get('standings_rank', 99),
     )
 
+    # Canonical abbrev -> team-tab title, for the records-page hyperlinks: an
+    # ACTIVE franchise's abbrev links to its team page (Kyle 2026-07-15). Only
+    # actives are here, so a defunct-franchise abbrev never resolves to a link.
+    _fmap = get_franchise_map()
+    link_map = {_fmap.get(int(fr['team_id']), {}).get('abbrev'):
+                _safe_sheet_title(fr['team_name'])
+                for fr in franchises
+                if _fmap.get(int(fr['team_id']), {}).get('abbrev')}
+
     team_tabs = []
     for fr in franchises:
         fid = int(fr['team_id'])
@@ -2584,7 +2606,7 @@ def build_all_tabs(nav_targets=None):
     standings = build_standings_rows(context, arc, finishes, franchises)
 
     return ([(HOME_TAB, *home), (RECORDS_TAB, *records),
-             (STANDINGS_TAB, *standings)] + team_tabs)
+             (STANDINGS_TAB, *standings)] + team_tabs), link_map
 
 
 # ---------------------------------------------------------------------------
@@ -2661,17 +2683,45 @@ def write_cbs_almanac(sheet_id):
     client = _get_authorized_client()
     spreadsheet = _sheets_call('open', lambda: client.open_by_key(sheet_id))
 
-    tabs = build_all_tabs()
+    tabs, link_map = build_all_tabs()
     home = next(t for t in tabs if t[0] == HOME_TAB)
     others = [t for t in tabs if t[0] != HOME_TAB]
 
-    nav_targets = {}
+    nav_targets, ws_by_title = {}, {}
     for title, rows, formats in others:
         # USER_ENTERED so the bref =HYPERLINK cells on Records + team pages
         # parse as links, not literal text (RAW left them as strings).
         ws = _write_tab(spreadsheet, title, rows, formats,
                         value_input_option='USER_ENTERED')
         nav_targets[title] = ws.id
+        ws_by_title[title] = ws
+
+    # Records-page hyperlinks (Kyle 2026-07-15): now the team-tab gids exist,
+    # link every STANDALONE active-team abbrev cell to its team page. A bare
+    # abbrev ('SED') or an 'ABBREV (count)' cell (the HoS shame) links; a list
+    # ('SED, CSC') or a defunct abbrev doesn't. Values-only re-write (the pass-1
+    # formats persist).
+    abbrev_gid = {ab: nav_targets[t] for ab, t in link_map.items()
+                  if ab and t in nav_targets}
+
+    def _link_abbrev(val):
+        if not isinstance(val, str) or not val or val.startswith('='):
+            return val
+        if val in abbrev_gid:                        # bare standalone abbrev
+            return f'=HYPERLINK("#gid={abbrev_gid[val]}&range=A1", "{val}")'
+        m = re.match(r'^([A-Z0-9]{2,5}) \(', val)    # 'ABBREV (count)' (shame)
+        if m and m.group(1) in abbrev_gid:
+            safe = val.replace('"', '""')
+            return (f'=HYPERLINK("#gid={abbrev_gid[m.group(1)]}'
+                    f'&range=A1", "{safe}")')
+        return val
+
+    rec = next((t for t in others if t[0] == RECORDS_TAB), None)
+    if rec and abbrev_gid and RECORDS_TAB in ws_by_title:
+        linked = [[_link_abbrev(c) for c in row] for row in rec[1]]
+        rw = ws_by_title[RECORDS_TAB]
+        _sheets_call('link Records', lambda: rw.update(
+            linked, 'A1', value_input_option='USER_ENTERED'))
 
     # Rebuild Home's rows with live nav targets (cheap: row assembly only
     # -- the boards were already computed inside build_all_tabs; rebuild

@@ -159,7 +159,7 @@ def _run_points_league_almanac(args, parser):
     are H2H concepts and are ignored here (the points almanac's horizon
     comes from the data)."""
     if args.preview_dir or args.no_sheets:
-        tabs = cbs_almanac_sheets.build_all_tabs()
+        tabs, _ = cbs_almanac_sheets.build_all_tabs()
         preview_tabs = [(title, rows) for title, rows, _ in tabs]
         if args.preview_dir:
             _write_preview_dir(preview_tabs, args.preview_dir)

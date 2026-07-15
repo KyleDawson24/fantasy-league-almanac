@@ -2,8 +2,10 @@
 -- Canonical franchise identity (MLB-64). The platform re-mints a team id when
 -- a franchise leaves and comes back (Foster's Folly is id 13 through 2019 and
 -- id 30 from 2021); this collapses those ids into ONE franchise per the
--- curated cbs_franchise_lineage seed -- harvested from the historian's
--- continuity sheet, so the links are data, not code. franchise_id ->
+-- curated franchise_lineage seed -- harvested from the historian's continuity
+-- sheet, so the links are data, not code. Reads its observed franchises from
+-- the platform-general int_franchise_registry seam, so any league flows
+-- through. franchise_id ->
 -- canonical_franchise_id (the EARLIEST id in a lineage, its anchor) + the
 -- canonical display name / abbrev (the anchor's, unless the seed overrides).
 -- An unlinked franchise is its own canonical; the #### sentinel (9999) maps to
@@ -18,10 +20,10 @@
 with franchises as (
     select
         league_key,
-        cast(franchise_id as varchar) as franchise_id,
-        abbrev,
-        franchise_name
-    from {{ ref('cbs_franchises') }}
+        franchise_id,
+        observed_abbrev as abbrev,
+        observed_name   as franchise_name
+    from {{ ref('int_franchise_registry') }}
 ),
 
 lineage as (
@@ -31,7 +33,7 @@ lineage as (
         cast(canonical_franchise_id as varchar)          as canonical_franchise_id,
         nullif(cast(canonical_name as varchar), '')      as canonical_name,
         nullif(cast(canonical_abbrev as varchar), '')    as canonical_abbrev
-    from {{ ref('cbs_franchise_lineage') }}
+    from {{ ref('franchise_lineage') }}
 ),
 
 resolved as (

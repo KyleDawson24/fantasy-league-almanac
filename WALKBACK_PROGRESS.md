@@ -32,6 +32,18 @@ Kyle took a first pass at the sheet (3 lineage links, 3 owner-alias merges,
       doesn't cover, first-token → first_name for co-owner comma joins).
       Verified: current + ESPN displays unchanged, Fulton one owner across
       13+30 all years, 173 downstream tests green.
+- [x] **Made platform-agnostic (Kyle's call).** Override seeds shed the `cbs_`
+      prefix -> `franchise_lineage`, `owner_alias`, `team_owner_by_year`
+      (league-keyed rows, matching the shared `owner_nicknames`/`player_alias`
+      convention; CBS is just the only league with rows loaded). `dim_franchise`
+      now reads its observed input from a platform-general seam
+      **`int_franchise_registry`** (the "what your league's history makes
+      available" layer) rather than `cbs_franchises` directly -- a new platform
+      adds ONE union branch there + optional lineage rows, no override required
+      to flow through. The owner CANON (dim_owner/dim_team_owner) was already a
+      platform union; only `int_cbs__team_owner_season` stays CBS-specific
+      (CBS serves owner NAMES, not ids -- legit platform adapter). Behavior
+      unchanged (34->31, 23 tests green).
 - [ ] **NEXT — thread canonical franchise** through team-grain facts/marts +
       the almanac renderers (team pages span renames/ids; records/standings by
       canonical franchise). Incremental; hold the ESPN goldens (float-only).

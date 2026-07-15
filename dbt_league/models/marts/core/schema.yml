@@ -229,10 +229,11 @@ models:
 
   - name: dim_franchise
     description: >
-      Canonical franchise identity (MLB-64). Collapses the platform's
-      re-minted team ids into one continuous franchise via the curated
-      cbs_franchise_lineage seed (harvested from the historian's continuity
-      sheet): franchise_id -> canonical_franchise_id (the earliest id in a
+      Canonical franchise identity (MLB-64), platform-general. Collapses a
+      platform's re-minted team ids into one continuous franchise via the
+      curated franchise_lineage seed (harvested from the historian's continuity
+      sheet), resolved onto the observed int_franchise_registry seam:
+      franchise_id -> canonical_franchise_id (the earliest id in a
       lineage) plus the canonical display name/abbrev (the anchor's, unless
       the seed overrides). Unlinked franchises and the #### sentinel map to
       themselves. The join every team-grain surface uses to tell a

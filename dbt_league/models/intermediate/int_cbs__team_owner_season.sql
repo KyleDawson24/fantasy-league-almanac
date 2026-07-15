@@ -1,14 +1,17 @@
 -- int_cbs__team_owner_season.sql
 -- Per-season CBS team ownership (MLB-64), ALL-TIME. Turns the curated
--- owner-by-year NAMES (cbs_owner_by_year -- the historian's Owner 1/2/3 where
--- entered, else the roster-page owner) into canonical owner IDS:
+-- team_owner_by_year NAMES (the historian's Owner 1/2/3 where entered, else the
+-- roster-page owner) into canonical owner IDS:
 --
 --   name -> owner_id : a CURRENT owner is matched by display name so it keeps
 --       its seeded slug ('Julian D. Sherman' -> cbs-julian-sherman, NOT a fresh
 --       cbs-jason-d-scott); everyone else is slugged from the name (matching
 --       build_continuity_sheet._slug).
---   owner_id -> canonical : cbs_owner_alias collapses the drift the historian
---       merged (Dave/Desmond Foster, Rich/Rexford Landon, Sandy/Sanford).
+--   owner_id -> canonical : the owner_alias seed collapses the drift the
+--       historian merged (Dave/Desmond Foster, Rich/Rexford Landon, Sandy/Sanford).
+--
+-- CBS-specific because CBS serves owner NAMES, not ids; it feeds the shared,
+-- platform-general owner chain (stg_cbs__team_owners -> dim_owner).
 --
 -- This is what grows the owner chain from current-era-only to full history:
 -- stg_cbs__team_owners reads it, and dim_owner / dim_team_owner then serve
@@ -25,7 +28,7 @@ with owner_year as (
         cast(season_year as varchar)   as season_year,
         cast(franchise_id as varchar)  as franchise_id,
         trim(owner_name)               as owner_name
-    from {{ ref('cbs_owner_by_year') }}
+    from {{ ref('team_owner_by_year') }}
     where owner_name is not null and trim(owner_name) <> ''
 ),
 
@@ -43,7 +46,7 @@ current_display as (
 ),
 
 alias as (
-    select owner_id, canonical_owner_id from {{ ref('cbs_owner_alias') }}
+    select owner_id, canonical_owner_id from {{ ref('owner_alias') }}
 ),
 
 resolved as (

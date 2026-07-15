@@ -5,16 +5,18 @@ Reads the human-edited Google Sheet (the override surface built by
 build_continuity_sheet.py) and writes the seeds dbt consumes to make the
 warehouse's franchise + owner continuity faithful:
 
-  cbs_franchise_lineage.csv  franchise_id -> canonical_franchise_id (the
-                             earliest id in a lineage) + optional name/abbrev
-                             overrides. OVERRIDE-ONLY: an unlinked franchise
-                             isn't listed and resolves to itself in
-                             dim_franchise.
-  cbs_owner_alias.csv        owner_id -> canonical_owner_id + preferred_name
-                             (collapses Dave/Desmond Foster and friends).
-  cbs_owner_by_year.csv      per-season owner OVERRIDES (the historian's
-                             Owner 1/2/3 entries). Downstream takes
-                             COALESCE(this, stg_cbs__ui_rosters.owner_name).
+  franchise_lineage.csv   franchise_id -> canonical_franchise_id (the earliest
+                          id in a lineage) + optional name/abbrev overrides.
+                          OVERRIDE-ONLY: an unlinked franchise isn't listed and
+                          resolves to itself in dim_franchise.
+  owner_alias.csv         owner_id -> canonical_owner_id + preferred_name
+                          (collapses Dave/Desmond Foster and friends).
+  team_owner_by_year.csv  the curated per-season owner (the historian's Owner
+                          1/2/3 where entered, else the observed roster-page
+                          owner) -> int_cbs__team_owner_season resolves it.
+
+These are platform-general seeds (league-keyed rows), like owner_nicknames /
+player_alias -- CBS is just the only league with rows loaded today.
 
 Re-runnable: re-harvest after each editing pass, then `dbt seed` + rebuild.
 Header text is matched loosely (first line, case-insensitive, substring), so
@@ -182,13 +184,15 @@ def main():
     args = ap.parse_args()
 
     lineage, alias, oby = harvest(args.league, _sheet_id_from(args.sheet_id))
-    _write(_SEEDS / 'cbs_franchise_lineage.csv',
+    # Platform-general override seeds (league-keyed rows), matching the shared
+    # owner_nicknames / player_alias convention -- any league writes here.
+    _write(_SEEDS / 'franchise_lineage.csv',
            ['league_key', 'franchise_id', 'canonical_franchise_id',
             'canonical_name', 'canonical_abbrev'], lineage)
-    _write(_SEEDS / 'cbs_owner_alias.csv',
+    _write(_SEEDS / 'owner_alias.csv',
            ['league_key', 'owner_id', 'canonical_owner_id', 'preferred_name'],
            alias)
-    _write(_SEEDS / 'cbs_owner_by_year.csv',
+    _write(_SEEDS / 'team_owner_by_year.csv',
            ['league_key', 'season_year', 'franchise_id', 'owner_name'], oby)
     print(f"\nHarvested: {len(lineage)} lineage links, {len(alias)} owner "
           f"aliases, {len(oby)} owner-year rows.")

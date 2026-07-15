@@ -20,10 +20,18 @@ Kyle took a first pass at the sheet (3 lineage links, 3 owner-alias merges,
       canonical_franchise_id (earliest anchor) + canonical name/abbrev; unlinked
       + #### map to self. **34 ids → 31 canonical franchises.** 5 dbt tests
       green (unique grain, not-null canon/name).
-- [ ] **NEXT — owner models:** grow `dim_owner` to all-time (parsed owners +
-      alias resolution) and a per-season team-owner model
-      (`COALESCE(cbs_owner_by_year, stg_cbs__ui_rosters.owner_name)` → resolve
-      names to canonical owner ids).
+- [x] **Owner models LANDED (per-season, all-time).** Harvest now writes a
+      COMPLETE `cbs_owner_by_year` (his Owner 1/2/3 where entered, else the
+      split roster-page owner) so no SQL co-owner splitting is needed.
+      `int_cbs__team_owner_season` (new) resolves names → canonical owner ids
+      (current owner matched by display to keep its seeded slug; else slugged;
+      then `cbs_owner_alias` collapses Dave/Desmond Foster). `stg_cbs__team_owners`
+      re-sourced from it → grew from 16 current-era rows to **328 team-seasons**;
+      `dim_owner` grew **19 → 46** CBS owners (ESPN untouched at 16; a
+      `seen_name` fallback displays the historical owners the nickname seed
+      doesn't cover, first-token → first_name for co-owner comma joins).
+      Verified: current + ESPN displays unchanged, Fulton one owner across
+      13+30 all years, 173 downstream tests green.
 - [ ] **NEXT — thread canonical franchise** through team-grain facts/marts +
       the almanac renderers (team pages span renames/ids; records/standings by
       canonical franchise). Incremental; hold the ESPN goldens (float-only).

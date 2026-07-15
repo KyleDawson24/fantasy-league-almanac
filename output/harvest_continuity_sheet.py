@@ -142,10 +142,15 @@ def harvest(league_key, sheet_id):
         if cid != oid or pn:
             alias_rows.append((league_key, oid, cid, pn))
 
-    # ---- per-season owner overrides (Team-Owner by Year tab) --------------
+    # ---- per-season owners (Team-Owner by Year tab) -----------------------
+    # COMPLETE, not override-only: the historian's Owner 1/2/3 where entered,
+    # else the observed 'Owner(s) on record' (already split + normalized in the
+    # generator, "; "-joined). So the seed carries the full curated owner-by-
+    # year and the downstream model needs no SQL co-owner splitting.
     hdr, body = _load(ss, 'Team-Owner by Year')
     c_yr, c_fid = _col(hdr, 'year'), _col(hdr, 'team id')
     c_owner = [_col(hdr, f'owner {i}') for i in (1, 2, 3)]
+    c_rec = _col(hdr, 'on record')
     oby_rows = []
     for r in body:
         yr, fid = _cell(r, c_yr), _cell(r, c_fid)
@@ -154,6 +159,8 @@ def harvest(league_key, sheet_id):
         names = []
         for ci in c_owner:
             names += _split_owners(_cell(r, ci))
+        if not names:                          # no override -> observed record
+            names = [n.strip() for n in _cell(r, c_rec).split(';') if n.strip()]
         for nm in dict.fromkeys(names):        # dedupe, preserve order
             oby_rows.append((league_key, yr, fid, nm))
 

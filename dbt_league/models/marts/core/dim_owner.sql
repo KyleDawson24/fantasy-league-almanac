@@ -32,7 +32,8 @@ with owners as (
         league_key,
         owner_id,
         first_name,
-        last_name
+        last_name,
+        cast(null as varchar) as seen_name
     from {{ ref('stg_team_owners') }}
     where owner_id is not null
     qualify row_number() over (
@@ -42,17 +43,21 @@ with owners as (
 
     union all
 
-    -- CBS owners (MLB-72 follow-on): the platform serves no owner
-    -- identity, so the spine rows come from the curated bridge and the
-    -- names ride entirely on the owner_nicknames seed (the coalesces
-    -- below). Distinct owner_ids by construction ('cbs-' slugs vs ESPN
-    -- member GUIDs), so the union can't collide.
-    select distinct
+    -- CBS owners (MLB-64): the spine is now every owner ever seen, per season
+    -- (stg_cbs__team_owners grew to full history). Current owners still get
+    -- their names from the owner_nicknames seed (the coalesces below); the
+    -- HISTORICAL owners the seed doesn't cover carry seen_name -- the latest
+    -- roster-page display of that person -- as the display fallback, and its
+    -- first token as first_name so co-owner comma-joins still work. Distinct
+    -- owner_ids by construction ('cbs-' slugs vs ESPN member GUIDs).
+    select
         league_key,
         owner_id,
-        cast(null as varchar) as first_name,
-        cast(null as varchar) as last_name
+        split_part(max_by(owner_name, season_year), ' ', 1) as first_name,
+        cast(null as varchar)                                as last_name,
+        max_by(owner_name, season_year)                      as seen_name
     from {{ ref('stg_cbs__team_owners') }}
+    group by league_key, owner_id
 ),
 
 nicknames as (
@@ -80,8 +85,13 @@ select
     -- verbatim, so nicknames + intentional casing (McAvery) come through.
     coalesce(
         n.preferred_name,
-        initcap(trim(coalesce(o.first_name, n.first_name)))
-            || ' ' || initcap(trim(coalesce(o.last_name, n.last_name)))
+        nullif(
+            initcap(trim(coalesce(o.first_name, n.first_name)))
+                || ' ' || initcap(trim(coalesce(o.last_name, n.last_name))),
+            ''),
+        -- CBS historical owners have no nickname row and no last_name, so the
+        -- concat above is NULL -- fall back to their roster-page display.
+        o.seen_name
     ) as owner_display
 from owners o
 left join nicknames n

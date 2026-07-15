@@ -1,6 +1,28 @@
 version: 2
 
 models:
+  - name: int_cbs__team_owner_season
+    description: >
+      Per-season CBS team ownership (MLB-64), all-time. Resolves the curated
+      owner-by-year NAMES (cbs_owner_by_year) to canonical owner IDS: a current
+      owner is matched by display name to keep its seeded slug, everyone else is
+      slugged from the name; cbs_owner_alias then collapses the historian's
+      merges (Dave/Desmond Foster). Grows the owner chain (stg_cbs__team_owners)
+      from current-era-only to full history.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - season_year
+              - franchise_id
+              - owner_id
+    columns:
+      - name: owner_id
+        tests: [not_null]
+      - name: season_year
+        tests: [not_null]
+
   - name: int_player_daily
     description: >
       Wide daily row per (league, season, scoring_period, team, player_key, lineup_slot).

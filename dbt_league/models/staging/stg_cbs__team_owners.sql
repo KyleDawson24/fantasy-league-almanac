@@ -1,39 +1,32 @@
 -- stg_cbs__team_owners.sql
--- The CBS team -> owner bridge, mirroring stg_team_owners' grain so the
--- shared owner dimension chain (dim_owner -> dim_team_owner) serves both
--- platforms. CBS serves NO owner identity anywhere (the roster/standings
--- pages carry team names only; owner strings appear solely as free text
--- on the year-end report), so identity is SEED-CURATED: cbs_team_owners
--- maps franchise -> minted owner_id slugs ('cbs-abel-holbrook'), and the
--- shared owner_nicknames seed carries their names -- the same seed that
--- overrides ESPN display names, per Kyle's one-preferred-names-source
--- call (2026-07-13).
+-- The CBS team -> owner bridge. GROWN to full history (MLB-64): it now sources
+-- the per-season resolved ownership (int_cbs__team_owner_season), which turns
+-- the curated owner-by-year NAMES into canonical owner ids. It was current-era
+-- only (the seed attested just today's owners); the continuity-sheet harvest
+-- lands the rest, so this serves every season the historian has filled --
+-- and the shared owner chain (dim_owner -> dim_team_owner) serves owner
+-- history downstream with NO shape change, exactly as this model's prior
+-- header promised.
 --
--- CURRENT-ERA ONLY, deliberately: rows are stamped with the latest
--- captured season because that's the era the seed attests. Historical
--- owner custody (who ran franchise 13 in 2012) is exactly MLB-64's
--- chain-of-custody work; when that lands, this staging grows per-season
--- rows and the downstream dims serve owner history with no shape change.
+-- Same grain + owner_id contract as stg_team_owners so the ESPN branch of the
+-- shared dims is untouched; owner_name rides along for dim_owner to display
+-- historical owners the nickname seed doesn't cover.
 --
 -- ==========================================================================
 -- GRAIN: one row per (league_key, season_year, team_id, owner_id).
---   Co-owned teams yield multiple rows per (league, season, team) --
---   identical to stg_team_owners' contract.
+--   Co-owned teams yield multiple rows per (league, season, team).
 -- ==========================================================================
 
 {{ config(materialized='view') }}
 
-with current_season as (
-    select league_key, max(season_year) as season_year
-    from {{ ref('stg_cbs__rosters') }}
-    group by 1
-)
-
 select
-    s.league_key,
-    cs.season_year,
-    s.franchise_id      as team_id,
-    s.owner_id
-from {{ ref('cbs_team_owners') }} s
-inner join current_season cs
-    on s.league_key = cs.league_key
+    league_key,
+    season_year,
+    franchise_id as team_id,
+    owner_id,
+    owner_name
+from {{ ref('int_cbs__team_owner_season') }}
+qualify row_number() over (
+    partition by league_key, season_year, franchise_id, owner_id
+    order by owner_name
+) = 1

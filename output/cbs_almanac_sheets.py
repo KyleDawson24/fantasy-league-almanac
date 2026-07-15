@@ -855,19 +855,42 @@ def get_cbs_records_data():
     # ---- Franchise Hall of Fame (Kyle 2026-07-14): top 25 (player × franchise)
     # career ACTIVE points -- a player's run WITH one team, not his whole career.
     # Keyed by abbrev (re-registrations combine); the #### holding pen excluded.
+    # Slash | Stat Line for a player's run with a franchise (Kyle 2026-07-15):
+    # discipline picks hitting (AVG/OBP/SLG) vs pitching (ERA/WHIP) slash, then
+    # the marquee counting line -- both through the same ESPN helpers the rate
+    # records use, so it reads identically.
+    _HOF_LINE_COLS = ['h', 'ab', 'b_bb', 'hbp', 'sf', 'tb', '2b', '3b', 'hr',
+                      'r', 'rbi', 'sb', 'outs', 'er', 'p_h', 'p_bb', 'k',
+                      'w', 'sv', 'hld', 'qs', 'cg']
+
+    def _hof_line(agg):
+        pitcher = _rec_fnum(agg.get('outs')) > _rec_fnum(agg.get('ab'))
+        if pitcher:
+            slash = ' / '.join(d for d in (_rate_num_disp(agg, 'ERA')[1],
+                                           _rate_num_disp(agg, 'WHIP')[1]) if d)
+        else:
+            trip = [_rate_num_disp(agg, k)[1] for k in ('AVG', 'OBP', 'SLG')]
+            slash = '/'.join(trip) if trip[0] else ''
+        statvals = {s: _rec_fnum(agg.get(s.lower(), 0.0)) for s in _STAT_LINE_ORDER}
+        return ' | '.join(p for p in (slash, _player_line(statvals)) if p)
+
     hof = {}
     for r in player_team_season:
         ab = r.get('_abbrev')
         if not ab or ab == '####':
             continue
         e = hof.setdefault((r['player_key'], ab),
-                           {'abbrev': ab, 'pts': 0.0, 'seasons': set(), 'pk': r['player_key']})
+                           {'abbrev': ab, 'pts': 0.0, 'seasons': set(),
+                            'pk': r['player_key'], 'agg': {}})
         e['pts'] += _rec_fnum(r.get('calculated_points'))
         e['seasons'].add(int(r['season_year']))
+        for c in _HOF_LINE_COLS:
+            e['agg'][c] = e['agg'].get(c, 0.0) + _rec_fnum(r.get(c))
     for e in hof.values():
         nm = pname.get(e['pk'], (None, None))
         e['display_name'], e['player_name'] = nm[0], nm[1]
         e['span'] = _years_of_service(e['seasons'])   # stint list, not a flat span
+        e['statline'] = _hof_line(e['agg'])
     data['_hof'] = sorted(hof.values(), key=lambda e: -e['pts'])[:25]
 
     # ---- Lineup Slot Records (Kyle 2026-07-14): left = best player-SEASON by
@@ -1026,8 +1049,13 @@ def get_cbs_records_data():
     for pk, e in hos.items():
         total = total_by_pk.get(pk, e['act'] + e['inact'])
         unrostered = max(0.0, total - e['act'] - e['inact'])
-        wasted = unrostered + e['inact']   # inactive = unrostered OR benched
-        if wasted <= 0:
+        benched = e['inact']               # rostered but sat -- the ranking metric
+        wasted = unrostered + benched      # inactive = unrostered OR benched
+        # Ranked by BENCHED, not total wasted (Kyle 2026-07-15): total wasted is
+        # dominated by wire-fodder middle relievers (all unrostered); benched --
+        # a stud a team HELD and sat -- is the more telling shame now the data's
+        # clean. A player never benched isn't a benching story.
+        if benched <= 0:
             continue
         shame = ''
         if e['bench_by']:
@@ -1038,12 +1066,12 @@ def get_cbs_records_data():
         nm = pname.get(pk, (None, None))
         hos_list.append({
             'display_name': nm[0] or e['name'], 'player_name': nm[1],
-            'shame': shame, 'wasted': wasted,
+            'shame': shame, 'benched': benched, 'wasted': wasted,
             'details': (f"{int(round(unrostered)):,} unrostered · "
-                        f"{int(round(e['inact'])):,} benched · "
+                        f"{int(round(benched)):,} benched · "
                         f"{int(round(e['act'])):,} active · "
                         f"{pct:.0f}% of career unused")})
-    data['_hos'] = sorted(hos_list, key=lambda e: -e['wasted'])[:25]
+    data['_hos'] = sorted(hos_list, key=lambda e: -e['benched'])[:25]
     return data
 
 
@@ -2137,29 +2165,29 @@ def build_records_rows(context, catalog, data):
                                        'backgroundColor': _POWDER}})
         rows.append(['Franchise Hall of Fame — top 25 careers with one franchise',
                      '', '', '', '', '', '',
-                     'Wasted Hall of Shame — top 25 by career wasted points'])
+                     'Wasted Hall of Shame — top 25 by career benched points'])
         _wide_band()
         # HoS carries NO rank column (Kyle): dropping it lands the four HoS
         # columns on the Records All-Time shape -- Player H(150) / Benched Most
         # By I(125) / Wasted Points J / Breakdown K(400) -- so the breakdown
         # sits in the wide managed Details column instead of straggling past
         # _REC_LAST_COL in L (where it read as "missing").
-        rows.append(['Rank', 'Player', 'Franchise', 'Active Points', 'Years of Service',
-                     '', '',
-                     'Player', 'Benched Most By', 'Wasted Points', 'Breakdown'])
+        rows.append(['Rank', 'Player', 'Franchise', 'Active Points',
+                     'Years of Service', 'Slash | Stat Line', '',
+                     'Player', 'Benched Most By', 'Benched Points', 'Breakdown'])
         _wide_band()
         for i in range(max(len(hof), len(hos))):
-            left = ['', '', '', '', '']
+            left = ['', '', '', '', '', '']
             if i < len(hof):
                 e = hof[i]
                 left = [i + 1, _bref_player_cell(e), e.get('abbrev', ''),
-                        _pts(e.get('pts')), e.get('span', '')]
+                        _pts(e.get('pts')), e.get('span', ''), e.get('statline', '')]
             right = ['', '', '', '']
             if i < len(hos):
                 e = hos[i]
                 right = [_bref_player_cell(e), e.get('shame', ''),
-                         _pts(e.get('wasted')), e.get('details', '')]
-            rows.append(left + ['', ''] + right)
+                         _pts(e.get('benched')), e.get('details', '')]
+            rows.append(left + [''] + right)
         rows.append([])
 
     return rows, formats

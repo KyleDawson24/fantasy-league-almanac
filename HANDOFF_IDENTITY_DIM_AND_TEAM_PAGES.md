@@ -23,6 +23,45 @@ compressed form and loads automatically.
 
 ---
 
+## 0b. Update — 2026-07-15 (what landed AFTER this doc was written)
+
+The gate and the whole queued records batch below have since shipped; §3/§6.1/
+§6.2 are historical now. Current tip `eac15aa` on `claude/modest-montalcini-3af8c4`.
+Detail lives in `WALKBACK_PROGRESS.md` + the commits; this is the delta.
+
+- **MLB-81 identity dim — CLEARED** (see `project_cbs_identity_gate` memory).
+  Unblocked the HoS render.
+- **Records polish batch (`5d700df..eac15aa`)** — all on the CBS dev sheet:
+  - **Wasted Hall of Shame** rendered, split **Pitchers | Hitters**, ranked by
+    **true wasted** (unrostered + benched), breakdown cells 8pt centered. Sits
+    directly right of the Franchise Hall of Fame (buffer col G) at cols **H–K**
+    (pitchers) / **L–O** (hitters).
+  - **Lineup Slot Records** reworked to **actual lineup slot**: pitcher slots
+    span all years; hitter slots are **2026-only** (2001–25 logged "active", not
+    the slot — honor the zero-out). U ranks on its own actual 'U' slot, not the
+    sum of all hitter positions.
+  - **Player all-time records**: Owner column = the franchises the player earned
+    with (named, comma-joined), numbers stripped. **All-Time Team Total**
+    records rank by **completed-season average**.
+  - **HoF line (col F)**: header "Slash | Stat Line (While Active for Listed
+    Team)"; **Years of Service (col E) = season count**, centered; pitchers show
+    **W-L + labeled ERA/WHIP** (`56W - 31L / 3.19 ERA / 1.20 WHIP`); both
+    disciplines use a `||` separator between rate and counting lines.
+- **Dynamic team-page hyperlinks (this batch)** — every **standalone**
+  active-franchise abbrev cell on the Records page (HoF franchise col,
+  leaderboard team cols, HoS "benched most by") links to that franchise's
+  team-page tab. Links resolve from live tab **gids at write time**
+  (`write_cbs_almanac`, after pass-1), so they survive franchise churn / other
+  leagues; **multi-team lists and defunct abbrevs stay plain text**.
+  `build_all_tabs` now returns **`(tabs, link_map)`** — both callers updated.
+  Verified 102 `#gid=` links on the dev Records tab.
+- **Still open**: **team-pages column-exact 1:1** (§6.3) is the remaining
+  render sprint, and franchise **continuity entity-scoping / records career
+  rollup** is deferred to a dedicated session (see
+  `project_cbs_continuity_mlb64` memory). ESPN goldens held throughout.
+
+---
+
 ## 1. Where to work (mechanics)
 
 - **Worktree:** `C:\Users\kyled\projects\espn-league-manager\.claude\worktrees\modest-montalcini-3af8c4`

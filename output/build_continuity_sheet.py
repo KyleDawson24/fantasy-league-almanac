@@ -192,6 +192,29 @@ def _name_story(seasons_for_id):
             for nm, a, b in story]
 
 
+def _norm_owner(o):
+    """Tidy a parsed owner name: collapse whitespace, and title-case only the
+    all-caps / all-lower ones ('JACK KLINE', 'matt pulse') so mixed-case names
+    that are already right ('McNeal', \"Delgado\", 'L.J.') are left alone."""
+    o = ' '.join((o or '').split())
+    return o.title() if (o.isupper() or o.islower()) else o
+
+
+def _split_owners(s):
+    """Co-owned teams store 'A and B' / 'A & B' / 'A, B' in one owner_name
+    cell -- and the tag-stripped source sometimes glues it ('Barry Sextonand
+    Sandy'). Split on all those, incl. the glued 'and' after a lowercase."""
+    parts = re.split(r'\s*,\s*|\s*&\s*|\s+and\s+|(?<=[a-z])and\s+', s or '')
+    return [_norm_owner(p) for p in parts if p and p.strip()]
+
+
+def _surname(name):
+    """Last alphabetic token, lowercased -- the stable key for matching an
+    owner across name drift (Dave/Desmond Foster, Rich/Rexford Landon)."""
+    toks = [t for t in re.sub(r"[^A-Za-z ]", ' ', name).split() if len(t) > 1]
+    return toks[-1].lower() if toks else name.lower()
+
+
 def extract_cbs(league_key, league_name):
     """Return (teams, owners, bridge) as lists of dict rows, platform-agnostic
     in column shape."""
@@ -222,6 +245,31 @@ def extract_cbs(league_key, league_name):
         ys = [y for y, _, _ in by_id[fid]]
         return min(ys), max(ys)
 
+    # ---- observed owners per season -------------------------------------
+    # stg_cbs__ui_rosters.owner_name is the owner off the year-end roster
+    # report header (populated 2007+; blank 2003-06). cbs_ui_parse.py already
+    # extracts it -- nothing downstream consumed it until this. This is the
+    # real "who owned what when", so most of the bridge is OBSERVED, not
+    # guessed; and shared owners across an id break confirm continuity.
+    owner_by = {}   # (year, fid) -> [cleaned owner display names]
+    for r in _q(f"""select distinct season_year, franchise_id, owner_name
+                    from stg_cbs__ui_rosters
+                    where league_key = '{league_key}'
+                      and owner_name is not null and owner_name <> ''"""):
+        owner_by[(int(r['season_year']), str(r['franchise_id']))] = \
+            _split_owners(r['owner_name'])
+    cur_year = max((y for y, _, _ in seasons), default=None)
+    owner_surnames = {}   # fid -> {surname}
+    owner_disp = {}       # fid -> {surname: a display name}
+    for (yy, ff), ns in owner_by.items():
+        for n in ns:
+            sn = _surname(n)
+            owner_surnames.setdefault(ff, set()).add(sn)
+            owner_disp.setdefault(ff, {}).setdefault(sn, n)
+
+    def _owner_link(a, b):
+        return owner_surnames.get(a, set()) & owner_surnames.get(b, set())
+
     # ---- continuity hints + unambiguous-remint suggestions ----
     def norm(s):
         return ''.join(c for c in (s or '').lower() if c.isalnum())
@@ -242,14 +290,16 @@ def extract_cbs(league_key, league_name):
                     partners[fid].add(other)
         partners[fid].discard(fid)
 
-    # a remint suggestion is safe only when the EARLIER id is claimed by
-    # exactly one later id (no fork) and the gap is <=1 season (sat-out).
+    # A later id "claims" an earlier disjoint partner when the sat-out gap is
+    # small (<=1) OR they share an owner (surname) -- owner continuity is the
+    # strong signal. An earlier id claimed by TWO later ids is a co-owner
+    # split (a fork), not a clean lineage: suggest nothing, flag it.
     claims = {}   # earlier_id -> set(later_ids) that would link to it
     for fid in by_id:
         y0, _ = span(fid)
         for p in partners[fid]:
-            py0, py1 = span(p)
-            if py1 < y0 and (y0 - py1 - 1) <= 1:
+            _, py1 = span(p)
+            if py1 < y0 and ((y0 - py1 - 1) <= 1 or _owner_link(fid, p)):
                 claims.setdefault(p, set()).add(fid)
 
     def hint_and_suggest(fid):
@@ -257,23 +307,33 @@ def extract_cbs(league_key, league_name):
         msgs, suggest = [], ''
         for p in sorted(partners[fid], key=int):
             py0, py1 = span(p)
-            if py1 < y0:
+            shared = _owner_link(fid, p)
+            who = ', '.join(sorted(owner_disp.get(p, {}).get(s)
+                                   or owner_disp.get(fid, {}).get(s) or s
+                                   for s in shared))
+            if py1 < y0:                                   # earlier, disjoint
                 gap = y0 - py1 - 1
-                rel = (f"ended {py1}, {gap or 'no'}-yr gap -> "
-                       + ("likely continuation" if gap <= 1
-                          else "possible revival, confirm"))
-                if gap <= 1 and len(claims.get(p, ())) == 1 \
-                        and len(claims.get(p, ())) and fid in claims[p] \
-                        and not any(fid in claims.get(q, ()) and q != p
-                                    for q in partners[fid]):
-                    # earlier id p is claimed only by this id -> safe anchor
-                    if len(claims[p]) == 1:
-                        suggest = p
-            elif py0 > y1:
+                fork = len(claims.get(p, ())) > 1
+                if fork and shared:
+                    rel = (f"co-owned id {p} split in {y0} into "
+                           + "+".join(map(str, sorted(claims[p], key=int)))
+                           + f" (shared owner {who}) -> partial continuation, "
+                           "confirm")
+                elif shared:
+                    rel = f"SAME owner ({who}) -> almost certainly one franchise"
+                elif gap <= 1:
+                    rel = f"ended {py1}, {gap or 'no'}-yr gap -> likely continuation"
+                else:
+                    rel = f"ended {py1}, {gap}-yr gap -> possible revival, confirm"
+                if not fork and claims.get(p) == {fid}:
+                    suggest = p
+            elif py0 > y1:                                 # a newer id
                 rel = f"began {py0} after this ended {y1} -> newer id"
-            else:
+            else:                                          # overlap in time
                 rel = f"OVERLAPS ({py0}-{py1}) -> coexisted, likely DISTINCT"
-            msgs.append(f"id {p} ({py0}-{py1}) shares name/abbrev; {rel}")
+                if shared:
+                    rel += f" (owner {who} on both -- confirm)"
+            msgs.append(f"id {p} ({py0}-{py1}); {rel}")
         return " | ".join(msgs), suggest
 
     teams = []
@@ -291,32 +351,53 @@ def extract_cbs(league_key, league_name):
             '_latest': latest_name,
         })
 
-    # ---- owners ----
-    owner_franch = {}
+    # ---- owners: current-era slugs + everyone ever seen on the pages -----
+    def _slug(name):
+        return 'cbs-' + re.sub(r'[^a-z0-9]+', '-', name.lower()).strip('-')
+    cur_disp_to_id = {disp(oid).lower(): oid for oids in owner_map.values()
+                      for oid in oids}
+    id_name = {}   # owner_id -> display name
+    seen_on = {}   # owner_id -> {(fid, year_or_'current')}
     for fid, oids in owner_map.items():
         for oid in oids:
-            owner_franch.setdefault(oid, set()).add(fid)
+            id_name[oid] = disp(oid)
+            seen_on.setdefault(oid, set()).add((fid, 'current'))
+    for (yy, ff), ns in owner_by.items():
+        for n in ns:                        # reuse a curated slug on exact match
+            oid = cur_disp_to_id.get(n.lower()) or _slug(n)
+            id_name.setdefault(oid, n)
+            seen_on.setdefault(oid, set()).add((ff, yy))
     owners = []
-    for oid in sorted(owner_franch, key=lambda o: disp(o).lower()):
-        seen = ", ".join(f"id {f} (current)" for f in sorted(owner_franch[oid],
-                                                             key=int))
+    for oid in sorted(id_name, key=lambda o: id_name[o].lower()):
+        by_f = {}
+        for f, y in seen_on.get(oid, ()):
+            by_f.setdefault(f, []).append(y)
+        bits = []
+        for f in sorted(by_f, key=int):
+            ys = sorted(y for y in by_f[f] if y != 'current')
+            bits.append(f"id {f} ({ys[0]}-{ys[-1]})" if ys and ys[0] != ys[-1]
+                        else f"id {f} ({ys[0]})" if ys else f"id {f} (current)")
         owners.append({
             'Platform': 'CBS', 'League': league_name, 'Owner ID': oid,
-            'Name Seen': disp(oid), 'Seen On': seen,
+            'Name Seen': id_name[oid], 'Seen On': ", ".join(bits),
             'Same As (Canonical)': '', 'Preferred Name': '', 'Note': '',
         })
 
     # ---- bridge ----
-    # "Owner(s) today" is lever (1): today's owner shown as a read-only HINT
-    # (not asserted as historical truth). The historian enters the actual
-    # owners into the Owner 1/2/3 dropdowns; blank there = accept the hint.
+    # "Owner(s) on record" is the year-end roster header owner (OBSERVED,
+    # 2007+); the live season falls back to the curated current owner; pre-2007
+    # is blank. The historian only fills Owner 1/2/3 for the blanks / a fix.
     bridge = []
     for fid in sorted(by_id, key=int):
-        today = ", ".join(disp(o) for o in owner_map.get(fid, []))
+        cur = [disp(o) for o in owner_map.get(fid, [])]
         for y, _, nm in by_id[fid]:
+            rec = owner_by.get((y, fid))
+            if rec is None and y == cur_year:
+                rec = cur
             bridge.append({
                 'Platform': 'CBS', 'League': league_name, 'Year': y,
-                'Team ID': fid, 'Team Name': nm, 'Owner(s) today': today,
+                'Team ID': fid, 'Team Name': nm,
+                'Owner(s) on record': "; ".join(rec or []),
                 'Owner 1': '', 'Owner 2': '', 'Owner 3': '', 'Note': '',
             })
     return teams, owners, bridge
@@ -357,16 +438,16 @@ _TABS = {
         'dropdown': {'Same As (Canonical)': 'Owners_ids'},
     },
     'Team-Owner by Year': {
-        'purpose': ("One row per team per year. 'Owner(s) today' is a read-only "
-                    "hint. Enter who ACTUALLY owned the team that year in the "
-                    "Owner 1/2/3 dropdowns (co-owners across the columns); blank "
-                    "= accept the hint / unknown. The team name jogs the memory."),
+        'purpose': ("One row per team per year. 'Owner(s) on record' is the "
+                    "OWNER OFF THE YEAR-END ROSTER PAGE (2007+, blank before "
+                    "that). Only fill Owner 1/2/3 to fix a wrong one or fill a "
+                    "pre-2007 blank; leave blank to accept the record."),
         'cols': ['Platform', 'League', 'Year', 'Team ID', 'Team Name',
-                 'Owner(s) today', 'Owner 1', 'Owner 2', 'Owner 3', 'Note'],
+                 'Owner(s) on record', 'Owner 1', 'Owner 2', 'Owner 3', 'Note'],
         'grey': ['Platform', 'League', 'Year', 'Team ID', 'Team Name',
-                 'Owner(s) today'],
-        'widths': {'Team Name': 210, 'Owner(s) today': 150, 'Owner 1': 150,
-                   'Owner 2': 150, 'Owner 3': 150, 'Note': 180},
+                 'Owner(s) on record'],
+        'widths': {'Team Name': 210, 'Owner(s) on record': 190, 'Owner 1': 150,
+                   'Owner 2': 150, 'Owner 3': 150, 'Note': 170},
         'dropdown': {'Owner 1': 'Owners_names', 'Owner 2': 'Owners_names',
                      'Owner 3': 'Owners_names'},
     },
@@ -405,10 +486,11 @@ _READ_ME = [
      "As' on the duplicate. 'Preferred Name' overrides how the name shows."],
     [""],
     ["Tab \"Team-Owner by Year\" -- who owned each team each year:"],
-    ["   * 'Owner(s) today' is just a hint (today's owner). In Owner 1/2/3, "
-     "enter who ACTUALLY owned the team that year -- one name per column for "
-     "co-owned teams. Leave blank to accept the hint. The team's name that "
-     "year is shown to jog your memory."],
+    ["   * 'Owner(s) on record' is already filled from the year-end roster "
+     "pages (2007 onward) -- so most of this tab is DONE. It's blank only "
+     "before 2007. Fill Owner 1/2/3 just to correct a wrong one or fill an "
+     "early blank; one name per column for co-owned teams. The team's name "
+     "that year is shown to jog your memory."],
     [""],
     ["Yellow cells are DROPDOWNS -- click the little arrow and pick a name/ID "
      "from the list. If who you need isn't there yet (an owner from the early "

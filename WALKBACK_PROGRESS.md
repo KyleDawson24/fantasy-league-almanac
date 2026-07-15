@@ -13,6 +13,24 @@
       (his Drive, his to share with the FIL). Four tabs: READ ME FIRST · Teams
       (34) · Owners (19) · Team-Owner by Year (411). Grey = read-only evidence
       (warning-only protected), yellow = fill/ignore.
+- **Owner history from the roster pages (Kyle, 2026-07-15):** the year-end
+      roster report header carries the owner (`Team Name - Owner`), and
+      `cbs_ui_parse.py` **already extracts it** into
+      `stg_cbs__ui_rosters.owner_name` (populated 2007+, blank 2003-06) —
+      nothing downstream consumed it. So the "sweep" is a warehouse query, not
+      an HTML scrape. Wired into the generator: (1) bridge **"Owner(s) on
+      record"** is now OBSERVED for 2007+ — 316/411 rows (76%) pre-filled, so
+      the historian only fills pre-2007; (2) the **Owners tab grew 19 → 49**
+      (all-time, co-owners split, casing normalized via `_split_owners`/
+      `_norm_owner`); (3) **owner continuity now drives the hints** (surname
+      match): 30→13 (Fulton), 28→22 (Kline), 23→11 (Savage/Colton/Landon revival)
+      auto-suggest; **id 26 resolved as a co-owner SPLIT** — Kendrick→31,
+      Keating→32 (both partial continuations, not one lineage); 14/17 stay
+      distinct (shared owner Osborn noted). Also nailed the ticket's mystery:
+      **2020 id 1 = Julian D. Sherman + Preston Larkin** ("Ashen Tyrants").
+      *Warehouse-side follow-on (MLB-64 ingestion):* `dim_owner`/
+      `dim_team_owner` should consume `owner_name` for per-season history — now
+      trivial (the data's already in staging), no re-extraction.
 - **Robustness follow-ups (Kyle caught both):** (a) **live season included** —
       `stg_cbs__ui_standings` stops at the last completed year, so 2026 is
       unioned from `stg_cbs__rosters` (latest captured name/team); without it a

@@ -676,6 +676,22 @@ def get_cbs_records_data():
                 best = (eid, a)
         return best
 
+    def _best_career_avg(acc, stat):
+        """All-Time TEAM records ranked by COMPLETED-SEASON AVERAGE (Kyle
+        2026-07-15), not raw total -- the total just tallies who's been in the
+        league longest. avg = total / seasons played, the current season riding
+        in as a rolling partial; min 1 completed (closed) season to qualify.
+        (acc is already abbrev-keyed to active franchises.)"""
+        best, best_avg = None, 0.0
+        for eid, a in acc.items():
+            if not (a['seasons'] & _closed):        # need >=1 completed season
+                continue
+            n = len(a['seasons'])
+            avg = a.get(stat, 0.0) / n if n else 0.0
+            if avg > 0 and (best is None or avg > best_avg):
+                best, best_avg = (eid, a), avg
+        return best
+
     # Negative Records (Kyle 2026-07-13): the futility mirror of the best
     # block -- the fewest points in a completed full season. Team grain only
     # (a career SUM just measures longevity), over the gated season set built
@@ -732,7 +748,11 @@ def get_cbs_records_data():
         if rest:
             rem = sum(v for _, v in rest)
             parts.append(f'{_spell(len(rest))} other teams: {_rec_value(stat, rem)}')
-        return ', '.join(parts)
+        # Owner (Kyle 2026-07-15): the NAMED franchises comma-joined WITHOUT the
+        # numbers -- mirrors Details and fills the otherwise-blank player-record
+        # Owner cell (Verlander -> 'FLV, JUNK, KCM').
+        owner = ', '.join(ab for ab, _ in head)
+        return ', '.join(parts), owner
 
     def _season_statvals(row):
         return {s: _rec_fnum(row.get(s.lower())) for s in stat_names}
@@ -752,11 +772,17 @@ def get_cbs_records_data():
 
     def _team_career_side(entry, stat, col):
         ab, a = entry   # career is abbrev-keyed (active franchises only)
+        n = len(a['seasons'])
+        avg = a.get(stat, 0.0) / n if n else 0.0   # completed-season average
         return {
             'holder': ab, 'owner': owner_by_abbrev.get(ab, ''),
-            'value': a.get(stat, 0.0), 'period': _span_from_years(a['seasons']),
+            'value': avg,
+            # Averages want a decimal; _rec_value would round to whole. OUTS
+            # renders as its IP average.
+            'value_disp': fmt_ip(avg) if stat == 'OUTS' else f'{avg:,.1f}',
+            'period': _span_from_years(a['seasons']),
             'last_season': max(a['seasons']),
-            'details': _contribs(
+            'details': _contribs(   # Details stay TOTALS, not averages (Kyle)
                 [r for r in player_team_season if r.get('_abbrev') == ab], col),
         }
 
@@ -778,20 +804,22 @@ def get_cbs_records_data():
                 'year': _fid(bps.get('season_year')),
                 'details': _player_line(_season_statvals(bps)),
             }
-        # career-scope leaders
-        btc = _best_career(team_career, stat)
+        # career-scope leaders. TEAM = completed-season AVERAGE (Kyle); PLAYER
+        # stays a raw career total.
+        btc = _best_career_avg(team_career, stat)
         bpc = _best_career(player_career, stat)
         career_team = _team_career_side(btc, stat, col) if btc else None
         career_player = None
         if bpc:
             pk, a = bpc
             nm = pname.get(pk, (None, None))
+            _det, _own = _player_team_list(pk, stat, col)
             career_player = {
                 'display_name': nm[0], 'player_name': nm[1],
-                'value': a.get(stat, 0.0), 'owner': '',
+                'value': a.get(stat, 0.0), 'owner': _own,
                 'period': _span_from_years(a['seasons']),
                 'last_season': max(a['seasons']),
-                'details': _player_team_list(pk, stat, col),
+                'details': _det,
             }
         # worst-scope leader (Negative Records; single SEASON, roster-complete
         # post-coin-flip only). Career-worst is intentionally omitted.
@@ -1996,7 +2024,7 @@ def _rec_side(cell, stat, player=False, with_period=True):
     if cell.get('is_rate'):
         value, details = cell.get('value', ''), cell.get('details', '')
     else:
-        value = _rec_value(stat, cell.get('value'))
+        value = cell.get('value_disp') or _rec_value(stat, cell.get('value'))
         details = (cell.get('details') or '') if player else \
             _contributor_detail(stat, cell.get('details'))
     # with_period=False drops the span cell -- the All-Time side has no 'Yrs'
@@ -2033,8 +2061,10 @@ def build_records_rows(context, catalog, data):
          f'didn\'t happen for the league ({era}). Auto-cataloged from the '
          f'categories this league scores plus tracked counting stats. '
          f'"Season" = best single season all-time; "All-Time Total" = best '
-         f'career accumulation. Owner is the holding franchise\'s '
-         f'current owner (true owner-by-era arrives with the ownership re-key).'],
+         f'career (players: total; teams: completed-season AVERAGE, active '
+         f'franchises, min 1 completed season). Owner shows a team record\'s '
+         f'franchise owner and, for player records, the franchises they earned '
+         f'it with.'],
         [],
     ]
     formats = [

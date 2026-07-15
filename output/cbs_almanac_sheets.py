@@ -1064,6 +1064,14 @@ def get_cbs_records_data():
         WHERE {league_predicate()} AND stat_name = 'CALCULATED_POINTS'
         GROUP BY cbs_player_id
     """)}
+    # Discipline split (Kyle 2026-07-15): the shame list runs Pitchers | Hitters
+    # side by side. A player is a pitcher if his career pitching production
+    # outweighs his hitting (two-way 900/901 pseudo-ids fall out cleanly).
+    disc_pit = {r['player_key'] for r in query_snowflake(f"""
+        SELECT player_key FROM fct_player_daily_performance
+        WHERE {league_predicate()}
+        GROUP BY player_key
+        HAVING SUM(total_pitching_stat_pts) > SUM(total_hitting_stat_pts)""")}
     hos = {}
     for r in hos_rows:
         ab = _abbrev_of.get(_fid(r.get('team_id')))
@@ -1077,13 +1085,12 @@ def get_cbs_records_data():
     for pk, e in hos.items():
         total = total_by_pk.get(pk, e['act'] + e['inact'])
         unrostered = max(0.0, total - e['act'] - e['inact'])
-        benched = e['inact']               # rostered but sat -- the ranking metric
-        wasted = unrostered + benched      # inactive = unrostered OR benched
-        # Ranked by BENCHED, not total wasted (Kyle 2026-07-15): total wasted is
-        # dominated by wire-fodder middle relievers (all unrostered); benched --
-        # a stud a team HELD and sat -- is the more telling shame now the data's
-        # clean. A player never benched isn't a benching story.
-        if benched <= 0:
+        benched = e['inact']
+        # Back to TRUE wasted (Kyle 2026-07-15): unrostered (on the wire) OR
+        # benched. Ranking by benched alone just surfaced start-limited SPs;
+        # wasted is the honest futility measure.
+        wasted = unrostered + benched
+        if wasted <= 0:
             continue
         shame = ''
         if e['bench_by']:
@@ -1094,12 +1101,16 @@ def get_cbs_records_data():
         nm = pname.get(pk, (None, None))
         hos_list.append({
             'display_name': nm[0] or e['name'], 'player_name': nm[1],
-            'shame': shame, 'benched': benched, 'wasted': wasted,
+            'is_pitcher': pk in disc_pit, 'shame': shame, 'wasted': wasted,
             'details': (f"{int(round(unrostered)):,} unrostered · "
                         f"{int(round(benched)):,} benched · "
                         f"{int(round(e['act'])):,} active · "
                         f"{pct:.0f}% of career unused")})
-    data['_hos'] = sorted(hos_list, key=lambda e: -e['benched'])[:25]
+    hos_list.sort(key=lambda e: -e['wasted'])
+    data['_hos'] = {   # Pitchers | Hitters, each top 25 by wasted
+        'pitchers': [e for e in hos_list if e['is_pitcher']][:25],
+        'hitters': [e for e in hos_list if not e['is_pitcher']][:25],
+    }
     return data
 
 
@@ -2182,42 +2193,53 @@ def build_records_rows(context, catalog, data):
     # ESPN records page, which has no futility block. The worst-* data is still
     # computed upstream (harmless, unused) so re-adding is render-only.
 
-    # ---- Franchise Hall of Fame (left) | Wasted Hall of Shame (right), side by
-    # side with the Shame aligned to the All-Time block (Kyle 2026-07-14). Both
-    # are 25-deep player lists; HoF = career active pts with one franchise, HoS
-    # = career WASTED (unrostered + benched) pts.
+    # ---- Franchise Hall of Fame (A-F) | buffer G | Wasted Hall of Shame,
+    # split Pitchers (H-K) + Hitters (L-O), side by side (Kyle 2026-07-15). HoF
+    # = career active pts with one franchise; HoS = career WASTED (unrostered +
+    # benched), by discipline, each 25 deep. Breakdowns at K & O.
     hof = data.get('_hof') or []
-    hos = data.get('_hos') or []
-    if hof or hos:
+    hos = data.get('_hos') or {}
+    hos_pit = hos.get('pitchers') or []
+    hos_hit = hos.get('hitters') or []
+    n = max(len(hof), len(hos_pit), len(hos_hit))
+    if n:
         def _wide_band():
-            formats.append({'range': f'A{len(rows)}:{_REC_LAST_COL}{len(rows)}',
+            formats.append({'range': f'A{len(rows)}:O{len(rows)}',
                             'format': {'textFormat': {'bold': True},
                                        'backgroundColor': _POWDER}})
         rows.append(['Franchise Hall of Fame — top 25 careers with one franchise',
                      '', '', '', '', '', '',
-                     'Wasted Hall of Shame — top 25 by career benched points'])
+                     'Wasted Hall of Shame — top 25 by career wasted points '
+                     '(unrostered + benched)'])
         _wide_band()
-        # HoS carries NO rank column (Kyle): dropping it lands the four HoS
-        # columns on the Records All-Time shape -- Player H(150) / Benched Most
-        # By I(125) / Wasted Points J / Breakdown K(400) -- so the breakdown
-        # sits in the wide managed Details column instead of straggling past
-        # _REC_LAST_COL in L (where it read as "missing").
         rows.append(['Rank', 'Player', 'Franchise', 'Active Points',
                      'Years of Service', 'Slash | Stat Line', '',
-                     'Player', 'Benched Most By', 'Benched Points', 'Breakdown'])
+                     'Pitchers', 'Benched Most By', 'Wasted Points', 'Breakdown',
+                     'Hitters', 'Benched Most By', 'Wasted Points', 'Breakdown'])
         _wide_band()
-        for i in range(max(len(hof), len(hos))):
-            left = ['', '', '', '', '', '']
+        first_data = len(rows) + 1
+        for i in range(n):
+            hf = ['', '', '', '', '', '']
             if i < len(hof):
                 e = hof[i]
-                left = [i + 1, _bref_player_cell(e), e.get('abbrev', ''),
-                        _pts(e.get('pts')), e.get('span', ''), e.get('statline', '')]
-            right = ['', '', '', '']
-            if i < len(hos):
-                e = hos[i]
-                right = [_bref_player_cell(e), e.get('shame', ''),
-                         _pts(e.get('benched')), e.get('details', '')]
-            rows.append(left + [''] + right)
+                hf = [i + 1, _bref_player_cell(e), e.get('abbrev', ''),
+                      _pts(e.get('pts')), e.get('span', ''), e.get('statline', '')]
+            pit = ['', '', '', '']
+            if i < len(hos_pit):
+                e = hos_pit[i]
+                pit = [_bref_player_cell(e), e.get('shame', ''),
+                       _pts(e.get('wasted')), e.get('details', '')]
+            hit = ['', '', '', '']
+            if i < len(hos_hit):
+                e = hos_hit[i]
+                hit = [_bref_player_cell(e), e.get('shame', ''),
+                       _pts(e.get('wasted')), e.get('details', '')]
+            rows.append(hf + [''] + pit + hit)
+        # Breakdown cells (K = pitchers, O = hitters): centered, 8pt.
+        for col in ('K', 'O'):
+            formats.append({'range': f'{col}{first_data}:{col}{len(rows)}',
+                            'format': {'horizontalAlignment': 'CENTER',
+                                       'textFormat': {'fontSize': 8}}})
         rows.append([])
 
     return rows, formats
@@ -2669,7 +2691,9 @@ _HOME_WIDTHS = [(0, 1, 100), (1, 2, 125), (2, 3, 100), (3, 4, 50),
 # (Kyle 2026-07-14), so the second Details is now col K (index 10).
 _RECORDS_WIDTHS = [(0, 1, 175), (1, 2, 150), (2, 3, 125),
                    (5, 6, 400), (6, 7, 25),
-                   (7, 8, 150), (8, 9, 125), (10, 11, 400)]
+                   (7, 8, 150), (8, 9, 125), (9, 10, 50), (10, 11, 400),
+                   # Wasted HoS Hitters block L-O (Kyle 2026-07-15).
+                   (11, 12, 150), (12, 13, 125), (13, 14, 50), (14, 15, 400)]
 _STANDINGS_WIDTHS = [(0, 1, 190), (1, 2, 60)]
 _TEAM_WIDTHS = [(0, 1, 55), (1, 2, 170), (2, 7, 62), (7, 12, 46), (12, 13, 30),
                 (13, 14, 55), (14, 15, 170), (15, 16, 62), (16, 21, 62),

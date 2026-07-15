@@ -1,5 +1,43 @@
 # MLB-63 Walk-Back + Almanac v2 — Live Progress Log
 
+## MLB-64 CONTINUITY MAPPING SHEET (2026-07-14)
+
+- [x] **`output/build_continuity_sheet.py`** — a platform-agnostic generator
+      for a hand-to-a-human franchise/owner **override sheet**. Non-technical
+      fill-or-ignore; blank always = "observed value is correct". CLI:
+      `--league <key> [--sheet-id <id|url> | --preview-dir <dir>]`
+      (preview never touches Sheets). Reuses the almanac writers' cached OAuth
+      token (spreadsheets scope — can't mint a sheet, so the target must
+      pre-exist and be user-owned).
+- [x] **Rendered to Kyle's sheet** `1fMCSSRvpE-2HwEOf3OuSPsvsbootWq1bWI-2zVvLx94`
+      (his Drive, his to share with the FIL). Four tabs: READ ME FIRST · Teams
+      (34) · Owners (19) · Team-Owner by Year (395). Grey = read-only evidence
+      (warning-only protected), yellow = fill/ignore.
+- **Design (Kyle-approved):** `Same As (Canonical)` resolves downstream as
+      `COALESCE(same_as, league_key || '::' || id)` — blank auto-namespaces
+      (every league's "1" stays distinct), an earlier id merges within a league
+      (earliest = anchor), a **shared free-text label stitches across
+      leagues/platforms** (the ESPN→CBS migration superpower, MLB-8-adjacent).
+      Teams.`Same As` pre-filled ONLY for unambiguous remints (30→13, 28→22 —
+      the sat-out-2020 pattern); overlaps (14/17) and forks (26→31/32) left
+      blank with hints. Findings surfaced: id 1 present in 2020 as "Angry
+      Tyrants" (contradicts the ticket's "id 1 absent 2020").
+- **Tab-3 autofill levers** (Kyle's question — how much of the bridge fills
+      itself): (1) DONE — today's owner propagated across each active
+      franchise's span (the "assumed" column). (2) TODO — once Teams links a
+      retired id to an active one, back-propagate that owner. (3) THE unlock —
+      parse year-end roster-title owners (2008+) for real per-season custody;
+      shrinks the manual residue to pre-2008.
+- **Next (the ingestion side, separate from the FIL sheet):** a `dim_franchise`
+      resolver applying the filled seed (`COALESCE` rule above) + growing
+      `stg_cbs__team_owners` from current-era to per-season; the roster-title
+      owner parse (lever 3).
+- **NOTE — uncommitted WIP alongside this:** `cbs_almanac_sheets.py` +
+      `almanac_render.py` carry the in-progress Lineup Slot Records rework
+      (`_ROSTER_SLOTS`), rate-records Details (`_rate_component_detail`), the
+      ≥1.000 rate fix (1.422 OPS), and the bref period-strip for middle-initial
+      names — left uncommitted on purpose; not part of the continuity commit.
+
 ## ALMANAC V2 (2026-07-13, per Kyle's re-sequenced approval — union first)
 
 - [x] V2-A: **Fielding sweep** — `mlb_stats.py --fielding` (yearByYear

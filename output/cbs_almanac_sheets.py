@@ -408,6 +408,23 @@ def get_active_franchises(roster_date):
     )
 
 
+def get_franchise_map():
+    """franchise_id -> {canonical_id, name, abbrev} from dim_franchise, the
+    MLB-64 continuity overlay that stitches a franchise's re-minted ids
+    (Foster's Folly 13 + 30) into one identity. Every surface that keys by
+    franchise rolls up through this. The #### sentinel is excluded."""
+    rows = query_snowflake(
+        f"SELECT franchise_id, canonical_franchise_id, canonical_name,"
+        f"       canonical_abbrev"
+        f" FROM dim_franchise WHERE {league_predicate()}"
+    )
+    return {int(r['franchise_id']): {
+                'canonical_id': int(r['canonical_franchise_id']),
+                'name': r['canonical_name'],
+                'abbrev': r['canonical_abbrev'],
+            } for r in rows if str(r['franchise_id']) != str(_CBS_SENTINEL_FID)}
+
+
 def get_season_records():
     wanted = ", ".join(f"'{s}'" for s in
                        _RECORDS_POINTS + _RECORDS_HITTING + _RECORDS_PITCHING)
@@ -2199,17 +2216,30 @@ def build_standings_rows(context, arc, finishes, active_franchises):
 
     # ---- historic finishes matrix
     seasons = sorted({int(r['season_year']) for r in finishes})
-    by_franchise = {}
-    latest_name = {}
-    for r in finishes:
-        fid = int(r['franchise_id'])
-        by_franchise.setdefault(fid, {})[int(r['season_year'])] = r
-        latest_name[fid] = r['team_name']  # season-ordered input
-    active_ids = [int(r['team_id']) for r in active_franchises]
-    active_name = {int(r['team_id']): r['team_name'] for r in active_franchises}
+    # Roll up by CANONICAL franchise (MLB-64): a club that left and returned
+    # under a new id (Foster's Folly 13 -> 30) is ONE row spanning both eras.
+    fmap = get_franchise_map()
 
-    _section(f'SEASON FINISHES {seasons[0]}–{seasons[-1]} '
-             f'(① = champion; names as of today, franchises tracked by id)')
+    def _canon(fid):
+        return fmap.get(fid, {}).get('canonical_id', fid)
+
+    by_franchise = {}          # canonical_id -> {season: finish row}
+    latest_name = {}           # canonical_id -> most-recent observed name
+    _latest_year = {}
+    for r in finishes:
+        cid = _canon(int(r['franchise_id']))
+        yr = int(r['season_year'])
+        by_franchise.setdefault(cid, {})[yr] = r
+        if yr >= _latest_year.get(cid, 0):
+            _latest_year[cid] = yr
+            latest_name[cid] = r['team_name']
+    # A canonical franchise is active if ANY of its ids is on the current roster.
+    active_ids = [_canon(int(r['team_id'])) for r in active_franchises]
+    active_name = {_canon(int(r['team_id'])): r['team_name']
+                   for r in active_franchises}
+
+    _section(f'SEASON FINISHES {seasons[0]}–{seasons[-1]} (① = champion; names '
+             f'as of today, franchises stitched across renames + re-ids)')
     _header(['Franchise', 'Titles'] + [str(y) for y in seasons])
 
     def _finish_cells(fid):
@@ -2255,9 +2285,10 @@ def build_standings_rows(context, arc, finishes, active_franchises):
                                            'textFormat': {'bold': True}}})
     rows.append([])
     rows.append(['Season finishes come from the league\'s year-end standings '
-                 'pages; 2002 ran 15 teams and 2020 ran 12. Franchise names '
-                 'drift across eras — rows are keyed by franchise id, shown '
-                 'under their latest name.'])
+                 'pages; 2002 ran 15 teams and 2020 ran 12. Franchises are '
+                 'stitched across renames and id changes (a club that left and '
+                 'returned under a new id is one row), shown under their latest '
+                 'name.'])
     formats.append({'range': f'A{len(rows)}:AA{len(rows)}',
                     'format': {'textFormat': {'italic': True, 'fontSize': 9}}})
     return rows, formats

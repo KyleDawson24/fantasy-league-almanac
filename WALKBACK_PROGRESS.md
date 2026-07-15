@@ -44,9 +44,22 @@ Kyle took a first pass at the sheet (3 lineage links, 3 owner-alias merges,
       platform union; only `int_cbs__team_owner_season` stays CBS-specific
       (CBS serves owner NAMES, not ids -- legit platform adapter). Behavior
       unchanged (34->31, 23 tests green).
-- [ ] **NEXT — thread canonical franchise** through team-grain facts/marts +
-      the almanac renderers (team pages span renames/ids; records/standings by
-      canonical franchise). Incremental; hold the ESPN goldens (float-only).
+- [ ] **THREADING (in progress) — canonical franchise through the almanac.**
+      Doing it in the CBS RENDERER (cbs_almanac_sheets.py) by joining
+      dim_franchise, NOT in shared marts -- so ESPN (separate renderer) is
+      untouchable and no shared model changes.
+  - [x] **Season Finishes matrix** rolled up by canonical (`get_franchise_map`
+        + `_canon`): Foster's Folly (13+30) and Kimball Drives (22+28) are now
+        ONE active row each spanning both eras; Windmill Haymakers (11+23) one
+        defunct row; 34 ids -> 31 rows. Verified.
+  - [ ] `_franchise_owner_labels` -> canonical bridge (drop the abbrev hack; it
+        false-links 14/17) + per-era owners (dim_team_owner now has history).
+  - [ ] Team pages span a franchise's ids; records/team-holder by canonical.
+  - **ESPN byte-diff note:** the golden shows ONE pre-existing drift cell (a
+        reliever's 158->159 / 3.86->3.87, the documented float/rebuild-order
+        class). NOT from this CBS-only work (separate renderer; no ESPN player
+        facts rebuilt this session). Needs a `REGENERATE_BASELINES=1` re-anchor
+        when Kyle's ready -- flagged, not done unilaterally (his ESPN caution).
 
 ## MLB-64 CONTINUITY MAPPING SHEET (2026-07-14)
 

@@ -933,25 +933,57 @@ def get_cbs_records_data():
         WHERE {league_predicate()} AND weighted_active_pts IS NOT NULL
         GROUP BY position, season_year, team_id, player_key
     """)
-    ps, pf = {}, {}   # (pos,sy,pk)->season agg; (pos,abbrev)->franchise career
+    # LEFT ("Season") pool: eligibility-based per-position season points, all
+    # years -- the best-lineup selector below optimizes over these.
+    ps = {}
     for r in slot_rows:
         pos = r.get('position')
         if not pos:
             continue
         pts = _rec_fnum(r.get('pts'))
-        pk, sy, fid = r['player_key'], int(r['season_year']), _fid(r.get('team_id'))
+        pk, sy = r['player_key'], int(r['season_year'])
         e = ps.setdefault((pos, sy, pk),
                           {'pts': 0.0, 'name': r.get('display_name'), 'main': (None, 0.0)})
         e['pts'] += pts
         if pts > e['main'][1]:
-            e['main'] = (fid, pts)
+            e['main'] = (_fid(r.get('team_id')), pts)
+
+    # RIGHT ("All-Time Team Totals") side: ACTUAL lineup slots (Kyle 2026-07-15).
+    # PITCHERS keep the eligibility model (a pitcher is ALWAYS in a P slot, so
+    # every year is honest, estimated era included). HITTER slots use the real
+    # lineup_slot -- but the league only logged specific hitter positions from
+    # the 2026 daily capture on (2001-25 recorded 'active', not which slot), so
+    # pre-2026 hitter slotting is zeroed rather than guessed.
+    slot_actual_rows = query_snowflake(f"""
+        SELECT lineup_slot AS position, season_year, team_id, player_key,
+               MAX(display_name) AS display_name,
+               ROUND(SUM(total_hitting_stat_pts * COALESCE(active_weight, 0)), 1)
+                   AS pts
+        FROM fct_player_daily_performance
+        WHERE {league_predicate()} AND game_date IS NOT NULL
+          AND lineup_slot IN ('C', '1B', '2B', '3B', 'SS', 'OF', 'DH', 'U')
+        GROUP BY lineup_slot, season_year, team_id, player_key
+    """)
+    pf = {}   # (pos, abbrev) -> franchise all-time total at that slot
+
+    def _add_pf(pos, sy, fid, pk, disp, pts):
         ab = _abbrev_of.get(fid)
-        if ab and ab != '####' and ab in active_abbrevs:
-            f = pf.setdefault((pos, ab), {'pts': 0.0, 'seasons': set(), 'contrib': {}})
-            f['pts'] += pts
-            f['seasons'].add(sy)
-            cn, cp = f['contrib'].get(pk, (r.get('display_name'), 0.0))
-            f['contrib'][pk] = (cn, cp + pts)
+        if not ab or ab == '####' or ab not in active_abbrevs or pts <= 0:
+            return
+        f = pf.setdefault((pos, ab), {'pts': 0.0, 'seasons': set(), 'contrib': {}})
+        f['pts'] += pts
+        f['seasons'].add(sy)
+        cn, cp = f['contrib'].get(pk, (disp, 0.0))
+        f['contrib'][pk] = (cn, cp + pts)
+
+    for r in slot_rows:                       # pitchers: all years, as-is
+        if r.get('position') != 'P':
+            continue
+        _add_pf('P', int(r['season_year']), _fid(r.get('team_id')),
+                r['player_key'], r.get('display_name'), _rec_fnum(r.get('pts')))
+    for r in slot_actual_rows:                # hitters: actual slot (2026-only)
+        _add_pf(r['position'], int(r['season_year']), _fid(r.get('team_id')),
+                r['player_key'], r.get('display_name'), _rec_fnum(r.get('pts')))
 
     # Franchise ranking per position -- the RIGHT ("All-Time Team Totals") side;
     # top-N feeds OF x3 / P x9. Plus a hitter-total aggregate for the U column.
@@ -2175,8 +2207,10 @@ def build_records_rows(context, catalog, data):
         # caveat rides beside it at col I instead of a separate row (Kyle: I77).
         rows.append(['Lineup Slot Records', 'Season', '', '', '', '', '',
                      'All-Time Team Totals',
-                     '* 2004–2020 positions are eligibility estimates '
-                     '(no lineup log); only P and DH reliable.', '', ''])
+                     '* Team Totals: pitcher slots span all years; HITTER slots '
+                     'are 2026-only — specific hitter positions weren’t '
+                     'logged before the 2026 daily capture (2001–25 recorded '
+                     '"active", not the slot).', '', ''])
         _band()
         formats.append({'range': f'I{len(rows)}',
                         'format': {'textFormat': {'bold': False, 'italic': True,

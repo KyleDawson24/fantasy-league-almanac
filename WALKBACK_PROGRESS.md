@@ -11,8 +11,18 @@
       pre-exist and be user-owned).
 - [x] **Rendered to Kyle's sheet** `1fMCSSRvpE-2HwEOf3OuSPsvsbootWq1bWI-2zVvLx94`
       (his Drive, his to share with the FIL). Four tabs: READ ME FIRST · Teams
-      (34) · Owners (19) · Team-Owner by Year (395). Grey = read-only evidence
+      (34) · Owners (19) · Team-Owner by Year (411). Grey = read-only evidence
       (warning-only protected), yellow = fill/ignore.
+- **Robustness follow-ups (Kyle caught both):** (a) **live season included** —
+      `stg_cbs__ui_standings` stops at the last completed year, so 2026 is
+      unioned from `stg_cbs__rosters` (latest captured name/team); without it a
+      rename made THIS year is invisible (id 1 → Firefly Lake Vandals 2026 now
+      shows). (b) **fill cells are dropdowns, not free text** — data-validation
+      (strict=False, so unseen historical owners can still be typed); the
+      bridge's co-owner field is split into Owner 1/2/3 columns with an
+      "Owner(s) today" read-only hint. (c) ported the almanac's `_sheets_call`
+      backoff — an un-retried transient 503 on a `clear()` had left the sheet
+      half-written.
 - **Design (Kyle-approved):** `Same As (Canonical)` resolves downstream as
       `COALESCE(same_as, league_key || '::' || id)` — blank auto-namespaces
       (every league's "1" stays distinct), an earlier id merges within a league

@@ -67,6 +67,7 @@ import argparse
 import os
 import re
 import sys
+import time
 from pathlib import Path
 
 import gspread
@@ -128,15 +129,55 @@ def _q(sql):
     return db.query_snowflake(sql)
 
 
+# Sheets throws transient 500/503 ("service unavailable") and 429 (per-minute
+# write quota); the almanac writers learned to back off past the minute window
+# rather than crash. Same lesson here -- one un-retried 503 on a clear() was
+# enough to leave the sheet half-written.
+_RETRY_WAITS = [5, 15, 40, 70]
+
+
+def _retry(label, fn):
+    for attempt in range(len(_RETRY_WAITS) + 1):
+        try:
+            return fn()
+        except gspread.exceptions.APIError as exc:
+            msg = str(exc).lower()
+            transient = any(s in msg for s in
+                            ('[500]', '[503]', '[429]', 'unavailable',
+                             'rate limit', 'quota exceeded', 'internal error'))
+            if attempt == len(_RETRY_WAITS) or not transient:
+                raise
+            wait = _RETRY_WAITS[attempt]
+            print(f"  [retry] {label}: {msg[:70]}; waiting {wait}s")
+            time.sleep(wait)
+
+
 def _cbs_team_seasons(league_key):
-    """(year, team_id, team_name) for every observed team-season, ordered.
-    Bare table names resolve against db's default ANALYTICS schema."""
-    return [(int(r['season_year']), str(r['franchise_id']), r['team_name'])
-            for r in _q(f"""
-                select season_year, franchise_id, team_name
-                from stg_cbs__ui_standings
-                where league_key = '{league_key}'
-                order by franchise_id, season_year""")]
+    """(year, team_id, team_name) for every observed team-season.
+
+    Completed seasons come from the UI standings parse (2001..last finished
+    year). The LIVE season is absent there -- it's served by the daily roster
+    capture -- so its teams are unioned in (latest captured name per team).
+    Without this a rename made THIS year is invisible (id 1 -> 'Firefly Lake
+    Veronicas' in 2026 would still read as 2025's 'Mesa Javelinas'). Bare table
+    names resolve against db's default ANALYTICS schema."""
+    completed = _q(f"""
+        select season_year, franchise_id, team_name
+        from stg_cbs__ui_standings
+        where league_key = '{league_key}'""")
+    live = _q(f"""
+        select season_year, team_id as franchise_id, team_name
+        from stg_cbs__rosters
+        where league_key = '{league_key}' and team_name is not null
+        qualify row_number() over (
+            partition by season_year, team_id order by roster_date desc) = 1""")
+    done_years = {int(r['season_year']) for r in completed}
+    rows = [(int(r['season_year']), str(r['franchise_id']), r['team_name'])
+            for r in completed]
+    rows += [(int(r['season_year']), str(r['franchise_id']), r['team_name'])
+             for r in live if int(r['season_year']) not in done_years]
+    rows.sort(key=lambda t: (int(t[1]), t[0]))
+    return rows
 
 
 def _name_story(seasons_for_id):
@@ -265,16 +306,18 @@ def extract_cbs(league_key, league_name):
             'Same As (Canonical)': '', 'Preferred Name': '', 'Note': '',
         })
 
-    # ---- bridge (lever 1: assumed = current owner across active spans) ----
+    # ---- bridge ----
+    # "Owner(s) today" is lever (1): today's owner shown as a read-only HINT
+    # (not asserted as historical truth). The historian enters the actual
+    # owners into the Owner 1/2/3 dropdowns; blank there = accept the hint.
     bridge = []
     for fid in sorted(by_id, key=int):
-        assumed = ", ".join(disp(o) for o in owner_map.get(fid, []))
+        today = ", ".join(disp(o) for o in owner_map.get(fid, []))
         for y, _, nm in by_id[fid]:
             bridge.append({
                 'Platform': 'CBS', 'League': league_name, 'Year': y,
-                'Team ID': fid, 'Team Name': nm,
-                'Owner - assumed': assumed, 'Owner(s) - your entry': '',
-                'Note': '',
+                'Team ID': fid, 'Team Name': nm, 'Owner(s) today': today,
+                'Owner 1': '', 'Owner 2': '', 'Owner 3': '', 'Note': '',
             })
     return teams, owners, bridge
 
@@ -299,6 +342,7 @@ _TABS = {
         'widths': {'Name History': 430, 'Continuity Hint': 300,
                    'Years': 90, 'Same As (Canonical)': 130,
                    'Canonical Name': 160, 'Note': 220},
+        'dropdown': {'Same As (Canonical)': 'Teams_ids'},
     },
     'Owners': {
         'purpose': ("One row per owner handle. Merge duplicate handles for the "
@@ -310,17 +354,21 @@ _TABS = {
         'widths': {'Owner ID': 170, 'Seen On': 240,
                    'Same As (Canonical)': 150, 'Preferred Name': 160,
                    'Note': 220},
+        'dropdown': {'Same As (Canonical)': 'Owners_ids'},
     },
     'Team-Owner by Year': {
-        'purpose': ("One row per team per year. Confirm/correct who owned each "
-                    "team. The team name jogs the memory; 'assumed' is today's "
-                    "owner. Blank your-entry = accept the assumed (or unknown)."),
+        'purpose': ("One row per team per year. 'Owner(s) today' is a read-only "
+                    "hint. Enter who ACTUALLY owned the team that year in the "
+                    "Owner 1/2/3 dropdowns (co-owners across the columns); blank "
+                    "= accept the hint / unknown. The team name jogs the memory."),
         'cols': ['Platform', 'League', 'Year', 'Team ID', 'Team Name',
-                 'Owner - assumed', 'Owner(s) - your entry', 'Note'],
+                 'Owner(s) today', 'Owner 1', 'Owner 2', 'Owner 3', 'Note'],
         'grey': ['Platform', 'League', 'Year', 'Team ID', 'Team Name',
-                 'Owner - assumed'],
-        'widths': {'Team Name': 220, 'Owner - assumed': 180,
-                   'Owner(s) - your entry': 220, 'Note': 220},
+                 'Owner(s) today'],
+        'widths': {'Team Name': 210, 'Owner(s) today': 150, 'Owner 1': 150,
+                   'Owner 2': 150, 'Owner 3': 150, 'Note': 180},
+        'dropdown': {'Owner 1': 'Owners_names', 'Owner 2': 'Owners_names',
+                     'Owner 3': 'Owners_names'},
     },
 }
 
@@ -357,9 +405,14 @@ _READ_ME = [
      "As' on the duplicate. 'Preferred Name' overrides how the name shows."],
     [""],
     ["Tab \"Team-Owner by Year\" -- who owned each team each year:"],
-    ["   * 'assumed' is today's owner, guessed back across the years. Correct "
-     "any year that was actually someone else in 'your entry'; leave blank to "
-     "accept the guess. The team's name that year is shown to jog your memory."],
+    ["   * 'Owner(s) today' is just a hint (today's owner). In Owner 1/2/3, "
+     "enter who ACTUALLY owned the team that year -- one name per column for "
+     "co-owned teams. Leave blank to accept the hint. The team's name that "
+     "year is shown to jog your memory."],
+    [""],
+    ["Yellow cells are DROPDOWNS -- click the little arrow and pick a name/ID "
+     "from the list. If who you need isn't there yet (an owner from the early "
+     "years we haven't seen), just type it in; that's expected."],
     [""],
     ["Advanced -- linking across leagues: if this club (or person) also exists "
      "in another league's copy of this sheet, type the SAME made-up label in "
@@ -451,6 +504,37 @@ def _protect_requests(gid, tab):
     return reqs
 
 
+# Fill columns become dropdowns so the historian picks from a known list
+# instead of free-typing (which no downstream parser could trust). The lists
+# live in other tabs, referenced by range. strict=False + showCustomUi: a
+# value not in the list (a never-before-seen historical owner, or a made-up
+# cross-league stitch label) is still allowed -- the dropdown suggests, it
+# doesn't imprison.
+_DROPDOWN_RANGES = {
+    'Teams_ids':    '=Teams!$C$3:$C$1000',     # Teams.Team ID
+    'Owners_ids':   '=Owners!$C$3:$C$1000',    # Owners.Owner ID
+    'Owners_names': '=Owners!$D$3:$D$1000',    # Owners.Name Seen
+}
+
+
+def _validation_requests(gid, tab):
+    spec = _TABS[tab]
+    reqs = []
+    for i, c in enumerate(spec['cols']):
+        src = spec.get('dropdown', {}).get(c)
+        if not src:
+            continue
+        reqs.append({'setDataValidation': {
+            'range': {'sheetId': gid, 'startRowIndex': 2,
+                      'startColumnIndex': i, 'endColumnIndex': i + 1},
+            'rule': {
+                'condition': {'type': 'ONE_OF_RANGE',
+                              'values': [{'userEnteredValue':
+                                          _DROPDOWN_RANGES[src]}]},
+                'strict': False, 'showCustomUi': True}}})
+    return reqs
+
+
 def _readme_requests(gid):
     return [
         {'repeatCell': {'range': {'sheetId': gid}, 'cell': {},
@@ -488,37 +572,47 @@ def _write_preview(preview_dir, teams, owners, bridge):
 
 
 def _reset_protected_ranges(spreadsheet):
-    meta = spreadsheet.fetch_sheet_metadata()
+    meta = _retry('fetch metadata', spreadsheet.fetch_sheet_metadata)
     reqs = []
     for sh in meta.get('sheets', []):
         for pr in sh.get('protectedRanges', []) or []:
             reqs.append({'deleteProtectedRange':
                          {'protectedRangeId': pr['protectedRangeId']}})
     if reqs:
-        spreadsheet.batch_update({'requests': reqs})
+        _retry('clear protections',
+               lambda: spreadsheet.batch_update({'requests': reqs}))
 
 
 def _ensure_tab(spreadsheet, title, n_rows, n_cols):
+    need_rows, need_cols = max(n_rows + 10, 40), max(n_cols, 8)
     try:
         ws = spreadsheet.worksheet(title)
+        # A rerun may need more room than the prior grid (e.g. the bridge grew
+        # a column, or a new season added rows) -- grow, never shrink.
+        if ws.row_count < need_rows or ws.col_count < need_cols:
+            _retry(f'resize {title}',
+                   lambda: ws.resize(rows=max(ws.row_count, need_rows),
+                                     cols=max(ws.col_count, need_cols)))
     except gspread.WorksheetNotFound:
-        ws = spreadsheet.add_worksheet(title=title,
-                                       rows=max(n_rows + 10, 40),
-                                       cols=max(n_cols, 8))
-    ws.clear()
+        ws = _retry(f'create {title}',
+                    lambda: spreadsheet.add_worksheet(
+                        title=title, rows=need_rows, cols=need_cols))
+    _retry(f'clear {title}', ws.clear)
     return ws
 
 
 def _write_sheet(sheet_id, teams, owners, bridge):
     client = _get_authorized_client()
-    ss = client.open_by_key(sheet_id)
+    ss = _retry('open', lambda: client.open_by_key(sheet_id))
     _reset_protected_ranges(ss)
 
     # READ ME (pad to a rectangular 2-col block)
     readme = [row + [''] * (2 - len(row)) for row in _READ_ME]
     ws = _ensure_tab(ss, 'READ ME FIRST', len(readme), 2)
-    ws.update(readme, 'A1', value_input_option='RAW')
-    ss.batch_update({'requests': _readme_requests(ws.id)})
+    _retry('update READ ME',
+           lambda: ws.update(readme, 'A1', value_input_option='RAW'))
+    _retry('style READ ME',
+           lambda: ss.batch_update({'requests': _readme_requests(ws.id)}))
     print("  wrote READ ME FIRST")
 
     for tab, data in [('Teams', teams), ('Owners', owners),
@@ -526,13 +620,21 @@ def _write_sheet(sheet_id, teams, owners, bridge):
         rows = _rows_for(tab, data)
         ncol = len(_TABS[tab]['cols'])
         ws = _ensure_tab(ss, tab, len(rows), ncol)
-        ws.update(rows, 'A1', value_input_option='USER_ENTERED')
-        ss.batch_update({'requests': _style_requests(ws.id, tab, len(data))})
-        ss.batch_update({'requests': _protect_requests(ws.id, tab)})
+        _retry(f'update {tab}',
+               lambda ws=ws, rows=rows: ws.update(
+                   rows, 'A1', value_input_option='USER_ENTERED'))
+        _retry(f'style {tab}', lambda ws=ws, tab=tab, data=data: ss.batch_update(
+            {'requests': _style_requests(ws.id, tab, len(data))}))
+        _retry(f'protect {tab}', lambda ws=ws, tab=tab: ss.batch_update(
+            {'requests': _protect_requests(ws.id, tab)}))
+        vreqs = _validation_requests(ws.id, tab)
+        if vreqs:
+            _retry(f'validate {tab}',
+                   lambda vreqs=vreqs: ss.batch_update({'requests': vreqs}))
         print(f"  wrote {tab}  ({len(data)} rows)")
 
     # order + drop any leftover default sheet
-    by_title = {ws.title: ws for ws in ss.worksheets()}
+    by_title = {ws.title: ws for ws in _retry('list tabs', ss.worksheets)}
     reqs = []
     for idx, title in enumerate(_TAB_ORDER):
         if title in by_title:
@@ -540,11 +642,12 @@ def _write_sheet(sheet_id, teams, owners, bridge):
                 'properties': {'sheetId': by_title[title].id, 'index': idx},
                 'fields': 'index'}})
     if reqs:
-        ss.batch_update({'requests': reqs})
+        _retry('sort tabs',
+               lambda: ss.batch_update({'requests': reqs}))
     for title, ws in by_title.items():
         if title not in _TAB_ORDER:
             try:
-                ss.del_worksheet(ws)
+                _retry('drop default', lambda ws=ws: ss.del_worksheet(ws))
             except gspread.exceptions.APIError:
                 pass
     print(f"\nDone: https://docs.google.com/spreadsheets/d/{sheet_id}/edit")

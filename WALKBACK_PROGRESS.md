@@ -52,8 +52,11 @@ Kyle took a first pass at the sheet (3 lineage links, 3 owner-alias merges,
         + `_canon`): Foster's Folly (13+30) and Kimball Drives (22+28) are now
         ONE active row each spanning both eras; Windmill Haymakers (11+23) one
         defunct row; 34 ids -> 31 rows. Verified.
-  - [ ] `_franchise_owner_labels` -> canonical bridge (drop the abbrev hack; it
-        false-links 14/17) + per-era owners (dim_team_owner now has history).
+  - [x] `_franchise_owner_labels` -> canonical bridge (dim_franchise) + real
+        per-lineage owners from dim_team_owner history. Drops the abbrev-inherit
+        hack (false-linked 14/17); id 14 now shows Gideon Osborn (its own 2008
+        owner). Records Owner column is correct across renames. (Per-SEASON
+        owner on a season record = the team-pages session's refinement.)
   - [ ] Team pages span a franchise's ids; records/team-holder by canonical.
   - **ESPN byte-diff note:** the golden shows ONE pre-existing drift cell (a
         reliever's 158->159 / 3.86->3.87, the documented float/rebuild-order

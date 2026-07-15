@@ -499,30 +499,35 @@ def _rec_agg(group_cols, extra_selects=''):
 
 def _franchise_owner_labels():
     """franchise_id -> {abbrev, owner}. abbrev is the record Holder for team
-    records; owner is the Owner column. Only the 16 current franchises carry a
-    dim_team_owner row, but the same team gets re-registered under new
-    franchise_ids across renames (BENT = 14 & 17, FULT = 13 & 30, ...). Since
-    the abbrev is the stable identity, a historical id inherits its abbrev's
-    current owner -- so a record held under an old id still shows an owner
-    (current-era; the true per-era owner arrives with the MLB-64 re-key).
-    Multi-owner names join with ' & ' (a comma read as 'Last, First')."""
+    records; owner is the Owner column. MLB-64 re-key: bridges renames/re-ids
+    through dim_franchise's CANONICAL identity instead of the old abbrev hack
+    (which false-linked 14/17 -- two DISTINCT 'Bent Spokes' franchises), and
+    reads the real per-lineage owner from dim_team_owner's now-full history --
+    so a defunct id like 14 shows Gideon Osborn (its actual 2008 owner), not a
+    BENT-inherited one. Every raw id maps to its canonical franchise's abbrev +
+    latest owner. Multi-owner names join with ' & ' (a comma read as
+    'Last, First'). (Per-SEASON owner on a season record is the next refinement,
+    for the team-pages session.)"""
     rows = query_snowflake(f"""
-        SELECT f.franchise_id, f.abbrev,
-               MAX_BY(o.owner_display, o.season_year) AS owner
-        FROM cbs_franchises f
-        LEFT JOIN dim_team_owner o
-            ON f.league_key = o.league_key AND f.franchise_id = o.team_id
-        WHERE {league_predicate('f')}
-        GROUP BY f.franchise_id, f.abbrev
+        WITH canon_owner AS (
+            SELECT df.canonical_franchise_id AS cid,
+                   MAX(df.canonical_abbrev)  AS abbrev,
+                   MAX_BY(o.owner_display, o.season_year) AS owner
+            FROM dim_franchise df
+            LEFT JOIN dim_team_owner o
+                ON df.league_key = o.league_key AND df.franchise_id = o.team_id
+            WHERE {league_predicate('df')}
+            GROUP BY df.canonical_franchise_id
+        )
+        SELECT df.franchise_id, c.abbrev, c.owner
+        FROM dim_franchise df
+        JOIN canon_owner c ON df.canonical_franchise_id = c.cid
+        WHERE {league_predicate('df')}
     """)
-    labels = {int(r['franchise_id']):
-              {'abbrev': r['abbrev'], 'owner': (r['owner'] or '').replace(', ', ' & ')}
-              for r in rows}
-    owner_by_abbrev = {m['abbrev']: m['owner'] for m in labels.values() if m['owner']}
-    for m in labels.values():
-        if not m['owner']:
-            m['owner'] = owner_by_abbrev.get(m['abbrev'], '')
-    return labels
+    return {int(r['franchise_id']):
+            {'abbrev': r['abbrev'],
+             'owner': (r['owner'] or '').replace(', ', ' & ')}
+            for r in rows}
 
 
 def _rec_fnum(v):

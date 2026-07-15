@@ -585,6 +585,35 @@
         updated — unrelated to MLB-81, flagged as a separate task).
       * CBS dev re-rendered for Kyle's eyeball (the merge gate). NEXT: HoS
         render unheld, slot-records rework, team-pages 1:1 (all still queued).
+- [x] **MLB-81 follow-up (same day) — the INVERSE middle-initial case (Kyle's
+      Miggy catch).** The first cut's middle-initial variant stripped only
+      CROSSWALK-side initials (K-Rod: `francisco j rodriguez` → `francisco
+      rodriguez`). But the initial can ride the id-less LOG/ANCHOR side instead
+      — CBS's 2003-06 roster pages wrote "Miguel M Cabrera" → `miguel m cabrera`
+      while the crosswalk carries plain "Miguel Cabrera" — and those forms never
+      resolved (mlbam NULL → name-fallback → no match to the plain-named games).
+      Miguel Cabrera's 2004-06 breakout (1,874 pts) was dumping into
+      "unrostered", topping the Wasted Hall of Shame with a fake 3,453.
+      **Fix**: `dim_player_identity` gains an `idless_bridged` candidate set —
+      id-less log/anchor name forms that carry a middle initial, bridged to
+      mlbam by matching their STRIPPED form to a crosswalk name (the symmetric
+      completion of the strip variant). 67 stint-side name-forms now resolve;
+      Miggy 2004-06 fully attributes (career 7,288 → **9,410**, his wasted drops
+      to ~688 = just his 2020/2022/23 twilight + pre-callup 2003). Ambiguous set
+      18 → 23 (genuine homonyms, name-fallback). K-Rod/Verlander unchanged,
+      contested still 0. Consumers unchanged (fix is dim-local); stints TABLE
+      must rebuild to pick up the new resolution. Post-fix the Wasted HoS top is
+      the believable long-career-setup-man class (Joe Smith, Javier Lopez, Bryan
+      Shaw, Chad Qualls...), not early-career stars. Reconciliation MAE 2004-06
+      ticks +0.5..1.6 — completing attribution WIDENS the known mid-era overshoot
+      (reconstructed>official on current-vs-era rules), NOT a misattribution;
+      player-level checks clean. ESPN byte-diff re-anchored (4 float-order cells:
+      CAL/CHIN/FNA/NPNP ppg + one rounded-sum boundary).
+      * **Wasted HoS render (Kyle)**: dropped the HoS **Rank** column — the stray
+        column pushed the Breakdown out to unmanaged col L (read as "missing");
+        the four HoS columns now land on the Records All-Time shape (Player H /
+        Benched Most By I / Wasted J / **Breakdown K**, the wide 400px Details
+        column). Breakdown reinstated by construction.
 - **REQUEST LIST (running)**: team abbrev preferences collect in the
   cbs_franchises seed (MATT, JUNK so far).
 

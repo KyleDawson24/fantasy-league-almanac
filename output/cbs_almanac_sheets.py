@@ -1962,16 +1962,21 @@ def build_records_rows(context, catalog, data):
     hos = data.get('_hos') or []
     if hof or hos:
         def _wide_band():
-            formats.append({'range': f'A{len(rows)}:L{len(rows)}',
+            formats.append({'range': f'A{len(rows)}:{_REC_LAST_COL}{len(rows)}',
                             'format': {'textFormat': {'bold': True},
                                        'backgroundColor': _POWDER}})
         rows.append(['Franchise Hall of Fame — top 25 careers with one franchise',
                      '', '', '', '', '', '',
                      'Wasted Hall of Shame — top 25 by career wasted points'])
         _wide_band()
+        # HoS carries NO rank column (Kyle): dropping it lands the four HoS
+        # columns on the Records All-Time shape -- Player H(150) / Benched Most
+        # By I(125) / Wasted Points J / Breakdown K(400) -- so the breakdown
+        # sits in the wide managed Details column instead of straggling past
+        # _REC_LAST_COL in L (where it read as "missing").
         rows.append(['Rank', 'Player', 'Franchise', 'Active Points', 'Years of Service',
                      '', '',
-                     'Rank', 'Player', 'Benched Most By', 'Wasted Points', 'Breakdown'])
+                     'Player', 'Benched Most By', 'Wasted Points', 'Breakdown'])
         _wide_band()
         for i in range(max(len(hof), len(hos))):
             left = ['', '', '', '', '']
@@ -1979,10 +1984,10 @@ def build_records_rows(context, catalog, data):
                 e = hof[i]
                 left = [i + 1, _bref_player_cell(e), e.get('abbrev', ''),
                         _pts(e.get('pts')), e.get('span', '')]
-            right = ['', '', '', '', '']
+            right = ['', '', '', '']
             if i < len(hos):
                 e = hos[i]
-                right = [i + 1, _bref_player_cell(e), e.get('shame', ''),
+                right = [_bref_player_cell(e), e.get('shame', ''),
                          _pts(e.get('wasted')), e.get('details', '')]
             rows.append(left + ['', ''] + right)
         rows.append([])

@@ -123,10 +123,43 @@ alias_candidates as (
     group by a.mlbam_id, xw.stat_group_scope, a.name_key
 ),
 
+-- The INVERSE middle-initial case (Miggy, not K-Rod): the initial rides on the
+-- id-less LOG/ANCHOR side, not the crosswalk. CBS's 2003-06 roster pages wrote
+-- "Miguel M Cabrera" -> 'miguel m cabrera' while the crosswalk carries plain
+-- "Miguel Cabrera"; those forms live only in id-less sources so they can't tie
+-- to mlbam by id. Bridge them by matching their middle-initial-STRIPPED form to
+-- a crosswalk name (the symmetric completion of the strip variant above, which
+-- only covered crosswalk-side initials). Restricted to forms that actually
+-- carry a middle initial so plain names don't round-trip.
+xw_keys as (
+    select distinct name_key, mlbam_id, stat_group_scope from named_variants
+),
+
+idless_forms as (
+    select distinct {{ cbs_name_key('player_name_raw') }} as name_key
+    from {{ ref('stg_cbs__ui_transactions') }}
+    where player_cbs_id is null and player_name_raw is not null
+    union
+    select distinct {{ cbs_name_key('player_name_raw') }} as name_key
+    from {{ ref('stg_cbs__ui_rosters') }}
+    where player_name_raw is not null
+),
+
+idless_bridged as (
+    select 'cbs' as platform, cast(null as varchar) as platform_player_id,
+           x.mlbam_id, x.stat_group_scope, f.name_key
+    from idless_forms f
+    join xw_keys x
+        on x.name_key = regexp_replace(f.name_key, '^([a-z]+) [a-z] (.+)$', '\\1 \\2')
+    where regexp_like(f.name_key, '^[a-z]+ [a-z] .+$')
+),
+
 candidates as (
     select platform, platform_player_id, mlbam_id, stat_group_scope, name_key from named_variants
     union all
     select platform, platform_player_id, mlbam_id, stat_group_scope, name_key from alias_candidates
+    union all
+    select platform, platform_player_id, mlbam_id, stat_group_scope, name_key from idless_bridged
 ),
 
 -- Per (platform, name_key, mlbam): collapse discipline scope. Multiple scopes

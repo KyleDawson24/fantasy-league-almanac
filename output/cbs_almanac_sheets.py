@@ -58,7 +58,7 @@ import gspread
 
 import db
 from db import league_predicate, query_snowflake
-from almanac_data import get_optimal_team_candidates
+from almanac_data import get_optimal_season_candidates, get_optimal_team_candidates
 # Shared board machinery ((a) reuse per Kyle 2026-07-13): the CBS Home
 # mirrors the ESPN Home by CALLING its builders, not by imitating them.
 # The private imports are deliberate and noted in BRAINTHOUGHTS as the
@@ -67,17 +67,22 @@ from almanac_logic import (
     _HOME_SCORING_CALLOUT,
     _deviation_by_slot,
     _merge_home_bands,
+    build_team_history_tabs,
     get_optimal_team_selections,
 )
 from almanac_render import (
     HOME_DEVIATION_LABEL,
     HOME_HEADER,
+    SLOT_ORDER,
     _bref_player_cell,
     _hitting_rate,
     _pitching_rate,
     format_all_league_team_row,
     format_all_league_team_row_with_deviation,
     home_nav_link,
+    team_tab_banner_merges,
+    team_tab_format_specs,
+    team_tab_merge_ranges,
 )
 from formatters import fmt_ip, format_top_scorer_stats_line
 from sheets_writer import _get_authorized_client
@@ -93,7 +98,6 @@ CBS_SLOT_CAPS = {
     'C': 1, '1B': 1, '2B': 1, '3B': 1, 'SS': 1,
     'OF': 3, 'DH': 1, 'U': 1, 'P': 9,
 }
-_HITTER_SLOTS = ('C', '1B', '2B', '3B', 'SS', 'OF', 'DH', 'U')
 
 # Records-tab curation: the scored categories + marquee counting stats.
 _RECORDS_POINTS = ['CALCULATED_POINTS', 'CALCULATED_HITTING_PTS',
@@ -1157,15 +1161,16 @@ def _span_from_years(years):
 
 def get_provenance_mix(entity_id=None):
     """How the roster states behind the numbers are known, as game-day
-    shares per provenance class -- the input to every fidelity label.
-    League-wide when entity_id is None, else franchise-scoped."""
+    counts per (season, provenance) -- the input to every fidelity label.
+    League-wide when entity_id is None, else franchise-scoped. Season
+    grain so the sentence can bucket by ERA (Kyle 2026-07-17)."""
     scope = f' AND {_entity_where(entity_id)}' if entity_id is not None else ''
     return query_snowflake(
-        f"SELECT provenance, COUNT(*) AS n"
+        f"SELECT season_year, provenance, COUNT(*) AS n"
         f" FROM fct_player_daily_performance"
         f" WHERE {league_predicate()} AND provenance IS NOT NULL"
         f"   AND game_date IS NOT NULL{scope}"
-        f" GROUP BY provenance"
+        f" GROUP BY season_year, provenance"
     )
 
 
@@ -1177,7 +1182,10 @@ def get_stat_sources():
     lenses a reader cares about: captured live, reconstructed day-by-day,
     and estimated. Percentages come from the same mix the fidelity
     sentence uses, so the two always agree."""
-    mix = {r['provenance']: r['n'] for r in get_provenance_mix()}
+    # The mix is (season, provenance) grain now -- aggregate to provenance.
+    mix = {}
+    for r in get_provenance_mix():
+        mix[r['provenance']] = mix.get(r['provenance'], 0) + r['n']
     total = sum(mix.values()) or 1
     seasons = query_snowflake(
         f"SELECT season_year, provenance, COUNT(*) AS n"
@@ -1262,10 +1270,12 @@ def get_current_rostered():
 
 
 def get_years_of_service(keys, entity_id=None):
-    """Per player_key, the seasons with nonzero ACTIVE production --
-    scoped to a franchise for team pages, league-wide (entity_id None)
-    for the all-time board. The renderer compresses these to the
-    'count: year-ranges' longevity string."""
+    """Per player_key, the seasons with ANY active production -- a season
+    counts if the player was actively started and produced nonzero active
+    points, net-NEGATIVE seasons included (a bad season is still service,
+    Kyle 2026-07-15). Scoped to a franchise for team pages, league-wide
+    (entity_id None) for the all-time board. The renderer compresses these
+    to the 'count: year-ranges' longevity string."""
     if not keys:
         return {}
     quoted = ", ".join("'%s'" % k.replace("'", "''") for k in keys)
@@ -1278,7 +1288,7 @@ def get_years_of_service(keys, entity_id=None):
         FROM fct_player_daily_performance
         WHERE {' AND '.join(filters)}
         GROUP BY player_key, season_year
-        HAVING SUM(total_stat_pts * COALESCE(active_weight, 0)) > 0
+        HAVING SUM(total_stat_pts * COALESCE(active_weight, 0)) <> 0
     """)
     out = {}
     for r in rows:
@@ -1608,8 +1618,17 @@ def get_roster_days(entity_id, season_year=None):
     spans (the walk-back's effective intervals, name_key-bridged to
     player identity) + the current season's captured roster dates.
     season_year scopes to one season (the team page's current side);
-    None spans the franchise's whole history."""
-    name_key_expr = _name_key_sql('p.player_name')
+    None spans the franchise's whole history.
+
+    The stint join keys on the PERSON: a two-way split asset's fact name
+    ("Shohei Ohtani (Batter)") never matches the transaction log's
+    person-grain stints, which zeroed his roster days (Kyle 2026-07-17,
+    Deuces' all-time DH with 155 games and 0 days). Chop the
+    parenthetical before the name key; both split assets then carry the
+    person's tenure, which is the honest per-asset answer. The captured
+    (2026) side already joins by the pseudo-ids and needs no change."""
+    person_name = "regexp_replace(p.player_name, ' \\\\(.*\\\\)$', '')"
+    name_key_expr = _name_key_sql(person_name)
     stint_season = (f" AND season_year = {int(season_year)}"
                     if season_year is not None else '')
     return query_snowflake(f"""
@@ -1643,35 +1662,268 @@ def get_roster_days(entity_id, season_year=None):
     """)
 
 
-def get_bench_ranking(entity_id, season_year=None, exclude_keys=(), top_n=10):
-    """Bench section: most TOTAL ROSTERED points for this franchise
-    (weight-independent -- everything produced while rostered), for
-    players not already in the Best Lineup."""
-    filters = [league_predicate(), _entity_where(entity_id),
-               "game_date IS NOT NULL"]
-    if season_year is not None:
-        filters.append(f"season_year = {season_year}")
-    if exclude_keys:
-        quoted = ", ".join("'%s'" % k.replace("'", "''") for k in exclude_keys)
-        filters.append(f"player_key NOT IN ({quoted})")
-    return query_snowflake(f"""
-        SELECT
-            player_key,
-            MAX(player_name)                          AS player_name,
-            MAX(position)                             AS position,
-            MIN(season_year)                          AS first_season,
-            MAX(season_year)                          AS last_season,
-            SUM(games_played)                         AS games,
-            ROUND(SUM(total_stat_pts), 1)             AS rostered_pts,
-            ROUND(SUM(total_stat_pts * COALESCE(active_weight, 0)), 1)
-                                                      AS weighted_active_pts
-        FROM fct_player_daily_performance
-        WHERE {' AND '.join(filters)}
-        GROUP BY player_key
-        HAVING SUM(total_stat_pts) > 0
-        ORDER BY rostered_pts DESC, player_key
-        LIMIT {int(top_n)}
+def get_roster_days_by_season(entity_id):
+    """get_roster_days at SEASON grain, one query for the franchise's
+    whole history -> {(player_key, season_year): days}. Feeds the Best
+    Individual Seasons block's Roster Days column (Kyle 2026-07-17).
+    Same person-keyed stint join (two-way split assets carry the
+    person's tenure) + captured 2026 dates."""
+    person_name = "regexp_replace(p.player_name, ' \\\\(.*\\\\)$', '')"
+    name_key_expr = _name_key_sql(person_name)
+    rows = query_snowflake(f"""
+        WITH players AS (
+            SELECT DISTINCT p.player_key, p.player_name
+            FROM fct_player_daily_performance p
+            WHERE {league_predicate('p')} AND {_entity_where(entity_id, 'p')}
+              AND p.game_date IS NOT NULL
+        ),
+        stint_days AS (
+            SELECT name_key, season_year,
+                   SUM(DATEDIFF('day', stint_start, attribution_end_exclusive))
+                       AS days
+            FROM int_cbs__roster_stints_effective
+            WHERE {league_predicate()} AND franchise_id = {int(entity_id)}
+            GROUP BY 1, 2
+        ),
+        captured AS (
+            SELECT player_id AS player_key, season_year,
+                   COUNT(DISTINCT roster_date) AS days
+            FROM stg_cbs__rosters
+            WHERE {league_predicate()} AND team_id = '{int(entity_id)}'
+            GROUP BY 1, 2
+        ),
+        unioned AS (
+            SELECT p.player_key, s.season_year, s.days
+            FROM players p
+            JOIN stint_days s ON s.name_key = {name_key_expr}
+            UNION ALL
+            SELECT player_key, season_year, days FROM captured
+        )
+        SELECT player_key, season_year, SUM(days) AS roster_days
+        FROM unioned
+        GROUP BY 1, 2
     """)
+    return {(r['player_key'], int(r['season_year'])): int(r['roster_days'] or 0)
+            for r in rows}
+
+
+def get_cbs_team_history_data(context, franchises, franchise_map):
+    """ESPN-shaped team-history rows for every active CBS franchise, both
+    scopes -- the exact row contract of almanac_data.get_team_roster_
+    history_stats, so almanac_logic.build_team_history_tabs renders CBS
+    team tabs IDENTICALLY to ESPN's (Kyle 2026-07-16: the tide flows
+    ESPN->CBS; nothing from the old CBS tab shape survives).
+
+    CBS mapping choices:
+      active_*        ACTIVE-weighted sums (the Records 'real league'
+                      lens; 2004-2020 estimated days count fractionally)
+      bench_il_points production while rostered but NOT active
+                      (total * (1 - active_weight)); CBS reserves = its
+                      bench, header stays ESPN's "Bench/IL Points"
+      il_days         always 0 (CBS has RS, no IL slots -> no IL section)
+      rostered_days   calendar days from get_roster_days (stints +
+                      captured), the walk-back's roster-tenure number
+      active_slots_   real lineup slots the player started (captured/
+      played          reconstructed eras); estimated-era EST rows are
+                      excluded -- 'position' backfills the display
+      service_years   distinct seasons with nonzero active production
+                      (negatives count), for the trailing YoS column
+    """
+    season = int(context['season_year'])
+    roster_date = context['roster_date']
+    fids = [int(f['team_id']) for f in franchises]
+    id_list = ", ".join(str(f) for f in fids)
+    w = 'COALESCE(active_weight, 0)'
+
+    # Shared aggregate columns: the whole-history query below and the
+    # by-season query (the Best Individual Seasons block) sum the same
+    # fields at different grains. Rate inputs keep 1dp; stats the tab
+    # displays as bare integers round to whole.
+    agg_cols = f"""
+                MAX_BY(player_name, game_date)  AS player_name,
+                MAX_BY(display_name, game_date) AS display_name,
+                MAX_BY(position, game_date)     AS position,
+                MAX_BY(pro_team, game_date)     AS pro_team,
+                ROUND(SUM(total_stat_pts * {w}), 1)          AS active_points,
+                ROUND(SUM(total_hitting_stat_pts * {w}), 1)  AS active_hitting_points,
+                ROUND(SUM(total_pitching_stat_pts * {w}), 1) AS active_pitching_points,
+                ROUND(SUM(total_stat_pts * (1 - {w})), 1)    AS bench_il_points,
+                ROUND(SUM(games_played * {w}))               AS active_games,
+                ROUND(SUM(h * {w}), 1)    AS h,
+                ROUND(SUM(ab * {w}), 1)   AS ab,
+                ROUND(SUM(b_bb * {w}), 1) AS b_bb,
+                ROUND(SUM(hbp * {w}), 1)  AS hbp,
+                ROUND(SUM(sf * {w}), 1)   AS sf,
+                ROUND(SUM(tb * {w}), 1)   AS tb,
+                ROUND(SUM(hr * {w}))      AS hr,
+                ROUND(SUM(sb * {w}))      AS sb,
+                ROUND(SUM(w * {w}))       AS w,
+                ROUND(SUM(l * {w}))       AS l,
+                ROUND(SUM(sv * {w}))      AS sv,
+                ROUND(SUM(er * {w}), 1)   AS er,
+                ROUND(SUM(outs * {w}), 1) AS outs,
+                ROUND(SUM(k * {w}))       AS k,
+                ROUND(SUM(p_bb * {w}))    AS p_bb,
+                ROUND(SUM(p_h * {w}), 1)  AS p_h,
+                LISTAGG(DISTINCT CASE
+                    WHEN {w} > 0
+                     AND lineup_slot NOT IN ('BE', 'IL', 'FA', 'RS', 'EST', 'ACT')
+                    THEN lineup_slot END, ',') AS active_slots_played"""
+
+    rows = query_snowflake(f"""
+        WITH scoped AS (
+            SELECT 'current_season' AS scope, f.*
+            FROM fct_player_daily_performance f
+            WHERE {league_predicate('f')} AND f.game_date IS NOT NULL
+              AND f.team_id IN ({id_list}) AND f.season_year = {season}
+            UNION ALL
+            SELECT 'all_time' AS scope, f.*
+            FROM fct_player_daily_performance f
+            WHERE {league_predicate('f')} AND f.game_date IS NOT NULL
+              AND f.team_id IN ({id_list})
+        ),
+        totals AS (
+            SELECT
+                scope, team_id, player_key,
+                {agg_cols}
+            FROM scoped
+            GROUP BY scope, team_id, player_key
+        ),
+        service AS (
+            -- Mirrors the ESPN service_seasons CTE + get_years_of_service:
+            -- a season counts on ANY nonzero active production (negative
+            -- seasons are still service -- Kyle 2026-07-15).
+            SELECT scope, team_id, player_key,
+                   LISTAGG(TO_VARCHAR(season_year), ',')
+                       WITHIN GROUP (ORDER BY season_year) AS service_years
+            FROM (
+                SELECT scope, team_id, player_key, season_year
+                FROM scoped
+                GROUP BY scope, team_id, player_key, season_year
+                HAVING SUM(total_stat_pts * {w}) <> 0
+            )
+            GROUP BY scope, team_id, player_key
+        )
+        SELECT t.*, COALESCE(s.service_years, '') AS service_years
+        FROM totals t
+        LEFT JOIN service s
+            ON t.scope = s.scope AND t.team_id = s.team_id
+           AND t.player_key = s.player_key
+    """)
+
+    # Season-grain rows for the Best Individual Seasons block (Kyle
+    # 2026-07-17): same aggregates, +season_year in the grain.
+    season_rows = query_snowflake(f"""
+        SELECT
+            team_id, player_key, season_year,
+            {agg_cols}
+        FROM fct_player_daily_performance
+        WHERE {league_predicate()} AND game_date IS NOT NULL
+          AND team_id IN ({id_list})
+        GROUP BY team_id, player_key, season_year
+    """)
+
+    by_key, by_name = get_current_rostered()
+    meta = {}
+    for f in franchises:
+        fid = int(f['team_id'])
+        meta[fid] = {
+            'team_name': f['team_name'],
+            'team_abbrev': franchise_map.get(fid, {}).get('abbrev') or '',
+        }
+    # Roster-tenure days per franchise: both scopes + the by-season map
+    # (3x16 queries; the old tabs ran 2x16).
+    days = {}
+    season_days = {}
+    for fid in fids:
+        days[('current_season', fid)] = {
+            r['player_key']: r['roster_days']
+            for r in get_roster_days(fid, season_year=season)}
+        days[('all_time', fid)] = {
+            r['player_key']: r['roster_days'] for r in get_roster_days(fid)}
+        season_days[fid] = get_roster_days_by_season(fid)
+
+    stat_tail = ('h', 'ab', 'b_bb', 'hbp', 'sf', 'tb', 'hr', 'sb',
+                 'w', 'l', 'sv', 'er', 'outs', 'k', 'p_bb', 'p_h')
+
+    def _shape(r):
+        """The common row transform: names (two-way pseudo identities keep
+        CBS's "(Batter)" split label on display; the bref search key gets
+        the human name, same convention as _enrich_lineup), the Tm column
+        ('*' on this page's team, abbrev on another, blank unclaimed --
+        by_name fallback covers the id-split class), and the slot list
+        filtered to REAL display slots (SLOT_ORDER's vocabulary; stray
+        slot-unknown codes like 'ACT' burned us)."""
+        fid = int(r['team_id'])
+        m = meta.get(fid)
+        if m is None:
+            return None
+        name = r['player_name'] or ''
+        display = r['display_name'] or name
+        if name.endswith(' (Batter)') or name.endswith(' (Pitcher)'):
+            display = display or name
+            name = name.rsplit(' (', 1)[0]
+        cur = by_key.get(r['player_key']) or by_name.get(_norm_name(display))
+        cur_abbrev = (cur or {}).get('abbrev') or ''
+        tm_now = '*' if (cur_abbrev and cur_abbrev == m['team_abbrev']) else cur_abbrev
+        slots = {s for s in (r.get('active_slots_played') or '').split(',')
+                 if s in SLOT_ORDER}
+        return {
+            'team_id': fid,
+            'team_name': m['team_name'],
+            'team_abbrev': m['team_abbrev'],
+            'latest_matchup_end_date': roster_date,
+            'player_id': r['player_key'],
+            'player_name': name,
+            'display_name': display,
+            'position': r.get('position') or '',
+            'pro_team': r.get('pro_team') or '',
+            'current_fantasy_team': tm_now,
+            'active_slots_played': ','.join(sorted(slots, key=SLOT_ORDER.get)),
+            'il_days': 0,
+            'active_games': int(r.get('active_games') or 0),
+            'active_points': float(r.get('active_points') or 0),
+            'active_hitting_points': float(r.get('active_hitting_points') or 0),
+            'active_pitching_points': float(r.get('active_pitching_points') or 0),
+            'bench_il_points': float(r.get('bench_il_points') or 0),
+            **{col: r.get(col) for col in stat_tail},
+        }
+
+    players = []
+    for r in rows:
+        shaped = _shape(r)
+        if shaped is None:
+            continue
+        shaped['scope'] = r['scope']
+        shaped['rostered_days'] = int(
+            days[(r['scope'], shaped['team_id'])].get(r['player_key']) or 0)
+        shaped['service_years'] = r.get('service_years') or ''
+        players.append(shaped)
+
+    player_seasons = []
+    for r in season_rows:
+        shaped = _shape(r)
+        if shaped is None:
+            continue
+        year = int(r['season_year'])
+        shaped['season_year'] = year
+        shaped['rostered_days'] = int(
+            season_days[shaped['team_id']].get((r['player_key'], year)) or 0)
+        player_seasons.append(shaped)
+
+    return {'players': players, 'player_seasons': player_seasons}
+
+
+def _cbs_optimal_team(season_year=None, team_id=None):
+    """Starters selector for the shared team-tab builder: CBS's own
+    get_best_lineup (shared gap-based selection over CBS_SLOT_CAPS,
+    weighted-active lens, CBS eligibility + U synthesis), mapped to the
+    builder's (player_id, slot_label, lineup_slot) contract."""
+    lineup = get_best_lineup(entity_id=team_id, season_year=season_year)
+    return [{'player_id': s.get('player_key'),
+             'slot_label': s.get('slot_label'),
+             'lineup_slot': s.get('lineup_slot')}
+            for s in lineup]
 
 
 # ---------------------------------------------------------------------------
@@ -1733,13 +1985,6 @@ def _fmt_date(value):
     return f'{value:%b} {value.day}, {value.year}'
 
 
-def _span(row):
-    lo, hi = row.get('first_season'), row.get('last_season')
-    if not lo:
-        return ''
-    return str(int(lo)) if lo == hi else f'{int(lo)}–{int(hi)}'
-
-
 def _compress_years(years):
     """Sorted distinct years -> compact range list: [2001,2002,2003,2009]
     -> '2001–2003, 2009'. The building block of the stat-sources dates
@@ -1768,84 +2013,47 @@ def _years_of_service(years):
     return f'{len(ys)}: {_compress_years(ys)}'
 
 
-def _ppg(points, games):
-    if not games:
-        return ''
-    return f'{float(points or 0) / float(games):.2f}'
+# Era buckets for the fidelity label (the walk-back fidelity map): each
+# era's game-days as a share of ALL game-days, labeled by how that era's
+# lineup states are known. Bucketing by ERA (not provenance enum) means
+# every day lands somewhere -- the old enum sentence dropped
+# estimated_adjacent + sentinel and summed to ~93% (Kyle 2026-07-17).
+_PROVENANCE_ERAS = [
+    (2026, 9999, '2026 onward', 'captured live'),
+    (2021, 2025, '2021–2025', 'reconstructed day-by-day from the transaction log'),
+    (2004, 2020, '2004–2020', 'estimated from year-end start shares'),
+    (2001, 2003, '2001–2003', 'reconstructed from the transaction log'),
+]
 
 
-def _merge_bands(left_rows, right_rows, left_width, gap=1):
-    """Two-band layout helper: pad the left band to a fixed width, then a
-    gap, then the right band. Mirrors the ESPN Home's dashboard shape."""
-    merged = []
-    for i in range(max(len(left_rows), len(right_rows))):
-        left = list(left_rows[i]) if i < len(left_rows) else []
-        left += [''] * (left_width - len(left))
-        right = list(right_rows[i]) if i < len(right_rows) else []
-        merged.append(left + [''] * gap + right)
-    return merged
-
-
-def _provenance_sentence(mix_rows):
-    """One-line fidelity label from a provenance mix."""
+def _provenance_era_lines(mix_rows):
+    """Era-keyed fidelity lines from a (season, provenance) mix -- one
+    string per era, shares summing to ~100% of game-days, feeding the
+    team-tab "Lineup Data:" block (Kyle's gold standard, 2026-07-17).
+    The block has three rows; when all four eras are present, the two
+    transaction-log-reconstructed eras merge onto one line."""
     total = sum(r['n'] for r in mix_rows) or 1
-    share = {r['provenance']: 100.0 * r['n'] / total for r in mix_rows}
-    est = share.get('estimated_startshare', 0) + share.get('estimated_membership', 0)
-    rec = share.get('reconstructed_day', 0)
-    cap = share.get('captured', 0)
-    return (f'Lineup states behind these numbers: {cap:.0f}% captured live, '
-            f'{rec:.0f}% reconstructed day-by-day from the transaction log, '
-            f'{est:.0f}% estimated from year-end start shares (2004–2020 era).')
-
-
-def _lineup_row(sel, all_time=False):
-    """One Best-Lineup row: slot, player, span, days/games, points, ppg +
-    the discipline-appropriate stat tail."""
-    slot = sel.get('slot_label') or ''
-    name = sel.get('display_name') or sel.get('player_name') or '—'
-    pts = sel.get('position_pts')
-    games = sel.get('weighted_games') or sel.get('games')
-    is_pitcher = (sel.get('lineup_slot') == 'P')
-    if is_pitcher:
-        tail = [_num(sel.get('k')), _num(sel.get('w')), _num(sel.get('sv')),
-                _num(sel.get('qs')), fmt_ip(sel.get('outs')) if sel.get('outs') else '']
-    else:
-        tail = [_num(sel.get('r')), _num(sel.get('rbi')), _num(sel.get('b_bb')),
-                _num(sel.get('sb')), _num(sel.get('tb'))]
-    row = [slot, name]
-    if all_time:
-        # Kyle's longevity string when it's been stamped (the team-page
-        # all-time lineup), else the plain span.
-        row.append(sel.get('_years_of_service') or _span(sel))
-    row += [
-        _num(sel.get('roster_days')) if sel.get('roster_days') is not None else '',
-        _num(sel.get('games')),
-        _pts(pts),
-        _ppg(pts, games),
-    ]
-    return row + tail
-
-
-def _lineup_block(lineup, all_time=False):
-    """Rows for one Best-Lineup side: hitter header, hitter slots, pitcher
-    header, pitcher slots. Returns (rows, header_row_indexes)."""
-    span_col = ['Yrs'] if all_time else []
-    hitter_hdr = (['Slot', 'Player'] + span_col +
-                  ['RosterDays', 'Games', 'Active Pts', 'ppg',
-                   'R', 'RBI', 'BB', 'SB', 'TB'])
-    pitcher_hdr = (['', ''] + ([''] if all_time else []) +
-                   ['', '', '', '', 'K', 'W', 'SV', 'QS', 'IP'])
-    rows = [hitter_hdr]
-    headers = [0]
-    hitters = [s for s in lineup if s.get('lineup_slot') in _HITTER_SLOTS]
-    pitchers = [s for s in lineup if s.get('lineup_slot') == 'P']
-    for sel in hitters:
-        rows.append(_lineup_row(sel, all_time=all_time))
-    headers.append(len(rows))
-    rows.append(pitcher_hdr)
-    for sel in pitchers:
-        rows.append(_lineup_row(sel, all_time=all_time))
-    return rows, headers
+    by_era = {}
+    for r in mix_rows:
+        year = int(r['season_year'])
+        for lo, hi, era, _label in _PROVENANCE_ERAS:
+            if lo <= year <= hi:
+                by_era[era] = by_era.get(era, 0) + r['n']
+                break
+    present = [(era, label, by_era[era])
+               for _lo, _hi, era, label in _PROVENANCE_ERAS
+               if by_era.get(era)]
+    if len(present) > 3:
+        recon = [(e, lab, n) for e, lab, n in present
+                 if lab.startswith('reconstructed')]
+        if len(recon) > 1:
+            eras = ', '.join(sorted(e for e, _lab, _n in recon))
+            merged = (eras, recon[0][1], sum(n for _e, _lab, n in recon))
+            present = [merged if (e, lab, n) == recon[0] else (e, lab, n)
+                       for e, lab, n in present
+                       if (e, lab, n) not in recon[1:]]
+    return [f'{era}: {label} ({100.0 * n / total:.0f}%)'
+            for era, label, n in present[:3]]
 
 
 # The one wording deviation from ESPN's deviation-column label: CBS
@@ -1923,15 +2131,22 @@ def build_home_rows(context, nav_targets=None):
     month_label = (f'Team of the Month - {lo:%B %Y} '
                    f'(rolls over on the 8th of each new month)')
 
-    def _board(title, lineup, mode, dev_map=None):
+    def _board(title, lineup, mode, dev_map=None, leading_blank=True):
         if mode == 'season':
             hdr = [*HOME_HEADER, _CBS_DEVIATION_LABEL, '']
         elif mode == 'alltime':
             hdr = [*HOME_HEADER, 'Years of Service']
         else:  # 'plain' -- the month board: base columns, no deviation/years
             hdr = list(HOME_HEADER)
-        rows_, meta_ = [[title], [], hdr], [{'k': 'title'}, {'k': 'blank'},
-                                            {'k': 'header'}]
+        # Title sits directly on its header row. The spacer blank moves ABOVE
+        # the title for all but the FIRST board, which stays flush with the top
+        # of the band so the right half aligns with the left (Kyle 2026-07-16).
+        if leading_blank:
+            rows_ = [[], [title], hdr]
+            meta_ = [{'k': 'blank'}, {'k': 'title'}, {'k': 'header'}]
+        else:
+            rows_ = [[title], hdr]
+            meta_ = [{'k': 'title'}, {'k': 'header'}]
         prev_bench = False
         for sel in lineup:
             is_bench = str(sel.get('slot_label') or '').startswith('BE')
@@ -1956,14 +2171,16 @@ def build_home_rows(context, nav_targets=None):
         return rows_, meta_
 
     right, meta = [], []
-    for title, lineup, mode, dev in [
+    boards = [
         (month_label, context['month_board'], 'season', month_dev),
         (f'All-League Team Season-to-Date: {season}', context['season_board'],
          'season', season_dev),
         (f'All-League Team: All-Time ({era})', context['alltime_board'],
          'alltime', None),
-    ]:
-        rws, mta = _board(title, lineup, mode, dev)
+    ]
+    for i, (title, lineup, mode, dev) in enumerate(boards):
+        # First board flush with the top; later boards get a spacer above.
+        rws, mta = _board(title, lineup, mode, dev, leading_blank=(i > 0))
         right += rws + [[]]
         meta += mta + [{'k': 'blank'}]
 
@@ -2419,110 +2636,10 @@ def build_standings_rows(context, arc, finishes, active_franchises):
     return rows, formats
 
 
-def build_team_tab(context, franchise, current_lineup, alltime_lineup,
-                   bench_current, bench_alltime, days_current, days_alltime,
-                   provenance_mix):
-    """One franchise page: a two-scope Best Lineup (LEFT current season,
-    RIGHT all-time cumulative). BOTH sides are THIS franchise's OWN best
-    lineup -- not the all-league team (Kyle, 2026-07-14):
-
-      Starters  the optimal lineup (slot template) maximizing ACTIVE points
-                scored FOR THIS TEAM. Left = among players it started this
-                season; right = among players it EVER started, all at once
-                ("the best team this franchise could assemble from every
-                piece it's had").
-      Bench     next players by TOTAL points on this team's roster (active +
-                inactive -- points available, used or not), starters removed.
-      Others    everyone else it rostered (that scope), by total points;
-                capped on the all-time side (25-year league).
-
-    So a player recurs across pages: Freeman is on BP's CURRENT lineup (BP
-    rosters him, his best 1B this year) AND CAL's ALL-TIME lineup (CAL's
-    best-ever 1B though he left). The Tm columns (small-font, cols A & P)
-    say where the player is rostered NOW: '*' on this page's team, the team
-    abbrev on another, blank when unclaimed. Mirrors the ESPN team tab
-    (tests/fixtures/almanac_v1_1_0/*.tsv). See project_cbs_team_pages memory."""
-    season = context['season_year']
-    era = f"{context['first_season']}–{season}"
-    title = _safe_sheet_title(franchise['team_name'])
-    cur_days = {r['player_key']: r['roster_days'] for r in days_current}
-    all_days = {r['player_key']: r['roster_days'] for r in days_alltime}
-    for sel in current_lineup:
-        if sel.get('player_key') in cur_days:
-            sel['roster_days'] = cur_days[sel['player_key']]
-    for sel in alltime_lineup:
-        if sel.get('player_key') in all_days:
-            sel['roster_days'] = all_days[sel['player_key']]
-
-    left_rows, left_headers = _lineup_block(current_lineup, all_time=False)
-    right_rows, right_headers = _lineup_block(alltime_lineup, all_time=True)
-    left_width = len(left_rows[0])
-
-    rows = [
-        [franchise['team_name']],
-        [f'Best Lineup — {season} season × all-time ({era}), through '
-         f'{_fmt_date(context["roster_date"])}. Starting slots take the best '
-         f'ACTIVE points at each eligible position (CBS\'s own eligibility '
-         f'rule, date-scoped); bench blocks rank TOTAL rostered points.'],
-        [_provenance_sentence(provenance_mix)],
-        [],
-        [f'Current Season — {season}'] + [''] * (left_width - 1) + ['']
-        + [f'All-Time ({era})'],
-        [],
-    ]
-    formats = [
-        {'range': 'A1:V1', 'format': {'textFormat': {'bold': True, 'fontSize': 14}}},
-        {'range': 'A2:V2', 'format': {'textFormat': {'italic': True},
-                                      'backgroundColor': _PALE_BLUE}},
-        {'range': 'A3:V3', 'format': {'textFormat': {'italic': True, 'fontSize': 9}}},
-        {'range': f'A5:{_col(left_width)}5',
-         'format': {'textFormat': {'bold': True},
-                    'backgroundColor': _POWDER}},
-    ]
-    right_start_col = left_width + 2
-    right_end_col = right_start_col + len(right_rows[0]) - 1
-    formats.append({'range': f'{_col(right_start_col)}5:{_col(right_end_col)}5',
-                    'format': {'textFormat': {'bold': True},
-                               'backgroundColor': _POWDER}})
-
-    body_start = len(rows)
-    body = _merge_bands(left_rows, right_rows, left_width, gap=1)
-    rows.extend(body)
-    for h in left_headers:
-        r = body_start + h + 1
-        formats.append({'range': f'A{r}:{_col(left_width)}{r}',
-                        'format': {'textFormat': {'bold': True}}})
-    for h in right_headers:
-        r = body_start + h + 1
-        formats.append({'range': f'{_col(right_start_col)}{r}:{_col(right_end_col)}{r}',
-                        'format': {'textFormat': {'bold': True}}})
-
-    rows.append([])
-
-    # ---- bench blocks
-    bench_hdr_cur = ['', 'Player', 'Pos', 'Games', 'Rostered Pts', 'Active Pts']
-    bench_hdr_all = ['', 'Player', 'Pos', 'Yrs', 'Games', 'Rostered Pts', 'Active Pts']
-    bench_left = [[f'Bench — most rostered points, {season}'], bench_hdr_cur]
-    for b in bench_current:
-        bench_left.append(['', b['player_name'], b.get('position') or '',
-                           _num(b['games']), _pts(b['rostered_pts']),
-                           _pts(b['weighted_active_pts'])])
-    bench_right = [['Bench — most rostered points, all-time'], bench_hdr_all]
-    for b in bench_alltime:
-        bench_right.append(['', b['player_name'], b.get('position') or '',
-                            _span(b), _num(b['games']),
-                            _pts(b['rostered_pts']),
-                            _pts(b['weighted_active_pts'])])
-    bench_start = len(rows)
-    rows.extend(_merge_bands(bench_left, bench_right, left_width, gap=1))
-    r = bench_start + 1
-    formats.append({'range': f'A{r}:V{r}',
-                    'format': {'textFormat': {'bold': True, 'foregroundColor': _WHITE},
-                               'backgroundColor': _NAVY}})
-    formats.append({'range': f'A{r + 1}:V{r + 1}',
-                    'format': {'textFormat': {'bold': True}}})
-
-    return title, rows, formats
+# build_team_tab / _lineup_block / _lineup_row / _merge_bands and the old
+# two-band CBS team-page shape retired 2026-07-16: team tabs now render
+# through the SHARED almanac_logic.build_team_history_tabs in ESPN's exact
+# shape (see get_cbs_team_history_data + build_all_tabs).
 
 
 def build_all_tabs(nav_targets=None):
@@ -2534,9 +2651,8 @@ def build_all_tabs(nav_targets=None):
     arc = get_standings_arc(season)
     finishes = get_historic_finishes()
     franchises = get_active_franchises(context['roster_date'])
-    context['provenance_mix'] = get_provenance_mix()
-
-    # Team tab order = current standings order.
+    # Standings order for the Standings tab; team TABS sort alphabetically
+    # by title inside the shared builder (Kyle 2026-07-17).
     latest = {r['team_id']: r for r in arc if r['is_latest_period']}
     franchises = sorted(
         franchises,
@@ -2552,32 +2668,52 @@ def build_all_tabs(nav_targets=None):
                 for fr in franchises
                 if _fmap.get(int(fr['team_id']), {}).get('abbrev')}
 
+    # Team pages: ESPN's shape VERBATIM (Kyle 2026-07-16) -- the shared
+    # almanac_logic builder over CBS data + the CBS starters selector.
+    # Full-name tab titles (Kyle's one deliberate asymmetry), alphabetical
+    # tab order (builder default), the era-keyed provenance lines in the
+    # Lineup Data block, and the Best Individual Seasons block over
+    # player-season candidates (Kyle 2026-07-17).
+    history = get_cbs_team_history_data(context, franchises, _fmap)
+    seasons_by_team = {}
+    for r in history['player_seasons']:
+        seasons_by_team.setdefault(r['team_id'], []).append(r)
+
+    def _cbs_best_seasons(fid):
+        candidates = get_optimal_season_candidates(fid)
+        # DH/U are universal-fill slots: clone every hitter-season a DH +
+        # U candidacy, same as the roster lineups (the eligibility arrays
+        # deliberately carry only EARNED positions).
+        candidates = _synthesize_universal_slots(candidates)
+        return {'candidates': candidates,
+                'seasons': seasons_by_team.get(fid, [])}
+
+    team_pages = build_team_history_tabs(
+        history,
+        season_year=season,
+        slot_caps={**CBS_SLOT_CAPS, 'BE': _CBS_BENCH_SLOTS},
+        optimal_team_fn=_cbs_optimal_team,
+        title_fn=lambda meta: _safe_sheet_title(meta.get('team_name') or ''),
+        lineup_data=lambda fid: _provenance_era_lines(get_provenance_mix(fid)),
+        best_seasons_fn=_cbs_best_seasons,
+    )
     team_tabs = []
-    for fr in franchises:
-        fid = int(fr['team_id'])
-        current_lineup = get_best_lineup(entity_id=fid, season_year=season)
-        alltime_lineup = get_best_lineup(entity_id=fid, season_year=None)
-        # Years-of-service on the team-page all-time lineup, scoped to this
-        # franchise (Kyle wants the longevity string here too; on a team
-        # page it shows the come-and-go pattern, e.g. "5: 2011-2013, 2018-2019").
-        at_years = get_years_of_service(
-            [s['player_key'] for s in alltime_lineup if s.get('player_key')],
-            entity_id=fid)
-        for s in alltime_lineup:
-            s['_years_of_service'] = _years_of_service(
-                at_years.get(s.get('player_key'), []))
-        in_lineups = {s['player_key'] for s in current_lineup + alltime_lineup
-                      if s.get('player_key')}
-        bench_current = get_bench_ranking(fid, season_year=season,
-                                          exclude_keys=in_lineups, top_n=8)
-        bench_alltime = get_bench_ranking(fid, season_year=None,
-                                          exclude_keys=in_lineups, top_n=10)
-        team_tabs.append(build_team_tab(
-            context, fr, current_lineup, alltime_lineup,
-            bench_current, bench_alltime,
-            get_roster_days(fid, season_year=season), get_roster_days(fid),
-            get_provenance_mix(fid),
-        ))
+    for title, rows in team_pages:
+        formats = team_tab_format_specs(rows)
+        # A1 abbrev parenthetical: size-10 non-bold run (same treatment as
+        # the ESPN writer's _title_abbrev_run_request).
+        a1 = rows[0][0] if rows and rows[0] else ''
+        split = a1.rfind(' (')
+        if a1.endswith(')') and split > 0:
+            formats.append({'range': 'A1', 'runs': [
+                {'startIndex': 0, 'format': {'bold': True}},
+                {'startIndex': split, 'format': {'bold': False, 'fontSize': 10}},
+            ]})
+        # Best Individual Seasons banner rows merge A:O (dynamic per tab;
+        # the writer defers these until after its unmerge pass).
+        formats.extend({'range': rng, 'merge': True}
+                       for rng in team_tab_banner_merges(rows))
+        team_tabs.append((title, rows, formats))
 
     context['team_titles'] = [title for title, _, _ in team_tabs]
     current_key, current_name = get_current_rostered()
@@ -2605,8 +2741,12 @@ def build_all_tabs(nav_targets=None):
                                  get_cbs_records_data())
     standings = build_standings_rows(context, arc, finishes, franchises)
 
+    # Third element: the team-tab title set -- the writer bulk-writes those
+    # tabs RAW (zero-padded rate strings survive) + reapplies '=' formulas,
+    # exactly like the ESPN team tabs.
+    team_titles = {title for title, _, _ in team_tabs}
     return ([(HOME_TAB, *home), (RECORDS_TAB, *records),
-             (STANDINGS_TAB, *standings)] + team_tabs), link_map
+             (STANDINGS_TAB, *standings)] + team_tabs), link_map, team_titles
 
 
 # ---------------------------------------------------------------------------
@@ -2648,15 +2788,30 @@ def _sheets_call(label, fn):
             time.sleep(_QUOTA_WAIT_SECONDS)
 
 
-def _write_tab(spreadsheet, title, rows, formats, value_input_option='RAW'):
+def _write_tab(spreadsheet, title, rows, formats, value_input_option='RAW',
+               reapply_formulas=False):
     width = max((len(r) for r in rows if r), default=8)
+    needed_rows = max(len(rows) + 10, 40)
+    needed_cols = max(width, 10)
     try:
         worksheet = spreadsheet.worksheet(title)
+        # Team tabs GREW with the ESPN-shape rebuild (uncapped Other ->
+        # 1,000+ rows on the long-tenured franchises); an existing grid
+        # from an earlier render may be too small for the values write
+        # and the row-addressed style ranges.
+        if (worksheet.row_count < needed_rows
+                or worksheet.col_count < needed_cols):
+            _sheets_call(
+                f'resize {title}',
+                lambda ws=worksheet: ws.resize(
+                    rows=max(ws.row_count, needed_rows),
+                    cols=max(ws.col_count, needed_cols)),
+            )
     except gspread.WorksheetNotFound:
         worksheet = _sheets_call(
             f'create {title}',
-            lambda t=title, w=width: spreadsheet.add_worksheet(
-                title=t, rows=max(len(rows) + 10, 40), cols=max(w, 10),
+            lambda t=title: spreadsheet.add_worksheet(
+                title=t, rows=needed_rows, cols=needed_cols,
             ),
         )
     _sheets_call(f'clear {title}', worksheet.clear)
@@ -2665,6 +2820,12 @@ def _write_tab(spreadsheet, title, rows, formats, value_input_option='RAW'):
         lambda ws=worksheet, r=rows, vio=value_input_option: ws.update(
             r, 'A1', value_input_option=vio),
     )
+    if reapply_formulas:
+        # BEFORE the style pass: the team tabs auto-resize their Player
+        # columns, and resizing against the raw 150-char '=HYPERLINK(...)'
+        # literals (instead of the rendered short names) left them
+        # comically wide (Kyle 2026-07-17).
+        _reapply_formula_cells(worksheet, rows)
     _sheets_call(
         f'style {title}',
         lambda ws=worksheet, t=title, f=formats:
@@ -2675,6 +2836,30 @@ def _write_tab(spreadsheet, title, rows, formats, value_input_option='RAW'):
     return worksheet
 
 
+def _reapply_formula_cells(worksheet, rows):
+    """Re-send '='-prefixed cells with USER_ENTERED after a RAW bulk write
+    (mirrors almanac_write._reapply_formula_cells): RAW keeps zero-padded
+    rate strings verbatim but leaves the bref HYPERLINKs as literal text;
+    this pass re-coerces only those cells. Fresh dicts per attempt --
+    gspread rewrites each entry's 'range' in place, so a retry after a
+    quota hit would double-prefix the title and 400."""
+    formula_cells = [
+        {'range': f'{_col(col)}{row_number}', 'values': [[value]]}
+        for row_number, row in enumerate(rows, start=1)
+        for col, value in enumerate(row, start=1)
+        if isinstance(value, str) and value.startswith('=')
+    ]
+    if not formula_cells:
+        return
+    _sheets_call(
+        f'reapply {len(formula_cells)} formula cells {worksheet.title}',
+        lambda: worksheet.batch_update(
+            [dict(cell) for cell in formula_cells],
+            value_input_option='USER_ENTERED',
+        ),
+    )
+
+
 def write_cbs_almanac(sheet_id):
     """Two-pass write, mirroring the ESPN almanac (#25): pass 1 writes
     every non-Home tab so their gids exist; pass 2 renders Home's nav as
@@ -2683,16 +2868,24 @@ def write_cbs_almanac(sheet_id):
     client = _get_authorized_client()
     spreadsheet = _sheets_call('open', lambda: client.open_by_key(sheet_id))
 
-    tabs, link_map = build_all_tabs()
+    tabs, link_map, team_titles = build_all_tabs()
     home = next(t for t in tabs if t[0] == HOME_TAB)
     others = [t for t in tabs if t[0] != HOME_TAB]
 
     nav_targets, ws_by_title = {}, {}
     for title, rows, formats in others:
-        # USER_ENTERED so the bref =HYPERLINK cells on Records + team pages
-        # parse as links, not literal text (RAW left them as strings).
-        ws = _write_tab(spreadsheet, title, rows, formats,
-                        value_input_option='USER_ENTERED')
+        if title in team_titles:
+            # Team tabs: RAW (mirrors the ESPN team-tab writer) so the
+            # zero-padded rate strings ("040") survive verbatim; the bref
+            # '=' cells re-coerce to formulas INSIDE the write, before the
+            # style pass auto-resizes the Player columns.
+            ws = _write_tab(spreadsheet, title, rows, formats,
+                            value_input_option='RAW', reapply_formulas=True)
+        else:
+            # USER_ENTERED so the bref =HYPERLINK cells on Records parse
+            # as links, not literal text (RAW left them as strings).
+            ws = _write_tab(spreadsheet, title, rows, formats,
+                            value_input_option='USER_ENTERED')
         nav_targets[title] = ws.id
         ws_by_title[title] = ws
 
@@ -2772,9 +2965,16 @@ _RECORDS_WIDTHS = [(0, 1, 175), (1, 2, 150), (2, 3, 125),
                    # Wasted HoS Hitters block L-O (Kyle 2026-07-15).
                    (11, 12, 150), (12, 13, 125), (13, 14, 50), (14, 15, 400)]
 _STANDINGS_WIDTHS = [(0, 1, 190), (1, 2, 60)]
-_TEAM_WIDTHS = [(0, 1, 55), (1, 2, 170), (2, 7, 62), (7, 12, 46), (12, 13, 30),
-                (13, 14, 55), (14, 15, 170), (15, 16, 62), (16, 21, 62),
-                (21, 26, 46)]
+# Team-tab widths: VERBATIM from almanac_write._apply_team_tab_dimensions
+# (Kyle 2026-07-16: CBS team tabs identical to ESPN's) -- tiny Tm cols,
+# 50px stat columns (incl. the new Total/Active/Inactive trio), 80px
+# pipe columns, 325px trailing YoS at idx 31 (last column, let the
+# come-and-go year ranges run free -- Kyle 2026-07-17).
+_TEAM_WIDTHS = [(0, 1, 25), (1, 2, 75), (3, 4, 40), (4, 5, 50), (5, 6, 50),
+                (6, 7, 50), (7, 8, 50), (8, 9, 55), (9, 10, 40), (10, 15, 80),
+                (15, 16, 15), (16, 17, 25), (17, 18, 75), (19, 20, 40),
+                (20, 21, 50), (21, 22, 50), (22, 23, 50), (23, 24, 50),
+                (24, 25, 55), (25, 26, 40), (26, 31, 80), (31, 32, 325)]
 
 
 def _tab_style_requests(sheet_gid, title, formats):
@@ -2783,6 +2983,9 @@ def _tab_style_requests(sheet_gid, title, formats):
     formatting, so without this every re-render layers new colours over the
     old and stale artifacts accumulate -- Kyle round 7), then the frozen
     header band, the builder's cell formats, and column widths."""
+    # Team tabs freeze through the column-header band (5, like ESPN's
+    # worksheet.freeze(rows=5)); the dashboard tabs keep the 2-row band.
+    is_team_tab = title not in (HOME_TAB, RECORDS_TAB, STANDINGS_TAB)
     requests = [{
         'repeatCell': {
             'range': {'sheetId': sheet_gid},   # whole sheet
@@ -2793,14 +2996,35 @@ def _tab_style_requests(sheet_gid, title, formats):
         'updateSheetProperties': {
             'properties': {
                 'sheetId': sheet_gid,
-                'gridProperties': {'frozenRowCount': 2},
+                'gridProperties': {'frozenRowCount': 5 if is_team_tab else 2},
             },
             'fields': 'gridProperties.frozenRowCount',
         },
     }]
+    deferred_merges = []
     for spec in formats or ():
         grid_range = gspread.utils.a1_range_to_grid_range(
             spec['range'], sheet_id=sheet_gid)
+        if spec.get('merge'):
+            # Dynamic merges from the builder (the Best Individual Seasons
+            # banner rows). DEFERRED past the team-tab unmerge below --
+            # merging first would be undone by the full-sheet unmerge.
+            deferred_merges.append({
+                'mergeCells': {'range': grid_range, 'mergeType': 'MERGE_ALL'},
+            })
+            continue
+        if 'runs' in spec:
+            # Per-character run styling (textFormatRuns) for a single cell --
+            # the A1 team name (bold) + its size-10 abbrev parenthetical.
+            # Written after the range formats so it wins on that cell.
+            requests.append({
+                'updateCells': {
+                    'range': grid_range,
+                    'rows': [{'values': [{'textFormatRuns': spec['runs']}]}],
+                    'fields': 'textFormatRuns',
+                },
+            })
+            continue
         fields = ','.join(sorted(spec['format'].keys()))
         requests.append({
             'repeatCell': {
@@ -2829,4 +3053,28 @@ def _tab_style_requests(sheet_gid, title, formats):
             'fields': 'pixelSize',
         },
     } for start, end, pixels in widths)
+    if is_team_tab:
+        # Auto-fit the two Player columns (C and S), like the ESPN writer's
+        # _auto_resize_columns_request.
+        requests.extend({
+            'autoResizeDimensions': {
+                'dimensions': {
+                    'sheetId': sheet_gid,
+                    'dimension': 'COLUMNS',
+                    'startIndex': start,
+                    'endIndex': end,
+                },
+            },
+        } for start, end in ((2, 3), (18, 19)))
+        # Header merges (Roster Days pairs, the Points banners, the CBS
+        # Lineup Data lines), shared with the ESPN writer, then the
+        # builder's dynamic merges (Best Individual Seasons banners).
+        # Unmerge the whole sheet first: re-merging an already-merged
+        # range errors on rerun.
+        requests.append({'unmergeCells': {'range': {'sheetId': sheet_gid}}})
+        requests.extend({
+            'mergeCells': {'range': {'sheetId': sheet_gid, **rng},
+                           'mergeType': 'MERGE_ALL'},
+        } for rng in team_tab_merge_ranges(with_lineup_data=True))
+        requests.extend(deferred_merges)
     return requests

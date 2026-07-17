@@ -48,10 +48,16 @@ from almanac_render import (
     RECORDS_MATRIX_WIDTH,
     RECORDS_TAB,
     TEAM_HISTORY_DETAIL_HEADER,
+    TEAM_HISTORY_ALLTIME_DETAIL_HEADER,
+    TEAM_HISTORY_BEST_SEASON_BANNER,
+    TEAM_HISTORY_GLOSS_LINES,
     TEAM_HISTORY_HITTER_HEADER,
     TEAM_HISTORY_HITTER_STATS,
     TEAM_HISTORY_MIXED_HEADER,
     TEAM_HISTORY_MIXED_STATS,
+    TEAM_HISTORY_OTHER_CAP,
+    TEAM_HISTORY_OTHER_MORE,
+    TEAM_HISTORY_OTHER_WORST,
     TEAM_HISTORY_PITCHER_HEADER,
     TEAM_HISTORY_PITCHER_STATS,
     TEAM_ROSTER_HEADER,
@@ -579,13 +585,13 @@ def _home_left_rows(all_time_rows, team_titles, nav_targets, align_alltime_to=No
     rows.extend([term, definition] for term, definition in _HOME_GLOSSARY)
 
     # Align the all-time block with the right-band Season-to-Date block so
-    # the lineups sit inline: pad up to the season label's row, then mirror
-    # its label / blank / header / rows shape.
+    # the lineups sit inline: pad up to the season label's row (the pad's
+    # last blank is the spacer above the title), then mirror its
+    # label / header / rows shape -- title directly on header (Kyle 2026-07-15).
     if align_alltime_to is not None:
         while len(rows) < align_alltime_to:
             rows.append([])
     rows.append(['All-League Team: All-Time'])
-    rows.append([])
     rows.append(list(HOME_ALLTIME_HEADER))
     rows.extend(format_all_league_thin_row(row) for row in all_time_rows)
     return rows
@@ -616,9 +622,13 @@ def _home_right_rows(weekly_rows, weekly_all_rows, season_rows,
     week_dev = _deviation_by_slot(weekly_rows, weekly_all_rows)
     season_dev = _deviation_by_slot(season_rows, season_all_rows)
 
+    # Each board's title sits directly on its header row. The FIRST board is
+    # flush with the top of the band (row 4, aligned with the left band's
+    # first row); later boards get a spacer blank above the title (Kyle
+    # 2026-07-16). season_label_idx points at the title row so the left
+    # band's All-Time block still aligns to it.
     rows = [
         [f'All-League Team of the Week: {season_year} Week {matchup_period}'],
-        [],
         header,
     ]
     rows.extend(
@@ -627,10 +637,10 @@ def _home_right_rows(weekly_rows, weekly_all_rows, season_rows,
         )
         for row in weekly_rows
     )
-    rows.append([])
+    rows.append([])          # separator between the two boards
+    rows.append([])          # spacer above the Season-to-Date title
     season_label_idx = len(rows)
     rows.append([f'All-League Team Season-to-Date: {season_year}'])
-    rows.append([])
     rows.append(header)
     rows.extend(
         format_all_league_team_row_with_deviation(
@@ -1176,25 +1186,31 @@ def _blank_roster_row(template, slot, slot_rank, slots_to_fill):
     }
 
 
-# Column anchors for the team-tab header text (v1.1.2). Indices into a
-# TEAM_ROSTER_MATRIX_WIDTH-wide row: the slot-fill explanation sits in
-# the current-season side (col F), the points glossary over the all-time
-# side (col Q). Both overflow rightward into the empty header cells.
-_EXPLAIN_COL = 5
-_GLOSSARY_COL = 16
+# Header-row column anchors (Kyle's gold standard, 2026-07-17): the
+# points glossary at col H (overflowing rightward into empty cells),
+# the "Lineup Data:" label right-aligned at R1, and the era lines at
+# S1:S3 (merged S:X writer-side so auto-resize ignores them).
+_GLOSS_COL = 7
+_LINEUP_DATA_LABEL_COL = 17
+_LINEUP_DATA_COL = 18
 
 
-def _team_history_header_row(placements):
-    """Build one TEAM_ROSTER_MATRIX_WIDTH-wide header row with text placed
-    at specific column indices (everything else blank)."""
-    row = [''] * TEAM_ROSTER_MATRIX_WIDTH
+def _team_history_header_row(placements, width=TEAM_ROSTER_MATRIX_WIDTH):
+    """Build one header row `width` cells wide (default TEAM_ROSTER_MATRIX_
+    WIDTH) with text at specific column indices (everything else blank).
+    Callers pass a wider width when the all-time side carries the trailing
+    Years-of-Service column."""
+    row = [''] * width
     for idx, text in placements.items():
-        if 0 <= idx < TEAM_ROSTER_MATRIX_WIDTH:
+        if 0 <= idx < width:
             row[idx] = text
     return row
 
 
-def build_team_history_tabs(history_data, season_year, league_id=None, slot_caps=None):
+def build_team_history_tabs(history_data, season_year, league_id=None, slot_caps=None,
+                            optimal_team_fn=None, title_fn=None,
+                            lineup_data=None, team_order=None,
+                            best_seasons_fn=None):
     """Build side-by-side current-season/all-time best-lineup tabs.
 
     v1.1.1: Starters fill switched from days-active-at-slot greedy to
@@ -1203,10 +1219,41 @@ def build_team_history_tabs(history_data, season_year, league_id=None, slot_caps
     (active + bench/IL points), so a player can land in Bench "because
     they were blocked by a better player" -- the missed-opportunity
     framing the user picked for Approach 1.
+
+    The CBS almanac reuses this builder verbatim (Kyle 2026-07-16: team
+    tabs identical across leagues, ESPN's shape wins) via league knobs,
+    all defaulting to the ESPN behavior:
+      optimal_team_fn  starters selector (see build_team_history_side)
+      title_fn         team_meta -> worksheet title (default abbrev-based
+                       team_tab_title; CBS keeps full team names)
+      lineup_data      callable(team_id) -> up to 3 era lines for the
+                       R1/S1:S3 "Lineup Data:" block (CBS provenance);
+                       None = no block (ESPN)
+      team_order       explicit team_id tab order; None = alphabetical by
+                       title (both leagues -- Kyle 2026-07-17)
+      best_seasons_fn  callable(team_id) -> {'candidates': [...],
+                       'seasons': [...]} feeding the Best Individual
+                       Seasons block under the Current Season readout
+                       (Kyle 2026-07-17); None = no block
     """
     del league_id
     slot_caps = slot_caps or {}
     players = history_data.get('players') or []
+
+    # Years-of-Service column (all-time side, trailing): render only for
+    # leagues with >= 1 completed prior season -- otherwise it's a trivial
+    # "1: <year>" for everyone (Kyle 2026-07-16). Detected from any active
+    # season the all-time rows recorded before the current one.
+    show_yos = any(
+        y.strip() and int(y) < season_year
+        for row in players
+        if row.get('scope') == 'all_time'
+        for y in str(row.get('service_years') or '').split(',')
+    )
+    all_time_detail = (TEAM_HISTORY_ALLTIME_DETAIL_HEADER if show_yos
+                       else TEAM_HISTORY_DETAIL_HEADER)
+    roster_header = [*TEAM_HISTORY_DETAIL_HEADER, '', *all_time_detail]
+    matrix_width = len(roster_header)
 
     teams = {}
     players_by_team_scope = defaultdict(list)
@@ -1218,62 +1265,85 @@ def build_team_history_tabs(history_data, season_year, league_id=None, slot_caps
         teams.setdefault(team_id, row)
         players_by_team_scope[(team_id, scope)].append(row)
 
+    _title = title_fn or team_tab_title
+    if team_order is not None:
+        order_index = {tid: i for i, tid in enumerate(team_order)}
+        sort_key = lambda tid: (order_index.get(tid, len(order_index)),)
+    else:
+        # Alphabetical by the DISPLAYED title (title_fn), not the default
+        # abbrev title -- sorting CBS's full-name tabs by abbrev looked
+        # scrambled (Kyle 2026-07-17).
+        sort_key = lambda tid: (str(_title(teams[tid])).casefold(), tid)
+
     tabs = []
-    for team_id in sorted(teams, key=lambda tid: _team_sort_key(teams[tid])):
+    for team_id in sorted(teams, key=sort_key):
         team_meta = teams[team_id]
         current_rows = build_team_history_side(
             players_by_team_scope[(team_id, 'current_season')],
             slot_caps,
             season_year=season_year,
             team_id=team_id,
+            optimal_team_fn=optimal_team_fn,
         )
         all_time_rows = build_team_history_side(
             players_by_team_scope[(team_id, 'all_time')],
             slot_caps,
             season_year=None,
             team_id=team_id,
+            optimal_team_fn=optimal_team_fn,
         )
         row_labels = _team_history_row_labels(current_rows, all_time_rows)
         period_end_date = _format_sheet_date(team_meta.get('latest_matchup_end_date'))
+        # Kyle's gold-standard header (2026-07-17): a terse A2 dateline
+        # (the "through" date = last completed matchup period on ESPN,
+        # last captured date on CBS), a static A3 scoring note, the
+        # points glossary inline at H1:H3, and the league-specific
+        # Lineup Data block at R1/S1:S3.
         subtitle = (
-            f"Best Lineup -- current season + all-time"
-            + (f", through {period_end_date}" if period_end_date else "")
+            'Optimal Lineups'
+            + (f', through {period_end_date}' if period_end_date else '')
         )
+        team_name = team_meta.get('team_name') or f'Team {team_id}'
+        team_abbrev = team_meta.get('team_abbrev')
+        # Abbrev rides in the A1 cell as a size-10 non-bold parenthetical
+        # (the writer styles the run); the tab itself stays abbrev-named.
+        title_cell = f"{team_name} ({team_abbrev})" if team_abbrev else team_name
+        era_lines = list(lineup_data(team_id) or ()) if lineup_data else []
+        row1 = {0: title_cell, _GLOSS_COL: TEAM_HISTORY_GLOSS_LINES[0]}
+        row2 = {0: subtitle, _GLOSS_COL: TEAM_HISTORY_GLOSS_LINES[1]}
+        row3 = {0: "Points are calculated according to current season's "
+                   'scoring.',
+                _GLOSS_COL: TEAM_HISTORY_GLOSS_LINES[2]}
+        if era_lines:
+            row1[_LINEUP_DATA_LABEL_COL] = 'Lineup Data:'
+            for placements, line in zip((row1, row2, row3), era_lines[:3]):
+                placements[_LINEUP_DATA_COL] = line
         rows = [
-            _team_history_header_row({
-                0: team_meta.get('team_name') or f'Team {team_id}',
-                _GLOSSARY_COL: ('Total Points -- all points a player produced '
-                                'while rostered by this team (active + bench/IL).'),
-            }),
-            _team_history_header_row({
-                0: subtitle,
-                _EXPLAIN_COL: ('Starting lineup: best Active Points at each '
-                               'eligible position. Bench / IL / Other: most '
-                               'Total Points while rostered.'),
-                _GLOSSARY_COL: ('Active Points -- produced while in an active '
-                                'lineup slot (not bench or IL).'),
-            }),
-            _team_history_header_row({
-                _EXPLAIN_COL: ('Points use current-season scoring -- tell us if '
-                               "you'd rather see them as awarded at the time."),
-                _GLOSSARY_COL: ('Inactive Points -- produced while on this '
-                                "team's bench or IL."),
-            }),
-            _team_history_scope_header(),
-            TEAM_ROSTER_HEADER,
+            _team_history_header_row(row1, width=matrix_width),
+            _team_history_header_row(row2, width=matrix_width),
+            _team_history_header_row(row3, width=matrix_width),
+            _team_history_scope_header(with_yos=show_yos),
+            roster_header,
         ]
         for label in row_labels:
             rows.append(format_team_history_matrix_row(
                 label,
                 current_rows.get(label),
                 all_time_rows.get(label),
+                with_yos=show_yos,
             ))
-        tabs.append((team_tab_title(team_meta), rows))
+        if best_seasons_fn is not None:
+            _overlay_best_season_block(
+                rows, best_seasons_fn(team_id) or {}, slot_caps,
+                matrix_width=matrix_width,
+            )
+        tabs.append((_title(team_meta), rows))
 
     return tabs
 
 
-def build_team_history_side(player_rows, slot_caps, *, season_year, team_id):
+def build_team_history_side(player_rows, slot_caps, *, season_year, team_id,
+                            optimal_team_fn=None):
     """Arrange one scope of team/player history into best-lineup rows.
 
     v1.1.1: Starters come from get_optimal_team (calculated-points lens,
@@ -1294,6 +1364,12 @@ def build_team_history_side(player_rows, slot_caps, *, season_year, team_id):
         current-season side. Threaded into get_optimal_team.
       team_id:     this tab's team_id. Threaded into get_optimal_team
         so the Starters pool is scoped to players this team rostered.
+      optimal_team_fn: optional starters selector for a non-ESPN league
+        (the CBS almanac passes a get_best_lineup adapter). Called as
+        fn(season_year=..., team_id=...) and must return rows carrying
+        player_id + slot_label + lineup_slot, pre-sorted in slot order.
+        None = ESPN's almanac_data.get_optimal_team (read at call time
+        so tests can monkeypatch it).
     """
     players = {
         row.get('player_id'): row
@@ -1316,11 +1392,14 @@ def build_team_history_side(player_rows, slot_caps, *, season_year, team_id):
     # (the selector itself sorts before returning), so the output dict
     # insertion order below is already correct for _team_history_row_
     # labels to read off.
-    optimal_rows = almanac_data.get_optimal_team(
-        season_year=season_year,
-        team_id=team_id,
-        points_type='active',
-    )
+    if optimal_team_fn is not None:
+        optimal_rows = optimal_team_fn(season_year=season_year, team_id=team_id)
+    else:
+        optimal_rows = almanac_data.get_optimal_team(
+            season_year=season_year,
+            team_id=team_id,
+            points_type='active',
+        )
     for opt_row in optimal_rows:
         player_id = opt_row.get('player_id')
         if player_id is None:
@@ -1420,18 +1499,55 @@ def build_team_history_side(player_rows, slot_caps, *, season_year, team_id):
         row for row in players.values()
         if row.get('player_id') not in selected_ids
     ]
+    # Other only renders players who actually DID something for this team:
+    # an active game played, or any points (active or inactive) while
+    # rostered (Kyle 2026-07-16 -- LAW's 7-roster-day, all-zero Agustin
+    # Ramirez row was pure noise). Bench and IL keep the unfiltered pool:
+    # Bench ranks by production anyway, and IL tenancy is its own story.
+    remaining = [
+        row for row in remaining
+        if int(row.get('active_games') or 0) > 0
+        or float(row.get('active_points') or 0) != 0
+        or float(row.get('bench_il_points') or 0) != 0
+    ]
+
+    def _total(r):
+        return (float(r.get('active_points') or 0)
+                + float(r.get('bench_il_points') or 0))
+
+    # The franchise futility chair (Kyle 2026-07-17): the worst-ever
+    # player by rostered_days - total_points ("the guy who dragged you
+    # down" -- days+games-total was tested and only nosed toward
+    # high-playing-time mediocrity; the hoarded-star class belongs to
+    # the Wasted Hall of Shame, not here). Pulled OUT of the also-ran
+    # ranking and pinned as the section's last row. All-time only --
+    # a CURRENT-season worst-of makes no sense unless a team somehow
+    # burns through 100+ players in one year (Kyle 2026-07-17), so the
+    # current side only seats a chair when its cut actually fires.
+    want_chair = (season_year is None
+                  or len(remaining) > TEAM_HISTORY_OTHER_CAP)
+    chair = max(
+        remaining,
+        key=lambda r: int(r.get('rostered_days') or 0) - _total(r),
+        default=None,
+    ) if want_chair else None
+    pool = [r for r in remaining if r is not chair]
+
     # Other N uses the same total-rostered-production sort as Bench
     # (Approach 1) so the leftover-pool ordering is coherent across the
     # two sections -- they're conceptually the same pool with Bench just
-    # the top BE-many rows.
-    remaining.sort(
+    # the top BE-many rows. Capped at the top 100 (Kyle 2026-07-17);
+    # the cut collapses into one honest summary line.
+    pool.sort(
         key=lambda r: (
-            -(float(r.get('active_points') or 0) + float(r.get('bench_il_points') or 0)),
+            -_total(r),
             -int(r.get('rostered_days') or 0),
             r.get('display_name') or r.get('player_name') or '',
         ),
     )
-    for row_number, row in enumerate(remaining, 1):
+    also_rans = pool[:TEAM_HISTORY_OTHER_CAP]
+    cut = pool[TEAM_HISTORY_OTHER_CAP:]
+    for row_number, row in enumerate(also_rans, 1):
         label = f'Other {row_number}'
         position = _inactive_position_display(row)
         output[label] = _team_history_display_row(
@@ -1439,15 +1555,172 @@ def build_team_history_side(player_rows, slot_caps, *, season_year, team_id):
             label,
             display_slot=_compact_inactive_slot('Other', position),
         )
+    if cut:
+        cutoff = _total(also_rans[-1])
+        # The teasers are the nearest misses: the next 3 by total points
+        # right below the cutoff (ranks 101-103).
+        teasers = ', '.join(
+            (r.get('display_name') or r.get('player_name') or '?')
+            for r in cut[:3])
+        summary = _empty_team_history_display_row()
+        # The text rides in the Team cell (col D/T) -- it overflows
+        # rightward across the blank numeric cells; the Player column
+        # stays empty so its auto-resize doesn't fit to this line. The
+        # trailing tease hands off to the chair row below (Kyle
+        # 2026-07-17).
+        summary['pro_team'] = (
+            f'{len(cut)} other players under {cutoff:g} points, '
+            f'including {teasers} and, worst of all...')
+        output[TEAM_HISTORY_OTHER_MORE] = summary
+    if chair is not None:
+        position = _inactive_position_display(chair)
+        output[TEAM_HISTORY_OTHER_WORST] = _team_history_display_row(
+            chair,
+            TEAM_HISTORY_OTHER_WORST,
+            display_slot=_compact_inactive_slot('Worst', position),
+        )
 
     return output
 
 
+def _overlay_best_season_block(rows, data, slot_caps, *, matrix_width):
+    """Write the Best Individual Seasons block into the LEFT side (cols
+    A:O) below the Current Season readout (Kyle 2026-07-17): one buffer
+    row, the navy banner, then the optimal lineup over PLAYER-SEASON
+    candidates -- the same player may take several slots via different
+    seasons, but a player-season is used once (synthetic key|season
+    candidate ids make the shared selector enforce that for free).
+    Starters + bench only; no Others. The right side's rows continue
+    alongside untouched; extra full-width rows are appended if the block
+    runs past them."""
+    block = _best_season_block_rows(data, slot_caps)
+    if not block:
+        return
+    # Last row with any left-side content, below the column header (the
+    # first 5 rows are the tab header band).
+    left_last = 4
+    for i in range(5, len(rows)):
+        if any(str(c).strip() for c in rows[i][:15]):
+            left_last = i
+    insert_at = left_last + 2   # +1 = the buffer row
+    for offset, block_row in enumerate(block):
+        idx = insert_at + offset
+        while idx >= len(rows):
+            rows.append([''] * matrix_width)
+        row = rows[idx]
+        if len(row) < matrix_width:
+            row.extend([''] * (matrix_width - len(row)))
+        row[:15] = block_row
+
+
+def _best_season_block_rows(data, slot_caps):
+    """The block's left-side cell rows: banner, hitter/pitcher stat
+    sub-headers + starters, mixed sub-header + bench. Candidates carry
+    (player, season, position, active pts); season stat rows carry the
+    display fields at (player, season) grain."""
+    candidates = []
+    for cand in data.get('candidates') or ():
+        row = dict(cand)
+        season = int(row['season_year'])
+        # Identity: player_id where present (numeric on ESPN; the CBS id
+        # string doubles as player_key), player_key for the CBS ui-only
+        # synthetics -- must match the seasons rows' player_id key.
+        pid = row.get('player_id')
+        base = str(pid) if pid is not None else str(row.get('player_key'))
+        row['player_key'] = f'{base}|{season}'
+        row['_base_key'] = base
+        candidates.append(row)
+    if not candidates:
+        return []
+    season_stats = {
+        (str(r.get('player_id')), int(r['season_year'])): r
+        for r in data.get('seasons') or ()
+    }
+    starter_caps = {slot: count for slot, count in slot_caps.items()
+                    if slot not in ('BE', 'IL')}
+    picks = get_optimal_team_selections(candidates, starter_caps)
+
+    def _display_row(stat_row, season, label, display_slot, slot_code):
+        row = dict(stat_row)
+        name = row.get('display_name') or row.get('player_name') or ''
+        row['display_name'] = f'{name} ({season})'
+        # The Team column doubles as YEAR in this section (Kyle
+        # 2026-07-17: pro_team is only season-accurate on the CBS side;
+        # a Year column is honest on both leagues). The sub-headers
+        # relabel the column.
+        row['pro_team'] = season
+        if str(slot_code).startswith(('SP', 'RP', 'P')):
+            slot_points = row.get('active_pitching_points')
+        else:
+            slot_points = row.get('active_hitting_points')
+        return _team_history_display_row(
+            row, label, display_slot=display_slot, active_points=slot_points)
+
+    def _side_cells(display_row):
+        return _team_history_side_cells(display_row)
+
+    def _stat_header(labels):
+        side = [''] * len(TEAM_HISTORY_DETAIL_HEADER)
+        side[3] = 'Year'   # the Team column's 1-off relabel, this section only
+        side[10:] = labels
+        return side
+
+    hitters, pitchers = [], []
+    used = set()
+    for pick in picks:
+        label = pick.get('slot_label') or pick.get('lineup_slot') or ''
+        slot_code = pick.get('lineup_slot') or ''
+        is_pitcher = str(slot_code).startswith(('SP', 'RP', 'P'))
+        bucket = pitchers if is_pitcher else hitters
+        base = pick.get('_base_key')
+        if base is None:
+            bucket.append(_side_cells({
+                **_empty_team_history_display_row(), 'display_slot': label}))
+            continue
+        season = int(pick['season_year'])
+        used.add((base, season))
+        stat_row = season_stats.get((base, season), pick)
+        bucket.append(_side_cells(
+            _display_row(stat_row, season, label, label, slot_code)))
+
+    rows = [[TEAM_HISTORY_BEST_SEASON_BANNER] + [''] * 14]
+    rows.append(_stat_header(TEAM_HISTORY_HITTER_STATS))
+    rows.extend(hitters)
+    rows.append(_stat_header(TEAM_HISTORY_PITCHER_STATS))
+    rows.extend(pitchers)
+
+    bench_count = int(slot_caps.get('BE') or 0)
+    if bench_count:
+        def _season_total(r):
+            return (float(r.get('active_points') or 0)
+                    + float(r.get('bench_il_points') or 0))
+        bench_pool = sorted(
+            (r for key, r in season_stats.items() if key not in used),
+            key=lambda r: (-_season_total(r), str(r.get('player_id')),
+                           int(r['season_year'])),
+        )
+        bench_rows = []
+        for r in bench_pool[:bench_count]:
+            season = int(r['season_year'])
+            position = _inactive_position_display(r)
+            display_slot = _compact_inactive_slot('BE', position)
+            bench_rows.append(_side_cells(
+                _display_row(r, season, display_slot, display_slot,
+                             r.get('position') or '')))
+        if bench_rows:
+            rows.append(_stat_header(TEAM_HISTORY_MIXED_STATS))
+            rows.extend(bench_rows)
+    return rows
+
+
 def _team_history_row_labels(current_rows, all_time_rows):
-    base_labels = [label for label in current_rows if not label.startswith('Other ')]
+    specials = (TEAM_HISTORY_OTHER_MORE, TEAM_HISTORY_OTHER_WORST)
+    base_labels = [label for label in current_rows
+                   if not label.startswith('Other ') and label not in specials]
     labels = list(base_labels)
     for label in all_time_rows:
-        if not label.startswith('Other ') and label not in labels:
+        if (not label.startswith('Other ') and label not in specials
+                and label not in labels):
             labels.append(label)
     labels = _insert_before_first(
         labels,
@@ -1468,9 +1741,15 @@ def _team_history_row_labels(current_rows, all_time_rows):
         _max_other_index(current_rows),
         _max_other_index(all_time_rows),
     )
+    tail_start = len(labels)
     labels.extend(f'Other {i}' for i in range(1, other_count + 1))
-    if other_count:
-        labels.insert(len(labels) - other_count, '')
+    # The section tail (Kyle 2026-07-17): the "...N more" summary line,
+    # then the franchise futility chair as the very last row.
+    for special in specials:
+        if special in current_rows or special in all_time_rows:
+            labels.append(special)
+    if len(labels) > tail_start:
+        labels.insert(tail_start, '')
     return labels
 
 

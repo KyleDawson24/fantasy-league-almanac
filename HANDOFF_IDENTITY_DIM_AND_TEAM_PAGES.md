@@ -62,6 +62,21 @@ Detail lives in `WALKBACK_PROGRESS.md` + the commits; this is the delta.
 
 ---
 
+## 0c. Update — 2026-07-17: the team-pages sprint LANDED
+
+§6.3 is DONE and went well past the original spec — see the
+2026-07-16/17 rounds in `WALKBACK_PROGRESS.md` (the ledger is the
+authoritative account) + the `project_cbs_team_pages` memory. Headline:
+CBS team tabs render through the SHARED `build_team_history_tabs` (one
+format source, `team_tab_format_specs`); Kyle's team-sheet overhaul
+shipped on both leagues (Total/Active/Inactive trio, gold-standard
+headers, Other cap + futility chair, the Best Individual Seasons block
+over player-season candidates). ESPN goldens re-anchored to the new
+shape. Remaining from this doc: §6.4's open Kyle inputs and the
+continuity entity-scoping session. Next surface: standings tweaks.
+
+---
+
 ## 1. Where to work (mechanics)
 
 - **Worktree:** `C:\Users\kyled\projects\espn-league-manager\.claude\worktrees\modest-montalcini-3af8c4`

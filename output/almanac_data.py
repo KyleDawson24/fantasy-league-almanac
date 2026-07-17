@@ -413,6 +413,169 @@ def get_optimal_team_candidates(season_year=None, matchup_period=None,
     return rows
 
 
+def get_optimal_season_candidates(team_id):
+    """Per-(player, SEASON, position) candidate pool for the Best
+    Individual Seasons lineup (Kyle 2026-07-17): position-eligible
+    active points per season for players on this team that season.
+    weighted_active is the cross-era lens -- identical to 'active'
+    where lineup states are known (all ESPN rows), start-share-weighted
+    on CBS's estimated era -- so one query serves both leagues. The
+    block builder synthesizes key|season candidate ids so the shared
+    selector can reuse a player across slots while burning each
+    player-season once."""
+    return query_snowflake(f"""
+        SELECT
+            player_key,
+            MAX(player_id)    AS player_id,
+            MAX(player_name)  AS player_name,
+            MAX(display_name) AS display_name,
+            MAX(pro_team)     AS pro_team,
+            position,
+            season_year,
+            ROUND(SUM(weighted_active_pts), 1) AS position_pts
+        FROM fct_player_position_pts
+        WHERE {league_predicate()} AND team_id = %s
+        GROUP BY player_key, position, season_year
+        HAVING SUM(weighted_active_pts) > 0
+        ORDER BY position, position_pts DESC, player_id, player_key,
+                 season_year
+    """, (team_id,))
+
+
+def get_team_player_season_stats():
+    """ESPN display stats at (team, player, SEASON) grain for the Best
+    Individual Seasons block -- the same fields the team-history rows
+    carry (active/inactive points, hitting/pitching split, games, days,
+    stat tail, current fantasy team), one query for all teams. The CBS
+    almanac builds its equivalent in get_cbs_team_history_data."""
+    return query_snowflake(f"""
+        WITH latest_day AS (
+            SELECT season_year, MAX(scoring_period) AS scoring_period
+            FROM mart_daily_roster_snapshot
+            WHERE team_id IS NOT NULL AND {league_predicate()}
+            GROUP BY 1
+            QUALIFY ROW_NUMBER() OVER (ORDER BY season_year DESC) = 1
+        ),
+
+        roster AS (
+            SELECT
+                team_id,
+                player_id,
+                season_year,
+                COUNT(DISTINCT scoring_period) AS rostered_days,
+                SUM(CASE WHEN roster_status = 'active'
+                        THEN COALESCE(games_played, 0) ELSE 0
+                END) AS active_games
+            FROM mart_daily_roster_snapshot
+            WHERE team_id IS NOT NULL AND {league_predicate()}
+            GROUP BY 1, 2, 3
+        ),
+
+        player_context AS (
+            SELECT player_id, player_name, display_name, position, pro_team
+            FROM mart_daily_roster_snapshot
+            WHERE team_id IS NOT NULL AND {league_predicate()}
+            QUALIFY ROW_NUMBER() OVER (
+                PARTITION BY player_id
+                ORDER BY season_year DESC, scoring_period DESC
+            ) = 1
+        ),
+
+        current_player_team AS (
+            SELECT d.player_id, d.team_id AS current_fantasy_team_id,
+                   d.team_abbrev AS current_fantasy_team
+            FROM mart_daily_roster_snapshot d
+            INNER JOIN latest_day ld
+                ON d.season_year = ld.season_year
+                AND d.scoring_period = ld.scoring_period
+            WHERE d.team_id IS NOT NULL AND {league_predicate('d')}
+            QUALIFY ROW_NUMBER() OVER (
+                PARTITION BY d.player_id ORDER BY d.team_name
+            ) = 1
+        ),
+
+        season_active AS (
+            SELECT
+                team_id, player_id, season_year,
+                ROUND(SUM(calculated_points), 1)      AS active_points,
+                ROUND(SUM(calculated_hitting_pts), 1) AS active_hitting_points,
+                ROUND(SUM(calculated_pitching_pts), 1) AS active_pitching_points,
+                SUM(h) AS h, SUM(ab) AS ab, SUM(b_bb) AS b_bb,
+                SUM(hbp) AS hbp, SUM(sf) AS sf, SUM(tb) AS tb,
+                SUM(hr) AS hr, SUM(sb) AS sb, SUM(w) AS w, SUM(l) AS l,
+                SUM(sv) AS sv, SUM(er) AS er, SUM(outs) AS outs,
+                SUM(k) AS k, SUM(p_bb) AS p_bb, SUM(p_h) AS p_h
+            FROM fct_player_season_performance
+            WHERE team_id IS NOT NULL AND {league_predicate()}
+              AND performance_status = 'active'
+            GROUP BY 1, 2, 3
+        ),
+
+        season_inactive AS (
+            SELECT team_id, player_id, season_year,
+                   ROUND(SUM(calculated_points), 1) AS bench_il_points
+            FROM fct_player_season_performance
+            WHERE team_id IS NOT NULL AND {league_predicate()}
+              AND performance_status = 'inactive'
+            GROUP BY 1, 2, 3
+        )
+
+        SELECT
+            r.team_id,
+            r.player_id,
+            r.season_year,
+            pl.player_name,
+            pl.display_name,
+            pl.position,
+            pl.pro_team,
+            CASE
+                WHEN cpt.current_fantasy_team_id = r.team_id THEN '*'
+                ELSE COALESCE(cpt.current_fantasy_team, '')
+            END AS current_fantasy_team,
+            r.rostered_days,
+            r.active_games,
+            COALESCE(sa.active_points, 0)           AS active_points,
+            COALESCE(sa.active_hitting_points, 0)   AS active_hitting_points,
+            COALESCE(sa.active_pitching_points, 0)  AS active_pitching_points,
+            COALESCE(si.bench_il_points, 0)         AS bench_il_points,
+            COALESCE(sa.h, 0) AS h, COALESCE(sa.ab, 0) AS ab,
+            COALESCE(sa.b_bb, 0) AS b_bb, COALESCE(sa.hbp, 0) AS hbp,
+            COALESCE(sa.sf, 0) AS sf, COALESCE(sa.tb, 0) AS tb,
+            COALESCE(sa.hr, 0) AS hr, COALESCE(sa.sb, 0) AS sb,
+            COALESCE(sa.w, 0) AS w, COALESCE(sa.l, 0) AS l,
+            COALESCE(sa.sv, 0) AS sv, COALESCE(sa.er, 0) AS er,
+            COALESCE(sa.outs, 0) AS outs, COALESCE(sa.k, 0) AS k,
+            COALESCE(sa.p_bb, 0) AS p_bb, COALESCE(sa.p_h, 0) AS p_h
+        FROM roster r
+        LEFT JOIN player_context pl ON r.player_id = pl.player_id
+        LEFT JOIN current_player_team cpt ON r.player_id = cpt.player_id
+        LEFT JOIN season_active sa
+            ON r.team_id = sa.team_id AND r.player_id = sa.player_id
+            AND r.season_year = sa.season_year
+        LEFT JOIN season_inactive si
+            ON r.team_id = si.team_id AND r.player_id = si.player_id
+            AND r.season_year = si.season_year
+        ORDER BY r.team_id, r.season_year, r.player_id
+    """)
+
+
+def team_best_seasons_fn():
+    """Factory for build_team_history_tabs' best_seasons_fn (ESPN): the
+    season-grain display stats fetch once for all teams, per-team
+    candidates lazily."""
+    from collections import defaultdict
+    by_team = defaultdict(list)
+    for row in get_team_player_season_stats():
+        by_team[row['team_id']].append(row)
+
+    def fn(team_id):
+        return {
+            'candidates': get_optimal_season_candidates(team_id),
+            'seasons': by_team.get(team_id, []),
+        }
+    return fn
+
+
 # Stat columns the rendered All-League Team row needs (per format_top_
 # scorer_stats_line + the TOP_SCORER_STAT_DISPLAY map in formatters.py).
 # Kept aligned with the original _get_all_league_team_for_week query so
@@ -1017,6 +1180,28 @@ def get_team_roster_history_stats(season_year):
             FROM scoped_season
             WHERE performance_status = 'inactive'
             GROUP BY 1, 2, 3
+        ),
+
+        service_seasons AS (
+            -- Distinct seasons a player was actively started for this team with
+            -- nonzero active production (net-negative seasons included) -- the
+            -- all-time "Years of Service" column (Kyle 2026-07-16). Mirrors the
+            -- CBS get_years_of_service definition; only meaningful for the
+            -- all_time scope. Rendered as a "count: year-ranges" string.
+            SELECT
+                scope,
+                team_id,
+                player_id,
+                LISTAGG(TO_VARCHAR(season_year), ',')
+                    WITHIN GROUP (ORDER BY season_year) AS service_years
+            FROM (
+                SELECT scope, team_id, player_id, season_year
+                FROM scoped_season
+                WHERE performance_status = 'active'
+                GROUP BY scope, team_id, player_id, season_year
+                HAVING ROUND(SUM(calculated_points), 1) <> 0
+            )
+            GROUP BY scope, team_id, player_id
         )
 
         SELECT
@@ -1066,7 +1251,8 @@ def get_team_roster_history_stats(season_year):
             COALESCE(at.outs, 0) AS outs,
             COALESCE(at.k, 0) AS k,
             COALESCE(at.p_bb, 0) AS p_bb,
-            COALESCE(at.p_h, 0) AS p_h
+            COALESCE(at.p_h, 0) AS p_h,
+            COALESCE(ss.service_years, '') AS service_years
         FROM roster_totals rt
         INNER JOIN current_teams ct
             ON rt.team_id = ct.team_id
@@ -1087,6 +1273,10 @@ def get_team_roster_history_stats(season_year):
             ON rt.scope = it.scope
             AND rt.team_id = it.team_id
             AND rt.player_id = it.player_id
+        LEFT JOIN service_seasons ss
+            ON rt.scope = ss.scope
+            AND rt.team_id = ss.team_id
+            AND rt.player_id = ss.player_id
         ORDER BY ct.team_name, rt.scope, rt.rostered_days DESC, pl.display_name
     """, (season_year, season_year, season_year, season_year))
 

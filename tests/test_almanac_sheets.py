@@ -854,6 +854,35 @@ class TestTeamHistoryRows:
 
         assert _player_text(result['BE']['player']) == 'Mostly Benched Slugger'  # 75 > 30
         assert _player_text(result['Other 1']['player']) == 'Modest Everyday'
+        # No futility chair on a CURRENT-season side unless its 100-cap
+        # cut fires (Kyle 2026-07-17); the chair is an all-time feature.
+        assert almanac_render.TEAM_HISTORY_OTHER_WORST not in result
+
+    def test_history_side_all_time_pins_futility_chair(self, monkeypatch):
+        """All-time sides always seat the chair: the worst player by
+        rostered_days - total_points is pulled from the Other ranking
+        and pinned under the sentinel label with a Worst slot."""
+        players = [
+            _history_player(
+                1, 'Fine Player', team_id=2,
+                active_points=500, bench_il_points=0, rostered_days=100,
+            ),
+            _history_player(
+                2, 'Roster Barnacle', team_id=2,
+                active_points=5, bench_il_points=0, rostered_days=300,
+            ),
+        ]
+        _stub_get_optimal_team(monkeypatch, {2: []})
+
+        result = almanac_sheets.build_team_history_side(
+            players, {}, season_year=None, team_id=2,
+        )
+
+        worst = result[almanac_render.TEAM_HISTORY_OTHER_WORST]
+        assert _player_text(worst['player']) == 'Roster Barnacle'
+        assert worst['display_slot'].startswith('Worst')
+        assert _player_text(result['Other 1']['player']) == 'Fine Player'
+        assert 'Other 2' not in result
 
     def test_hitting_rates_keep_three_digits_for_low_rates(self):
         row = _history_player(1, 'Slumping Bat')
@@ -893,15 +922,19 @@ class TestTeamHistoryRows:
 
         rows = tabs[0][1]
         assert rows[3][0] == 'Current Season'
-        assert rows[3][15] == 'All-Time'
+        assert rows[3][16] == 'All-Time'
+        # Row 4 also carries the merged-header text (Kyle 2026-07-17):
+        # 'Roster Days' over the E/U pairs, 'Points' over the trio.
+        assert rows[3][4] == 'Roster Days'
+        assert rows[3][6] == 'Points'
         assert rows[4] == almanac_sheets.TEAM_ROSTER_HEADER
-        assert rows[5][9:14] == ['Avg', 'OBP', 'Slg', 'HR', 'SB']
+        assert rows[5][10:15] == ['Avg', 'OBP', 'Slg', 'HR', 'SB']
         # v1.1.1: current_fantasy_team column now holds '*' when the
         # player is still on this tab's team (was the redundant abbrev).
         # The _history_player helper hardcodes the field to the team's
         # full name -- testing only the slot/player/pro columns here.
         assert _texts(rows[6][1:4]) == ['LF', 'Current LF', 'BOS']
-        assert _texts(rows[6][16:19]) == ['LF', 'All Time LF', 'BOS']
+        assert _texts(rows[6][17:20]) == ['LF', 'All Time LF', 'BOS']
 
     def test_team_history_matrix_inserts_spacer_before_other_rows(self, monkeypatch):
         history_data = {
@@ -945,9 +978,9 @@ class TestTeamHistoryRows:
         )
 
         rows = tabs[0][1]
-        assert rows[5][9:14] == ['Avg', 'OBP', 'Slg', 'HR', 'SB']
-        assert rows[7][9:14] == ['W-L (Sv)', 'ERA', 'WHIP', 'K', 'BB']
-        assert rows[9][9:14] == ['Avg|W-L-Sv', 'OBP|ERA', 'Slg|WHIP', 'HR|K', 'SB|BB']
+        assert rows[5][10:15] == ['Avg', 'OBP', 'Slg', 'HR', 'SB']
+        assert rows[7][10:15] == ['W-L (Sv)', 'ERA', 'WHIP', 'K', 'BB']
+        assert rows[9][10:15] == ['Avg|W-L-Sv', 'OBP|ERA', 'Slg|WHIP', 'HR|K', 'SB|BB']
 
     def test_pitcher_decision_display_drops_saves_when_none(self):
         # v1.1.2: saves == 0 -> plain W-L.

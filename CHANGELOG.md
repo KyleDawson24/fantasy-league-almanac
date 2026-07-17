@@ -22,6 +22,25 @@ for the ESPN league.
 
 ### Added
 
+- **Team pages, unified: the CBS team tabs render through the SHARED
+  ESPN builder — one shape, one format source, both leagues.** A CBS
+  data provider (`get_cbs_team_history_data`) emits ESPN's exact row
+  contract from the union daily fact; `get_best_lineup` plugs in as the
+  starters selector; the entire cell-format spec extracted to
+  `almanac_render.team_tab_format_specs` so the two writers cannot
+  drift. In the same arc, the team-sheet overhaul (both leagues): a
+  Total | Active | Inactive points trio under a merged "Points" banner;
+  the gold-standard header (terse "Optimal Lineups" dateline, inline
+  points glossary, CBS-only era-provenance "Lineup Data:" block);
+  Years of Service trailing the all-time side; the Other section
+  capped at 100 with an honest "N more under X points" summary line
+  and the franchise futility chair (worst-ever player by roster days
+  minus total points) pinned last; and the **Best Individual Seasons
+  by Lineup Slot** block — the optimal lineup over player-SEASON
+  candidates, where the same player can hold multiple slots via
+  different years but each player-season is used once. ESPN almanac
+  goldens re-anchored to the new shape.
+
 - **`docs/known-data-issues.md`** — the permanent log of source-data
   defects that are documented and bounded rather than fixed (the
   warehouse doesn't control the source): CBS's season-grain IRSTR key

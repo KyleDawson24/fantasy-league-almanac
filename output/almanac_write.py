@@ -76,6 +76,9 @@ from almanac_render import (
     _is_rare_team_week_stat,
     _safe_sheet_title,
     _team_week_specs_for_category,
+    team_tab_banner_merges,
+    team_tab_format_specs,
+    team_tab_merge_ranges,
 )
 from sheets_writer import _get_authorized_client
 
@@ -121,6 +124,7 @@ def write_almanac(sheet_id, season_year=None, matchup_period=None):
         season_year=season_year,
         league_id=league_id,
         slot_caps=get_roster_slot_capacities(season_year, include_inactive=True),
+        best_seasons_fn=almanac_data.team_best_seasons_fn(),
     )
     draft_board = get_draft_board(season_year)
     draft_tab_rows = build_draft_tab_rows(draft_board, season_year, league_id=league_id)
@@ -944,8 +948,38 @@ def _records_score_value_formats(rows):
     return formats
 
 
+def _title_abbrev_run_request(sheet_id, title_text):
+    """Style the trailing ' (ABBREV)' of a team-page A1 title as a size-10,
+    non-bold run -- a small parenthetical beside the bold team name (which
+    inherits the cell's bold/large default). Returns an updateCells request,
+    or None when the title carries no ' (...)' suffix. Applied AFTER the base
+    A1 format so the run wins on that cell."""
+    if not title_text or not title_text.endswith(')'):
+        return None
+    split = title_text.rfind(' (')
+    if split <= 0:
+        return None
+    return {
+        'updateCells': {
+            'range': {
+                'sheetId': sheet_id,
+                'startRowIndex': 0, 'endRowIndex': 1,
+                'startColumnIndex': 0, 'endColumnIndex': 1,
+            },
+            'rows': [{'values': [{'textFormatRuns': [
+                {'startIndex': 0, 'format': {'bold': True}},
+                {'startIndex': split, 'format': {'bold': False, 'fontSize': 10}},
+            ]}]}],
+            'fields': 'textFormatRuns',
+        },
+    }
+
+
 def _replace_team_tab(spreadsheet, title, rows):
     """Clear/create one fantasy team roster tab and write rows."""
+    # Width is dynamic: the all-time side gains a trailing Years-of-Service
+    # column for leagues with history (30 cols vs the base 29).
+    width = max((len(r) for r in rows if r), default=TEAM_ROSTER_MATRIX_WIDTH)
     try:
         worksheet = spreadsheet.worksheet(title)
     except gspread.WorksheetNotFound:
@@ -954,7 +988,7 @@ def _replace_team_tab(spreadsheet, title, rows):
             lambda: spreadsheet.add_worksheet(
                 title=title,
                 rows=max(len(rows) + 10, 50),
-                cols=TEAM_ROSTER_MATRIX_WIDTH,
+                cols=max(width, TEAM_ROSTER_MATRIX_WIDTH),
             ),
         )
 
@@ -967,143 +1001,31 @@ def _replace_team_tab(spreadsheet, title, rows):
 
     try:
         _sheets_call(f'freeze {title}', lambda: worksheet.freeze(rows=5))
-        _apply_team_tab_dimensions(spreadsheet, worksheet)
-        formats = [
-            {
-                'range': 'A1:AC1',
-                'format': {'textFormat': {'bold': True, 'fontSize': 13}},
-            },
-            {
-                'range': 'A2:AC2',
-                'format': {
-                    'textFormat': {'italic': True},
-                    'backgroundColor': {'red': 0.95, 'green': 0.97, 'blue': 0.99},
-                },
-            },
-            {
-                'range': 'A4:AC5',
-                'format': {
-                    'textFormat': {
-                        'bold': True,
-                        'foregroundColor': {'red': 1, 'green': 1, 'blue': 1},
-                    },
-                    'backgroundColor': {'red': 0.12, 'green': 0.20, 'blue': 0.30},
-                },
-            },
-            {
-                # Points glossary (Q1:Q3) -- plain, left-aligned, small.
-                # Comes after the A1/A2 row formats so it overrides their
-                # bold/italic on these cells.
-                'range': 'Q1:Q3',
-                'format': {
-                    'horizontalAlignment': 'LEFT',
-                    'textFormat': {'bold': False, 'italic': False, 'fontSize': 10},
-                },
-            },
-            {
-                'range': 'A5:A',
-                'format': {'textFormat': {'fontSize': 5}},
-            },
-            {
-                'range': 'P5:P',
-                'format': {'textFormat': {'fontSize': 5}},
-            },
-            {
-                # Wrap only the row-5 stat headers (the multi-word Roster Days /
-                # Games / Active Points labels) so they stack in the 50px
-                # columns; the short numeric data below stays single-line.
-                'range': 'E5:G5',
-                'format': {'wrapStrategy': 'WRAP'},
-            },
-            {
-                'range': 'T5:V5',
-                'format': {'wrapStrategy': 'WRAP'},
-            },
-            {
-                'range': 'G:H',
-                'format': {'numberFormat': {'type': 'NUMBER', 'pattern': '0'}},
-            },
-            {
-                'range': 'V:W',
-                'format': {'numberFormat': {'type': 'NUMBER', 'pattern': '0'}},
-            },
-            {
-                'range': 'I:I',
-                'format': {'numberFormat': {'type': 'NUMBER', 'pattern': '0.0'}},
-            },
-            {
-                'range': 'X:X',
-                'format': {'numberFormat': {'type': 'NUMBER', 'pattern': '0.0'}},
-            },
-            {
-                'range': 'E:F',
-                'format': {'numberFormat': {'type': 'NUMBER', 'pattern': '0'}},
-            },
-            {
-                'range': 'T:U',
-                'format': {'numberFormat': {'type': 'NUMBER', 'pattern': '0'}},
-            },
+        _apply_team_tab_dimensions(spreadsheet, worksheet, width)
+        # The entire format spec is shared with the CBS writer via
+        # almanac_render.team_tab_format_specs (Kyle 2026-07-16: identical
+        # team tabs across leagues, one format source so they can't drift).
+        _batch_format(worksheet, team_tab_format_specs(rows))
+        # Header merges (Roster Days pairs + the Points banners) plus the
+        # dynamic Best Individual Seasons banner rows. Unmerge first:
+        # re-merging an already-merged range errors on rerun. ESPN has no
+        # Lineup Data block (that's the CBS provenance story).
+        banner_ranges = [
+            gspread.utils.a1_range_to_grid_range(rng, sheet_id=worksheet.id)
+            for rng in team_tab_banner_merges(rows)
         ]
-        for row_number, row in enumerate(rows, 1):
-            if len(row) > 9 and row[9] in {'Avg', 'W-L (Sv)', 'Avg|W-L-Sv'}:
-                text_format = {'bold': True}
-                if row_number <= 5:
-                    text_format['foregroundColor'] = {'red': 1, 'green': 1, 'blue': 1}
-                formats.extend([
-                    {
-                        'range': f'J{row_number}:N{row_number}',
-                        'format': {'textFormat': text_format},
-                    },
-                    {
-                        'range': f'Y{row_number}:AC{row_number}',
-                        'format': {'textFormat': text_format},
-                    },
-                ])
-            # Header rows (team name / subtitle / glossary / scope / column
-            # header) carry labels + glossary text in cols B/Q, not slot codes
-            # -- skip the per-row data-cell alignment so the left-aligned
-            # glossary (Q1:Q3) is not clobbered by a spurious RIGHT.
-            if row_number <= 5:
-                continue
-            if _is_active_display_slot(row[1] if len(row) > 1 else ''):
-                formats.append({
-                    'range': f'B{row_number}:B{row_number}',
-                    'format': {'horizontalAlignment': 'RIGHT'},
-                })
-            if _is_active_display_slot(row[16] if len(row) > 16 else ''):
-                formats.append({
-                    'range': f'Q{row_number}:Q{row_number}',
-                    'format': {'horizontalAlignment': 'RIGHT'},
-                })
-            if _is_pitcher_display_slot(row[1] if len(row) > 1 else ''):
-                formats.extend([
-                    {
-                        'range': f'J{row_number}:N{row_number}',
-                        'format': {'horizontalAlignment': 'LEFT'},
-                    },
-                ])
-            elif _is_hitter_display_slot(row[1] if len(row) > 1 else ''):
-                formats.extend([
-                    {
-                        'range': f'J{row_number}:N{row_number}',
-                        'format': {'horizontalAlignment': 'RIGHT'},
-                    },
-                ])
-            if _is_pitcher_display_slot(row[16] if len(row) > 16 else ''):
-                formats.extend([
-                    {
-                        'range': f'Y{row_number}:AC{row_number}',
-                        'format': {'horizontalAlignment': 'LEFT'},
-                    },
-                ])
-            elif _is_hitter_display_slot(row[16] if len(row) > 16 else ''):
-                formats.extend([
-                    {
-                        'range': f'Y{row_number}:AC{row_number}',
-                        'format': {'horizontalAlignment': 'RIGHT'},
-                    },
-                ])
-        _batch_format(worksheet, formats)
+        _sheets_batch_update(spreadsheet, f'merges {title}', [
+            {'unmergeCells': {'range': {'sheetId': worksheet.id}}},
+            *({'mergeCells': {'range': {'sheetId': worksheet.id, **rng},
+                              'mergeType': 'MERGE_ALL'}}
+              for rng in team_tab_merge_ranges()),
+            *({'mergeCells': {'range': rng, 'mergeType': 'MERGE_ALL'}}
+              for rng in banner_ranges),
+        ])
+        run_req = _title_abbrev_run_request(
+            worksheet.id, rows[0][0] if rows and rows[0] else '')
+        if run_req:
+            _sheets_batch_update(spreadsheet, f'title run {title}', [run_req])
     except Exception as exc:
         print(f"[almanac] formatting skipped for {title}: {exc}")
 
@@ -1354,35 +1276,42 @@ def _sort_almanac_tabs(spreadsheet, ordered_titles):
     _sheets_batch_update(spreadsheet, 'sort almanac tabs', requests)
 
 
-def _apply_team_tab_dimensions(spreadsheet, worksheet):
+def _apply_team_tab_dimensions(spreadsheet, worksheet, matrix_width=TEAM_ROSTER_MATRIX_WIDTH):
     sheet_id = worksheet.id
     requests = []
     for start_index, width in [
         (0, 25),    # Tm
         (1, 75),    # Slot
         (3, 40),    # Team
-        (4, 50),    # RosterDays
+        (4, 50),    # Roster Days (merged E4:E5)
         (5, 50),    # Games
-        (6, 50),    # Active Points
-        (7, 75),    # Bench/IL Points
-        (8, 40),    # ppg
-        (14, 15),   # spacer
-        (15, 25),   # Tm
-        (16, 75),   # Slot
-        (18, 40),   # Team
-        (19, 50),   # RosterDays
-        (20, 50),   # Games
-        (21, 50),   # Active Points
-        (22, 75),   # Bench/IL Points
-        (23, 40),   # ppg
+        (6, 50),    # Total
+        (7, 50),    # Active
+        (8, 55),    # Inactive
+        (9, 40),    # ppg
+        (15, 15),   # spacer
+        (16, 25),   # Tm
+        (17, 75),   # Slot
+        (19, 40),   # Team
+        (20, 50),   # Roster Days (merged U4:U5)
+        (21, 50),   # Games
+        (22, 50),   # Total
+        (23, 50),   # Active
+        (24, 55),   # Inactive
+        (25, 40),   # ppg
     ]:
         requests.append(_column_width_request(sheet_id, start_index, start_index + 1, width))
     requests.extend([
-        _column_width_request(sheet_id, 9, 14, 80),
-        _column_width_request(sheet_id, 24, 29, 80),
+        _column_width_request(sheet_id, 10, 15, 80),
+        _column_width_request(sheet_id, 26, 31, 80),
         _auto_resize_columns_request(sheet_id, 2, 3),
-        _auto_resize_columns_request(sheet_id, 17, 18),
+        _auto_resize_columns_request(sheet_id, 18, 19),
     ])
+    # Trailing Years-of-Service column (idx 31) when the all-time side has
+    # it. Full 325px -- it's the last column, the come-and-go year ranges
+    # were truncating, and there's nothing to its right (Kyle 2026-07-17).
+    if matrix_width > TEAM_ROSTER_MATRIX_WIDTH:
+        requests.append(_column_width_request(sheet_id, 31, 32, 325))
     _sheets_batch_update(spreadsheet, f'format dimensions {worksheet.title}', requests)
 
 

@@ -1048,3 +1048,120 @@ It is committed at every checkpoint, so the branch on GitHub mirrors it.
   Early, 3/25) — the walk-back's opening-recovery already absorbs that
   class. UI pipeline verified end-to-end; MLB-54 and MLB-63 both
   flipped Done in Linear with full result comments.
+
+## Round — Team pages 1:1 (2026-07-16, overnight)
+
+- **CBS TEAM TABS = ESPN SHAPE, LANDED.** Kyle's call: nothing from the
+  old CBS two-band tab worth preserving; the tide flows ESPN->CBS with
+  Years of Service the one counter-current (added to ESPN earlier in the
+  session). Architecture is REUSE, not imitation: a new provider
+  `get_cbs_team_history_data` emits ESPN's exact row contract (both
+  scopes) from `fct_player_daily_performance` (active-weighted points +
+  stat tail, bench_il = total*(1-weight), roster-tenure days via
+  get_roster_days, LISTAGG service seasons, current-roster Tm column
+  with the by-name id-split fallback); `_cbs_optimal_team` adapts
+  get_best_lineup as the starters selector; the SHARED
+  `almanac_logic.build_team_history_tabs` renders both leagues via four
+  knobs (optimal_team_fn / title_fn / explain_extra / team_order); the
+  ENTIRE format spec extracted to `almanac_render.team_tab_format_specs`
+  and consumed by both writers.
+- Kyle's product calls (asked before he slept): full-name CBS tab titles
+  (the one deliberate asymmetry), "Bench/IL Points" header verbatim (CBS
+  RS = its bench; il_days=0 so no IL rows render), Other UNCAPPED (see
+  the nutso: 203-1044 rows/tab, Veronicas/Meteors/Hackers >1000),
+  provenance sentence APPENDED to the row-3 scoring note (not replacing).
+- Other-section filter, BOTH leagues (Kyle): only players with an active
+  game OR nonzero points (active or inactive) render — LAW's all-zero
+  Agustin Ramirez class is gone (LAW 82->77 rows). Bench/IL pools stay
+  unfiltered (IL tenancy is its own story).
+- Gotchas found: CBS slot-unknown eras carry lineup_slot='ACT' — leaked
+  as "Other - ACT" until the slot list was filtered to SLOT_ORDER
+  vocabulary; CBS team tabs must write RAW + reapply '='-cells (mirrors
+  the ESPN writer) so zero-padded rates ("040") survive; the writer now
+  resizes pre-existing small grids (old 50-row tabs vs 1000+ new rows).
+- Retired: build_team_tab, _lineup_block, _lineup_row, _merge_bands,
+  _span, _ppg, get_bench_ranking, _TEAM_GLOSSARY, _HITTER_SLOTS.
+- Verified: 210 unit tests green; ESPN preview diff vs goldens is
+  EXACTLY the expected class (trailing YoS col + header fold + filtered
+  Other rows — data rows byte-identical when truncated to 29 cols);
+  CBS preview structurally identical to CAL.tsv (pipe headers + Avg/W-L
+  sub-headers, W-L adds -Sv only when SV>0, Tm cols, bref links with
+  the parenthetical stripped from the search key, Ohtani halves split
+  correctly, YoS trailing). Goldens re-anchor still HELD for pre-push.
+
+## Round — Team-tab column slew + Other cap (2026-07-17)
+
+- **Column restructure, both almanacs (shared spec):** Total column
+  between Games and Active (= the player's FULL active+inactive for the
+  tab's filters -- deliberately undecomposed, so a two-way starter's
+  Total is his true total even where Active shows the slot discipline);
+  'Bench/IL Points' -> 'Inactive', 'Active Points' -> 'Active'; a merged
+  centered size-10 'Points' banner over the trio (G4:I4/W4:Y4);
+  'Roster Days' wrapped + vertically merged (E4:E5/U4:U5). All indices
+  shifted (pipes K-O/AA-AE, ppg J/Z, YoS idx 31); merges via a shared
+  team_tab_merge_ranges(), writers unmerge-then-merge on rerun.
+- **Other section = top-100 + honest summary + futility chair (Kyle's
+  design):** also-rans capped at 100 by total pts; the cut collapses to
+  "N other players under X points, including <next 3>"; the franchise's
+  WORST-EVER player (max rostered_days - total_points) is pulled from the
+  ranking and pinned as the section's last row, 'Worst - <pos>'. Metric
+  chosen after a 3-way shootout: days+games-total only nosed toward
+  high-playing-time mediocrity (Kris Bryant class); days-ACTIVE crowned
+  hoarded stars (Hader 455 bench pts) which is the Wasted HoS's story;
+  days-TOTAL finds the true black holes (Carrasco 137d/-1pt). Veronicas
+  1,044 rows -> 141; their cut's teaser includes C.C. Sabathia (the
+  100th-best Other sits at 580 pts -- cap is one constant if raised).
+- **ppg blanked on Bench/IL/Other/Worst rows** (they rank by TOTAL;
+  active-rate there read as noise + never-started players divide by
+  zero). Upgrade path if wanted: total per rostered-game needs a small
+  SQL add both sides.
+- Also this round: row-3 note -> col A3 (both leagues); CBS note now
+  era-keyed and sums to 100% ("2026 onward: captured live (2%); ...";
+  the old enum sentence dropped estimated_adjacent+sentinel = the
+  missing 7%); get_provenance_mix now (season, provenance) grain; tab
+  sort fixed to the DISPLAYED title (was abbrev -- looked scrambled);
+  width wonk root-caused: auto-resize ran against raw '=HYPERLINK'
+  literals before the formula reapply -- reapply now precedes styling;
+  bref search keys chop anything after ' (' (fixes Records' Ohtani
+  links league-wide).
+- **Ohtani roster-days zero (Kyle-spotted):** the split assets' fact
+  names ("Shohei Ohtani (Batter)") never matched the transaction log's
+  person-grain stint name_key, so get_roster_days returned 0 stint days
+  for both halves (games/points were fine -- those flow through the
+  id-first attribution seams). Fix: chop the parenthetical before the
+  name key in the stint join; person tenure flows to both assets while
+  captured-2026 days stay asset-specific (EGG batter 486 = 381 stint +
+  105 captured; FULT pitcher 105 -- the two halves live on DIFFERENT
+  fantasy teams in 2026, which is extremely CBS).
+
+## Round — Gold-standard headers + Best Individual Seasons (2026-07-17)
+
+- **Header gold standard (Kyle's hand-mocked layout, both leagues):**
+  A2 "Optimal Lineups, through [latest data]"; A3 the static
+  "Points are calculated according to current season's scoring.";
+  the points glossary inline at H1:H3 (Kyle's wording -- Active notes
+  the optimizer, Total notes the Bench/"Other" ranking); CBS-only
+  "Lineup Data:" block (R1 label right-aligned + era lines at S1:S3,
+  merged S:X so the Player column's auto-resize ignores them; when all
+  four eras fire, the two log-reconstructed eras merge onto one line).
+  Everything in rows 1-3 except A1/A2 renders size-8 italic Dark Gray 4.
+  The row-2 pale-blue wash and the Q1:Q3 glossary are gone.
+- **Best Individual Seasons by Lineup Slot (both leagues):** a navy A:O
+  banner one buffer row under the Current Season readout, then the
+  optimal lineup where candidates are PLAYER-SEASONS (position-eligible
+  weighted-active points per season for the tab's team). Synthetic
+  key|season candidate ids make the shared selector burn each
+  player-season once while letting the same player take several slots
+  -- Veronicas: Verlander at P 1 (2019) AND P 2 (2011). Bench filled by
+  season-total; no Others. Names render "Player (YYYY)". Data: shared
+  get_optimal_season_candidates (position fact, season grain) +
+  get_team_player_season_stats (ESPN) / the CBS provider's by-season
+  scan + get_roster_days_by_season; CBS candidates get the DH/U
+  universal-fill synthesis. The block overlays the LEFT 15 columns
+  while the all-time side continues alongside; stat sub-header bolding
+  now keys per side (row[10] vs row[26]) since the sides no longer
+  align below the roster sections.
+- Known wrinkle: by-season roster days miss where the stint name_key
+  disagrees on middle initials (Miguel Cabrera 2006 = 0d) -- same class
+  as the Ohtani parenthetical gap; the real fix is the BRAINTHOUGHTS
+  entry moving roster tenure into dbt on id-first seams.

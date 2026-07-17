@@ -108,11 +108,55 @@ RECORDS_MATRIX_DETAIL_HEADER = [
 ]
 
 
+# Row-5 column headers, one side. Kyle 2026-07-17 restructure: a Total
+# column between Games and Active (= Active + Inactive under the tab's
+# filters), 'Active Points'/'Bench/IL Points' renamed Active/Inactive
+# with a merged, centered 'Points' banner above the trio (row 4), and
+# 'Roster Days' living in row 4 too (vertically merged over its empty
+# row-5 cell -- "janky but gets things looking right"). The row-4 text
+# comes from _team_history_scope_header; the merges are writer-side.
 TEAM_HISTORY_DETAIL_HEADER = [
     'Tm', 'Slot', 'Player', 'Team',
-    'RosterDays', 'Games', 'Active Points', 'Bench/IL Points', 'ppg',
+    '', 'Games', 'Total', 'Active', 'Inactive', 'ppg',
     'Avg|W-L-Sv', 'OBP|ERA', 'Slg|WHIP', 'HR|K', 'SB|BB',
 ]
+
+
+# The all-time side carries one extra trailing column -- Years of Service --
+# for leagues with enough history (Kyle 2026-07-16). Kept as a tail so the
+# current-vs-all-time asymmetry reads as an addition, not a mid-row jog.
+TEAM_HISTORY_ALLTIME_DETAIL_HEADER = [
+    *TEAM_HISTORY_DETAIL_HEADER,
+    'Years of Service',
+]
+
+
+# Sentinel row labels for the Other section's tail (Kyle 2026-07-17):
+# the "...N more under the bar" summary line and the franchise futility
+# chair (worst-ever player by rostered_days - total_points), pinned last.
+TEAM_HISTORY_OTHER_MORE = '__other_more__'
+TEAM_HISTORY_OTHER_WORST = '__other_worst__'
+
+# Also-rans rendered per side before the summary line collapses the rest
+# (Kyle 2026-07-17 -- the uncapped register ran 1,000+ rows on the
+# long-tenured CBS franchises).
+TEAM_HISTORY_OTHER_CAP = 100
+
+# The left-side block under the Current Season readout: the franchise's
+# optimal lineup drawn from PLAYER-SEASONS (same player may recur across
+# slots via different seasons; a player-season is used once). Kyle
+# 2026-07-17. The banner text doubles as the format/merge marker.
+TEAM_HISTORY_BEST_SEASON_BANNER = 'Best Individual Seasons by Lineup Slot'
+
+# Row 1-3 gloss lines (col H), verbatim from Kyle's gold-standard mock
+# (2026-07-17). The old Q1:Q3 glossary is retired.
+TEAM_HISTORY_GLOSS_LINES = (
+    'Active Points -- produced while in an active lineup slot. '
+    'Starting Lineups are optimized by Active Points',
+    'Inactive Points -- produced while on this team\'s bench or IL.',
+    'Total Points -- Active + Inactive Points. Bench & "Other" slots '
+    'are ranked by total points.',
+)
 
 
 TEAM_ROSTER_HEADER = [
@@ -235,35 +279,41 @@ def _records_matrix_scope_header(section_title):
     ]
 
 
-def _team_history_scope_header():
-    left_span = len(TEAM_HISTORY_DETAIL_HEADER)
-    return [
-        'Current Season',
-        *([''] * (left_span - 1)),
-        '',
-        'All-Time',
-        *([''] * (left_span - 1)),
-    ]
+def _team_history_scope_header(with_yos=False):
+    """Row 4: the scope labels + the merged header text (Kyle 2026-07-17)
+    -- 'Roster Days' over its vertically-merged E/U pair and the 'Points'
+    banner over the Total/Active/Inactive trio. The writers merge the
+    cells; a merge keeps the top-left value, so the text lives here."""
+    span = len(TEAM_HISTORY_DETAIL_HEADER)
+    side = [''] * span
+    side[4] = 'Roster Days'
+    side[6] = 'Points'
+    right = list(side)
+    if with_yos:
+        right.append('')
+    return ['Current Season', *side[1:], '', 'All-Time', *right[1:]]
 
 
-def format_team_history_matrix_row(label, current_row=None, all_time_row=None):
+def format_team_history_matrix_row(label, current_row=None, all_time_row=None,
+                                   with_yos=False):
     if label == TEAM_HISTORY_HITTER_HEADER:
-        return _team_history_section_header_row(TEAM_HISTORY_HITTER_STATS)
+        return _team_history_section_header_row(TEAM_HISTORY_HITTER_STATS, with_yos)
     if label == TEAM_HISTORY_PITCHER_HEADER:
-        return _team_history_section_header_row(TEAM_HISTORY_PITCHER_STATS)
+        return _team_history_section_header_row(TEAM_HISTORY_PITCHER_STATS, with_yos)
     if label == TEAM_HISTORY_MIXED_HEADER:
-        return _team_history_section_header_row(TEAM_HISTORY_MIXED_STATS)
+        return _team_history_section_header_row(TEAM_HISTORY_MIXED_STATS, with_yos)
     return [
         *_team_history_side_cells(current_row),
         '',
-        *_team_history_side_cells(all_time_row),
+        *_team_history_side_cells(all_time_row, with_yos=with_yos),
     ]
 
 
-def _team_history_section_header_row(stat_labels):
+def _team_history_section_header_row(stat_labels, with_yos=False):
     side = [''] * len(TEAM_HISTORY_DETAIL_HEADER)
-    side[9:] = stat_labels
-    return [*side, '', *side]
+    side[10:] = stat_labels
+    all_side = [*side, ''] if with_yos else side   # YoS col has no stat sub-header
+    return [*side, '', *all_side]
 
 
 def _team_history_display_row(row, label, display_slot=None, active_games=None,
@@ -273,6 +323,12 @@ def _team_history_display_row(row, label, display_slot=None, active_games=None,
         active_points if active_points is not None else row.get('active_points')
     )
     stat_line = _team_history_stat_line(row, display_slot or label)
+    # Total = the player's FULL active + inactive for this team/scope --
+    # deliberately the undecomposed active (a two-way starter's Total is
+    # his true total even where his Active cell shows the slot's
+    # discipline only). Kyle 2026-07-17.
+    total_points = (float(row.get('active_points') or 0)
+                    + float(row.get('bench_il_points') or 0))
     return {
         'slot_label': label,
         'display_slot': display_slot or label,
@@ -281,11 +337,13 @@ def _team_history_display_row(row, label, display_slot=None, active_games=None,
         'current_fantasy_team': row.get('current_fantasy_team') or '',
         'rostered_days': int(row.get('rostered_days') or 0),
         'active_games': active_games,
+        'total_points': _round_half_up(total_points),
         'active_points': _round_half_up(active_points),
         'bench_il_points': _round_half_up(float(row.get('bench_il_points') or 0)),
         'points_per_active_game': (
             f"{active_points / active_games:.2f}" if active_games else ''
         ),
+        'years_of_service': _format_years_of_service(row.get('service_years')),
         **stat_line,
     }
 
@@ -298,9 +356,11 @@ def _empty_team_history_display_row():
         'current_fantasy_team': '',
         'rostered_days': '',
         'active_games': '',
+        'total_points': '',
         'active_points': '',
         'bench_il_points': '',
         'points_per_active_game': '',
+        'years_of_service': '',
         'stat_1': '',
         'stat_2': '',
         'stat_3': '',
@@ -309,15 +369,37 @@ def _empty_team_history_display_row():
     }
 
 
-def _team_history_side_cells(row):
+def _format_years_of_service(service_years):
+    """The SQL LISTAGG "2024,2025,2026" -> the CBS-style "count: year-ranges"
+    longevity string, e.g. "3: 2024-2026". Empty when the player logged no
+    active (started, nonzero) seasons. En-dash ranges match the CBS almanac."""
+    if not service_years:
+        return ''
+    years = sorted({int(y) for y in str(service_years).split(',') if y.strip()})
+    if not years:
+        return ''
+    ranges, start, prev = [], years[0], years[0]
+    for y in years[1:]:
+        if y == prev + 1:
+            prev = y
+        else:
+            ranges.append((start, prev))
+            start = prev = y
+    ranges.append((start, prev))
+    span = ', '.join(str(a) if a == b else f'{a}–{b}' for a, b in ranges)
+    return f'{len(years)}: {span}'
+
+
+def _team_history_side_cells(row, with_yos=False):
     row = row or _empty_team_history_display_row()
-    return [
+    cells = [
         row.get('current_fantasy_team') or '',
         row.get('display_slot') or '',
         row.get('player') or '',
         row.get('pro_team') or '',
         row.get('rostered_days'),
         row.get('active_games'),
+        row.get('total_points'),
         row.get('active_points'),
         row.get('bench_il_points'),
         row.get('points_per_active_game'),
@@ -327,6 +409,9 @@ def _team_history_side_cells(row):
         row.get('stat_4'),
         row.get('stat_5'),
     ]
+    if with_yos:
+        cells.append(row.get('years_of_service') or '')
+    return cells
 
 
 def _team_history_stat_line(row, display_slot):
@@ -1029,10 +1114,14 @@ def _bref_link(official_name, display_text):
     # bref's name search chokes on the periods in disambiguation initials --
     # "Francisco J. Rodriguez" / "Chris B. Young" return nothing, but
     # "Francisco J Rodriguez" / "Chris B Young" resolve (and dotless leading
-    # initials like "CC Sabathia" work either way). Strip periods from the
-    # search KEY only; the visible label keeps them.
+    # initials like "CC Sabathia" work either way). It also chokes on any
+    # parenthetical qualifier (CBS's two-way split assets: "Shohei Ohtani
+    # (Batter)"), so chop from the first ' (' -- Kyle 2026-07-17: anything
+    # after a parenthesis is safe to chop until proven wrong. Both apply to
+    # the search KEY only; the visible label keeps them.
+    search_key = str(official_name).split(' (', 1)[0].replace('.', '')
     url = ('https://www.baseball-reference.com/search/search.fcgi?search='
-           + urllib.parse.quote_plus(str(official_name).replace('.', '')))
+           + urllib.parse.quote_plus(search_key))
     return f'=HYPERLINK("{url}", "{safe}")'
 
 
@@ -1134,6 +1223,237 @@ def _format_sheet_date(value):
         return date.fromisoformat(text[:10]).strftime('%b %#d, %Y' if os.name == 'nt' else '%b %-d, %Y')
     except ValueError:
         return text
+
+
+def _a1_column(index_1_based):
+    """1-based column index -> A1 letters (1 -> A, 27 -> AA)."""
+    letters = ''
+    index = index_1_based
+    while index:
+        index, remainder = divmod(index - 1, 26)
+        letters = chr(65 + remainder) + letters
+    return letters
+
+
+def team_tab_format_specs(rows):
+    """The ENTIRE team-tab format spec as {'range','format'} entries --
+    shared by the ESPN writer (_replace_team_tab) and the CBS writer
+    (Kyle 2026-07-16: CBS team tabs identical to ESPN's, one format
+    source so they can't drift). Pure: no Sheets calls.
+
+    Covers: bold-13 title row, italic pale-blue subtitle, navy scope +
+    column header band (rows 4-5), the Q1:Q3 points glossary reset,
+    font-5 Tm columns (A/P), wrapped row-5 stat headers, number formats,
+    the pipe-column stat-header bolding, and the pitcher-left /
+    hitter-right stat alignment per data row. Freeze counts, column
+    widths, and the A1 abbrev text run stay writer-side (they need the
+    sheet id / different request shapes)."""
+    width = max((len(r) for r in rows if r), default=31)
+    last_col = _a1_column(width)
+    white = {'red': 1, 'green': 1, 'blue': 1}
+    navy = {'red': 0.12, 'green': 0.20, 'blue': 0.30}
+    # Google's "Dark Gray 4" -- the header-note text color (Kyle's
+    # gold-standard mock, 2026-07-17).
+    dark_gray_4 = {'red': 0.263, 'green': 0.263, 'blue': 0.263}
+    note_format = {
+        'textFormat': {'bold': False, 'italic': True, 'fontSize': 8,
+                       'foregroundColor': dark_gray_4},
+    }
+    formats = [
+        {
+            'range': 'A1',
+            'format': {'textFormat': {'bold': True, 'fontSize': 13}},
+        },
+        {
+            'range': 'A2',
+            'format': {'textFormat': {'italic': True}},
+        },
+        # Everything else in the header rows -- the A3 scoring note, the
+        # H1:H3 points glossary, and the Lineup Data block (R1 label +
+        # S1:S3 era lines) -- reads as size-8 italic dark-gray notes
+        # (Kyle's gold standard, 2026-07-17).
+        {'range': 'A3', 'format': note_format},
+        {'range': 'H1:H3', 'format': note_format},
+        {'range': 'R1',
+         'format': {**note_format, 'horizontalAlignment': 'RIGHT'}},
+        {'range': 'S1:S3', 'format': note_format},
+        {
+            'range': f'A4:{last_col}5',
+            'format': {
+                'textFormat': {'bold': True, 'foregroundColor': white},
+                'backgroundColor': navy,
+            },
+        },
+        {
+            'range': 'A5:A',
+            'format': {'textFormat': {'fontSize': 5}},
+        },
+        {
+            'range': 'Q5:Q',
+            'format': {'textFormat': {'fontSize': 5}},
+        },
+        # The vertically-merged Roster Days pair (E4:E5 / U4:U5): wrapped
+        # + middled so the two-word label sits centered in its 50px slot.
+        {
+            'range': 'E4:F5',
+            'format': {'wrapStrategy': 'WRAP', 'verticalAlignment': 'MIDDLE'},
+        },
+        {
+            'range': 'U4:V5',
+            'format': {'wrapStrategy': 'WRAP', 'verticalAlignment': 'MIDDLE'},
+        },
+        # The merged 'Points' banner over Total/Active/Inactive: centered,
+        # size 10, keeping the navy band's bold white.
+        {
+            'range': 'G4:I4',
+            'format': {
+                'horizontalAlignment': 'CENTER',
+                'textFormat': {'bold': True, 'fontSize': 10,
+                               'foregroundColor': white},
+            },
+        },
+        {
+            'range': 'W4:Y4',
+            'format': {
+                'horizontalAlignment': 'CENTER',
+                'textFormat': {'bold': True, 'fontSize': 10,
+                               'foregroundColor': white},
+            },
+        },
+        # Whole numbers: RosterDays/Games (E:F, U:V) + the points trio
+        # (G:I, W:Y); ppg keeps a decimal (J, Z).
+        {
+            'range': 'E:F',
+            'format': {'numberFormat': {'type': 'NUMBER', 'pattern': '0'}},
+        },
+        {
+            'range': 'U:V',
+            'format': {'numberFormat': {'type': 'NUMBER', 'pattern': '0'}},
+        },
+        {
+            'range': 'G:I',
+            'format': {'numberFormat': {'type': 'NUMBER', 'pattern': '0'}},
+        },
+        {
+            'range': 'W:Y',
+            'format': {'numberFormat': {'type': 'NUMBER', 'pattern': '0'}},
+        },
+        {
+            'range': 'J:J',
+            'format': {'numberFormat': {'type': 'NUMBER', 'pattern': '0.0'}},
+        },
+        {
+            'range': 'Z:Z',
+            'format': {'numberFormat': {'type': 'NUMBER', 'pattern': '0.0'}},
+        },
+    ]
+    stat_labels = {'Avg', 'W-L (Sv)', 'Avg|W-L-Sv'}
+    for row_number, row in enumerate(rows, 1):
+        if row and row[0] == TEAM_HISTORY_BEST_SEASON_BANNER:
+            # The Best Individual Seasons banner: navy band across the
+            # left side (A:O), centered bold white -- the writers merge
+            # the range (team_tab_banner_merges).
+            formats.append({
+                'range': f'A{row_number}:O{row_number}',
+                'format': {
+                    'horizontalAlignment': 'CENTER',
+                    'textFormat': {'bold': True, 'foregroundColor': white},
+                    'backgroundColor': navy,
+                },
+            })
+        # Stat sub-headers bold per SIDE independently -- the left side's
+        # Best Individual Seasons block (Kyle 2026-07-17) means the two
+        # sides no longer share row alignment below the roster sections.
+        text_format = {'bold': True}
+        if row_number <= 5:
+            text_format['foregroundColor'] = white
+        if len(row) > 10 and row[10] in stat_labels:
+            formats.append({
+                'range': f'K{row_number}:O{row_number}',
+                'format': {'textFormat': text_format},
+            })
+        if len(row) > 26 and row[26] in stat_labels:
+            formats.append({
+                'range': f'AA{row_number}:AE{row_number}',
+                'format': {'textFormat': text_format},
+            })
+        # Header rows (team name / subtitle / note / scope / column
+        # header) carry labels + glossary text, not slot codes -- skip
+        # the per-row data-cell alignment so the left-aligned glossary
+        # (Q1:Q3) is not clobbered by a spurious RIGHT.
+        if row_number <= 5:
+            continue
+        # The Best Individual Seasons sub-headers relabel the Team column
+        # 'Year' -- bold it like its sibling stat labels.
+        if len(row) > 3 and row[3] == 'Year':
+            formats.append({
+                'range': f'D{row_number}:D{row_number}',
+                'format': {'textFormat': {'bold': True}},
+            })
+        if _is_active_display_slot(row[1] if len(row) > 1 else ''):
+            formats.append({
+                'range': f'B{row_number}:B{row_number}',
+                'format': {'horizontalAlignment': 'RIGHT'},
+            })
+        if _is_active_display_slot(row[17] if len(row) > 17 else ''):
+            formats.append({
+                'range': f'R{row_number}:R{row_number}',
+                'format': {'horizontalAlignment': 'RIGHT'},
+            })
+        if _is_pitcher_display_slot(row[1] if len(row) > 1 else ''):
+            formats.append({
+                'range': f'K{row_number}:O{row_number}',
+                'format': {'horizontalAlignment': 'LEFT'},
+            })
+        elif _is_hitter_display_slot(row[1] if len(row) > 1 else ''):
+            formats.append({
+                'range': f'K{row_number}:O{row_number}',
+                'format': {'horizontalAlignment': 'RIGHT'},
+            })
+        if _is_pitcher_display_slot(row[17] if len(row) > 17 else ''):
+            formats.append({
+                'range': f'AA{row_number}:AE{row_number}',
+                'format': {'horizontalAlignment': 'LEFT'},
+            })
+        elif _is_hitter_display_slot(row[17] if len(row) > 17 else ''):
+            formats.append({
+                'range': f'AA{row_number}:AE{row_number}',
+                'format': {'horizontalAlignment': 'RIGHT'},
+            })
+    return formats
+
+
+def team_tab_merge_ranges(with_lineup_data=False):
+    """The team-tab header merges (Kyle 2026-07-17), as zero-based grid
+    ranges WITHOUT a sheetId (each writer stamps its own): the vertical
+    Roster Days pairs (E4:E5, U4:U5) and the Points banners over
+    Total/Active/Inactive (G4:I4, W4:Y4). with_lineup_data adds the
+    S1:X1..S3:X3 merges for the era lines -- merging keeps the right
+    Player column's auto-resize from fitting to the long note text
+    (auto-fit ignores merged cells). Writers should unmerge first --
+    re-merging an already-merged range errors."""
+    ranges = [
+        {'startRowIndex': 3, 'endRowIndex': 5, 'startColumnIndex': 4, 'endColumnIndex': 5},
+        {'startRowIndex': 3, 'endRowIndex': 4, 'startColumnIndex': 6, 'endColumnIndex': 9},
+        {'startRowIndex': 3, 'endRowIndex': 5, 'startColumnIndex': 20, 'endColumnIndex': 21},
+        {'startRowIndex': 3, 'endRowIndex': 4, 'startColumnIndex': 22, 'endColumnIndex': 25},
+    ]
+    if with_lineup_data:
+        ranges.extend(
+            {'startRowIndex': r, 'endRowIndex': r + 1,
+             'startColumnIndex': 18, 'endColumnIndex': 24}
+            for r in (0, 1, 2))
+    return ranges
+
+
+def team_tab_banner_merges(rows):
+    """A1 ranges of the Best Individual Seasons banner rows (A:O), for
+    each writer to merge -- the banner's row index varies per tab."""
+    return [
+        f'A{i}:O{i}'
+        for i, row in enumerate(rows, 1)
+        if row and row[0] == TEAM_HISTORY_BEST_SEASON_BANNER
+    ]
 
 
 def _is_pitcher_display_slot(slot):

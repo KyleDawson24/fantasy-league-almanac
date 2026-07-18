@@ -288,6 +288,51 @@ so there's no urgency.
 
 ---
 
+## Round 11 -- coverage honesty, color polish, keeper K-round (2026-07-18)
+
+Kyle's follow-up pass on the overhaul:
+
+- **Data-driven coverage** (CBS): the top-line helper and the all-time
+  note both carry `Coverage: 2025–2026`, computed from the years that
+  have pick order + who was taken (`_draft_coverage`, order_tier
+  'true') -- the automatable bit Kyle wanted. The "CBS does not avail
+  draft data prior to 2025" caveat is kept as **flagged league-specific
+  prose** (`_BSB_DRAFT_CAVEAT`) -- true of bsb, not universal to CBS;
+  it's the one line that would move to per-league config if a second
+  CBS league ever lands. Notes tightened; the cut explanations are
+  bound for user-facing docs (their own project).
+- **Cells super-header** (both books): a second merged label, "Each
+  Round × Pick's Historical Median Value," now spans the cell columns
+  on the all-time board (alongside "Top Pick" over B:D).
+- **Colour grading** (both): intentionally the Med column + the median
+  cells on ONE cell-anchored scale; the Max total (a straight top-pick
+  value on its own scale) and every Rd/Pick/Year number stay ungraded
+  (a readback proved Max was already white, Med already green -- now
+  it's deliberate, not incidental). Rd/Pick(/Year) join Max/Med as
+  centered; Team/Player + the name cells stay left.
+- **Keeper K-round** (ESPN; the parked idea, un-parked): keepers are
+  pulled OUT of the drafted slot averages (they occupied slots without
+  being competitively drafted), into a 'K' round whose cells are the
+  paced median by keeper RANK (each team's best kept, 2nd-best, ...);
+  the drafted picks are re-sequenced per season with the keeper gaps
+  removed before the re-cut, so drafted round 1 is the first player
+  actually drafted. Data-driven -- no K row without keepers, so CBS is
+  untouched. **My flag, stated up front**: with one keeper season
+  (2025 was the inaugural draft, 0 keepers; only 2026 has any), the K
+  row is entirely 2026-paced -- low signal, and the paced cells read
+  higher than the raw Max (the raw-vs-paced quirk Kyle already
+  accepted). It's the right SHAPE for when seasons accrue, and trivial
+  to hide if you'd rather wait.
+
+**Median/weighting resolution**: kept as-is (pace-to-full-season +
+median cells, raw Max, per-round Med column) -- matches "what you did is
+perfect" (paragraph 1) and keeps the Med summary column you asked to
+retain. No aggregation change; the weighted-mean variant is still a
+one-function swap if you decide the median-forces-scaling tradeoff isn't
+worth it later. Commit aaf8bc8.
+
+---
+
 ## Open questions for Kyle (morning review)
 
 1. **Value lens.** Defaulted to calculated season points (the record

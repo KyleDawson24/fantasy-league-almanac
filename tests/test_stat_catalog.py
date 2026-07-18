@@ -120,8 +120,13 @@ class TestPolarityMap:
 class TestAutoTracked:
     def test_canonical_set_preserved(self):
         # Stats tracked regardless of the league's scoring settings.
-        # Small, deliberate set; change only intentionally.
-        expected = {'H', 'TB', 'XBH', 'SF', 'ER', 'PA'}
+        # Small, deliberate set; change only intentionally. DOUBLES /
+        # TRIPLES / HR joined via the CBS records work -- the seed rows
+        # say it outright: auto-tracked for records even where unscored
+        # (CBS scores TB, not 2B/3B/HR; ESPN-neutral). The pin lagged
+        # the seed because this test only runs under -m warehouse.
+        expected = {'H', 'TB', 'XBH', 'SF', 'ER', 'PA',
+                    'DOUBLES', 'TRIPLES', 'HR'}
         assert get_auto_tracked() == expected
 
     def test_scored_and_derived_rows_not_auto_tracked(self):

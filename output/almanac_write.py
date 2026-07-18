@@ -28,6 +28,13 @@ from almanac_data import (
     get_draft_board,
     get_team_standings,
     get_team_slot_points,
+    get_team_slot_points_alltime,
+    get_team_acquisition_channels,
+    get_team_acquisition_channels_alltime,
+    get_team_affinity_weights,
+    get_team_rank_arc,
+    get_espn_season_finishes,
+    get_team_standings_alltime,
     get_current_team_roster_stats,
     get_latest_matchup_period,
     get_roster_slot_capacities,
@@ -134,6 +141,17 @@ def write_almanac(sheet_id, season_year=None, matchup_period=None):
         get_team_slot_points(season_year),
         team_week_stat_specs,
         season_year,
+        # acquisition_rows was preview-only until 2026-07-17 -- the writer
+        # always knew how to paint the blocks; the assembly never passed
+        # the rows, so the real sheet silently lacked them.
+        acquisition_rows=get_team_acquisition_channels(season_year),
+        slot_rows_alltime=get_team_slot_points_alltime(),
+        affinity_rows=get_team_affinity_weights(season_year),
+        rank_arc_rows=get_team_rank_arc(season_year),
+        finishes_rows=get_espn_season_finishes(),
+        standings_rows_alltime=get_team_standings_alltime(
+            team_week_stat_specs),
+        acquisition_rows_alltime=get_team_acquisition_channels_alltime(),
     )
     client = _get_authorized_client()
     spreadsheet = client.open_by_key(sheet_id)
@@ -505,29 +523,220 @@ def _lerp_color(c1, c2, t):
 
 
 def _standings_table_bounds(rows):
-    """Locate the two stacked tables on the Advanced Standings tab. Returns
-    (a_header, a_end, b_header, b_end) as 0-based row indices: the Standings
-    header row and the slot header row, each with the exclusive end of the data
-    block beneath it. None for a table that isn't found.
+    """Locate every Table-A-shaped standings table (the season one and
+    its all-time twin): a list of (header_idx, end_idx), 0-based, end
+    exclusive. The stacked tables below have their own locators
+    (_slot_grid_bounds, _acquisition_table_bounds, _affinity_bounds,
+    _espn_finishes_bounds)."""
+    bounds = []
+    for i, r in enumerate(rows):
+        if r and r[0] == 'Rank' and 'Offense' in r:
+            end = i + 1
+            while (end < len(rows) and rows[end]
+                   and rows[end][0] not in ('', None)):
+                end += 1
+            bounds.append((i, end))
+    return bounds
 
-    Table B is indented one cell (its Team / Owner columns sit under Table
-    A's), so its header and data rows key off column 1, not column 0."""
-    a_hdr = next((i for i, r in enumerate(rows)
-                  if r and r[0] == 'Rank' and 'Offense' in r), None)
-    b_hdr = next((i for i, r in enumerate(rows)
-                  if a_hdr is not None and i > a_hdr
-                  and len(r) > 1 and r[0] == '' and r[1] == 'Team'), None)
 
-    def _data_end(start, col=0):
-        end = start
-        while (end < len(rows) and rows[end] and len(rows[end]) > col
-               and rows[end][col] not in ('', None)):
-            end += 1
-        return end
+def _espn_finishes_bounds(rows):
+    """Locate the finishes-beside-the-chart table (anchored at col V,
+    hugging the top since round 12: explainer row 1, header row 2): None
+    or a dict with note/header/data geometry."""
+    for i, r in enumerate(rows):
+        if len(r) > 25 and r[21] == 'Team' and r[25] == 'Titles':
+            end = i + 1
+            while (end < len(rows) and len(rows[end]) > 21
+                   and rows[end][21] not in ('', None)):
+                end += 1
+            return {'col0': 21, 'note': i - 1, 'hdr': i, 'end': end,
+                    'n_cols': len(r) - 21}
+    return None
 
-    a_end = _data_end(a_hdr + 1) if a_hdr is not None else None
-    b_end = _data_end(b_hdr + 1, col=1) if b_hdr is not None else None
-    return a_hdr, a_end, b_hdr, b_end
+
+def _slot_grid_bounds(rows):
+    """Locate every slot-points grid (the season grid + its all-time
+    twin): indented headers with Team in column 1 and NO 'Keeper' column
+    (that's what distinguishes the acquisition blocks). Returns a list of
+    (header_idx, end_idx); data rows key off column 1, matching the
+    grids' one-cell indent."""
+    bounds = []
+    for i, r in enumerate(rows):
+        if len(r) > 1 and r[0] == '' and r[1] == 'Team' and 'Keeper' not in r:
+            end = i + 1
+            while (end < len(rows) and len(rows[end]) > 1
+                   and rows[end][1] not in ('', None)):
+                end += 1
+            bounds.append((i, end))
+    return bounds
+
+
+def _affinity_bounds(rows):
+    """Locate the roster-affinity matrices: header rows starting 'MLB
+    Team'. Returns a list of dicts -- header/end row indices plus the
+    two half-block column spans (the season half starts at column C, the
+    all-time half past the shared U divider; both read off the header's
+    abbrev runs, so the geometry survives pad-width changes)."""
+    bounds = []
+    for i, r in enumerate(rows):
+        if r and r[0] == 'MLB Team':
+            end = i + 1
+            while (end < len(rows) and rows[end]
+                   and rows[end][0] not in ('', None)):
+                end += 1
+            left0, n_t = 2, 0
+            while left0 + n_t < len(r) and r[left0 + n_t] not in ('', None):
+                n_t += 1
+            right0 = next((j for j in range(left0 + n_t, len(r))
+                           if r[j] not in ('', None)), None)
+            bounds.append({'hdr': i, 'end': end, 'left0': left0,
+                           'right0': right0, 'n_t': n_t})
+    return bounds
+
+
+def _stale_conditional_rule_requests(spreadsheet, worksheet, rows=None):
+    """Wipe requests for state that ACCUMULATES across reruns on this
+    worksheet: conditional-format rules (each render adds at index 0;
+    clear() only drops values) and -- when the tab carries the rank-chart
+    apparatus -- embedded charts, checkbox validations, and hidden helper
+    columns. Scoped to one sheetId; other tabs untouched."""
+    meta = _sheets_call(
+        f'meta {worksheet.title}',
+        lambda: spreadsheet.fetch_sheet_metadata({
+            'fields': 'sheets(properties(sheetId),conditionalFormats,'
+                      'charts(chartId))',
+        }),
+    )
+    sheet = next(
+        (s for s in meta.get('sheets', [])
+         if s.get('properties', {}).get('sheetId') == worksheet.id),
+        {},
+    )
+    requests = [{'deleteConditionalFormatRule':
+                 {'sheetId': worksheet.id, 'index': 0}}
+                for _ in sheet.get('conditionalFormats', ())]
+    for chart in sheet.get('charts', ()):
+        requests.append({'deleteEmbeddedObject':
+                         {'objectId': chart['chartId']}})
+    if rows is not None and _rank_chart_bounds(rows):
+        requests.append({'setDataValidation':
+                         {'range': {'sheetId': worksheet.id}, 'rule': None}})
+        requests.append({'updateDimensionProperties': {
+            'range': {'sheetId': worksheet.id, 'dimension': 'COLUMNS'},
+            'properties': {'hiddenByUser': False},
+            'fields': 'hiddenByUser',
+        }})
+    return requests
+
+
+def _rank_chart_bounds(rows):
+    """Locate the rank-by-week chart apparatus the builder emits with
+    rank_arc_rows: the '(check to plot)' toggle row and the hidden
+    helper block headed 'Week' at column AK. Returns None when absent,
+    else the geometry the writer needs to arm the checkboxes, hide the
+    helper columns, and add the chart."""
+    chk_idx = next((i for i, r in enumerate(rows)
+                    if r and r[0] == '(check to plot)'), None)
+    if chk_idx is None:
+        return None
+    n_teams = sum(1 for c in rows[chk_idx][1:] if isinstance(c, bool)) - 1
+    # The helper block's column is dynamic (past the widest table); find
+    # it from the 'Week' header the builder stamps at its first cell.
+    helper_first = helper_col0 = None
+    for i, r in enumerate(rows[chk_idx:], start=chk_idx):
+        idx = next((j for j, c in enumerate(r)
+                    if c == 'Week' and j >= 30), None)
+        if idx is not None:
+            helper_first, helper_col0 = i, idx
+            break
+    if helper_first is None or n_teams < 1:
+        return None
+    end = helper_first + 1
+    while (end < len(rows) and len(rows[end]) > helper_col0
+           and rows[end][helper_col0] not in ('', None)):
+        end += 1
+    return {
+        'checkbox_row0': chk_idx,
+        'n_teams': n_teams,
+        'helper_col0': helper_col0,
+        'first_row': helper_first,
+        'last_row': end,
+        'raw_end_col0': helper_col0 + 1 + 2 * n_teams,
+        'series_cols': [helper_col0 + 1 + t for t in range(n_teams)],
+    }
+
+
+def _rank_chart_requests(sheet_id, rows, season_year=None):
+    """setDataValidation + hide-columns + addChart for the rank-by-week
+    apparatus; empty when the tab doesn't carry one."""
+    b = _rank_chart_bounds(rows)
+    if not b:
+        return []
+    checkbox_range = {
+        'sheetId': sheet_id,
+        'startRowIndex': b['checkbox_row0'],
+        'endRowIndex': b['checkbox_row0'] + 1,
+        'startColumnIndex': 1,
+        'endColumnIndex': 2 + b['n_teams'],
+    }
+    title = (f'{season_year} standings position by week (top = 1st)'
+             if season_year else 'Standings position by week (top = 1st)')
+    return [
+        {'setDataValidation': {
+            'range': checkbox_range,
+            'rule': {'condition': {'type': 'BOOLEAN'},
+                     'strict': True, 'showCustomUi': True},
+        }},
+        {'updateDimensionProperties': {
+            'range': {'sheetId': sheet_id, 'dimension': 'COLUMNS',
+                      'startIndex': b['helper_col0'],
+                      'endIndex': b['raw_end_col0']},
+            'properties': {'hiddenByUser': True},
+            'fields': 'hiddenByUser',
+        }},
+        {'addChart': {'chart': {
+            'spec': {
+                'title': title,
+                'basicChart': {
+                    'chartType': 'LINE',
+                    'legendPosition': 'RIGHT_LEGEND',
+                    'headerCount': 1,
+                    'domains': [{'domain': {'sourceRange': {'sources': [{
+                        'sheetId': sheet_id,
+                        'startRowIndex': b['first_row'],
+                        'endRowIndex': b['last_row'],
+                        'startColumnIndex': b['helper_col0'],
+                        'endColumnIndex': b['helper_col0'] + 1,
+                    }]}}}],
+                    'series': [{'series': {'sourceRange': {'sources': [{
+                        'sheetId': sheet_id,
+                        'startRowIndex': b['first_row'],
+                        'endRowIndex': b['last_row'],
+                        'startColumnIndex': col,
+                        'endColumnIndex': col + 1,
+                    }]}}, 'targetAxis': 'LEFT_AXIS'}
+                        for col in b['series_cols']],
+                    'axis': [
+                        {'position': 'BOTTOM_AXIS', 'title': 'Week'},
+                        {'position': 'LEFT_AXIS',
+                         'title': 'Position (top = 1st)',
+                         'viewWindowOptions': {
+                             'viewWindowMode': 'EXPLICIT',
+                             'viewWindowMin': 0,
+                             'viewWindowMax': b['n_teams'] + 1}},
+                    ],
+                },
+                'hiddenDimensionStrategy': 'SHOW_ALL',
+            },
+            'position': {'overlayPosition': {
+                'anchorCell': {'sheetId': sheet_id,
+                               'rowIndex': b['first_row'],
+                               'columnIndex': 0},
+                'widthPixels': 940,
+                'heightPixels': 360,
+            }},
+        }}},
+    ]
 
 
 def _acquisition_table_bounds(rows):
@@ -552,17 +761,25 @@ def _apply_standings_gradients(spreadsheet, worksheet, rows, stat_specs):
     totals paint green-high, negative-weighted stats (L / ER / BLSV / ...)
     and Against paint green-low, zero-weighted stats get no gradient.
     Column positions come from standings_gradient_columns (positional, not
-    label lookup -- K / BB / H / HR / R appear in both stat blocks). Table
-    B: every lineup-slot column, green-high."""
+    label lookup -- K / BB / H / HR / R appear in both stat blocks). The
+    slot grids (season + all-time): every lineup-slot column, green-high.
+    Affinity matrices: one white->green rule per half-block (0 stays
+    white), so a shade means the same share in every team column. The
+    batch opens by deleting whatever rules the last render left --
+    addConditionalFormatRule stacks; clear() only drops values."""
     sheet_id = worksheet.id
-    a_hdr, a_end, b_hdr, b_end = _standings_table_bounds(rows)
-    requests = []
-    if a_hdr is not None:
+    requests = _stale_conditional_rule_requests(spreadsheet, worksheet, rows)
+    # Rank-by-week chart apparatus (checkboxes + hidden helper + chart),
+    # when the builder emitted one; rides the same batch as the gradients.
+    _title = rows[0][0] if rows and rows[0] else ''
+    _season = _title.rsplit(': ', 1)[-1] if ': ' in _title else None
+    requests.extend(_rank_chart_requests(sheet_id, rows, _season))
+    gradient_columns = almanac_render.standings_gradient_columns(
+        _team_week_specs_for_category(stat_specs, 'hitting'),
+        _team_week_specs_for_category(stat_specs, 'pitching'),
+    )
+    for a_hdr, a_end in _standings_table_bounds(rows):
         a_range = [{'startRowIndex': a_hdr + 1, 'endRowIndex': a_end}]
-        gradient_columns = almanac_render.standings_gradient_columns(
-            _team_week_specs_for_category(stat_specs, 'hitting'),
-            _team_week_specs_for_category(stat_specs, 'pitching'),
-        )
         for col, direction in gradient_columns:
             if direction is None:
                 continue
@@ -570,7 +787,62 @@ def _apply_standings_gradients(spreadsheet, worksheet, rows, stat_specs):
             requests.append(_color_scale_request(
                 sheet_id, col, a_end, scale=scale, row_ranges=a_range,
             ))
-    if b_hdr is not None:
+    # Finishes-beside-the-chart: CBS's auto-scaled finish gradient per
+    # year column (green best -> red worst within the year's own field).
+    fin = _espn_finishes_bounds(rows)
+    if fin:
+        for col in range(fin['col0'] + 7, fin['col0'] + fin['n_cols']):
+            requests.append({'addConditionalFormatRule': {'rule': {
+                'ranges': [{'sheetId': sheet_id,
+                            'startRowIndex': fin['hdr'] + 1,
+                            'endRowIndex': fin['end'],
+                            'startColumnIndex': col,
+                            'endColumnIndex': col + 1}],
+                'gradientRule': {
+                    'minpoint': {'type': 'MIN',
+                                 'color': {'red': 0.341, 'green': 0.733,
+                                           'blue': 0.541}},
+                    'midpoint': {'type': 'PERCENTILE', 'value': '50',
+                                 'color': {'red': 1.0, 'green': 0.839,
+                                           'blue': 0.4}},
+                    'maxpoint': {'type': 'MAX',
+                                 'color': {'red': 0.902, 'green': 0.486,
+                                           'blue': 0.451}},
+                },
+            }, 'index': 0}})
+    # Acquisition band groups merge (Kyle round 8, the CBS convention);
+    # unmerge the sheet first so reruns never re-merge a merged range.
+    band_rows = [i for i, r in enumerate(rows)
+                 if len(r) > 3 and r[3] == 'Points Acquired Via']
+    if band_rows:
+        requests.append({'unmergeCells': {'range': {'sheetId': sheet_id}}})
+        for i in band_rows:
+            for c0, c1 in ((3, 8), (9, 12), (13, 15),
+                           (21, 26), (27, 30), (31, 33)):
+                requests.append({'mergeCells': {
+                    'range': {'sheetId': sheet_id,
+                              'startRowIndex': i, 'endRowIndex': i + 1,
+                              'startColumnIndex': c0, 'endColumnIndex': c1},
+                    'mergeType': 'MERGE_ALL'}})
+    # De-italicize the trophy glyph inside the finishes explainer (Kyle
+    # round 12: an italic 🏆 'looks quite bad'): a textFormatRuns pass on
+    # that one cell -- the emoji is 2 UTF-16 units, so the italic run
+    # starts at index 2.
+    fin_note = _espn_finishes_bounds(rows)
+    if fin_note:
+        requests.append({'updateCells': {
+            'range': {'sheetId': sheet_id,
+                      'startRowIndex': fin_note['note'],
+                      'endRowIndex': fin_note['note'] + 1,
+                      'startColumnIndex': fin_note['col0'],
+                      'endColumnIndex': fin_note['col0'] + 1},
+            'rows': [{'values': [{'textFormatRuns': [
+                {'startIndex': 0, 'format': {'italic': False}},
+                {'startIndex': 2, 'format': {'italic': True}},
+            ]}]}],
+            'fields': 'textFormatRuns',
+        }})
+    for b_hdr, b_end in _slot_grid_bounds(rows):
         b_range = [{'startRowIndex': b_hdr + 1, 'endRowIndex': b_end}]
         # Slot values start after the indent + Team + Owner cells.
         for col in range(3, len(rows[b_hdr])):
@@ -587,6 +859,36 @@ def _apply_standings_gradients(spreadsheet, worksheet, rows, stat_specs):
             requests.append(_color_scale_request(
                 sheet_id, col, end, scale=_acq_scale[direction], row_ranges=acq_range,
             ))
+    for aff in _affinity_bounds(rows):
+        # Per-BLOCK red -> white -> green (Kyle 2026-07-17 round 4 -- the
+        # shared yellow-mid scale was an eyesore): each matrix scales to
+        # its own spread, on the same palette as the slot grids. Blanks
+        # can't take a gradient -- the static light-gray base laid down
+        # by the format pass is what marks a true zero/null.
+        for sc in (aff['left0'], aff['right0']):
+            if sc is None:
+                continue
+            requests.append({'addConditionalFormatRule': {
+                'rule': {
+                    'ranges': [{'sheetId': sheet_id,
+                                'startRowIndex': aff['hdr'] + 1,
+                                'endRowIndex': aff['end'],
+                                'startColumnIndex': sc,
+                                'endColumnIndex': sc + aff['n_t']}],
+                    'gradientRule': {
+                        'minpoint': {'type': 'NUMBER', 'value': '0',
+                                     'color': {'red': 0.96, 'green': 0.62,
+                                               'blue': 0.60}},
+                        'midpoint': {'type': 'PERCENTILE', 'value': '50',
+                                     'color': {'red': 1, 'green': 1,
+                                               'blue': 1}},
+                        'maxpoint': {'type': 'MAX',
+                                     'color': {'red': 0.67, 'green': 0.86,
+                                               'blue': 0.64}},
+                    },
+                },
+                'index': 0,
+            }})
     if requests:
         _sheets_batch_update(
             spreadsheet, f'standings gradients {worksheet.title}', requests,
@@ -602,6 +904,17 @@ def _replace_advanced_standings_tab(spreadsheet, rows, stat_specs):
     width = max((len(row) for row in rows), default=20)
     try:
         worksheet = spreadsheet.worksheet(ADVANCED_STANDINGS_TAB)
+        # The tab GREW with the rank-chart helper block (hidden cols to
+        # ~BM); an existing grid from an earlier render may be too small
+        # for the values write.
+        if (worksheet.col_count < width
+                or worksheet.row_count < len(rows) + 10):
+            _sheets_call(
+                f'resize {ADVANCED_STANDINGS_TAB}',
+                lambda ws=worksheet: ws.resize(
+                    rows=max(ws.row_count, len(rows) + 10),
+                    cols=max(ws.col_count, width)),
+            )
     except gspread.WorksheetNotFound:
         worksheet = _sheets_call(
             f'create {ADVANCED_STANDINGS_TAB}',
@@ -617,11 +930,17 @@ def _replace_advanced_standings_tab(spreadsheet, rows, stat_specs):
         f'update {ADVANCED_STANDINGS_TAB}',
         lambda: worksheet.update(rows, 'A1', value_input_option='RAW'),
     )
+    # The rank-chart helper formulas arrive as literal '=' strings under
+    # RAW (which the W-L cells need); re-coerce just those cells.
+    _reapply_formula_cells(worksheet, rows)
 
     try:
         sheet_id = worksheet.id
         last_col = _a1_col(width)
-        a_hdr, _, b_hdr, _ = _standings_table_bounds(rows)
+        a_tables = _standings_table_bounds(rows)
+        a_hdr = a_tables[0][0] if a_tables else None
+        slot_grids = _slot_grid_bounds(rows)
+        affinity = _affinity_bounds(rows)
         _apply_standings_gradients(spreadsheet, worksheet, rows, stat_specs)
         # Widths by column TYPE, derived from the Table A header layout
         # rather than hardcoded letters, so other leagues' stat counts get
@@ -635,6 +954,12 @@ def _replace_advanced_standings_tab(spreadsheet, rows, stat_specs):
             _column_width_request(sheet_id, 0, 2, 52),      # Rank, Team
             _column_width_request(sheet_id, 2, 3, 125),     # Owner
             _column_width_request(sheet_id, 3, width, 40),  # W-L + every value column
+            # Freeze the title + subtitle band (the CBS convention).
+            {'updateSheetProperties': {
+                'properties': {'sheetId': sheet_id,
+                               'gridProperties': {'frozenRowCount': 2}},
+                'fields': 'gridProperties.frozenRowCount',
+            }},
         ]
         if a_hdr is not None:
             width_requests.extend(
@@ -645,37 +970,209 @@ def _replace_advanced_standings_tab(spreadsheet, rows, stat_specs):
         _sheets_batch_update(
             spreadsheet, f'standings widths {worksheet.title}', width_requests,
         )
+        # CBS conventions (Kyle 2026-07-18): the NAVY lives on the section
+        # bands, table header rows are plain bold, explainer rows italic,
+        # the subtitle pale blue -- one visual system across both books.
         formats = [
-            {'range': 'A1', 'format': {'textFormat': {'bold': True, 'fontSize': 13}}},
+            {'range': 'A1', 'format': {'textFormat': {'bold': True, 'fontSize': 14}}},
+            {'range': f'A2:{last_col}2',
+             'format': {'textFormat': {'italic': True},
+                        'backgroundColor': {'red': 0.95, 'green': 0.97,
+                                            'blue': 0.99}}},
         ]
-        header_indices = [h for h in (a_hdr, b_hdr) if h is not None]
+        navy_fmt = {
+            'textFormat': {'bold': True,
+                           'foregroundColor': {'red': 1, 'green': 1,
+                                               'blue': 1}},
+            'backgroundColor': {'red': 0.12, 'green': 0.20, 'blue': 0.30},
+        }
+        section_titles = {'Detailed Standings (Weekly Averages)',
+                          'Detailed Standings (Weekly Averages, All-Time)',
+                          'Points by Lineup Slot',
+                          'Points by Lineup Slot (Season Totals)',
+                          'Production by Acquisition Channel',
+                          'Roster Affinity by MLB Team'}
+        # Two passes so every navy band runs as far as the WIDEST one
+        # (Kyle round 12: unified band width).
+        band_specs = []
+        for i, row in enumerate(rows):
+            title = row[0] if row else None
+            if not (title in section_titles
+                    or (isinstance(title, str)
+                        and title.endswith('Rank by Week'))):
+                continue
+            # Band width = the widest nearby row that isn't the hidden
+            # helper block (helper rows park past column 45).
+            w = max((len(r) for r in rows[i:i + 6]
+                     if r and len(r) <= 45), default=20)
+            band_specs.append((i, w))
+            if title in ('Production by Acquisition Channel',
+                         'Roster Affinity by MLB Team'):
+                # The explainer row directly underneath, CBS-note style.
+                formats.append({
+                    'range': f'A{i + 2}:{last_col}{i + 2}',
+                    'format': {'textFormat': {'italic': True,
+                                              'fontSize': 9}},
+                })
+        if band_specs:
+            band_col = _a1_col(max(w for _, w in band_specs))
+            for i, _w in band_specs:
+                formats.append({'range': f'A{i + 1}:{band_col}{i + 1}',
+                                'format': dict(navy_fmt)})
+        header_indices = [h for h, _ in a_tables]
+        header_indices += [h for h, _ in slot_grids]
         header_indices += [h for h, _ in _acquisition_table_bounds(rows)]
+        header_indices += [a['hdr'] for a in affinity]
         for header_idx in header_indices:
             r = header_idx + 1
             formats.append({
                 'range': f'A{r}:{last_col}{r}',
-                'format': {
-                    'textFormat': {
-                        'bold': True,
-                        'foregroundColor': {'red': 1, 'green': 1, 'blue': 1},
-                    },
-                    'backgroundColor': {'red': 0.12, 'green': 0.20, 'blue': 0.30},
-                },
+                'format': {'textFormat': {'bold': True}},
             })
-            if header_idx >= 1:  # bold the section label one row above
+
+        # Decimal rule (Kyle round 12): per value column, 0 decimals
+        # unless the column's AVERAGE is under 10, then 1 -- so CYC keeps
+        # its decimal while HR doesn't wobble between 51.9 and 52.
+        def _decimal_rule(hdr, end, first_col):
+            for col in range(first_col, len(rows[hdr])):
+                vals = [r[col] for r in rows[hdr + 1:end]
+                        if len(r) > col and isinstance(r[col], (int, float))]
+                if not vals:
+                    continue
+                pattern = '0.0' if sum(vals) / len(vals) < 10 else '0'
+                a1 = _a1_col(col + 1)
                 formats.append({
-                    'range': f'A{header_idx}',
-                    'format': {'textFormat': {'bold': True}},
+                    'range': f'{a1}{hdr + 2}:{a1}{end}',
+                    'format': {'numberFormat': {'type': 'NUMBER',
+                                                'pattern': pattern}},
                 })
-        # Bold the overall acquisition section header (sits above the explainer,
-        # so the per-header "row above" pass doesn't reach it).
+
+        for hdr, end in a_tables:
+            _decimal_rule(hdr, end, 4)
+        for hdr, end in slot_grids:
+            _decimal_rule(hdr, end, 3)
+        # Acquisition totals stay whole-point (all columns are large).
+        for hdr, end in _acquisition_table_bounds(rows):
+            formats.append({
+                'range': f'{_a1_col(4)}{hdr + 2}:'
+                         f'{_a1_col(len(rows[hdr]))}{end}',
+                'format': {'numberFormat': {'type': 'NUMBER',
+                                            'pattern': '0'}},
+            })
+        # The acquisition group-band rows bold + center over their merges;
+        # every indented sub-label row ('<season> to date' / 'All-Time'
+        # ...) bolds full-width.
         for i, row in enumerate(rows):
-            if row and row[0] == 'Production by Acquisition Channel':
+            if len(row) > 3 and row[3] == 'Points Acquired Via':
                 formats.append({
-                    'range': f'A{i + 1}',
+                    'range': f'A{i + 1}:{last_col}{i + 1}',
+                    'format': {'textFormat': {'bold': True},
+                               'horizontalAlignment': 'CENTER'},
+                })
+            elif (len(row) > 3 and row[0] == '' and row[1] == ''
+                    and row[2] == '' and isinstance(row[3], str) and row[3]):
+                formats.append({
+                    'range': f'A{i + 1}:{last_col}{i + 1}',
                     'format': {'textFormat': {'bold': True}},
                 })
-                break
+        # Finishes-beside-the-chart dressing (top-hugging since round 12:
+        # explainer row 1, header on the frozen subtitle row): italic
+        # note (the trophy glyph de-italicizes via a runs pass in the
+        # gradients batch), bold header, centered values, W% / Avg number
+        # formats, and the champion trophies' static green fill.
+        fin = _espn_finishes_bounds(rows)
+        if fin:
+            f0 = fin['col0']
+            first_col = _a1_col(f0 + 1)
+            last_fin_col = _a1_col(f0 + fin['n_cols'])
+            note_r = fin['note'] + 1
+            hdr_r = fin['hdr'] + 1
+            end_r = fin['end']
+            formats.append({
+                'range': f'{first_col}{note_r}:{last_fin_col}{note_r}',
+                'format': {'textFormat': {'italic': True, 'fontSize': 9}},
+            })
+            formats.append({
+                'range': f'{first_col}{hdr_r}:{last_fin_col}{hdr_r}',
+                'format': {'textFormat': {'bold': True}},
+            })
+            formats.append({
+                'range': f'{_a1_col(f0 + 5)}{hdr_r}:{last_fin_col}{end_r}',
+                'format': {'horizontalAlignment': 'CENTER'},
+            })
+            formats.append({
+                'range': f'{_a1_col(f0 + 6)}{hdr_r + 1}:'
+                         f'{_a1_col(f0 + 6)}{end_r}',
+                'format': {'numberFormat':
+                           {'type': 'PERCENT', 'pattern': '0.0%'}},
+            })
+            formats.append({
+                'range': f'{_a1_col(f0 + 7)}{hdr_r + 1}:'
+                         f'{_a1_col(f0 + 7)}{end_r}',
+                'format': {'numberFormat':
+                           {'type': 'NUMBER', 'pattern': '0.0'}},
+            })
+            for i in range(fin['hdr'] + 1, fin['end']):
+                for j, cell in enumerate(rows[i]):
+                    if isinstance(cell, str) and cell.startswith('🏆'):
+                        a1 = f'{_a1_col(j + 1)}{i + 1}'
+                        formats.append({
+                            'range': f'{a1}:{a1}',
+                            'format': {'backgroundColor':
+                                       {'red': 0.341, 'green': 0.733,
+                                        'blue': 0.541},
+                                       'textFormat': {'bold': True}},
+                        })
+        # The affinity sub-label row ('<season> to date' / 'All-Time') sits
+        # directly above its header with labels mid-row; bold it full-width
+        # (the "row above" pass only bolds column A).
+        for aff in affinity:
+            formats.append({
+                'range': f'A{aff["hdr"]}:{last_col}{aff["hdr"]}',
+                'format': {'textFormat': {'bold': True}},
+            })
+        # Affinity half-blocks (CBS conventions + the round-12 geometry):
+        # light-gray base for true zero/null cells (the gradient only
+        # paints numeric cells over it), whole-percent centered display,
+        # RIGHT-aligned abbrev headers, and a bold on each MLB club's
+        # biggest devotee per block (ties all bold).
+        for aff in affinity:
+            hdr, end, n_t = aff['hdr'], aff['end'], aff['n_t']
+            for start_col in (aff['left0'], aff['right0']):
+                if start_col is None:
+                    continue
+                first_a1 = _a1_col(start_col + 1)
+                last_a1 = _a1_col(start_col + n_t)
+                formats.append({
+                    'range': f'{first_a1}{hdr + 1}:{last_a1}{hdr + 1}',
+                    'format': {'horizontalAlignment': 'RIGHT'},
+                })
+                formats.append({
+                    'range': f'{first_a1}{hdr + 2}:{last_a1}{end}',
+                    'format': {
+                        'backgroundColor': {'red': 0.937, 'green': 0.937,
+                                            'blue': 0.937},
+                        'horizontalAlignment': 'CENTER',
+                        'numberFormat': {'type': 'PERCENT',
+                                         'pattern': '0%'},
+                    }})
+            for r_idx in range(hdr + 1, end):
+                for start_col in (aff['left0'], aff['right0']):
+                    if start_col is None:
+                        continue
+                    vals = rows[r_idx][start_col:start_col + n_t]
+                    numeric = [v for v in vals
+                               if isinstance(v, (int, float))]
+                    if not numeric:
+                        continue
+                    peak = max(numeric)
+                    for k, v in enumerate(vals):
+                        if isinstance(v, (int, float)) and v == peak:
+                            cell = f'{_a1_col(start_col + k + 1)}{r_idx + 1}'
+                            formats.append({
+                                'range': f'{cell}:{cell}',
+                                'format': {'textFormat': {'bold': True}},
+                            })
         _batch_format(worksheet, formats)
     except Exception as exc:
         print(f"[almanac] standings formatting skipped: {exc}")

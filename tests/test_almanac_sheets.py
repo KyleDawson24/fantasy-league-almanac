@@ -1163,7 +1163,7 @@ class TestAdvancedStandingsRows:
         # Subtitle reads the DERIVED standard matchup length (8 here), not
         # a hardcoded 7.
         assert 'averages per 8 days of gameplay' in rows[1][0]
-        assert rows[3] == ['Standings (Weekly Averages)']
+        assert rows[3] == ['Detailed Standings (Weekly Averages)']
         assert rows[4][:4] == ['Rank', 'Team', 'Owner', 'W-L']
         assert rows[5][:2] == [1, 'AAA']
         assert rows[6][:2] == [2, 'BBB']
@@ -1172,48 +1172,59 @@ class TestAdvancedStandingsRows:
         # under Table A's columns; slot columns in sort_order (C before SP
         # despite input order); a team missing a slot renders blank. BE/IL
         # never arrive here -- the data layer filters to active slots.
-        assert rows[9] == ['Points by Lineup Slot (Season Totals)']
-        assert rows[10] == ['', 'Team', 'Owner', 'C', 'SP']
-        assert rows[11] == ['', 'AAA', 'Owner 1', 5.5, 9.9]
-        assert rows[12] == ['', 'BBB', 'Owner 2', 4.4, '']
+        # (Single blank between sections since the round-11 parity pass.)
+        assert rows[8] == ['Points by Lineup Slot (Season Totals)']
+        assert rows[9] == ['', 'Team', 'Owner', 'C', 'SP']
+        assert rows[10] == ['', 'AAA', 'Owner 1', 5.5, 9.9]
+        assert rows[11] == ['', 'BBB', 'Owner 2', 4.4, '']
 
     def test_acquisition_header_layout(self):
+        # Kyle rounds 8+12: one table per lens, season half left /
+        # all-time half right, and every ESPN L/R split shares the U
+        # divider -- the left half pads out so the right starts at V (21).
+        half = ['Keeper', 'Draft', 'Pickup', 'Trade', 'Total', '',
+                'Release', 'Trade', 'Total', '', 'FA', 'Trade']
         assert almanac_sheets.ACQUISITION_HEADER == [
-            '', 'Team', 'Owner',
-            'Keeper', 'Draft', 'Trade', 'FA Add', 'Acquired', '',
-            'Dropped', 'Traded Away', 'Lost', '',
-            'FA Net', 'Trade Net',
+            '', 'Team', 'Owner', *half, *[''] * 6, *half,
         ]
+        assert almanac_sheets.ACQUISITION_HEADER[21] == 'Keeper'
+        band = almanac_render.ACQUISITION_BAND_ROW
+        for base in (3, 21):
+            assert band[base] == 'Points Acquired Via'
+            assert band[base + 6] == 'Points Lost Via'
+            assert band[base + 10] == 'Net Points via'
+        assert len(band) == len(almanac_sheets.ACQUISITION_HEADER)
 
-    def test_format_acquisition_row_active_lens(self):
-        row = almanac_render.format_acquisition_row(_acq_team(), 'active')
-        assert row == [
-            '', 'AAA', 'Owner 1',
-            100.0, 200.0, 50.0, 25.0, 375.0, '',
+    def test_acquisition_half_values_active_lens(self):
+        half = almanac_render.acquisition_half_values(_acq_team(), 'active')
+        assert half == [
+            100.0, 200.0, 25.0, 50.0, 375.0, '',
             10.0, 5.0, 15.0, '',
             15.0, 45.0,
         ]
 
-    def test_format_acquisition_row_reads_the_selected_lens(self):
+    def test_acquisition_half_reads_the_selected_lens(self):
         # The rostered lens pulls the *_rostered_pts family, not *_active_pts.
         team = _acq_team(keeper_active_pts=1.0, keeper_rostered_pts=999.0)
-        assert almanac_render.format_acquisition_row(team, 'active')[3] == 1.0
-        assert almanac_render.format_acquisition_row(team, 'rostered')[3] == 999.0
+        assert almanac_render.acquisition_half_values(team, 'active')[0] == 1.0
+        assert almanac_render.acquisition_half_values(team, 'rostered')[0] == 999.0
 
-    def test_format_acquisition_row_zero_and_negative(self):
+    def test_acquisition_half_zero_and_negative(self):
         # Zeros render as 0.0 (not blank); deltas can go negative.
         team = _acq_team(trade_active_pts=0.0, fa_delta_active_pts=-42.0)
-        row = almanac_render.format_acquisition_row(team, 'active')
-        assert row[5] == 0.0        # Trade
-        assert row[13] == -42.0     # FA Net
+        half = almanac_render.acquisition_half_values(team, 'active')
+        assert half[3] == 0.0       # Trade (after Pickup since round 7)
+        assert half[10] == -42.0    # Net FA
 
     def test_acquisition_gradient_columns_positions_and_polarity(self):
         # Acquired channels green-high, Lost buckets green-low, Net deltas
-        # zero-centered diverging; buffer columns 8 and 12 skipped.
+        # zero-centered diverging -- BOTH halves; buffer columns skipped.
+        per_half = [(0, 'most'), (1, 'most'), (2, 'most'), (3, 'most'),
+                    (4, 'most'),
+                    (6, 'fewest'), (7, 'fewest'), (8, 'fewest'),
+                    (10, 'diverging'), (11, 'diverging')]
         assert almanac_sheets.acquisition_gradient_columns() == [
-            (3, 'most'), (4, 'most'), (5, 'most'), (6, 'most'), (7, 'most'),
-            (9, 'fewest'), (10, 'fewest'), (11, 'fewest'),
-            (13, 'diverging'), (14, 'diverging'),
+            (base + off, d) for base in (3, 21) for off, d in per_half
         ]
 
     def test_build_advanced_standings_appends_ranked_acquisition_blocks(self):
@@ -1243,6 +1254,217 @@ class TestAdvancedStandingsRows:
             [_standings_team()], [], _STANDINGS_SPECS, 2026,
         )
         assert ['Production by Acquisition Channel'] not in rows
+        titles = [r[0] for r in rows
+                  if r and str(r[0]).startswith('Points by Lineup Slot')]
+        assert titles == ['Points by Lineup Slot (Season Totals)']
+        assert not any(r and r[0] == 'Roster Affinity by MLB Team'
+                       for r in rows)
+
+    def test_build_advanced_standings_alltime_slot_grid(self):
+        standings = [_standings_team(team_id=1, abbrev='AAA')]
+        season_slots = [
+            {'team_id': 1, 'lineup_slot': 'C', 'slot_pts': 5.5, 'sort_order': 10},
+        ]
+        alltime_slots = [
+            {'team_id': 1, 'lineup_slot': 'C', 'slot_pts': 1.2, 'sort_order': 10},
+            {'team_id': 1, 'lineup_slot': 'SP', 'slot_pts': 9.1, 'sort_order': 140},
+        ]
+
+        rows = almanac_sheets.build_advanced_standings_tab_rows(
+            standings, season_slots, _STANDINGS_SPECS, 2026,
+            slot_rows_alltime=alltime_slots,
+        )
+
+        # Rounds 8+12: ONE grid, BOTH halves per-matchup averages, the
+        # left half padded so the right starts past the U divider; slot
+        # union across halves (SP exists all-time only here, so its
+        # season cell is blank).
+        titles = [r[0] for r in rows
+                  if r and str(r[0]).startswith('Points by Lineup Slot')]
+        assert titles == ['Points by Lineup Slot']
+        pad = [''] * 16                     # 3 id cols + 2 slots -> V
+        hdr = rows.index(['', 'Team', 'Owner', 'C', 'SP', *pad, 'C', 'SP'])
+        sub = rows[hdr - 1]
+        assert sub[3] == '2026 to date -- Averages per Matchup'
+        assert sub[21] == 'All-Time -- Averages per Matchup'
+        # Season totals now divide by the team's matchups played (2 in
+        # the fixture): 5.5 -> 2.8.
+        assert rows[hdr + 1] == ['', 'AAA', 'Owner 1',
+                                 2.8, '', *pad, 1.2, 9.1]
+
+    def test_build_advanced_standings_affinity_shares(self):
+        standings = [_standings_team(team_id=1, abbrev='AAA'),
+                     _standings_team(team_id=2, abbrev='BBB')]
+        affinity = [
+            {'team_id': 1, 'pro_team': 'Atl',
+             'season_wt': 30.0, 'alltime_wt': 60.0},
+            {'team_id': 1, 'pro_team': 'NYY',
+             'season_wt': 10.0, 'alltime_wt': 40.0},
+            {'team_id': 2, 'pro_team': 'Atl',
+             'season_wt': 5.0, 'alltime_wt': 25.0},
+            # A team that left the league: no column, no distortion.
+            {'team_id': 99, 'pro_team': 'Atl',
+             'season_wt': 7.0, 'alltime_wt': 7.0},
+        ]
+
+        rows = almanac_sheets.build_advanced_standings_tab_rows(
+            standings, [], _STANDINGS_SPECS, 2026, affinity_rows=affinity,
+        )
+
+        assert any(r and r[0] == 'Roster Affinity by MLB Team' for r in rows)
+        # Round 12: the season half begins at column C; the right half
+        # starts past the U divider (idx 21).
+        aff_pad = [''] * 17                 # spine + blank + 2 teams -> V
+        hdr = rows.index(['MLB Team', '', 'AAA', 'BBB', *aff_pad,
+                          'AAA', 'BBB'])
+        assert rows[hdr - 1][2] == '2026 to date'
+        assert rows[hdr - 1][21] == 'All-Time'
+        # Round 13: the spine shows full club names (static abbrev map).
+        atl = next(r for r in rows[hdr + 1:]
+                   if r and r[0] == 'Atlanta Braves')
+        nyy = next(r for r in rows[hdr + 1:]
+                   if r and r[0] == 'New York Yankees')
+        # Shares are per COLUMN, as FRACTIONS (the write layer formats the
+        # blocks as PERCENT): AAA season = 30 + 10 involvement, BBB = 5.
+        assert atl == ['Atlanta Braves', '', 0.75, 1.0, *aff_pad, 0.6, 1.0]
+        assert nyy == ['New York Yankees', '', 0.25, '', *aff_pad, 0.4, '']
+
+    def test_rank_chart_block_leads_the_tab(self):
+        import almanac_write
+
+        arc = []
+        for p in (1, 2):
+            arc += [
+                {'team_id': 1, 'team_abbrev': 'AAA', 'period': p,
+                 'standings_rank': 1},
+                {'team_id': 2, 'team_abbrev': 'BBB', 'period': p,
+                 'standings_rank': 2},
+            ]
+        rows = almanac_sheets.build_advanced_standings_tab_rows(
+            [_standings_team(team_id=1, abbrev='AAA')], [],
+            _STANDINGS_SPECS, 2026, rank_arc_rows=arc)
+
+        # The chart section leads (title, subtitle, blank, then chart).
+        assert rows[3] == ['2026 Rank by Week']
+        chk_idx = next(i for i, r in enumerate(rows)
+                       if r and r[0] == '(check to plot)')
+        # Kyle's toggle scheme: individuals OFF, one ALL master ON.
+        assert rows[chk_idx][1:] == [False, False, True]
+        assert rows[chk_idx - 1][:4] == ['Chart teams:', 'AAA', 'BBB', 'ALL']
+
+        b = almanac_write._rank_chart_bounds(rows)
+        assert b and b['n_teams'] == 2
+        # The helper parks past the widest table (floor col 45 -- Table A
+        # runs ~40 wide in production; hiding helper columns inside its
+        # width was the Defense/Total/Against truncation Kyle caught).
+        assert b['helper_col0'] == 45
+        assert b['series_cols'] == [46, 47]
+        assert b['raw_end_col0'] == 50
+        assert b['last_row'] - b['first_row'] - 1 == 2   # two weeks
+        assert rows[b['first_row']][45:] == ['Week', 'AAA', 'BBB',
+                                             'AAA', 'BBB']
+        data = rows[b['first_row'] + 1]
+        # Formulas gate on OR(ALL, own) and read same-row hidden raw ranks.
+        assert data[46].startswith('=IF(AND(OR($D$')
+        assert '3-' in data[46] and data[46].endswith('NA())')
+        assert data[48:50] == [1, 2]
+
+        reqs = almanac_write._rank_chart_requests(9, rows, 2026)
+        assert [next(iter(r)) for r in reqs] == [
+            'setDataValidation', 'updateDimensionProperties', 'addChart']
+        spec = reqs[2]['addChart']['chart']['spec']
+        assert spec['basicChart']['chartType'] == 'LINE'
+        assert len(spec['basicChart']['series']) == 2
+        assert spec['hiddenDimensionStrategy'] == 'SHOW_ALL'
+
+        # Without rank rows the tab keeps its classic layout.
+        plain = almanac_sheets.build_advanced_standings_tab_rows(
+            [_standings_team()], [], _STANDINGS_SPECS, 2026)
+        assert plain[3] == ['Detailed Standings (Weekly Averages)']
+        assert almanac_write._rank_chart_bounds(plain) is None
+
+    def test_finishes_table_beside_the_chart(self):
+        import almanac_write
+
+        arc = []
+        for p in (1, 2):
+            arc += [
+                {'team_id': 1, 'team_abbrev': 'AAA', 'period': p,
+                 'standings_rank': 1},
+                {'team_id': 2, 'team_abbrev': 'BBB', 'period': p,
+                 'standings_rank': 2},
+            ]
+        finishes = [
+            {'season_year': 2025, 'team_id': 1, 'team_abbrev': 'AAA',
+             'owner_display': 'Owner 1', 'wins': 10, 'losses': 4,
+             'ties': 0, 'finish': 1, 'is_champion': False},
+            # The playoff upset: BBB finished 2nd but swept the bracket.
+            {'season_year': 2025, 'team_id': 2, 'team_abbrev': 'BBB',
+             'owner_display': 'Owner 2', 'wins': 8, 'losses': 6,
+             'ties': 0, 'finish': 2, 'is_champion': True},
+            {'season_year': 2026, 'team_id': 1, 'team_abbrev': 'AAA',
+             'owner_display': 'Owner 1', 'wins': 2, 'losses': 0,
+             'ties': 0, 'finish': 1, 'is_champion': False},
+            {'season_year': 2026, 'team_id': 2, 'team_abbrev': 'BBB',
+             'owner_display': 'Owner 2', 'wins': 0, 'losses': 2,
+             'ties': 0, 'finish': 2, 'is_champion': False},
+        ]
+        standings = [_standings_team(team_id=1, abbrev='AAA'),
+                     _standings_team(team_id=2, abbrev='BBB')]
+        rows = almanac_sheets.build_advanced_standings_tab_rows(
+            standings, [], _STANDINGS_SPECS, 2026,
+            rank_arc_rows=arc, finishes_rows=finishes)
+
+        fin = almanac_write._espn_finishes_bounds(rows)
+        assert fin and fin['col0'] == 21
+        assert rows[fin['hdr']][21:] == ['Team', '', '', '', 'Titles',
+                                         'W%', 'Avg', '2025', '2026']
+        first, second = rows[fin['hdr'] + 1], rows[fin['hdr'] + 2]
+        # Sorted by Titles then W%: the 2025 crown outranks the better
+        # record; champion cell = trophy; the in-flight column carries
+        # the CURRENT reconstructed rank and counts toward nothing.
+        assert first[21] == 'Owner 2'
+        assert first[25] == 1                       # titles
+        assert first[26] == pytest.approx(0.5)      # 8-8 all-time
+        assert first[27] == 2.0                     # avg closed finish
+        # Trophy AND finish (Kyle 2026-07-18): the champion's regular-
+        # season finish is real information in an H2H league.
+        assert first[28] == '🏆 2' and first[29] == 2
+        assert second[21] == 'Owner 1'
+        assert second[25] == ''                     # titles blank at 0
+        assert second[26] == pytest.approx(0.75)    # 12-4 all-time
+        assert second[28] == 1 and second[29] == 1
+
+    def test_writer_bounds_locate_every_standings_table(self):
+        import almanac_write
+
+        rows = almanac_sheets.build_advanced_standings_tab_rows(
+            [_standings_team(team_id=1, abbrev='AAA')],
+            [{'team_id': 1, 'lineup_slot': 'C', 'slot_pts': 5.5,
+              'sort_order': 10}],
+            _STANDINGS_SPECS, 2026,
+            acquisition_rows=[_acq_team()],
+            slot_rows_alltime=[
+                {'team_id': 1, 'lineup_slot': 'C', 'slot_pts': 1.2,
+                 'sort_order': 10}],
+            affinity_rows=[
+                {'team_id': 1, 'pro_team': 'Atl',
+                 'season_wt': 1.0, 'alltime_wt': 2.0}],
+        )
+
+        (a_hdr, a_end), = almanac_write._standings_table_bounds(rows)
+        assert rows[a_hdr][0] == 'Rank' and a_end - a_hdr - 1 == 1
+        # Round 8: ONE combined L/R slot grid; the 'Keeper'-carrying
+        # acquisition headers stay out of the slot list and keep their
+        # own locator.
+        assert len(almanac_write._slot_grid_bounds(rows)) == 1
+        assert len(almanac_write._acquisition_table_bounds(rows)) == 2
+        (aff,) = almanac_write._affinity_bounds(rows)
+        assert rows[aff['hdr']][0] == 'MLB Team'
+        assert aff['end'] - aff['hdr'] - 1 == 1   # one MLB club row
+        # Round-12 geometry: season half at C, all-time past the divider.
+        assert aff['left0'] == 2 and aff['n_t'] == 1
+        assert aff['right0'] == 21
 
 
 class TestReapplyFormulaCellsRetry:

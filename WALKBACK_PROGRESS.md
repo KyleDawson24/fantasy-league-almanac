@@ -1134,6 +1134,529 @@ It is committed at every checkpoint, so the branch on GitHub mirrors it.
   105 captured; FULT pitcher 105 -- the two halves live on DIFFERENT
   fantasy teams in 2026, which is extremely CBS).
 
+## Round — Advanced standings, both leagues (2026-07-17, overnight #2)
+
+- **CBS tab renamed 'Standings' -> 'Advanced Standings'** (ESPN parity);
+  write_cbs_almanac renames a legacy worksheet IN PLACE (gid kept)
+  instead of stranding it -- verified gone on the dev sheet.
+- **Finishes matrices (Kyle's list):** 🏆 replaces ① (bold, centered,
+  static #57BB8A fill = the scale's rank-1 green); every finish cell
+  centered; both matrices carry the Sheets-standard green->yellow->red
+  gradient NUMBER-anchored 1 / 8.5 / 16 so a given rank paints the same
+  shade in both sections and across renders (per-range MIN/MAX would
+  re-scale per section; side effect: 2020's 12-team last place reads
+  mid-red, not full red). FORMER FRANCHISES folds into a HIDDEN ROW
+  GROUP (header + data rows; the navy band stays visible as the cue,
+  +/- expander in the margin).
+- **CBS writer grew two format-spec kinds + a stale-state wipe:**
+  {'range', 'gradient'} -> addConditionalFormatRule; {'hide_rows':
+  (start0, end0)} -> addDimensionGroup + hiddenByUser.
+  _stale_style_state_requests deletes prior rules AND row groups before
+  restyling (rules STACK per render, re-added groups NEST); the
+  metadata read only happens for tabs carrying those spec kinds.
+  Rerun-idempotency PROVEN on the dev sheet: full render then targeted
+  rerun both read 21 rules + one depth-1 group.
+- **CBS POINTS BY LINEUP SLOT (new):** left = 2026 totals by DEPLOYED
+  slot (captured era: C/1B/2B/3B/SS/OF/DH/U/P); right = all-time
+  per-season averages by PRIMARY POSITION -- pre-2026 lineups carry no
+  slot deployments (ACT/RS/EST placeholders) while the daily fact's
+  position column is 100% populated in every era (probed: zero nulls,
+  8-bucket vocabulary, all 26 seasons). NOTE (round-2 correction): that
+  column is the SEASON-level primary/display position from eligibility
+  windows, scope-guarded per stat side -- NOT position-of-that-game; a
+  2B cameo still credits the primary OF. Closed seasons only (through
+  2025) so the in-flight season can't drag the averages. Canonical-
+  franchise rows (MLB-64 rollup, numerator AND denominator) in
+  current-standings order; ESPN's red->white->green per value column.
+- **CBS MLB AFFINITY (new, bottom):** share of each franchise's
+  active-lineup games by MLB club -- 2026 left / all-time 2001-2026
+  right on one club spine, columns sum to 100% (verified 99.8-100.2
+  rounding drift), white->green per block. Substrate =
+  fct_cbs_player_game_attribution JOIN int_cbs__player_game_points on
+  the engine's game key (the ONLY home of MLB team-of-game; the daily
+  fact's pro_team is captured-2026 only). Two-way/pitcher-batting games
+  dedupe to one via MAX(weight) across stat-group rows; club names
+  label latest-era LEAGUE-WIDE (Expos rows read Nationals -- a
+  per-pair MAX_BY would era-split the labels). Fun: FLV all-time StL
+  18.4% (verified by independent SQL after a round-2 scare -- see
+  below); KCM Royals 16.8% this season.
+- **ESPN all-time slot grid:** Table B's twin as per-MATCHUP averages
+  (SUM mart_team_slot_production / SUM matchup_periods_played, same
+  marts = same regular-season scope); slot union across seasons (IF
+  appears from 2025). ESPN 'all-time' = 2025+2026 -- the warehouse's
+  full ESPN depth.
+- **ESPN Roster Affinity:** same design on the daily fact's per-period
+  pro_team snapshot (ESPN abbrev vocabulary, day-accurate across
+  trades), active slots only, FA rows excluded; playoff weeks INCLUDED
+  (the daily fact carries no playoff flag) -- question below.
+- **Two pre-existing ESPN bugs fixed in passing:** (1) conditional-
+  format rules accumulated every rerun (nothing ever deleted them) --
+  the ESPN writer now wipes the tab's rules before painting, same as
+  CBS; (2) the REAL write path never passed acquisition_rows -- the
+  MLB-17 blocks existed only in preview TSVs since they shipped; the
+  dev sheet now shows them for the first time (expected new content,
+  not a regression).
+- Builders take the new row sets as OPTIONAL kwargs (sections render
+  only when data is supplied), so existing callers/tests held without
+  edits; writer table location generalized (_slot_grid_bounds /
+  _affinity_bounds; _standings_table_bounds is Table-A-only now).
+- Verified: 221 unit tests green (was 211; +CBS standings builder
+  suite, +ESPN alltime/affinity/bounds tests); full TSV previews both
+  leagues (preview == targeted smoke line-identical); DEV renders both
+  leagues clean (quota backoffs absorbed). Goldens/byte-diff untouched
+  -- still the deliberately-red pre-push re-anchor. Nothing committed.
+
+### Questions for Kyle (standings round)
+
+1. **All-time slot lens**: the CBS all-time grid pivots on POSITION
+   PLAYED because slots don't exist pre-2026. Happy with that, or
+   prefer the all-time side stay slot-based and 2026-only until
+   captures accumulate?
+2. **All-time denominator**: CBS per-season averages exclude in-flight
+   2026 (through 2025). Include it instead (a half-season would read
+   ~low)? ESPN's per-matchup denominator sidesteps this and includes
+   2026.
+3. **Finish-gradient anchors**: NUMBER 1/8.5/16 rather than the
+   preset's per-range MIN/MAX -- consistent shades across both
+   matrices + the trophy fill matches "rank 1" exactly. 2020's 12-team
+   last place reads mid-red. OK, or want true per-range auto-scaling?
+4. **Former-franchise dupes**: the hidden matrix shows TWO 'Vince
+   Coleman Firecrackers' rows (2017-19 + 2021-22) and TWO 'Bent
+   Slides' rows -- same-name clubs on distinct canonical ids (the
+   COVID-re-id class?). If they're the same franchises, they're
+   MLB-64 continuity-override seed candidates.
+5. **ESPN affinity scope**: includes playoff weeks (slot grids stay
+   regular-season via the mart). Filter playoffs for symmetry, or fine
+   for a roster-identity lens?
+6. **CBS affinity lens**: ACTIVE-weighted games (estimated era counts
+   fractionally by start share). Want a rostered-games variant
+   instead/also?
+7. **Layer purity**: get_mlb_affinity reads int_cbs__player_game_points
+   from the output layer (the only place MLB team-of-game lives).
+   Promote a small affinity mart as a follow-up?
+
+### Round 2 (same morning): Kyle's first-look fixes
+
+- **FLV/SLB 18.4% scare RESOLVED -- the grid was right, my handoff
+  prose was wrong.** Independent SQL (no builder code): Firefly Lake
+  Veronicas = 18.4% Cardinals all-time on 43,390 attributed games (SLB
+  is 3.6%). No column-ordering bug; the summary sentence had
+  misattributed it to the Browns because the name made a tidier story.
+- **Position-semantics correction** (tab note + the bullet above
+  fixed): the daily fact's position = season-level PRIMARY position,
+  not position-of-game. Feeds Q1, now framed as: (a) primary [current,
+  era-complete], (b) per-game via the position fact [2007+ detail],
+  (c) slot-only zeroed pre-2026. Kyle torn; alignment with the Records
+  page is his deciding axis.
+- **Finish gradient -> TRUE auto-scale, per YEAR** (Kyle: 2020's
+  12-team last place literally couldn't do worse): one MIN/median/MAX
+  rule per season column, ranged over that year's cells in BOTH
+  matrices via the writer's new multi-range gradient specs.
+- **Affinity restyled (Kyle's list):** red->yellow->green (the
+  standard preset trio, same as the finishes), ONE rule spanning both
+  blocks -- shared scale so a share paints identically season-side and
+  all-time-side (per-block = split the spec back in two); static
+  scale-red BASE FILL under the blocks so blank zero-game cells read
+  as the 0 they are instead of whiter-than-red; cells now store
+  FRACTIONS with a '0.0%' PERCENT number format (12.3% display, one
+  decimal universally). Both leagues.
+- Kyle's answers logged: Q3 auto-scale DONE; Q4 -> league
+  questionnaire (BRAINTHOUGHTS Discussions entry, 2026-07-17); Q5
+  playoffs-in-ESPN-affinity fine for now (noted); Q6 active-weighted
+  CONFIRMED. Open: Q1 (position lens, torn), Q2 (include in-flight
+  season IF logically weighted -- games-volume "effective seasons"
+  proposal pending his nod), Q7 (mart home -- leaning fold-into-
+  existing; ANSWERED en route: ESPN affinity uses the per-period
+  pro_team SNAPSHOT, historic within ESPN's 2025+ window, not
+  current-team backfill; CBS is per-game gamelog truth).
+- Rule counts after restyle: CBS 43 (25 finish-year + 17 slot + 1
+  affinity, one collapsed depth-1 row group) / ESPN 87; both
+  write-twice stable on the dev sheets. 221 tests green.
+
+### Round 3 (same morning): standard-season clock + Records alignment
+
+- **Q1 + Q2 RESOLVED by Kyle's own designs.**
+- **All-time slot grid re-lensed to the RECORDS convention** (Kyle: "in
+  alignment with the records page... 0'd out until capture data
+  starts"): the primary-position lens is GONE; both sides now share the
+  full deployed-slot vocabulary (C/1B/2B/3B/SS/OF/DH/U/P). The P column
+  spans all years -- started pitching IS the P slot in every era, the
+  same construction the Records page's Team Totals use -- while hitter
+  slots draw only from captured seasons (2026+). Data:
+  get_slot_points_alltime (capture rows, season in grain) +
+  get_pitching_points_alltime (era-complete active-weighted pitching).
+- **Per-season averages -> PACES PER STANDARD SEASON** (Kyle's N-days
+  counter-proposal, replacing both my closed-seasons-only rule and the
+  games-volume idea he shot down -- games conflate roster behavior +
+  league size; a TIME clock doesn't): N = the median CLOSED season's
+  count of distinct attributed gameplay days (get_season_gameplay_days);
+  each season weighs days/N season-equivalents. 2020 counts the ~third
+  it played, a late-draft season self-reports short, and the in-flight
+  year now COUNTS (its days so far) -- the through-2025 exclusion is
+  gone. Hitter columns pace over capture-era equivalents; P over the
+  franchise's full membership equivalents (finishes seasons + current).
+  Note text on the tab spells all of this out.
+- **ESPN MLB-team direction (Kyle):** NO platform-specific fact/mart.
+  The platform-neutral gamelog layer (stg_mlb__player_game already
+  carries team-of-game for every game 1984+) is the shared surface both
+  leagues' attributions should join when this gets marted -- ESPN wired
+  through the same join lands per-game precision inside its 2025+
+  window. Logged as the fold target; no render change now (the
+  pro_team-snapshot numbers are near-identical within that window).
+- Dev re-render: CBS standings tab now 44 rules (25 finish-year + 18
+  slot columns + 1 affinity). Sanity on the new right block: hitter
+  paces = 2026 totals x N/days-elapsed (~x1.71 mid-July = season ~58%
+  run); P paces 3.8-4.2k/season, within a hair of the old position
+  lens; DH jumped ~150 -> ~1,000 because it now means the DEPLOYED DH
+  slot, not games at the DH position -- the Records-aligned semantic.
+  221 tests green (grid test rewritten for the pace split).
+
+### Round 4 (same morning): affinity de-eyesored + the 18.4% receipts
+
+- **Affinity restyle #2 (Kyle: the yellow-mid scale was an eyesore):**
+  red -> WHITE -> green on the slot grids' palette (_SCALE_RED/_GREEN,
+  now shared constants), one rule PER BLOCK (each matrix scales to its
+  own spread -- the shared-scale experiment retired), base fill follows
+  the softer red, and each MLB club's biggest devotee bolds per block
+  (row-max, ties all bold; CBS builder-side, ESPN writer-side). Rules:
+  CBS 45 / ESPN 88, write-twice stable.
+- **FLV 18.4% Cardinals: CONFIRMED REAL, third angle.** Per-player
+  receipts for franchise 1 x StL: Yadier Molina 687 weighted games
+  (2006-22), Carpenter 461, Goldschmidt 454, Edman 316, Arenado 301,
+  Wong, DeJong, Nootbaar, Fowler, Piscotty, Craig, J.D. Drew ('01-02).
+  FLV is the league's actual Cardinals homer; the Salt Lake Bisons
+  just wear the name (3.6% all-time). No column misrender -- the
+  original scare came from MY handoff sentence misattributing the
+  number to SLB.
+
+### Round 5 (same day): the format batch + two big dawgs
+
+- **Affinity polish (Kyle's list):** section renamed 'MLB Affinity
+  Chart', his explainer copy verbatim (nuance flagged in chat: it says
+  '2003-2025 estimate starts by start share' -- the start-share
+  estimator actually covers 2004-2020, with 2001-03 + 2021-25
+  reconstructed from lineup logs), light-gray base for true zero/null
+  cells (replacing scale-red), whole-percent display ('0%'), centered.
+- **Finishes matrix: Div + Avg columns, titles-then-avg sort.** Div =
+  division titles (best league finish within the division that season,
+  derived from stg_cbs__ui_standings.division_name now carried through
+  get_historic_finishes); Avg = mean finish, 1dp. Both matrices sort by
+  (titles DESC, avg ASC). Year columns shifted to E+; the footnote sits
+  flush under the former table and defines Div/Avg. Live order: HH
+  (5 titles / 7 div / 4.7 avg), FLV (3/4/7.7), KCM (2/5/8.0).
+- **BIG DAWG 1 -- the rank chart:** the '<season> STANDINGS -- PERIOD
+  N' snapshot table is GONE (adds nothing the CBS site doesn't show).
+  In its place: the rank-by-period matrix + an embedded LINE chart fed
+  by a HIDDEN helper block (cols AK+, formulas =IF(toggle, 17-rank,
+  NA())) with a per-team CHECKBOX row -- spaghetti control. The 17-flip
+  puts 1st at the top because the Sheets API cannot reverse a chart
+  axis (axis windowed 0..17, titled 'Position (top = 1st)'; tick
+  numbers are the flipped values -- the one wart). Toggles are SHARED
+  sheet state (Sheets has no per-viewer series filtering) and a
+  re-render resets them all-checked. Writer grew three spec kinds
+  (checkboxes -> setDataValidation BOOLEAN, hide_cols, chart ->
+  addChart; ChartData needs the sourceRange wrapper -- caught live) and
+  the stale wipe now also deletes charts + clears validations +
+  unhides columns. Helper VERIFIED live: P1 BWS formula evaluates 6 =
+  17-11 vs the matrix.
+- **BIG DAWG 2 -- transactional standings (MLB-17's CBS twin):**
+  get_acquisition_channels(season) builds season-scoped channels from
+  stg_cbs__ui_transactions x the attribution fact -- no stint
+  dependency (the stints model stops at 2025; the captured season
+  derives straight from the log). Channels: OPENING (no logged
+  acquisition = season-start roster; CBS never logged drafts, so
+  draft + keeper both live there), FA ADD, TRADE -- a game credits the
+  player's latest acquisition by that franchise on/before game date
+  (QUALIFY latest-event join). Lost = post-departure production,
+  WINDOWED to the player's next re-acquisition by the same franchise
+  (drop/re-add/re-drop can't double-count), drop vs trade_out split;
+  active lens = other franchises' started points, rostered lens adds
+  UNOWNED production (anti-join on attribution). Both lenses render
+  ESPN-shaped with per-column polarity gradients (+ _points_gradient_
+  low / _diverging_gradient) and 0dp display. CONSERVATION PROOF:
+  sum(acquired_active) = 77,912 = the season's exact total active
+  points -- every point lands in exactly one channel.
+- Dev render: 176 rows, 63 rules (25 finish-year + 18 slot + 18
+  acquisition + 2 affinity), 1 chart, write-twice stable (rules,
+  group, chart all survive the wipe). 224 tests green (+3: div/avg/
+  sort, chart apparatus, acquisition blocks).
+
+### Round 6 (same day): chart to the top + the all-time mirror
+
+- **Chart leads the page** (Kyle: 'should be at the top'): navy band ->
+  toggles -> chart area (rows ~7-25, helper hidden at AK+) -> the rank
+  matrix BELOW it. Helper formulas now reference downward; a layout
+  assert guards the arithmetic that places the matrix header.
+- **ALL / NONE master toggles** appended after the team boxes: native
+  checkboxes can't write each other (that needs Apps Script), so the
+  masters OVERRIDE -- plotted = IF(ALL, on, IF(NONE, off, own box)).
+  One click to plot everything, one to mute everything, both off =
+  individual control; individual states survive a master flip.
+- **All-time acquisition mirror (Kyle's ask, active franchises via the
+  usual canonical filter):** get_acquisition_channels_alltime reads
+  int_cbs__roster_stints for the historic channels -- the engine
+  already resolved the log's warts, so open_channel maps add/trade_in
+  and everything else (opening / lineup_opening / lineup_evidence) is
+  OPENING-class; a game credits the stint holding its date. Lost stays
+  SEASON-BOUNDED (departure window = next same-franchise stint that
+  season, else Dec 31) -- decades of a dropped prospect never count.
+  The builder sums these with the season query for 'All-Time Active /
+  Rostered Lens (2001-2026)' blocks under the season pair.
+  CONSERVATION EXACT: channeled 3,079,134 = attribution total
+  3,169,369 minus the 2001-02 sentinel's 90,235 to the point. (Side
+  fact: the sentinel DOES carry ~90k active-weighted points --
+  unattributable by design.)
+- **Affinity blurb made era-accurate** (Kyle deferred: 'if you're sure
+  you're right'): 2004-2020 = start-share estimates; other years
+  reconstruct from lineup logs; 2026 captured. His half-memory ('only
+  01 and 02 could be reconstructed') = the NO-ANCHOR years -- 2001-02
+  are log-only (no year-end anchors), which is a different distinction
+  than estimated-vs-reconstructed.
+- Dev render: 244 rows, 81 rules (+18 for the all-time blocks), chart
+  on top verified live (toggles rows 5-6, matrix at 26). Write-twice
+  stable. 225 tests green.
+
+### Round 7 (same day): Kyle's mockup pass + the trade-lost bug
+
+- **KYLE FOUND A REAL BUG from the sheet**: every Trade-lost cell read
+  0 because stg_cbs__ui_transactions carries NO trade_out rows -- the
+  UI report logs trades ONE-SIDED (the receiver's trade_in; the stint
+  engine derives out-edges itself, which is why the all-time side was
+  fine). Fix: the season query synthesizes the sender's trade_out from
+  counterparty_franchise_id. Season traded-away active: 0 -> 550.
+- **Acquisition tables rebuilt to Kyle's on-sheet mockup:** ONE table
+  per lens, season half left / all-time half right on the ACTIVE-
+  canonical-franchise spine (formers gone -- his 1:1 mirroring ask),
+  ranked by the season half's Total. Terse headers under merged group
+  bands ('Points Acquired Via' / 'Points Lost Via' / 'Net Points via'),
+  Pickup ahead of Trade. ESPN mirrored: ACQUISITION_HEADER renamed
+  (Keeper/Draft/Pickup/Trade/Total | Release/Trade/Total | FA/Trade) +
+  ACQUISITION_BAND_ROW above each block, format_acquisition_row
+  reordered (fa before trade), gradient positions unchanged by luck of
+  polarity classes. CBS writer now applies builder merges on non-team
+  tabs (unmerge-first).
+- **Rank matrix DELETED** (the chart covers it): the helper block is
+  now self-contained -- hidden cols AK+ carry Period, the plot
+  formulas, AND the raw ranks as plain values the formulas read.
+- **Toggle scheme per Kyle:** literal uncheck-others needs Apps Script,
+  so his fallback shipped -- defaults are individual boxes OFF + one
+  ALL master ON (plotted = OR(ALL, own)). Uncheck ALL, check a team,
+  see one line. NONE button dropped as redundant.
+- **Finishes matrix moved up** into the matrix's old slot (right under
+  the chart) and grew: the in-flight season as the LAST column (plain
+  current rank, no trophy, counts toward nothing), #00ff00 SOLID_MEDIUM
+  borders on division-champion cells (48 of them), full-width navy/bold
+  past AA (the _section/_header width param -- the old AA default was
+  the cutoff Kyle saw), Kyle's explainer verbatim under the band, and
+  the footnote now defines Div/Avg + the in-flight rule.
+- Dev render: 164 rows, 82 rules, 12 merges, 48 borders, write-twice
+  stable both sheets. 226 tests green.
+
+### Round 8 (same day): the ESPN rank chart (CBS mirrored back)
+
+- **CBS declared DONE by Kyle**; ESPN begins with its chart.
+- **ESPN has no intra-season standings snapshots -- so the arc is
+  RECONSTRUCTED**: get_team_rank_arc computes standings-after-week-N
+  from fct_team_weekly_active_performance (cumulative W/T, cumulative
+  calculated points as tiebreak, team_id deterministic last resort --
+  the almanac's own Table A ordering applied cumulatively; the OFFICIAL
+  site's mid-season tiebreakers could order a tied pair differently).
+  VERIFIED: the reconstruction's final-week order matches Table A
+  exactly, all 14 teams.
+- **Builder**: rank_arc_rows optional kwarg; the chart block LEADS the
+  tab ('{season} Rank by Week' above Table A), same apparatus as CBS --
+  individuals-OFF + ALL-ON toggles, self-contained hidden helper at
+  AK+ (Week, plot formulas, raw ranks), n+1 rank flip. Layout without
+  the kwarg is unchanged (old tests untouched).
+- **Writer**: content-based detection (_rank_chart_bounds keys off the
+  '(check to plot)' row + the 'Week' helper header -- the ESPN writer
+  computes everything from rows, per its architecture), then
+  _rank_chart_requests (checkbox validation, helper-column hide,
+  addChart) rides the gradients batch; the wipe now also deletes
+  charts, clears validations, and unhides columns. RAW write + a
+  formula-reapply pass for the helper '=' cells (the W-L strings still
+  need RAW); the tab writer grew CBS-style resize-if-small (the helper
+  pushes width to ~col BM).
+- Live: LINE chart on the ESPN dev sheet, helper evaluating (wk 1 SMEL
+  = rank 1 -> plots 14 on the flipped axis), write-twice stable (88
+  rules + chart survive the wipe). 227 tests green. ESPN preview TSVs
+  grow again -- same deliberately-red byte-diff bucket, pre-push
+  re-anchor unchanged.
+
+### Round 9 (same day, crash-interrupted + resumed): the ESPN mirror
+
+- Machine crashed mid-build; every landed edit survived (the clock
+  hoist had applied as a clean move). Resumed and finished.
+- **KYLE'S TRUNCATION REPORT WAS A REAL BUG I SHIPPED**: the chart
+  helper parked at col AK (36) INSIDE Table A's width (45 for this
+  stat set), and hiding helper columns hides them for the whole sheet
+  -- Defense/Total/Against vanished. helper_col0 is now dynamic
+  (max(45, header width + 5) -> 50 live) and the writer derives the
+  column from the helper's 'Week' stamp. Verified live: hidden cols =
+  exactly 50-78, Table A tail visible.
+- **Finishes-beside-the-chart (his mock, cols V+ on the chart rows):**
+  owner names as the spine (spillover, no merges), Titles / all-time
+  W% (the Div slot -- ESPN has no division data extracted; noted in
+  BRAINTHOUGHTS) / Avg, closed-year columns with 🏆 = the PLAYOFF
+  champion (derived: won every playoff week -- consolation brackets
+  always carry a loss), in-flight column = the current reconstructed
+  rank. Sorted titles then W%. CBS conventions writer-side (navy band,
+  trophy fill, per-year auto-gradient, '0.0%' W%). THE DATA EARNS IT:
+  Grant Ashford won the 2025 regular season (Avg 1.0) but Keven
+  McKendry swept the bracket and wears the trophy.
+- **All-time detailed standings, BOTH leagues, stacked below (too wide
+  for L/R):** ESPN = Table A's twin from mart_team_season_standings
+  summed per team (per-standard-matchup averages over summed
+  denominators, ordered by all-time W%; ORDER BY must use the output
+  aliases -- SUM(alias) nests aggregates in Snowflake). CBS = its
+  FIRST detailed standings, all-time-only (the current season reads
+  fine on the CBS site): marquee scored set (_HIT_ORDER/_PIT_ORDER,
+  OUTS -> IP) active-weighted, paced per standard season via the
+  hoisted clock + _member_equivalents, franchise spine, per-column
+  gradients, 0dp.
+- **ESPN slot grids -> ONE L/R table** (season totals left / all-time
+  per-matchup right, shared spine, slot union) when all-time rows are
+  present; legacy single grid otherwise (old tests hold).
+- **ESPN acquisition -> CBS's L/R shape:** _ACQ_HALF constants,
+  acquisition_half_values (format_acquisition_row retired), gradient
+  positions for both halves, sub-labels + band rows, and the ESPN
+  writer grew MERGE support (unmerge-first) + band/sub-label
+  bold-centering. All-time half = the mart summed across its seasons
+  = '2026-' today (2025's topics log isn't cleanly reachable --
+  MLB-16); labeled honestly, deepens on its own.
+- Dev renders write-twice stable: CBS 184 rows / 102 rules; ESPN 151
+  rules with chart + merges + validations surviving the wipe. 229
+  tests green.
+
+### Round 10 (same day): affinity re-weighted PA + BF
+
+- **Kyle: games-played underweights pitchers (~5:1).** The affinity
+  weight is now INVOLVEMENT = plate appearances + batters faced, both
+  almanacs. ESPN: PA = ab+b_bb+hbp+sf, BF = outs+p_h+p_bb+hbp_p,
+  straight off the daily fact (get_team_pro_team_games renamed
+  get_team_affinity_weights; row keys season_wt/alltime_wt). CBS:
+  hitting rows contribute PA (ab+bb+hbp+sf), pitching rows BF
+  (outs+ha+bbi -- pitcher-HBP isn't priced at game grain, negligible
+  undercount), from the same gamelog join. BONUS: the per-game
+  MAX(weight) dedup hack DIED -- a two-way or pitcher-batting game now
+  legitimately ADDS its PA and its BF instead of needing collapse.
+- Explainers on both tabs now say involvement (PA + BF) and why.
+- Sanity: FLV's all-time Cardinals share eased 18.4% -> 16.9% (their
+  homer stack is hitter-heavy; pitchers elsewhere now speak). Both dev
+  tabs re-rendered, write-twice stable (CBS 102 / ESPN 151 rules).
+  229 tests green.
+
+### Round 11 (2026-07-18): records IP + trophy-with-finish + the parity pass
+
+- **CBS Records: pitcher statlines finally show IP.** Kyle's read was
+  right -- the Home boards' shared formatter always knew IP; the
+  records-side _player_line picks from a fixed marquee list
+  (_STAT_LINE_ORDER) that simply LACKED OUTS. Added, displayed as IP
+  (/3), magnitude-sorted like its neighbors: 'Best Player Pitching
+  Points | 334 K, 260 IP, 30 QS'. The real fix -- ONE unified
+  top-N-by-point-contribution statline helper across records/boards/
+  both platforms -- is logged in BRAINTHOUGHTS (Wishlist).
+- **ESPN finishes: trophy AND finish** ('🏆 2' style) -- in an H2H
+  league the champion is the playoff winner, so the regular-season
+  finish is real information. Writer trophy detection now matches the
+  prefix. BRAINTHOUGHTS wishlist: a champion-definition toggle
+  (season-end rankings vs playoff performance).
+- **ESPN formatting parity with CBS (Kyle: 'replicate as closely as
+  possible, I'll clean up after'):** the NAVY INVERTED -- section
+  bands are navy/white (width = the section's own tables, helper rows
+  excluded from the measurement), table headers dropped to plain bold;
+  explainer rows italic-9 under the acquisition/affinity bands; A1 to
+  fontSize 14 with the pale-blue italic subtitle; title+subtitle
+  FROZEN (2 rows); every double blank between sections collapsed to
+  single (the buffer rows Kyle flagged); slot + acquisition value
+  columns display 0dp (Table A keeps 1dp weekly averages
+  deliberately); affinity base light-gray '0%' centered (was still
+  scale-red '0.0%' from round 7). Mine called out pre-execution: the
+  navy flip retints every table on the tab -- intended.
+- Renders: CBS Records + both standings tabs, write-twice stable (CBS
+  102 / ESPN 151 rules). 229 tests green (layout test re-indexed for
+  the single blanks; finishes test asserts '🏆 2').
+
+### Round 12 (2026-07-18): Kyle's ESPN review punch-list + the U divider
+
+- **Trophy de-italicized** in both finishes explainers: textFormatRuns
+  (the emoji is 2 UTF-16 units; italics resume at index 2) -- CBS via
+  the builder's 'runs' spec, ESPN via an updateCells pass in the
+  requests batch.
+- **ESPN finishes table hugs the top**: explainer row 1 (beside the
+  title), header row 2 (on the frozen subtitle band), teams from 3;
+  the navy 'SEASON FINISHES' band went with the move; bounds re-keyed
+  off the header ('Team' at V + 'Titles' at Z).
+- **Decimal rule, both Table As + the slot grid** (Kyle's repeatable
+  rule): per value column, 0 decimals unless the column AVERAGE is
+  under 10, then 1 -- CYC keeps its decimal, HR stops wobbling between
+  51.9 and 52, Offense/Defense/Total 0dp. Acquisition stays flat 0dp.
+- **Slot grid: BOTH halves now Averages per Matchup** (the season side
+  divided by matchups played) -- the L/R halves are directly comparable
+  for the first time. Sub-labels renamed to match.
+- **Section renamed 'Detailed Standings (Weekly Averages[, All-Time])'**
+  (Kyle: 'Standings' undersold the per-stat grid).
+- **THE U DIVIDER formalized (ESPN)**: every L/R split shares one
+  divider column -- U (0-based 20), which is Table A's own
+  offense/defense buffer. Left halves pad to T; right halves all start
+  at V (slot grid, acquisition incl. band merges at 21+, affinity).
+  The affinity season half starts at column C with RIGHT-aligned
+  abbrev headers (Kyle's wonky-column fix). CBS left as-is (no sturdy
+  equivalent divider -- Kyle's own call).
+- **Navy bands unified in width, both tabs**: every band runs as far
+  as the widest one (CBS post-pass over the navy specs; ESPN two-pass
+  max in the writer).
+- **Affinity explainers rewritten to Kyle's copy** ('involvement --
+  defined as plate appearances + batters faced... Bold indicates
+  highest value for given MLB team'), CBS keeping its provenance
+  sentence.
+- **Historic-transactions ANSWER (Kyle asked looked-vs-not)**: LOOKED
+  AND BLOCKED -- MLB-16's verdict stands: the real log lives in the
+  kona_league_communication topics feed (2026 extracts fine); the
+  leagueHistory endpoint REJECTS the topics filter, so 2025 isn't
+  cleanly reachable by API. Not proven-nonexistent: a site-UI scrape
+  (the CBS approach) would be a NEW investigation.
+- Renders write-twice stable (CBS 102 / ESPN 154 rules). 229 tests
+  green. Kyle: commit + push next once this round eyeballs clean --
+  release is close.
+
+### Round 13 (2026-07-18): pre-push touch-ups + the UTIL verdict
+
+- **ESPN affinity spine = full MLB names** (static ESPN_PRO_TEAM_NAMES
+  abbrev map, 'Oak' -> 'Athletics'), sorted by name, spilling A:B with
+  the season half still at C and all-time at V. Names will CLIP at ~104px
+  under the tab's 52px A/B columns -- flagged for Kyle's cleanup pass.
+- **Finishes side table re-anchored** (Kyle: 'i got sloppy'): explainer
+  row 3, header row 4, teams from 5 -- under the frozen band. Avg now
+  INCLUDES the in-flight season's current finish (his call, 'I know
+  it's wonky'); Titles stay closed-only.
+- **UTIL 'blank' VERDICT: real data, not a casing bug.** The vocabulary
+  is 'UTIL' everywhere; the SLOT ceased to exist -- the league's 2026
+  settings swapped UTIL for DH (dim_roster_slot_counts: 2025 UTIL
+  active/DH zeroed; 2026 DH active/UTIL zeroed) and the daily fact has
+  zero 2026 UTIL deployments. The union grid honestly shows the
+  settings drift (UTIL all-time-only, DH thin the other way). Nothing
+  to standardize.
+- **Team-label asymmetry noted for post-push** (BRAINTHOUGHTS): CBS
+  full names vs ESPN abbrev+owner = the surviving 1-column offset;
+  standardization deliberately deferred by Kyle.
+- Renders write-twice stable. 229 tests green.
+
+### Ship (2026-07-18): re-anchor + push (Kyle-authorized)
+
+- Byte-diff goldens re-anchored (REGENERATE_BASELINES=1, the planned
+  pre-push step -- Kyle delegated it this time); byte-diff + golden
+  BBCode suites green against the new baselines.
+- Warehouse sweep surfaced ONE stale pin unrelated to this sprint:
+  test_stat_catalog's auto-tracked set lagged the seed's deliberate
+  DOUBLES/TRIPLES/HR additions (the CBS records work; the seed rows
+  document the intent verbatim). Pin updated to match -- the test only
+  runs under -m warehouse, which is how it went unnoticed.
+- DH/UTIL record-keeping merge logged in BRAINTHOUGHTS (Kyle: eventual
+  slot-class rollup at the dim layer; color scaling suffices for now).
+- Committed + pushed to origin/claude/modest-montalcini-3af8c4. Kyle
+  picks it up for the next round = the actual release.
+
 ## Round — Gold-standard headers + Best Individual Seasons (2026-07-17)
 
 - **Header gold standard (Kyle's hand-mocked layout, both leagues):**

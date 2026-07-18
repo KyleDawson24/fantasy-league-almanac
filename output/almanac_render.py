@@ -54,6 +54,16 @@ DRAFT_VALUE_HEADER = ['Player', 'Team', 'Pick', 'Pts', 'Value']
 STANDINGS_FIXED_HEADER = ['Rank', 'Team', 'Owner', 'W-L']
 
 
+def col_letter(n):
+    """1-based column index -> A1 letters, dependency-free (both leagues'
+    builders lay out wide blocks by arithmetic)."""
+    letters = ''
+    while n:
+        n, rem = divmod(n - 1, 26)
+        letters = chr(65 + rem) + letters
+    return letters
+
+
 def standings_header(hitting_specs, pitching_specs):
     """Advanced Standings (Table A) header: identity columns, each scored
     hitting stat, the offense total, each scored pitching stat, the
@@ -742,10 +752,49 @@ def standings_gradient_columns(hitting_specs, pitching_specs):
 # the slot grid so Team / Owner line up under Table A, but the 'Keeper' column
 # is what the write layer keys off to tell the two apart. Buffer '' cells sit
 # between the Acquired group, the Lost group, and the Net deltas.
-ACQUISITION_HEADER = ['', 'Team', 'Owner',
-                      'Keeper', 'Draft', 'Trade', 'FA Add', 'Acquired', '',
-                      'Dropped', 'Traded Away', 'Lost', '',
-                      'FA Net', 'Trade Net']
+# Kyle 2026-07-17/18 (CBS restyle mirrored back + the formalized L/R
+# divider): one table per lens, season half left / all-time half right,
+# terse labels under 'Points Acquired/Lost Via' + 'Net Points via' group
+# bands. On the ESPN almanac every L/R split shares ONE divider column --
+# U (0-based 20), Table A's own offense/defense buffer -- so left halves
+# pad out to T and right halves all start at V.
+ESPN_DIVIDER_COL0 = 20
+
+# ESPN's box scores carry MLB clubs as abbreviations; the affinity spine
+# shows full names (Kyle round 13, matching CBS). Static platform
+# vocabulary -- unknown abbrevs fall back to themselves.
+ESPN_PRO_TEAM_NAMES = {
+    'Ari': 'Arizona Diamondbacks', 'Atl': 'Atlanta Braves',
+    'Bal': 'Baltimore Orioles', 'Bos': 'Boston Red Sox',
+    'ChC': 'Chicago Cubs', 'ChW': 'Chicago White Sox',
+    'Cin': 'Cincinnati Reds', 'Cle': 'Cleveland Guardians',
+    'Col': 'Colorado Rockies', 'Det': 'Detroit Tigers',
+    'Hou': 'Houston Astros', 'KC': 'Kansas City Royals',
+    'LAA': 'Los Angeles Angels', 'LAD': 'Los Angeles Dodgers',
+    'Mia': 'Miami Marlins', 'Mil': 'Milwaukee Brewers',
+    'Min': 'Minnesota Twins', 'NYM': 'New York Mets',
+    'NYY': 'New York Yankees', 'Oak': 'Athletics',
+    'Phi': 'Philadelphia Phillies', 'Pit': 'Pittsburgh Pirates',
+    'SD': 'San Diego Padres', 'Sea': 'Seattle Mariners',
+    'SF': 'San Francisco Giants', 'StL': 'St. Louis Cardinals',
+    'TB': 'Tampa Bay Rays', 'Tex': 'Texas Rangers',
+    'Tor': 'Toronto Blue Jays', 'Wsh': 'Washington Nationals',
+}
+
+_ACQ_HALF = ['Keeper', 'Draft', 'Pickup', 'Trade', 'Total', '',
+             'Release', 'Trade', 'Total', '', 'FA', 'Trade']
+_ACQ_BAND_HALF = ['Points Acquired Via', '', '', '', '', '',
+                  'Points Lost Via', '', '', '', 'Net Points via', '']
+
+# 3 identity cols + the 12-wide half ends at index 14; pad through the
+# shared divider (indexes 15..20) so the right half starts at V (21).
+_ACQ_PAD = [''] * (ESPN_DIVIDER_COL0 + 1 - (3 + len(_ACQ_HALF)))
+
+ACQUISITION_HEADER = ['', 'Team', 'Owner', *_ACQ_HALF, *_ACQ_PAD,
+                      *_ACQ_HALF]
+
+ACQUISITION_BAND_ROW = ['', '', '', *_ACQ_BAND_HALF, *_ACQ_PAD,
+                        *_ACQ_BAND_HALF]
 
 # Which mart column family each lens reads.
 _ACQ_LENS_SUFFIX = {'active': 'active_pts', 'rostered': 'rostered_pts'}
@@ -757,21 +806,18 @@ def _acq_num(value):
     return round(float(value or 0), 1)
 
 
-def format_acquisition_row(team_row, lens):
-    """One acquisition-block data row for a team under the given lens
-    ('active' or 'rostered'), mirroring ACQUISITION_HEADER: the four acquired
-    channels + their total, the two lost buckets + their total, then the two
-    Net deltas. Buffer cells between the groups."""
+def acquisition_half_values(team_row, lens):
+    """One HALF of an acquisition-table data row (season or all-time)
+    under the given lens, mirroring _ACQ_HALF: the four acquired channels
+    + their total, the two lost buckets + their total, then the two Net
+    deltas, with buffer cells between the groups."""
     sfx = _ACQ_LENS_SUFFIX[lens]
 
     def v(channel):
         return _acq_num(team_row.get(f'{channel}_{sfx}'))
 
     return [
-        '',
-        team_row.get('team_abbrev') or '',
-        team_row.get('owner_display') or '',
-        v('keeper'), v('draft'), v('trade'), v('fa_add'), v('acquired'), '',
+        v('keeper'), v('draft'), v('fa_add'), v('trade'), v('acquired'), '',
         v('dropped'), v('traded_away'), v('lost'), '',
         _acq_num(team_row.get(f'fa_delta_{sfx}')),
         _acq_num(team_row.get(f'trade_delta_{sfx}')),
@@ -779,17 +825,18 @@ def format_acquisition_row(team_row, lens):
 
 
 def acquisition_gradient_columns():
-    """(column_index, direction) pairs for an acquisition block, matching
-    ACQUISITION_HEADER. Acquired channels + total paint green-high ('most');
-    the Lost buckets + total paint green-low ('fewest' -- forfeiting less is
-    better); the two Net deltas use a zero-centered diverging scale
-    ('diverging' -- red negative, white zero, green positive). Buffer columns
-    (8, 12) get no gradient. Positional, like standings_gradient_columns."""
-    return [
-        (3, 'most'), (4, 'most'), (5, 'most'), (6, 'most'), (7, 'most'),
-        (9, 'fewest'), (10, 'fewest'), (11, 'fewest'),
-        (13, 'diverging'), (14, 'diverging'),
-    ]
+    """(column_index, direction) pairs matching ACQUISITION_HEADER, BOTH
+    halves. Acquired channels + total paint green-high ('most'); the Lost
+    buckets + total green-low ('fewest' -- forfeiting less is better);
+    the Net deltas zero-centered ('diverging'). Buffer/pad columns skip.
+    Positional, like standings_gradient_columns."""
+    per_half = [(0, 'most'), (1, 'most'), (2, 'most'), (3, 'most'),
+                (4, 'most'),
+                (6, 'fewest'), (7, 'fewest'), (8, 'fewest'),
+                (10, 'diverging'), (11, 'diverging')]
+    return [(base + off, direction)
+            for base in (3, ESPN_DIVIDER_COL0 + 1)
+            for off, direction in per_half]
 
 
 def format_record_matrix_row(spec, current_record=None, all_time_record=None,

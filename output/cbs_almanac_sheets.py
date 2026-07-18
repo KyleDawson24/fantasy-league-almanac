@@ -90,7 +90,7 @@ from sheets_writer import _get_authorized_client
 
 HOME_TAB = 'Home'
 RECORDS_TAB = 'Records'
-STANDINGS_TAB = 'Standings'
+STANDINGS_TAB = 'Advanced Standings'
 
 # The league's active-lineup shape, verbatim from the captured rules
 # (roster.positions): 19 active = C/1B/2B/3B/SS + OF*3 + DH + U + P*9.
@@ -286,9 +286,14 @@ _CBS_SENTINEL_FID = 9999
 # The player-record Details stat-line: marquee counting stats, headline first.
 # A hitter's pitching cells are zero and vice-versa, so one combined order
 # serves both; XBH/points are excluded (derived / shown as the Value).
+# OUTS rides as IP (Kyle 2026-07-18: pitcher statlines never surfaced
+# innings -- the list simply lacked it, while the Home boards' shared
+# formatter always had it; unifying the two statline builders into one
+# top-N-by-POINT-CONTRIBUTION helper is a logged wishlist item).
 _STAT_LINE_ORDER = ['HR', 'RBI', 'R', 'SB', 'W', 'SV', 'K', 'QS', 'HLD', 'CG',
-                    '2B', '3B', 'H', 'TB']
+                    '2B', '3B', 'H', 'TB', 'OUTS']
 _STAT_LINE_LABELS = {s: s for s in _STAT_LINE_ORDER}
+_STAT_LINE_LABELS['OUTS'] = 'IP'
 
 # Records section stat order (Kyle round 7): mirror the natural box-score order
 # rather than alphabetical. Hits, 2B, 3B, HR, XBH, then TB, then the rest.
@@ -304,6 +309,76 @@ _NAVY = {'red': 0.12, 'green': 0.20, 'blue': 0.30}
 _WHITE = {'red': 1, 'green': 1, 'blue': 1}
 _PALE_BLUE = {'red': 0.95, 'green': 0.97, 'blue': 0.99}
 _GOLD = {'red': 1.0, 'green': 0.95, 'blue': 0.75}
+# Season-finish scale: the Sheets-standard green -> yellow -> red preset
+# colors. Champions render as a trophy -- a TEXT cell the numeric gradient
+# skips -- so they carry the scale's best-finish green as a static fill.
+_FINISH_GREEN = {'red': 0.341, 'green': 0.733, 'blue': 0.541}   # #57BB8A
+_FINISH_YELLOW = {'red': 1.0, 'green': 0.839, 'blue': 0.4}      # #FFD666
+_FINISH_RED = {'red': 0.902, 'green': 0.486, 'blue': 0.451}     # #E67C73
+# The ESPN writer's gradient endpoints (softer than the finish trio) --
+# the slot grids and the affinity chart share them for one-tab coherence.
+_SCALE_RED = {'red': 0.96, 'green': 0.62, 'blue': 0.60}
+_SCALE_GREEN = {'red': 0.67, 'green': 0.86, 'blue': 0.64}
+# True-zero/null cells on the affinity chart (Kyle 2026-07-17 round 5).
+_LIGHT_GRAY = {'red': 0.937, 'green': 0.937, 'blue': 0.937}
+
+
+def _finish_gradient():
+    """TRUE auto-scale per YEAR column (Kyle 2026-07-17 round 2, replacing
+    the fixed 1/8.5/16 anchors): one rule per season, ranged over that
+    year's cells in BOTH matrices, so 2020's 12-team last place paints
+    full red -- they literally couldn't have done worse that year. Fresh
+    dicts per call (the gspread in-place-mutation lesson)."""
+    return {
+        'minpoint': {'type': 'MIN', 'color': _FINISH_GREEN},
+        'midpoint': {'type': 'PERCENTILE', 'value': '50',
+                     'color': _FINISH_YELLOW},
+        'maxpoint': {'type': 'MAX', 'color': _FINISH_RED},
+    }
+
+
+def _points_gradient():
+    """The ESPN writer's red -> white -> green scale (min / median / max),
+    per value column of the slot-points grids -- CBS mirrors ESPN's
+    Advanced Standings Table B exactly."""
+    return {
+        'minpoint': {'type': 'MIN', 'color': _SCALE_RED},
+        'midpoint': {'type': 'PERCENTILE', 'value': '50', 'color': _WHITE},
+        'maxpoint': {'type': 'MAX', 'color': _SCALE_GREEN},
+    }
+
+
+def _share_gradient():
+    """Affinity scale (Kyle 2026-07-17 rounds 4+5): red -> WHITE -> green,
+    one rule PER BLOCK so each matrix scales to its own spread. Blank
+    cells (true zero/null -- never rostered anyone from that club) can't
+    take a gradient; the builder lays a static light-gray base under the
+    blocks so they read as 'nothing here' rather than low-but-alive."""
+    return {
+        'minpoint': {'type': 'NUMBER', 'value': '0', 'color': _SCALE_RED},
+        'midpoint': {'type': 'PERCENTILE', 'value': '50', 'color': _WHITE},
+        'maxpoint': {'type': 'MAX', 'color': _SCALE_GREEN},
+    }
+
+
+def _points_gradient_low():
+    """Reversed points scale for fewer-is-better columns (the Lost side
+    of the acquisition blocks): green at the minimum, red at the max."""
+    return {
+        'minpoint': {'type': 'MIN', 'color': _SCALE_GREEN},
+        'midpoint': {'type': 'PERCENTILE', 'value': '50', 'color': _WHITE},
+        'maxpoint': {'type': 'MAX', 'color': _SCALE_RED},
+    }
+
+
+def _diverging_gradient():
+    """Zero-centered scale for the acquisition Net columns: the sign is
+    the story -- red below zero, white at exactly zero, green above."""
+    return {
+        'minpoint': {'type': 'MIN', 'color': _SCALE_RED},
+        'midpoint': {'type': 'NUMBER', 'value': '0', 'color': _WHITE},
+        'maxpoint': {'type': 'MAX', 'color': _SCALE_GREEN},
+    }
 # ESPN Records palette (Kyle 2026-07-13): powder-blue #f2f7fc section/scope
 # headers, and a light-orange recency wash for records held in the live season.
 _POWDER = {'red': 0.949, 'green': 0.969, 'blue': 0.988}   # #f2f7fc
@@ -392,14 +467,180 @@ def get_standings_arc(season_year):
 def get_historic_finishes():
     """25 years of season finishes from the parsed UI standings: one row
     per (season, franchise), champions flagged, with per-season names
-    (names drift; franchise_id is the spine)."""
+    (names drift; franchise_id is the spine). division_name rides along
+    so the builder can crown division champions (best league rank within
+    the division that season)."""
     return query_snowflake(
-        f"SELECT season_year, franchise_id, team_name, standings_rank,"
-        f"       is_champion, total_points, teams_in_season"
+        f"SELECT season_year, franchise_id, team_name, division_name,"
+        f"       standings_rank, is_champion, total_points, teams_in_season"
         f" FROM stg_cbs__ui_standings"
         f" WHERE {league_predicate()}"
         f" ORDER BY season_year, standings_rank"
     )
+
+
+def get_acquisition_channels(season_year):
+    """Season production by acquisition channel, both lenses -- the CBS
+    twin of ESPN's mart_team_acquisition_channels (MLB-17 shape), built
+    from the UI transaction log + the attribution fact. CBS channels:
+    OPENING (no logged acquisition -- the recovered season-start roster;
+    drafts were never logged, so draft/keeper collapse here), FA ADD,
+    and TRADE. A game credits the channel of the player's latest
+    acquisition by that franchise on/before the game. Lost = what
+    departed players produced AFTER leaving (drop vs trade split),
+    windowed to the player's next re-acquisition by the same franchise
+    so a drop/re-add/re-drop never double-counts: the active lens counts
+    other franchises' started points; the rostered lens adds unowned
+    (free-agent) production. Season-scoped like ESPN's."""
+    yr = int(season_year)
+    return query_snowflake(f"""
+        WITH attr AS (
+            SELECT cbs_player_id, stat_group, game_date, game_pk, game_index,
+                   franchise_id,
+                   COALESCE(active_weight, 0) AS w,
+                   COALESCE(calculated_fpts, 0) AS fpts
+            FROM fct_cbs_player_game_attribution
+            WHERE {league_predicate()} AND season_year = {yr}
+              AND franchise_id <> {_CBS_SENTINEL_FID}
+        ),
+        events AS (
+            -- The UI report logs trades ONE-SIDED (the receiver's
+            -- trade_in); the sender's departure is synthesized from the
+            -- counterparty -- without it every Trade-lost column reads 0
+            -- (Kyle caught this live, 2026-07-17 round 7).
+            SELECT franchise_id, player_cbs_id, effective_date, move_type,
+                   CASE WHEN move_type IN ('add', 'trade_in')
+                        THEN 1 ELSE 0 END AS is_acq
+            FROM stg_cbs__ui_transactions
+            WHERE {league_predicate()} AND season_year = {yr}
+              AND move_type IN ('add', 'trade_in', 'drop', 'trade_out')
+            UNION ALL
+            SELECT counterparty_franchise_id, player_cbs_id,
+                   effective_date, 'trade_out', 0
+            FROM stg_cbs__ui_transactions
+            WHERE {league_predicate()} AND season_year = {yr}
+              AND move_type = 'trade_in'
+              AND counterparty_franchise_id IS NOT NULL
+        ),
+        channeled AS (
+            SELECT a.franchise_id, a.w, a.fpts,
+                   COALESCE(e.move_type, 'opening') AS channel
+            FROM attr a
+            LEFT JOIN events e
+              ON e.player_cbs_id = a.cbs_player_id
+             AND e.franchise_id = a.franchise_id
+             AND e.is_acq = 1
+             AND e.effective_date <= a.game_date
+            QUALIFY ROW_NUMBER() OVER (
+                PARTITION BY a.cbs_player_id, a.stat_group, a.game_date,
+                             a.game_pk, a.game_index, a.franchise_id
+                ORDER BY e.effective_date DESC NULLS LAST) = 1
+        ),
+        acquired AS (
+            SELECT franchise_id,
+                   ROUND(SUM(CASE WHEN channel = 'opening' THEN fpts * w END), 1)   AS opening_active_pts,
+                   ROUND(SUM(CASE WHEN channel = 'add' THEN fpts * w END), 1)       AS fa_add_active_pts,
+                   ROUND(SUM(CASE WHEN channel = 'trade_in' THEN fpts * w END), 1)  AS trade_active_pts,
+                   ROUND(SUM(fpts * w), 1)                                          AS acquired_active_pts,
+                   ROUND(SUM(CASE WHEN channel = 'opening' THEN fpts END), 1)       AS opening_rostered_pts,
+                   ROUND(SUM(CASE WHEN channel = 'add' THEN fpts END), 1)           AS fa_add_rostered_pts,
+                   ROUND(SUM(CASE WHEN channel = 'trade_in' THEN fpts END), 1)      AS trade_rostered_pts,
+                   ROUND(SUM(fpts), 1)                                              AS acquired_rostered_pts
+            FROM channeled
+            GROUP BY franchise_id
+        ),
+        departures AS (
+            -- Each departure opens a Lost window that closes at the
+            -- player's next re-acquisition by the SAME franchise.
+            SELECT franchise_id, player_cbs_id, effective_date, move_type,
+                   COALESCE(MIN(CASE WHEN is_acq = 1 THEN effective_date END)
+                       OVER (PARTITION BY franchise_id, player_cbs_id
+                             ORDER BY effective_date, is_acq
+                             ROWS BETWEEN 1 FOLLOWING AND UNBOUNDED FOLLOWING),
+                       DATE '9999-12-31') AS window_end
+            FROM events
+        ),
+        dep_windows AS (
+            SELECT * FROM departures WHERE move_type IN ('drop', 'trade_out')
+        ),
+        lost_rostered_franchise AS (
+            SELECT d.franchise_id, d.move_type,
+                   SUM(a.fpts * a.w) AS lost_active,
+                   SUM(a.fpts) AS lost_rostered
+            FROM dep_windows d
+            JOIN attr a
+              ON a.cbs_player_id = d.player_cbs_id
+             AND a.franchise_id <> d.franchise_id
+             AND a.game_date > d.effective_date
+             AND a.game_date < d.window_end
+            GROUP BY d.franchise_id, d.move_type
+        ),
+        unowned AS (
+            -- Priced games with no attribution row = free-agent games.
+            SELECT g.cbs_player_id, g.game_date,
+                   SUM(g.calculated_fpts) AS fpts
+            FROM int_cbs__player_game_points g
+            LEFT JOIN fct_cbs_player_game_attribution a
+              ON a.league_key = g.league_key
+             AND a.cbs_player_id = g.cbs_player_id
+             AND a.stat_group = g.stat_group
+             AND a.game_date = g.game_date
+             AND a.game_pk = g.game_pk
+             AND a.game_index = g.game_index
+            WHERE {league_predicate('g')}
+              AND g.season_year = {yr}
+              AND a.cbs_player_id IS NULL
+            GROUP BY g.cbs_player_id, g.game_date
+        ),
+        lost_unowned AS (
+            SELECT d.franchise_id, d.move_type, SUM(u.fpts) AS lost_unowned
+            FROM dep_windows d
+            JOIN unowned u
+              ON u.cbs_player_id = d.player_cbs_id
+             AND u.game_date > d.effective_date
+             AND u.game_date < d.window_end
+            GROUP BY d.franchise_id, d.move_type
+        ),
+        lost AS (
+            SELECT COALESCE(f.franchise_id, u.franchise_id) AS franchise_id,
+                   COALESCE(f.move_type, u.move_type) AS move_type,
+                   COALESCE(f.lost_active, 0) AS lost_active,
+                   COALESCE(f.lost_rostered, 0)
+                       + COALESCE(u.lost_unowned, 0) AS lost_rostered
+            FROM lost_rostered_franchise f
+            FULL OUTER JOIN lost_unowned u
+              ON f.franchise_id = u.franchise_id
+             AND f.move_type = u.move_type
+        ),
+        lost_pivot AS (
+            SELECT franchise_id,
+                   ROUND(SUM(CASE WHEN move_type = 'drop' THEN lost_active END), 1)          AS dropped_active_pts,
+                   ROUND(SUM(CASE WHEN move_type = 'trade_out' THEN lost_active END), 1)     AS traded_away_active_pts,
+                   ROUND(SUM(lost_active), 1)                                                AS lost_active_pts,
+                   ROUND(SUM(CASE WHEN move_type = 'drop' THEN lost_rostered END), 1)        AS dropped_rostered_pts,
+                   ROUND(SUM(CASE WHEN move_type = 'trade_out' THEN lost_rostered END), 1)   AS traded_away_rostered_pts,
+                   ROUND(SUM(lost_rostered), 1)                                              AS lost_rostered_pts
+            FROM lost
+            GROUP BY franchise_id
+        )
+        SELECT a.franchise_id AS team_id,
+               COALESCE(a.opening_active_pts, 0)   AS opening_active_pts,
+               COALESCE(a.fa_add_active_pts, 0)    AS fa_add_active_pts,
+               COALESCE(a.trade_active_pts, 0)     AS trade_active_pts,
+               COALESCE(a.acquired_active_pts, 0)  AS acquired_active_pts,
+               COALESCE(l.dropped_active_pts, 0)   AS dropped_active_pts,
+               COALESCE(l.traded_away_active_pts, 0) AS traded_away_active_pts,
+               COALESCE(l.lost_active_pts, 0)      AS lost_active_pts,
+               COALESCE(a.opening_rostered_pts, 0)  AS opening_rostered_pts,
+               COALESCE(a.fa_add_rostered_pts, 0)   AS fa_add_rostered_pts,
+               COALESCE(a.trade_rostered_pts, 0)    AS trade_rostered_pts,
+               COALESCE(a.acquired_rostered_pts, 0) AS acquired_rostered_pts,
+               COALESCE(l.dropped_rostered_pts, 0)  AS dropped_rostered_pts,
+               COALESCE(l.traded_away_rostered_pts, 0) AS traded_away_rostered_pts,
+               COALESCE(l.lost_rostered_pts, 0)     AS lost_rostered_pts
+        FROM acquired a
+        LEFT JOIN lost_pivot l ON l.franchise_id = a.franchise_id
+    """)
 
 
 def get_active_franchises(roster_date):
@@ -428,6 +669,317 @@ def get_franchise_map():
                 'name': r['canonical_name'],
                 'abbrev': r['canonical_abbrev'],
             } for r in rows if str(r['franchise_id']) != str(_CBS_SENTINEL_FID)}
+
+
+def get_slot_points(season_year):
+    """Current-season points by DEPLOYED lineup slot, per franchise -- the
+    CBS twin of almanac_data.get_team_slot_points. Real slot deployments
+    exist only where lineups are captured live (2026 onward), which is
+    exactly the current-season window; the slot list is the league's own
+    active-roster shape, so reconstruction placeholders (ACT/RS/EST) and
+    any future bench vocabulary can never leak in as columns."""
+    slots = ", ".join(f"'{s}'" for s in CBS_SLOT_CAPS)
+    return query_snowflake(f"""
+        SELECT team_id, lineup_slot,
+               ROUND(SUM(total_stat_pts), 1) AS slot_pts
+        FROM fct_player_daily_performance
+        WHERE {league_predicate()} AND season_year = {int(season_year)}
+          AND game_date IS NOT NULL AND lineup_slot IN ({slots})
+        GROUP BY team_id, lineup_slot
+    """)
+
+
+def get_slot_points_alltime():
+    """Capture-era points by DEPLOYED slot, per (franchise, slot, season).
+    Real slots exist only where daily lineups are captured (2026 onward)
+    -- placeholder eras carry ACT/RS/EST and can't match -- so no season
+    filter is needed; the season stays in the grain so the builder can
+    derive the capture-era exposure window. Hitter slots + U only: the
+    era-complete P column comes from get_pitching_points_alltime (the
+    Records-page convention -- Kyle 2026-07-17 round 3)."""
+    slots = ", ".join(f"'{s}'" for s in CBS_SLOT_CAPS if s != 'P')
+    return query_snowflake(f"""
+        SELECT team_id, lineup_slot, season_year,
+               ROUND(SUM(total_stat_pts), 1) AS slot_pts
+        FROM fct_player_daily_performance
+        WHERE {league_predicate()} AND game_date IS NOT NULL
+          AND lineup_slot IN ({slots})
+        GROUP BY team_id, lineup_slot, season_year
+    """)
+
+
+def get_pitching_points_alltime():
+    """All-years ACTIVE-weighted pitching points per franchise -- the
+    all-time P column. Pitching production IS the P slot by construction
+    in every era (a started pitcher can only have occupied P), unlike
+    hitter slots which only exist where captured."""
+    return query_snowflake(f"""
+        SELECT team_id,
+               ROUND(SUM(total_pitching_stat_pts
+                         * COALESCE(active_weight, 0)), 1) AS p_pts
+        FROM fct_player_daily_performance
+        WHERE {league_predicate()} AND game_date IS NOT NULL
+        GROUP BY team_id
+    """)
+
+
+def get_detailed_stats_alltime():
+    """All-time ACTIVE-weighted totals of the marquee scored stats per
+    franchise -- the substrate for the all-time detailed standings (Kyle
+    2026-07-17 round 8: CBS's first detailed standings is all-time-only;
+    the current season reads fine on the CBS site). The builder divides
+    by standard-season equivalents to render paces."""
+    stat_cols = ([_REC_STAT_COL[s] for s in _HIT_ORDER]
+                 + [_REC_STAT_COL[s] for s in _PIT_ORDER])
+    col_select = ',\n               '.join(
+        f'ROUND(SUM({c} * COALESCE(active_weight, 0)), 1) AS {c}'
+        for c in stat_cols)
+    return query_snowflake(f"""
+        SELECT team_id,
+               {col_select},
+               ROUND(SUM(total_hitting_stat_pts
+                         * COALESCE(active_weight, 0)), 1) AS hit_pts,
+               ROUND(SUM(total_pitching_stat_pts
+                         * COALESCE(active_weight, 0)), 1) AS pit_pts,
+               ROUND(SUM(total_stat_pts
+                         * COALESCE(active_weight, 0)), 1) AS total_pts
+        FROM fct_player_daily_performance
+        WHERE {league_predicate()} AND game_date IS NOT NULL
+        GROUP BY team_id
+    """)
+
+
+def get_season_gameplay_days():
+    """League gameplay days per season (distinct attributed game dates)
+    -- the 'standard season' clock (Kyle 2026-07-17 round 3): N = the
+    median CLOSED season's days, and every season weighs days/N
+    season-equivalents. 2020 (~a third of a season) and the year in
+    flight count exactly what they played; an accidental short season
+    (late draft, a missed Japan opener) self-reports short instead of
+    diluting a per-season average."""
+    return query_snowflake(f"""
+        SELECT season_year, COUNT(DISTINCT game_date) AS days
+        FROM fct_cbs_player_game_attribution
+        WHERE {league_predicate()} AND franchise_id <> {_CBS_SENTINEL_FID}
+        GROUP BY season_year
+    """)
+
+
+def get_mlb_affinity(season_year):
+    """Active-lineup INVOLVEMENT with each MLB club per franchise -- the
+    affinity-chart substrate. Weighted by PA + BF (Kyle 2026-07-17 round
+    10: pure games-played underweights pitchers ~5:1): a hitting row
+    contributes plate appearances (AB+BB+HBP+SF), a pitching row batters
+    faced (outs+H+BB -- pitcher-HBP isn't priced at game grain, a
+    negligible undercount), each active-weighted (estimated-era rows
+    count by start share). The old per-game MAX(weight) dedup died with
+    the switch: a two-way or pitcher-batting game now legitimately ADDS
+    its PA and its BF. The MLB team-of-game lives only in the gamelog
+    layer, so this joins the attribution fact back to
+    int_cbs__player_game_points on the engine's own game key (mart
+    promotion is a candidate follow-up). Names label as the club's
+    latest-era name (Expos rows read Nationals; the id is the spine)."""
+    return query_snowflake(f"""
+        WITH involvement AS (
+            SELECT a.franchise_id AS team_id,
+                   g.team_id AS mlb_team_id,
+                   MAX(g.team_name) AS mlb_team_name,
+                   a.season_year,
+                   SUM((CASE WHEN g.stat_group = 'hitting'
+                             THEN COALESCE(g.ab, 0) + COALESCE(g.bb, 0)
+                                  + COALESCE(g.hbp, 0) + COALESCE(g.sf, 0)
+                             ELSE COALESCE(g.outs, 0) + COALESCE(g.ha, 0)
+                                  + COALESCE(g.bbi, 0) END)
+                       * COALESCE(a.active_weight, 0)) AS wt
+            FROM fct_cbs_player_game_attribution a
+            JOIN int_cbs__player_game_points g
+              ON  a.league_key = g.league_key
+              AND a.cbs_player_id = g.cbs_player_id
+              AND a.stat_group = g.stat_group
+              AND a.game_date = g.game_date
+              AND a.game_pk = g.game_pk
+              AND a.game_index = g.game_index
+            WHERE {league_predicate('a')}
+              AND a.franchise_id <> {_CBS_SENTINEL_FID}
+            GROUP BY a.franchise_id, g.team_id, a.season_year
+        )
+        , latest_names AS (
+            -- League-wide latest-era name per club: without this, a
+            -- franchise whose last Expos-era game was 2004 would label
+            -- the club differently than one that faced the Nationals.
+            SELECT mlb_team_id,
+                   MAX_BY(mlb_team_name, season_year) AS mlb_team_name
+            FROM involvement
+            GROUP BY mlb_team_id
+        )
+        SELECT i.team_id, i.mlb_team_id, n.mlb_team_name,
+               ROUND(SUM(CASE WHEN i.season_year = {int(season_year)}
+                              THEN i.wt ELSE 0 END), 1) AS season_wt,
+               ROUND(SUM(i.wt), 1) AS alltime_wt
+        FROM involvement i
+        JOIN latest_names n ON n.mlb_team_id = i.mlb_team_id
+        GROUP BY i.team_id, i.mlb_team_id, n.mlb_team_name
+    """)
+
+
+def get_acquisition_channels_alltime(last_closed_season):
+    """Historic (through the last CLOSED season) production by acquisition
+    channel, both lenses -- the walk-back-era half of the all-time
+    acquisition table (Kyle 2026-07-17 round 6). Where the season table
+    reads the raw transaction log, this reads int_cbs__roster_stints --
+    the engine already resolved the historic log's warts (void trades,
+    truncations, suffix splits), so channels come from each stint's
+    open_channel (lineup_opening / lineup_evidence collapse into
+    OPENING: recovered starts, no logged acquisition) and a game credits
+    the stint that holds its date. Lost stays SEASON-BOUNDED: a
+    drop/trade_out's window runs to the player's next stint with the
+    same franchise that season, else season end -- decades of a dropped
+    prospect's career never count. The builder sums these rows with the
+    current-season query's for the all-time blocks."""
+    yr = int(last_closed_season)
+    return query_snowflake(f"""
+        WITH attr AS (
+            SELECT cbs_player_id, stat_group, season_year, game_date,
+                   game_pk, game_index, franchise_id,
+                   COALESCE(active_weight, 0) AS w,
+                   COALESCE(calculated_fpts, 0) AS fpts
+            FROM fct_cbs_player_game_attribution
+            WHERE {league_predicate()} AND season_year <= {yr}
+              AND franchise_id <> {_CBS_SENTINEL_FID}
+        ),
+        stints AS (
+            SELECT franchise_id, resolved_cbs_player_id AS pid, season_year,
+                   stint_start,
+                   COALESCE(stint_end, DATE '9999-12-31') AS stint_end,
+                   CASE open_channel
+                        WHEN 'add' THEN 'add'
+                        WHEN 'trade_in' THEN 'trade_in'
+                        ELSE 'opening' END AS channel,
+                   close_type
+            FROM int_cbs__roster_stints
+            WHERE {league_predicate()} AND season_year <= {yr}
+        ),
+        channeled AS (
+            SELECT a.franchise_id, a.w, a.fpts,
+                   COALESCE(s.channel, 'opening') AS channel
+            FROM attr a
+            LEFT JOIN stints s
+              ON s.pid = a.cbs_player_id
+             AND s.franchise_id = a.franchise_id
+             AND s.season_year = a.season_year
+             AND a.game_date >= s.stint_start
+             AND a.game_date < s.stint_end
+            QUALIFY ROW_NUMBER() OVER (
+                PARTITION BY a.cbs_player_id, a.stat_group, a.season_year,
+                             a.game_date, a.game_pk, a.game_index,
+                             a.franchise_id
+                ORDER BY s.stint_start DESC NULLS LAST) = 1
+        ),
+        acquired AS (
+            SELECT franchise_id,
+                   ROUND(SUM(CASE WHEN channel = 'opening' THEN fpts * w END), 1)   AS opening_active_pts,
+                   ROUND(SUM(CASE WHEN channel = 'add' THEN fpts * w END), 1)       AS fa_add_active_pts,
+                   ROUND(SUM(CASE WHEN channel = 'trade_in' THEN fpts * w END), 1)  AS trade_active_pts,
+                   ROUND(SUM(fpts * w), 1)                                          AS acquired_active_pts,
+                   ROUND(SUM(CASE WHEN channel = 'opening' THEN fpts END), 1)       AS opening_rostered_pts,
+                   ROUND(SUM(CASE WHEN channel = 'add' THEN fpts END), 1)           AS fa_add_rostered_pts,
+                   ROUND(SUM(CASE WHEN channel = 'trade_in' THEN fpts END), 1)      AS trade_rostered_pts,
+                   ROUND(SUM(fpts), 1)                                              AS acquired_rostered_pts
+            FROM channeled
+            GROUP BY franchise_id
+        ),
+        dep_windows AS (
+            SELECT franchise_id, pid, season_year, close_type,
+                   stint_end AS dep_date,
+                   COALESCE(MIN(stint_start) OVER (
+                       PARTITION BY franchise_id, pid, season_year
+                       ORDER BY stint_start
+                       ROWS BETWEEN 1 FOLLOWING AND UNBOUNDED FOLLOWING),
+                       DATE_FROM_PARTS(season_year, 12, 31)) AS window_end
+            FROM stints
+        ),
+        departures AS (
+            SELECT * FROM dep_windows
+            WHERE close_type IN ('drop', 'trade_out')
+        ),
+        lost_franchise AS (
+            SELECT d.franchise_id, d.close_type,
+                   SUM(a.fpts * a.w) AS lost_active,
+                   SUM(a.fpts) AS lost_rostered
+            FROM departures d
+            JOIN attr a
+              ON a.cbs_player_id = d.pid
+             AND a.season_year = d.season_year
+             AND a.franchise_id <> d.franchise_id
+             AND a.game_date >= d.dep_date
+             AND a.game_date < d.window_end
+            GROUP BY d.franchise_id, d.close_type
+        ),
+        unowned AS (
+            SELECT g.cbs_player_id, g.season_year, g.game_date,
+                   SUM(g.calculated_fpts) AS fpts
+            FROM int_cbs__player_game_points g
+            LEFT JOIN fct_cbs_player_game_attribution a
+              ON a.league_key = g.league_key
+             AND a.cbs_player_id = g.cbs_player_id
+             AND a.stat_group = g.stat_group
+             AND a.game_date = g.game_date
+             AND a.game_pk = g.game_pk
+             AND a.game_index = g.game_index
+            WHERE {league_predicate('g')} AND g.season_year <= {yr}
+              AND a.cbs_player_id IS NULL
+            GROUP BY g.cbs_player_id, g.season_year, g.game_date
+        ),
+        lost_unowned AS (
+            SELECT d.franchise_id, d.close_type, SUM(u.fpts) AS lost_unowned
+            FROM departures d
+            JOIN unowned u
+              ON u.cbs_player_id = d.pid
+             AND u.season_year = d.season_year
+             AND u.game_date >= d.dep_date
+             AND u.game_date < d.window_end
+            GROUP BY d.franchise_id, d.close_type
+        ),
+        lost AS (
+            SELECT COALESCE(f.franchise_id, u.franchise_id) AS franchise_id,
+                   COALESCE(f.close_type, u.close_type) AS close_type,
+                   COALESCE(f.lost_active, 0) AS lost_active,
+                   COALESCE(f.lost_rostered, 0)
+                       + COALESCE(u.lost_unowned, 0) AS lost_rostered
+            FROM lost_franchise f
+            FULL OUTER JOIN lost_unowned u
+              ON f.franchise_id = u.franchise_id
+             AND f.close_type = u.close_type
+        ),
+        lost_pivot AS (
+            SELECT franchise_id,
+                   ROUND(SUM(CASE WHEN close_type = 'drop' THEN lost_active END), 1)          AS dropped_active_pts,
+                   ROUND(SUM(CASE WHEN close_type = 'trade_out' THEN lost_active END), 1)     AS traded_away_active_pts,
+                   ROUND(SUM(lost_active), 1)                                                 AS lost_active_pts,
+                   ROUND(SUM(CASE WHEN close_type = 'drop' THEN lost_rostered END), 1)        AS dropped_rostered_pts,
+                   ROUND(SUM(CASE WHEN close_type = 'trade_out' THEN lost_rostered END), 1)   AS traded_away_rostered_pts,
+                   ROUND(SUM(lost_rostered), 1)                                               AS lost_rostered_pts
+            FROM lost
+            GROUP BY franchise_id
+        )
+        SELECT a.franchise_id AS team_id,
+               COALESCE(a.opening_active_pts, 0)   AS opening_active_pts,
+               COALESCE(a.fa_add_active_pts, 0)    AS fa_add_active_pts,
+               COALESCE(a.trade_active_pts, 0)     AS trade_active_pts,
+               COALESCE(a.acquired_active_pts, 0)  AS acquired_active_pts,
+               COALESCE(l.dropped_active_pts, 0)   AS dropped_active_pts,
+               COALESCE(l.traded_away_active_pts, 0) AS traded_away_active_pts,
+               COALESCE(l.lost_active_pts, 0)      AS lost_active_pts,
+               COALESCE(a.opening_rostered_pts, 0)  AS opening_rostered_pts,
+               COALESCE(a.fa_add_rostered_pts, 0)   AS fa_add_rostered_pts,
+               COALESCE(a.trade_rostered_pts, 0)    AS trade_rostered_pts,
+               COALESCE(a.acquired_rostered_pts, 0) AS acquired_rostered_pts,
+               COALESCE(l.dropped_rostered_pts, 0)  AS dropped_rostered_pts,
+               COALESCE(l.traded_away_rostered_pts, 0) AS traded_away_rostered_pts,
+               COALESCE(l.lost_rostered_pts, 0)     AS lost_rostered_pts
+        FROM acquired a
+        LEFT JOIN lost_pivot l ON l.franchise_id = a.franchise_id
+    """)
 
 
 def get_season_records():
@@ -712,8 +1264,13 @@ def get_cbs_records_data():
     # A player's season/career stat-line detail (ESPN shows one on every
     # player record): the top marquee counting stats they posted, most first.
     def _player_line(statvals):
-        picks = [(_STAT_LINE_LABELS[s], statvals.get(s, 0.0))
-                 for s in _STAT_LINE_ORDER if statvals.get(s, 0.0) >= 1]
+        picks = []
+        for s in _STAT_LINE_ORDER:
+            v = statvals.get(s, 0.0)
+            if s == 'OUTS':
+                v = v / 3.0                     # display as innings pitched
+            if v >= 1:
+                picks.append((_STAT_LINE_LABELS[s], v))
         picks.sort(key=lambda t: -t[1])
         return ', '.join(f'{int(round(v))} {lbl}' for lbl, v in picks[:3])
 
@@ -2502,14 +3059,27 @@ def build_records_rows(context, catalog, data):
     return rows, formats
 
 
-def build_standings_rows(context, arc, finishes, active_franchises):
-    """Standings: the current season's period-by-period arc + every
-    season finish since the league began, champions marked."""
+def build_standings_rows(context, arc, finishes, active_franchises,
+                         slot_rows=None, alltime_slot_rows=None,
+                         alltime_pitching_rows=None, season_days=None,
+                         detailed_alltime_rows=None,
+                         acquisition_rows=None, alltime_acquisition_rows=None,
+                         affinity_rows=None):
+    """Advanced Standings: the rank-by-period arc with its toggleable
+    line chart, the points-by-slot grids (season totals by deployed slot
+    left; all-time PACES PER STANDARD SEASON right -- P era-complete,
+    hitter slots capture-era, the Records-page convention), the
+    acquisition-channel blocks (MLB-17's CBS twin), every season finish
+    since the league began (champions marked, Div/Avg columns, former
+    franchises folded into a hidden row group), and the MLB affinity
+    chart (share of games by MLB club, season left / all-time right) at
+    the bottom. The optional row sets render their sections only when
+    supplied, so layout-only callers skip the heavier queries."""
     season = context['season_year']
     period = context['latest_period']
 
     rows = [
-        ['Standings'],
+        ['Advanced Standings'],
         [f'{season} through period {period} · finishes back to '
          f'{context["first_season"]} from the league\'s own year-end '
          f'standings pages.'],
@@ -2527,44 +3097,138 @@ def build_standings_rows(context, arc, finishes, active_franchises):
                         'format': {'textFormat': {'bold': True, 'foregroundColor': _WHITE},
                                    'backgroundColor': _NAVY}})
 
-    def _header(cells):
+    def _header(cells, width='AA'):
         rows.append(cells)
-        formats.append({'range': f'A{len(rows)}:AA{len(rows)}',
+        formats.append({'range': f'A{len(rows)}:{width}{len(rows)}',
                         'format': {'textFormat': {'bold': True}}})
 
-    # ---- current standings
-    _section(f'{season} STANDINGS — PERIOD {period}')
+    def _note(text, width='AA'):
+        rows.append([text])
+        formats.append({'range': f'A{len(rows)}:{width}{len(rows)}',
+                        'format': {'textFormat': {'italic': True, 'fontSize': 9}}})
+
+    def _sub_labels(width_cols, left_label, right_start, right_label):
+        cells = [''] * width_cols
+        cells[1] = left_label
+        cells[right_start] = right_label
+        rows.append(cells)
+        formats.append({'range': f'A{len(rows)}:{_col(width_cols)}{len(rows)}',
+                        'format': {'textFormat': {'bold': True}}})
+
     latest = [r for r in arc if r['is_latest_period']]
-    _header(['Rank', 'Team', 'Points', 'Behind', 'Δ Rank', 'Period Pts'])
-    for row in latest:
-        rows.append([
-            int(row['standings_rank']), row['team_name'],
-            _pts(row['points']), _pts(row['points_behind_leader']),
-            _movement(row['rank_change']), _pts(row['period_points']),
-        ])
-    rows.append([])
 
-    # ---- the season arc: rank per period, one row per team
-    _section(f'{season} RANK BY PERIOD')
-    periods = sorted({int(r['period']) for r in arc})
-    _header(['Team'] + [f'P{p}' for p in periods])
-    rank_by = {}
-    for r in arc:
-        rank_by[(r['team_id'], int(r['period']))] = int(r['standings_rank'])
-    for row in sorted(latest, key=lambda r: r['standings_rank']):
-        rows.append([row['team_name']] +
-                    [rank_by.get((row['team_id'], p), '') for p in periods])
-    rows.append([])
-
-    # ---- historic finishes matrix
-    seasons = sorted({int(r['season_year']) for r in finishes})
     # Roll up by CANONICAL franchise (MLB-64): a club that left and returned
-    # under a new id (Foster's Folly 13 -> 30) is ONE row spanning both eras.
+    # under a new id (Foster's Folly 13 -> 30) is ONE row/column on every
+    # franchise-keyed surface below.
     fmap = get_franchise_map()
 
     def _canon(fid):
         return fmap.get(fid, {}).get('canonical_id', fid)
 
+    # Active canonical franchises in current-standings order -- the shared
+    # row/column order of the chart toggles, slot grids, acquisition
+    # blocks, and affinity chart.
+    ranked_canon, canon_label = [], {}
+    for row in latest:
+        cid = _canon(int(row['team_id']))
+        if cid not in canon_label:
+            ranked_canon.append(cid)
+            canon_label[cid] = row['team_name']
+    canon_abbrevs = [fmap.get(cid, {}).get('abbrev') or f'#{cid}'
+                     for cid in ranked_canon]
+    n_teams = len(ranked_canon)
+
+    # Closed seasons per canonical franchise (membership windows).
+    seasons_played = {}
+    for r in finishes:
+        seasons_played.setdefault(
+            _canon(int(r['franchise_id'])), set()).add(int(r['season_year']))
+
+    # The standard-season clock (Kyle 2026-07-17 round 3): N = the median
+    # CLOSED season's gameplay days; every season weighs days/N
+    # season-equivalents -- 2020 counts the third it played, the in-flight
+    # year counts its days so far, and an accidental short season (late
+    # draft) self-reports short. Shared by the slot grids and the
+    # all-time detailed standings.
+    days_by_season = {int(r['season_year']): int(r['days'])
+                      for r in season_days or ()}
+    closed_days = sorted(d for s, d in days_by_season.items()
+                         if s != int(season))
+    n_std = closed_days[len(closed_days) // 2] if closed_days else None
+
+    def _season_equivalents(season_set):
+        if not n_std or not season_set:
+            return None
+        return sum(days_by_season.get(s, 0) for s in season_set) / n_std
+
+    def _member_equivalents(cid):
+        return _season_equivalents(
+            set(seasons_played.get(cid, set())) | {int(season)})
+
+    # ---- the season arc: the chart IS the section (Kyle round 7 -- the
+    # rank matrix went away entirely; its data lives in the hidden helper).
+    _section(f'{season} RANK BY PERIOD')
+    periods = sorted({int(r['period']) for r in arc})
+    rank_by = {}
+    for r in arc:
+        rank_by[(r['team_id'], int(r['period']))] = int(r['standings_rank'])
+    latest_sorted = sorted(latest, key=lambda r: r['standings_rank'])
+
+    # Team toggles: abbrev labels over checkboxes + one ALL master.
+    # Native checkboxes can't rewrite each other (that needs Apps
+    # Script), so the default state is Kyle's round-7 scheme: individual
+    # boxes OFF, ALL on -- plotted = OR(ALL, own box). Uncheck ALL, then
+    # check the team(s) you want: a one-click path to a single line.
+    # Toggles are SHARED sheet state; a re-render resets the defaults.
+    rows.append(['Chart teams:', *canon_abbrevs, 'ALL'])
+    formats.append({'range': f'A{len(rows)}:{_col(2 + n_teams)}{len(rows)}',
+                    'format': {'textFormat': {'bold': True}}})
+    rows.append(['(check to plot)', *[False] * n_teams, True])
+    checkbox_row = len(rows)                # 1-based
+    formats.append({'checkboxes':
+                    f'B{checkbox_row}:{_col(2 + n_teams)}{checkbox_row}'})
+
+    # Chart area over a hidden, SELF-CONTAINED helper block (cols AK+):
+    # col AK = period, then one plot-formula column per team, then the
+    # raw ranks as plain values (same rows, further right) that the
+    # formulas read. flip = n+1 - rank puts 1st place at the TOP (the
+    # Sheets API cannot reverse a chart axis, so the y numbers are
+    # transformed and the axis is windowed).
+    helper_col0 = 36                        # 0-based col AK, past the grid
+    chart_first_row0 = len(rows)            # 0-based helper header row
+    n_chart_rows = max(18, 1 + len(periods))
+    flip = n_teams + 1
+    all_cell = f'${_col(2 + n_teams)}${checkbox_row}'
+    raw_col0 = helper_col0 + 1 + n_teams    # first raw-rank column, 0-based
+    helper = [[''] * helper_col0
+              + ['Period', *canon_abbrevs, *canon_abbrevs]]
+    for j, p in enumerate(periods):
+        cells = [''] * helper_col0 + [p]
+        helper_row = chart_first_row0 + 1 + j + 1   # 1-based sheet row
+        for t in range(n_teams):
+            own = f'{_col(2 + t)}${checkbox_row}'
+            raw_cell = f'{_col(raw_col0 + t + 1)}{helper_row}'
+            cells.append(f'=IF(AND(OR({all_cell},{own}),{raw_cell}<>""),'
+                         f'{flip}-{raw_cell},NA())')
+        for t, team in enumerate(latest_sorted):
+            cells.append(rank_by.get((team['team_id'], p), ''))
+        helper.append(cells)
+    rows.extend(helper)
+    rows.extend([[]] * (n_chart_rows - len(helper)))
+    formats.append({'hide_cols': (helper_col0, raw_col0 + n_teams)})
+    formats.append({'chart': {
+        'anchor': (chart_first_row0, 0),
+        'first_row': chart_first_row0,
+        'last_row': chart_first_row0 + 1 + len(periods),
+        'domain_col': helper_col0,
+        'series_cols': [helper_col0 + 1 + t for t in range(n_teams)],
+        'view_max': flip,
+        'title': f'{season} standings position by period (top = 1st)',
+    }})
+    rows.append([])
+
+    # ---- historic finishes matrix (under the chart -- Kyle round 7)
+    seasons = sorted({int(r['season_year']) for r in finishes})
     by_franchise = {}          # canonical_id -> {season: finish row}
     latest_name = {}           # canonical_id -> most-recent observed name
     _latest_year = {}
@@ -2580,59 +3244,488 @@ def build_standings_rows(context, arc, finishes, active_franchises):
     active_name = {_canon(int(r['team_id'])): r['team_name']
                    for r in active_franchises}
 
-    _section(f'SEASON FINISHES {seasons[0]}–{seasons[-1]} (① = champion; names '
-             f'as of today, franchises stitched across renames + re-ids)')
-    _header(['Franchise', 'Titles'] + [str(y) for y in seasons])
+    # Division champions: best league finish within the division that
+    # season (seasons without division data contribute none).
+    div_champs = {}                # (season, division) -> best finish row
+    for r in finishes:
+        dv = r.get('division_name')
+        if not dv:
+            continue
+        key = (int(r['season_year']), dv)
+        cur = div_champs.get(key)
+        if cur is None or int(r['standings_rank']) < int(cur['standings_rank']):
+            div_champs[key] = r
+    div_by_canon = {}
+    div_cells = set()              # (canonical_id, season): green border
+    for r in div_champs.values():
+        cid = _canon(int(r['franchise_id']))
+        div_by_canon[cid] = div_by_canon.get(cid, 0) + 1
+        div_cells.add((cid, int(r['season_year'])))
 
-    def _finish_cells(fid):
+    # The in-flight season rides as the LAST column: current rank, plain
+    # numbers (rank 1 stays '1', no trophy) -- and it counts toward
+    # nothing (Titles / Div / Avg are closed-seasons-only).
+    current_rank = {_canon(int(r['team_id'])): int(r['standings_rank'])
+                    for r in latest}
+
+    def _franchise_stats(fid):
+        entries = by_franchise.get(fid, {})
+        titles = sum(1 for e in entries.values() if e['is_champion'])
+        ranks = [int(e['standings_rank']) for e in entries.values()]
+        avg = round(sum(ranks) / len(ranks), 1) if ranks else None
+        return titles, div_by_canon.get(fid, 0), avg
+
+    def _finish_sort_key(fid):
+        titles, _div, avg = _franchise_stats(fid)
+        return (-titles, avg if avg is not None else 99.0,
+                latest_name.get(fid, ''))
+
+    year_labels = [str(y) for y in seasons] + [str(season)]
+    finish_header = ['Franchise', 'Titles', 'Div', 'Avg'] + year_labels
+    last_finish_col = _col(4 + len(year_labels))
+    _section(f'SEASON FINISHES {seasons[0]}–{season}', width=last_finish_col)
+    _note('🏆 = Season Champion. Bright Green Border = Division Champion. '
+          'Uses most current Team Names; franchises stitched across '
+          'renames + re-ids.', width=last_finish_col)
+    # The trophy glyph stays upright inside the italic note (Kyle round
+    # 12); the emoji is 2 UTF-16 units, so italics resume at index 2.
+    formats.append({'range': 'A' + str(len(rows)), 'runs': [
+        {'startIndex': 0, 'format': {'italic': False}},
+        {'startIndex': 2, 'format': {'italic': True}},
+    ]})
+    _header(finish_header, width=last_finish_col)
+
+    def _matrix_section_formats(header_row, n_rows, hide=False):
+        """Finish-matrix dressing for one section: center everything right
+        of the Franchise column (header included) and give Avg its one
+        decimal. hide=True (the former-franchise section) additionally
+        folds the header + data rows into a hidden row group -- the navy
+        section band stays visible as the cue that there's something to
+        expand. The rank gradient is emitted per-YEAR after both sections
+        exist (each year's rule spans both matrices)."""
+        first, last = header_row + 1, header_row + n_rows
+        formats.append({'range': f'B{header_row}:{last_finish_col}{last}',
+                        'format': {'horizontalAlignment': 'CENTER'}})
+        formats.append({'range': f'D{first}:D{last}',
+                        'format': {'numberFormat':
+                                   {'type': 'NUMBER', 'pattern': '0.0'}}})
+        if hide:
+            formats.append({'hide_rows': (header_row - 1, last)})
+
+    def _div_border():
+        # Fresh dicts per cell (the gspread mutation lesson). #00ff00 is
+        # bright enough to read against the green-shaded cells (Kyle).
+        side = {'style': 'SOLID_MEDIUM',
+                'color': {'red': 0.0, 'green': 1.0, 'blue': 0.0}}
+        return {'top': dict(side), 'bottom': dict(side),
+                'left': dict(side), 'right': dict(side)}
+
+    def _append_finish_row(fid, name):
+        titles, div_titles, avg = _franchise_stats(fid)
         cells = []
-        titles = 0
         for y in seasons:
             entry = by_franchise.get(fid, {}).get(y)
             if entry is None:
                 cells.append('')
-                continue
-            rank = int(entry['standings_rank'])
-            if entry['is_champion']:
-                titles += 1
-                cells.append('①')
+            elif entry['is_champion']:
+                cells.append('🏆')
             else:
-                cells.append(rank)
-        return titles, cells
+                cells.append(int(entry['standings_rank']))
+        rows.append([name, titles or '', div_titles or '',
+                     avg if avg is not None else '']
+                    + cells + [current_rank.get(fid, '')])
+        r_num = len(rows)
+        for k, y in enumerate(seasons):
+            if (fid, y) in div_cells:
+                cell = f'{_col(5 + k)}{r_num}'
+                formats.append({'range': f'{cell}:{cell}',
+                                'format': {'borders': _div_border()}})
 
     matrix_start = len(rows)
-    for fid in active_ids:
-        titles, cells = _finish_cells(fid)
-        rows.append([active_name.get(fid, latest_name.get(fid, f'#{fid}')),
-                     titles or ''] + cells)
+    active_header_row = len(rows)   # 1-based row number of the header row
+    for fid in sorted(active_ids, key=_finish_sort_key):
+        _append_finish_row(
+            fid, active_name.get(fid, latest_name.get(fid, f'#{fid}')))
+    _matrix_section_formats(active_header_row, len(active_ids))
     defunct = sorted(
         (fid for fid in by_franchise if fid not in set(active_ids)),
-        key=lambda fid: -max(by_franchise[fid]),
+        key=_finish_sort_key,
     )
+    former_span = None
     if defunct:
         rows.append([])
-        _section('FORMER FRANCHISES')
-        _header(['Franchise', 'Titles'] + [str(y) for y in seasons])
+        _section('FORMER FRANCHISES (hidden by default -- expand the row '
+                 'group)', width=last_finish_col)
+        _header(finish_header, width=last_finish_col)
+        former_header_row = len(rows)
         for fid in defunct:
-            titles, cells = _finish_cells(fid)
-            rows.append([latest_name.get(fid, f'#{fid}'), titles or ''] + cells)
+            _append_finish_row(fid, latest_name.get(fid, f'#{fid}'))
+        _matrix_section_formats(former_header_row, len(defunct), hide=True)
+        former_span = (former_header_row + 1, former_header_row + len(defunct))
 
-    # champion highlight: gold background on ① cells
+    # Rank gradient, ONE RULE PER YEAR COLUMN spanning both matrices (the
+    # in-flight column included): MIN/median/MAX auto-scale within the
+    # year's own field, so a short-field season (2020 ran 12) still
+    # paints its last place full red.
+    active_span = (active_header_row + 1, active_header_row + len(active_ids))
+    for k in range(len(year_labels)):
+        c = _col(5 + k)
+        year_ranges = [f'{c}{active_span[0]}:{c}{active_span[1]}']
+        if former_span:
+            year_ranges.append(f'{c}{former_span[0]}:{c}{former_span[1]}')
+        formats.append({'ranges': year_ranges, 'gradient': _finish_gradient()})
+
+    # champion highlight: the finish scale's best-finish green on 🏆 cells
+    # (the numeric gradient skips text cells, so they need the static fill)
     for i, row in enumerate(rows[matrix_start:], start=matrix_start):
         for j, cell in enumerate(row):
-            if cell == '①':
+            if cell == '🏆':
                 col = gspread.utils.rowcol_to_a1(i + 1, j + 1)
                 formats.append({'range': f'{col}:{col}',
-                                'format': {'backgroundColor': _GOLD,
+                                'format': {'backgroundColor': _FINISH_GREEN,
                                            'textFormat': {'bold': True}}})
+    _note('Div counts division titles (best league finish within the '
+          'division that season); Avg is the mean finish across CLOSED '
+          'seasons -- the in-flight column shows current rank and counts '
+          'toward nothing. 2002 ran 15 teams and 2020 ran 12.',
+          width=last_finish_col)
     rows.append([])
-    rows.append(['Season finishes come from the league\'s year-end standings '
-                 'pages; 2002 ran 15 teams and 2020 ran 12. Franchises are '
-                 'stitched across renames and id changes (a club that left and '
-                 'returned under a new id is one row), shown under their latest '
-                 'name.'])
-    formats.append({'range': f'A{len(rows)}:AA{len(rows)}',
-                    'format': {'textFormat': {'italic': True, 'fontSize': 9}}})
+
+    # ---- points by lineup slot (season totals left, all-time paces right)
+    if slot_rows or alltime_slot_rows or alltime_pitching_rows:
+        season_slots = list(CBS_SLOT_CAPS)
+        n_l = len(season_slots)
+        grid_width = 2 + 2 * n_l            # Team + left + buffer + right
+        grid_last_col = _col(grid_width)
+
+        slot_by, capture_by, p_by = {}, {}, {}
+        capture_seasons = set()
+        for r in slot_rows or ():
+            key = (_canon(int(r['team_id'])), r['lineup_slot'])
+            slot_by[key] = slot_by.get(key, 0.0) + float(r['slot_pts'] or 0)
+        for r in alltime_slot_rows or ():
+            key = (_canon(int(r['team_id'])), r['lineup_slot'])
+            capture_by[key] = (capture_by.get(key, 0.0)
+                               + float(r['slot_pts'] or 0))
+            capture_seasons.add(int(r['season_year']))
+        for r in alltime_pitching_rows or ():
+            cid = _canon(int(r['team_id']))
+            p_by[cid] = p_by.get(cid, 0.0) + float(r['p_pts'] or 0)
+
+        capture_eq = _season_equivalents(capture_seasons)
+
+        _section('POINTS BY LINEUP SLOT', width=grid_last_col)
+        _note('All-time cells are paces per standard season '
+              f'(= {n_std} gameplay days); short seasons (2020) and the '
+              'season in flight weigh exactly the days they played. The P '
+              'column spans all years -- started pitching is the P slot '
+              'in every era -- while hitter slots exist only where daily '
+              'lineups are captured (2001-25 logged "active", not the '
+              'slot), matching the Records page.', width=grid_last_col)
+        _sub_labels(grid_width,
+                    f'{season} to date -- totals by deployed slot',
+                    2 + n_l,
+                    'All-time -- pace per standard season')
+        _header(['Team', *season_slots, '', *season_slots],
+                width=grid_last_col)
+        grid_first = len(rows) + 1
+        for cid in ranked_canon:
+            member = set(seasons_played.get(cid, set())) | {int(season)}
+            member_eq = _season_equivalents(member)
+            left = [slot_by.get((cid, s), '') for s in season_slots]
+            right = []
+            for s in season_slots:
+                if s == 'P':
+                    pts, eq = p_by.get(cid), member_eq
+                else:
+                    pts, eq = capture_by.get((cid, s)), capture_eq
+                right.append(round(pts / eq, 1) if pts and eq else '')
+            rows.append([canon_label.get(cid, f'#{cid}'), *left, '', *right])
+        grid_last = len(rows)
+        for ci in [*range(1, 1 + n_l), *range(2 + n_l, grid_width)]:
+            col = _col(ci + 1)
+            formats.append({'range': f'{col}{grid_first}:{col}{grid_last}',
+                            'gradient': _points_gradient()})
+        # Whole-point display (Kyle 2026-07-17 round 5): the underlying
+        # values keep their precision for the gradients.
+        formats.append({'range': f'B{grid_first}:{grid_last_col}{grid_last}',
+                        'format': {'numberFormat':
+                                   {'type': 'NUMBER', 'pattern': '0'}}})
+        rows.append([])
+
+    # ---- all-time detailed standings (Kyle round 8: CBS's first
+    # per-stat standings table is all-time-only -- the current season
+    # reads fine on the CBS site; too wide for the L/R split, so it
+    # stands alone on the franchise spine, paced per standard season)
+    if detailed_alltime_rows and season_days:
+        det_by = {}
+        for r in detailed_alltime_rows:
+            cid = _canon(int(r['team_id']))
+            bucket = det_by.setdefault(cid, {})
+            for k, v in r.items():
+                if k != 'team_id':
+                    bucket[k] = bucket.get(k, 0.0) + float(v or 0)
+
+        hit_cols = [(s, _REC_STAT_COL[s]) for s in _HIT_ORDER]
+        pit_cols = [('IP' if s == 'OUTS' else s, _REC_STAT_COL[s])
+                    for s in _PIT_ORDER]
+        det_header = (['Franchise']
+                      + ['BB' if s == 'B_BB' else s for s, _ in hit_cols]
+                      + ['Hit Pts', '']
+                      + [s for s, _ in pit_cols] + ['Pit Pts', '', 'Total'])
+        det_width = len(det_header)
+        det_last_col = _col(det_width)
+        _section('ALL-TIME DETAILED STANDINGS', width=det_last_col)
+        _note('Active-lens production paced per standard season (the '
+              f'{n_std}-gameplay-day clock above); IP = innings pitched. '
+              'Ordered by total pace.', width=det_last_col)
+        _header(det_header, width=det_last_col)
+        det_first = len(rows) + 1
+
+        def _det_pace(cid, col, eq):
+            v = det_by.get(cid, {}).get(col, 0.0)
+            if col == 'outs':
+                v /= 3.0
+            return round(v / eq, 1) if eq else ''
+
+        ranked_by_pace = sorted(
+            ranked_canon,
+            key=lambda c: -(det_by.get(c, {}).get('total_pts', 0.0)
+                            / (_member_equivalents(c) or 1)))
+        for cid in ranked_by_pace:
+            eq = _member_equivalents(cid)
+            rows.append([
+                canon_label.get(cid, f'#{cid}'),
+                *[_det_pace(cid, col, eq) for _, col in hit_cols],
+                _det_pace(cid, 'hit_pts', eq), '',
+                *[_det_pace(cid, col, eq) for _, col in pit_cols],
+                _det_pace(cid, 'pit_pts', eq), '',
+                _det_pace(cid, 'total_pts', eq),
+            ])
+        det_last = len(rows)
+        value_cols = [i for i, label in enumerate(det_header)
+                      if i > 0 and label != '']
+        for ci in value_cols:
+            col = _col(ci + 1)
+            formats.append({'range': f'{col}{det_first}:{col}{det_last}',
+                            'gradient': _points_gradient()})
+        formats.append({'range': f'B{det_first}:{det_last_col}{det_last}',
+                        'format': {'numberFormat':
+                                   {'type': 'NUMBER', 'pattern': '0'}}})
+        rows.append([])
+
+    # ---- production by acquisition channel (the ESPN MLB-17 blocks'
+    # CBS twin: current season + the all-time mirror; Kyle rounds 5+6)
+    if acquisition_rows or alltime_acquisition_rows:
+        def _bucketize(rowset):
+            out = {}
+            for r in rowset or ():
+                cid = _canon(int(r['team_id']))
+                bucket = out.setdefault(cid, {})
+                for k, v in r.items():
+                    if k.endswith('_pts'):
+                        bucket[k] = bucket.get(k, 0.0) + float(v or 0)
+            return out
+
+        season_acq = _bucketize(acquisition_rows)
+        # All-time = the walk-back-era rows (through the last closed
+        # season, stint-channeled) + this season's log-channeled rows.
+        alltime_acq = _bucketize(alltime_acquisition_rows)
+        if alltime_acq:
+            for cid, bucket in season_acq.items():
+                target = alltime_acq.setdefault(cid, {})
+                for k, v in bucket.items():
+                    target[k] = target.get(k, 0.0) + v
+
+        half = ['Opening', 'Pickup', 'Trade', 'Total', '',
+                'Release', 'Trade', 'Total', '', 'FA', 'Trade']
+        n_half = len(half)                      # 11
+        acq_width = 2 + 2 * n_half              # Team + halves + buffer
+        acq_last_col = _col(acq_width)
+        _section('PRODUCTION BY ACQUISITION CHANNEL', width=acq_last_col)
+        _note("Points each franchise's roster produced, split by how each "
+              "player arrived (Opening = on the roster at first pitch -- "
+              "CBS never logged drafts, so draft and keeper both live "
+              "there), against what departed players went on to produce "
+              "after leaving. Lost is season-bounded everywhere: a "
+              "departure's window ends with that season (or the player's "
+              "return). Net FA = pickups acquired minus releases lost; "
+              "Net Trade = trades acquired minus trades lost.",
+              width=acq_last_col)
+
+        def _half_values(bucket, lens):
+            opening = bucket.get(f'opening_{lens}_pts', 0.0)
+            fa = bucket.get(f'fa_add_{lens}_pts', 0.0)
+            trade = bucket.get(f'trade_{lens}_pts', 0.0)
+            dropped = bucket.get(f'dropped_{lens}_pts', 0.0)
+            traded = bucket.get(f'traded_away_{lens}_pts', 0.0)
+            return [
+                round(opening, 1), round(fa, 1), round(trade, 1),
+                round(bucket.get(f'acquired_{lens}_pts', 0.0), 1), '',
+                round(dropped, 1), round(traded, 1),
+                round(bucket.get(f'lost_{lens}_pts', 0.0), 1), '',
+                round(fa - dropped, 1), round(trade - traded, 1),
+            ]
+
+        def _emit_lens_table(lens, label):
+            # Kyle's round-7 shape: ONE table per lens, season half left /
+            # all-time half right on the ACTIVE-franchise spine (formers
+            # filtered by construction), group bands over each half.
+            rows.append([label])
+            formats.append({'range': f'A{len(rows)}:{acq_last_col}{len(rows)}',
+                            'format': {'textFormat': {'bold': True}}})
+            _sub_labels(acq_width, f'{season} to date', 2 + n_half,
+                        f'All-Time ({context["first_season"]}-{season})')
+            bands = [''] * acq_width
+            for base in (1, 2 + n_half):
+                bands[base] = 'Points Acquired Via'
+                bands[base + 5] = 'Points Lost Via'
+                bands[base + 9] = 'Net Points via'
+            rows.append(bands)
+            band_row = len(rows)
+            formats.append({'range': f'A{band_row}:{acq_last_col}{band_row}',
+                            'format': {'textFormat': {'bold': True},
+                                       'horizontalAlignment': 'CENTER'}})
+            for base in (1, 2 + n_half):
+                for start, end in ((base, base + 3), (base + 5, base + 7),
+                                   (base + 9, base + 10)):
+                    formats.append({'range': f'{_col(start + 1)}{band_row}:'
+                                             f'{_col(end + 1)}{band_row}',
+                                    'merge': True})
+            _header(['Team', *half, '', *half], width=acq_last_col)
+            first = len(rows) + 1
+            ranked = sorted(
+                ranked_canon,
+                key=lambda c: (-season_acq.get(c, {}).get(
+                    f'acquired_{lens}_pts', 0.0), canon_label.get(c, '')))
+            for cid in ranked:
+                rows.append([
+                    canon_label.get(cid, f'#{cid}'),
+                    *_half_values(season_acq.get(cid, {}), lens), '',
+                    *(_half_values(alltime_acq.get(cid, {}), lens)
+                      if alltime_acq else [''] * n_half),
+                ])
+            last = len(rows)
+            grads = ((0, _points_gradient), (1, _points_gradient),
+                     (2, _points_gradient), (3, _points_gradient),
+                     (5, _points_gradient_low), (6, _points_gradient_low),
+                     (7, _points_gradient_low),
+                     (9, _diverging_gradient), (10, _diverging_gradient))
+            bases = (1, 2 + n_half) if alltime_acq else (1,)
+            for base in bases:
+                for off, grad in grads:
+                    col = _col(base + off + 1)
+                    formats.append({'range': f'{col}{first}:{col}{last}',
+                                    'gradient': grad()})
+            formats.append({'range': f'B{first}:{acq_last_col}{last}',
+                            'format': {'numberFormat':
+                                       {'type': 'NUMBER', 'pattern': '0'}}})
+            rows.append([])
+
+        _emit_lens_table(
+            'active',
+            'Active Lens - started points only '
+            '(Lost = production started by other franchises)')
+        _emit_lens_table(
+            'rostered',
+            'Rostered Lens - all points incl. reserves '
+            '(Lost = other franchises AND unowned)')
+
+    # ---- MLB affinity (season left, all-time right; shared MLB spine)
+    if affinity_rows:
+        names, season_g, alltime_g = {}, {}, {}
+        for r in affinity_rows:
+            cid = _canon(int(r['team_id']))
+            mid = int(r['mlb_team_id'])
+            names[mid] = r['mlb_team_name']
+            key = (cid, mid)
+            season_g[key] = season_g.get(key, 0.0) + float(r['season_wt'] or 0)
+            alltime_g[key] = alltime_g.get(key, 0.0) + float(r['alltime_wt'] or 0)
+        mlb_ids = sorted(names, key=lambda m: names[m])
+        season_tot = {cid: sum(season_g.get((cid, m), 0.0) for m in mlb_ids)
+                      for cid in ranked_canon}
+        alltime_tot = {cid: sum(alltime_g.get((cid, m), 0.0) for m in mlb_ids)
+                       for cid in ranked_canon}
+        abbrevs = [fmap.get(cid, {}).get('abbrev') or f'#{cid}'
+                   for cid in ranked_canon]
+        n_t = len(ranked_canon)
+        aff_width = 2 + 2 * n_t
+        aff_last_col = _col(aff_width)
+
+        def _share(games, total):
+            # Fractions, not x100 -- the blocks carry a PERCENT number
+            # format so the sheet displays 0.123 as 12.3%.
+            return round(games / total, 3) if games and total else ''
+
+        rows.append([])
+        _section('MLB Affinity Chart', width=aff_last_col)
+        _note("Share of each franchise's active-lineup involvement -- "
+              "defined as plate appearances + batters faced -- with each "
+              "MLB club (pure GP would underweight pitchers). 2004-2020 "
+              "is estimated by start share; other years reconstruct from "
+              "the league's own lineup logs (2026 captured live). Bold "
+              "indicates highest value for given MLB team.",
+              width=aff_last_col)
+        _sub_labels(aff_width, f'{season} to date', 2 + n_t, 'All-time')
+        _header(['MLB Team', *abbrevs, '', *abbrevs], width=aff_last_col)
+        aff_first = len(rows) + 1
+
+        def _bold_row_max(row_number, values, first_col_1b):
+            # The club's biggest devotee per block, bolded (ties all bold).
+            numeric = [v for v in values if isinstance(v, (int, float))]
+            if not numeric:
+                return
+            peak = max(numeric)
+            for k, v in enumerate(values):
+                if isinstance(v, (int, float)) and v == peak:
+                    cell = f'{_col(first_col_1b + k)}{row_number}'
+                    formats.append({'range': f'{cell}:{cell}',
+                                    'format': {'textFormat': {'bold': True}}})
+
+        for mid in mlb_ids:
+            left = [_share(season_g.get((cid, mid)), season_tot.get(cid))
+                    for cid in ranked_canon]
+            right = [_share(alltime_g.get((cid, mid)), alltime_tot.get(cid))
+                     for cid in ranked_canon]
+            rows.append([names[mid], *left, '', *right])
+            _bold_row_max(len(rows), left, 2)
+            _bold_row_max(len(rows), right, 3 + n_t)
+        aff_last = len(rows)
+        block_ranges = [
+            f'{_col(2)}{aff_first}:{_col(1 + n_t)}{aff_last}',
+            f'{_col(3 + n_t)}{aff_first}:{_col(aff_width)}{aff_last}',
+        ]
+        for rng in block_ranges:
+            # Light-gray base for true zero/null cells (the gradient only
+            # paints numeric cells over it), whole-percent display, and
+            # centered values (Kyle 2026-07-17 round 5).
+            formats.append({'range': rng, 'format': {
+                'backgroundColor': _LIGHT_GRAY,
+                'horizontalAlignment': 'CENTER',
+                'numberFormat': {'type': 'PERCENT', 'pattern': '0%'},
+            }})
+            # Per-block rule: each matrix scales to its own spread.
+            formats.append({'range': rng, 'gradient': _share_gradient()})
+
+    # Unified navy width (Kyle round 12): every section band runs as far
+    # as the widest one on the tab.
+    navy_specs = [s for s in formats
+                  if s.get('format', {}).get('backgroundColor') == _NAVY]
+    if navy_specs:
+        def _range_end_width(a1):
+            letters = ''.join(c for c in a1.split(':')[1] if c.isalpha())
+            n = 0
+            for ch in letters:
+                n = n * 26 + (ord(ch) - 64)
+            return n
+
+        band_col = _col(max(_range_end_width(s['range'])
+                            for s in navy_specs))
+        for s in navy_specs:
+            row_num = ''.join(c for c in s['range'].split(':')[0]
+                              if c.isdigit())
+            s['range'] = f'A{row_num}:{band_col}{row_num}'
+
     return rows, formats
 
 
@@ -2739,7 +3832,18 @@ def build_all_tabs(nav_targets=None):
     home = build_home_rows(context, nav_targets=nav_targets)
     records = build_records_rows(context, get_cbs_record_catalog(),
                                  get_cbs_records_data())
-    standings = build_standings_rows(context, arc, finishes, franchises)
+    standings = build_standings_rows(
+        context, arc, finishes, franchises,
+        slot_rows=get_slot_points(season),
+        alltime_slot_rows=get_slot_points_alltime(),
+        alltime_pitching_rows=get_pitching_points_alltime(),
+        season_days=get_season_gameplay_days(),
+        detailed_alltime_rows=get_detailed_stats_alltime(),
+        acquisition_rows=get_acquisition_channels(season),
+        alltime_acquisition_rows=get_acquisition_channels_alltime(
+            context['last_closed_season']),
+        affinity_rows=get_mlb_affinity(season),
+    )
 
     # Third element: the team-tab title set -- the writer bulk-writes those
     # tabs RAW (zero-padded rate strings survive) + reapplies '=' formulas,
@@ -2788,6 +3892,110 @@ def _sheets_call(label, fn):
             time.sleep(_QUOTA_WAIT_SECONDS)
 
 
+def _stale_style_state_requests(spreadsheet, worksheet, formats):
+    """Wipe requests for sheet state the full-format reset can't reach:
+    conditional-format rules, row groups, embedded charts, and data
+    validations all ACCUMULATE (or linger at stale addresses) across
+    reruns, so a tab that uses any of those spec kinds starts each render
+    by deleting whatever the last render left. The metadata read only
+    happens for tabs that carry those specs."""
+    dynamic_kinds = ('gradient', 'hide_rows', 'hide_cols', 'chart',
+                     'checkboxes')
+    if not any(any(k in s for k in dynamic_kinds) for s in formats or ()):
+        return []
+    meta = _sheets_call(
+        f'meta {worksheet.title}',
+        lambda: spreadsheet.fetch_sheet_metadata({
+            'fields': 'sheets(properties(sheetId),conditionalFormats,'
+                      'rowGroups,charts(chartId))',
+        }),
+    )
+    sheet = next(
+        (s for s in meta.get('sheets', [])
+         if s.get('properties', {}).get('sheetId') == worksheet.id),
+        {},
+    )
+    requests = [{'deleteConditionalFormatRule':
+                 {'sheetId': worksheet.id, 'index': 0}}
+                for _ in sheet.get('conditionalFormats', ())]
+    groups = sorted(sheet.get('rowGroups', ()),
+                    key=lambda g: -(g.get('depth') or 1))
+    for group in groups:
+        requests.append({'deleteDimensionGroup': {
+            'range': {**group.get('range', {}), 'sheetId': worksheet.id}}})
+    if groups:
+        # Deleting a group leaves its rows hidden; unhide everything so
+        # this render's own hide_rows specs are the only hidden state.
+        requests.append({'updateDimensionProperties': {
+            'range': {'sheetId': worksheet.id, 'dimension': 'ROWS'},
+            'properties': {'hiddenByUser': False},
+            'fields': 'hiddenByUser',
+        }})
+    for chart in sheet.get('charts', ()):
+        requests.append({'deleteEmbeddedObject':
+                         {'objectId': chart['chartId']}})
+    if any('hide_cols' in s for s in formats or ()):
+        requests.append({'updateDimensionProperties': {
+            'range': {'sheetId': worksheet.id, 'dimension': 'COLUMNS'},
+            'properties': {'hiddenByUser': False},
+            'fields': 'hiddenByUser',
+        }})
+    if any('checkboxes' in s for s in formats or ()):
+        # Clear ALL validations on the tab so a moved checkbox row never
+        # strands checkbox formatting at its old address.
+        requests.append({'setDataValidation': {
+            'range': {'sheetId': worksheet.id}, 'rule': None}})
+    return requests
+
+
+def _chart_request(sheet_gid, c):
+    """addChart request for a builder {'chart': ...} spec: a LINE chart
+    whose domain + series each read one helper column (headerCount 1
+    names the series from the helper's abbrev header). SHOW_ALL keeps the
+    HIDDEN helper columns feeding the chart; the left axis windows
+    0..view_max because the helper stores flipped ranks (top = 1st)."""
+    def _col_source(col):
+        return {'sourceRange': {'sources': [{
+            'sheetId': sheet_gid,
+            'startRowIndex': c['first_row'],
+            'endRowIndex': c['last_row'],
+            'startColumnIndex': col,
+            'endColumnIndex': col + 1,
+        }]}}
+
+    return {'addChart': {'chart': {
+        'spec': {
+            'title': c.get('title', ''),
+            'basicChart': {
+                'chartType': 'LINE',
+                'legendPosition': 'RIGHT_LEGEND',
+                'headerCount': 1,
+                'domains': [{'domain': _col_source(c['domain_col'])}],
+                'series': [{'series': _col_source(col),
+                            'targetAxis': 'LEFT_AXIS'}
+                           for col in c['series_cols']],
+                'axis': [
+                    {'position': 'BOTTOM_AXIS', 'title': 'Period'},
+                    {'position': 'LEFT_AXIS',
+                     'title': 'Position (top = 1st)',
+                     'viewWindowOptions': {
+                         'viewWindowMode': 'EXPLICIT',
+                         'viewWindowMin': 0,
+                         'viewWindowMax': c.get('view_max', 17)}},
+                ],
+            },
+            'hiddenDimensionStrategy': 'SHOW_ALL',
+        },
+        'position': {'overlayPosition': {
+            'anchorCell': {'sheetId': sheet_gid,
+                           'rowIndex': c['anchor'][0],
+                           'columnIndex': c['anchor'][1]},
+            'widthPixels': 940,
+            'heightPixels': 360,
+        }},
+    }}}
+
+
 def _write_tab(spreadsheet, title, rows, formats, value_input_option='RAW',
                reapply_formulas=False):
     width = max((len(r) for r in rows if r), default=8)
@@ -2826,11 +4034,12 @@ def _write_tab(spreadsheet, title, rows, formats, value_input_option='RAW',
         # literals (instead of the rendered short names) left them
         # comically wide (Kyle 2026-07-17).
         _reapply_formula_cells(worksheet, rows)
+    stale_state = _stale_style_state_requests(spreadsheet, worksheet, formats)
     _sheets_call(
         f'style {title}',
-        lambda ws=worksheet, t=title, f=formats:
+        lambda ws=worksheet, t=title, f=formats, pre=stale_state:
             spreadsheet.batch_update(
-                {'requests': _tab_style_requests(ws.id, t, f)}),
+                {'requests': pre + _tab_style_requests(ws.id, t, f)}),
     )
     print(f"[cbs-almanac] wrote tab: {title} ({len(rows)} rows)")
     return worksheet
@@ -2867,6 +4076,20 @@ def write_cbs_almanac(sheet_id):
     so the formulas parse). Idempotent: a rerun overwrites every tab."""
     client = _get_authorized_client()
     spreadsheet = _sheets_call('open', lambda: client.open_by_key(sheet_id))
+
+    # Tab-rename migration (2026-07-17): 'Standings' -> 'Advanced Standings'
+    # (ESPN parity). Rename a legacy worksheet in place -- keeping its gid --
+    # rather than stranding the old tab beside a freshly created one.
+    try:
+        legacy = spreadsheet.worksheet('Standings')
+    except gspread.WorksheetNotFound:
+        legacy = None
+    if legacy is not None:
+        try:
+            spreadsheet.worksheet(STANDINGS_TAB)
+        except gspread.WorksheetNotFound:
+            _sheets_call('rename legacy Standings tab',
+                         lambda: legacy.update_title(STANDINGS_TAB))
 
     tabs, link_map, team_titles = build_all_tabs()
     home = next(t for t in tabs if t[0] == HOME_TAB)
@@ -2964,7 +4187,10 @@ _RECORDS_WIDTHS = [(0, 1, 175), (1, 2, 150), (2, 3, 125),
                    (7, 8, 150), (8, 9, 125), (9, 10, 50), (10, 11, 400),
                    # Wasted HoS Hitters block L-O (Kyle 2026-07-15).
                    (11, 12, 150), (12, 13, 125), (13, 14, 50), (14, 15, 400)]
-_STANDINGS_WIDTHS = [(0, 1, 190), (1, 2, 60)]
+_STANDINGS_WIDTHS = [(0, 1, 190), (1, 2, 60),
+                     # Value columns (slot grids, finish years, affinity %)
+                     # sit narrow like ESPN's 40px stat columns.
+                     (2, 40, 44)]
 # Team-tab widths: VERBATIM from almanac_write._apply_team_tab_dimensions
 # (Kyle 2026-07-16: CBS team tabs identical to ESPN's) -- tiny Tm cols,
 # 50px stat columns (incl. the new Total/Active/Inactive trio), 80px
@@ -3003,6 +4229,57 @@ def _tab_style_requests(sheet_gid, title, formats):
     }]
     deferred_merges = []
     for spec in formats or ():
+        if 'checkboxes' in spec:
+            requests.append({'setDataValidation': {
+                'range': gspread.utils.a1_range_to_grid_range(
+                    spec['checkboxes'], sheet_id=sheet_gid),
+                'rule': {'condition': {'type': 'BOOLEAN'},
+                         'strict': True, 'showCustomUi': True},
+            }})
+            continue
+        if 'hide_cols' in spec:
+            start, end = spec['hide_cols']
+            requests.append({'updateDimensionProperties': {
+                'range': {'sheetId': sheet_gid, 'dimension': 'COLUMNS',
+                          'startIndex': start, 'endIndex': end},
+                'properties': {'hiddenByUser': True},
+                'fields': 'hiddenByUser',
+            }})
+            continue
+        if 'chart' in spec:
+            requests.append(_chart_request(sheet_gid, spec['chart']))
+            continue
+        if 'hide_rows' in spec:
+            # A hidden row GROUP (0-based half-open row range): the group's
+            # +/- expander in the margin is the discoverable affordance;
+            # hiding the rows is what renders it collapsed. Reruns don't
+            # stack -- _stale_style_state_requests unwinds prior groups.
+            start, end = spec['hide_rows']
+            dim_range = {'sheetId': sheet_gid, 'dimension': 'ROWS',
+                         'startIndex': start, 'endIndex': end}
+            requests.append({'addDimensionGroup': {'range': dim_range}})
+            requests.append({'updateDimensionProperties': {
+                'range': dim_range,
+                'properties': {'hiddenByUser': True},
+                'fields': 'hiddenByUser',
+            }})
+            continue
+        if 'gradient' in spec:
+            # Conditional-format color scale; 'ranges' (list) or 'range'
+            # (single A1) -- a multi-range rule scales MIN/PERCENTILE/MAX
+            # across the UNION (per-year finish rules span both matrices;
+            # the affinity rule spans both blocks). Numeric cells only --
+            # text (the 🏆 markers) and blanks stay unpainted, which is why
+            # champions and the affinity base carry static fills.
+            a1_ranges = spec.get('ranges') or [spec['range']]
+            requests.append({'addConditionalFormatRule': {
+                'rule': {'ranges': [
+                    gspread.utils.a1_range_to_grid_range(a, sheet_id=sheet_gid)
+                    for a in a1_ranges],
+                    'gradientRule': spec['gradient']},
+                'index': 0,
+            }})
+            continue
         grid_range = gspread.utils.a1_range_to_grid_range(
             spec['range'], sheet_id=sheet_gid)
         if spec.get('merge'):
@@ -3076,5 +4353,11 @@ def _tab_style_requests(sheet_gid, title, formats):
             'mergeCells': {'range': {'sheetId': sheet_gid, **rng},
                            'mergeType': 'MERGE_ALL'},
         } for rng in team_tab_merge_ranges(with_lineup_data=True))
+        requests.extend(deferred_merges)
+    elif deferred_merges:
+        # Non-team tabs with dynamic merges (the acquisition band rows on
+        # Advanced Standings): unmerge the sheet first -- re-merging an
+        # already-merged range errors on rerun.
+        requests.append({'unmergeCells': {'range': {'sheetId': sheet_gid}}})
         requests.extend(deferred_merges)
     return requests

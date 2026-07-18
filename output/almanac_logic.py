@@ -35,7 +35,11 @@ from almanac_data import (
     slot_label,
 )
 from almanac_render import (
+    ACQUISITION_BAND_ROW,
     ACQUISITION_HEADER,
+    ESPN_DIVIDER_COL0,
+    ESPN_PRO_TEAM_NAMES,
+    col_letter,
     ADVANCED_STANDINGS_TAB,
     HOME_ALLTIME_HEADER,
     HOME_DEVIATION_LABEL,
@@ -69,7 +73,7 @@ from almanac_render import (
     format_all_league_team_row,
     format_all_league_team_row_with_deviation,
     format_all_league_thin_row,
-    format_acquisition_row,
+    acquisition_half_values,
     format_draft_board_cell,
     format_draft_value_row,
     format_standings_row,
@@ -852,11 +856,21 @@ def build_draft_board_color_grid(board_rows):
 
 
 def build_advanced_standings_tab_rows(standings_rows, slot_rows, stat_specs,
-                                      season_year, acquisition_rows=None):
+                                      season_year, acquisition_rows=None,
+                                      slot_rows_alltime=None,
+                                      affinity_rows=None,
+                                      rank_arc_rows=None,
+                                      finishes_rows=None,
+                                      standings_rows_alltime=None,
+                                      acquisition_rows_alltime=None):
     """Build the Advanced Standings tab: the per-stat weekly-average
     standings (Table A) stacked over a team x active-lineup-slot points
-    grid (Table B), then two acquisition-channel blocks (Active and Rostered
-    lenses) when acquisition_rows is supplied (MLB-17).
+    grid (Table B), an all-time twin of Table B shown as per-matchup
+    averages (slot_rows_alltime), two acquisition-channel blocks (Active
+    and Rostered lenses) when acquisition_rows is supplied (MLB-17), and
+    the roster-affinity matrix -- share of active-lineup games by MLB
+    club, season left / all-time right on a shared club spine -- at the
+    bottom (affinity_rows; Kyle 2026-07-17).
 
     standings_rows come from almanac_data.get_team_standings (already
     ordered as a standings, with the per-week denominators on every row);
@@ -864,7 +878,7 @@ def build_advanced_standings_tab_rows(standings_rows, slot_rows, stat_specs,
     pre-ordered by the roster dim's sort_order); stat_specs from
     get_team_week_stat_specs -- the same scored-stat set and order the
     Matchup History tab uses. The write layer paints the column gradients --
-    this builder only lays out the cells. Both tables share the standings
+    this builder only lays out the cells. Every table shares the standings
     team order.
     """
     hitting_specs = _team_week_specs_for_category(stat_specs, 'hitting')
@@ -886,40 +900,238 @@ def build_advanced_standings_tab_rows(standings_rows, slot_rows, stat_specs,
          'Against are calculated points (Against = points conceded); W-L is '
          'the official ESPN record.'],
         [],
-        ['Standings (Weekly Averages)'],
-        standings_header(hitting_specs, pitching_specs),
     ]
+
+    # Rank-by-week chart (Kyle 2026-07-17, the CBS chart mirrored): team
+    # toggles (individuals OFF, one ALL master ON -- uncheck ALL, check a
+    # team, see one line) over a chart area whose HIDDEN helper block
+    # (cols AK+) is self-contained: Week, one plot-formula column per
+    # team, then the raw reconstructed ranks the formulas read. flip =
+    # n+1 - rank puts 1st at the TOP (the Sheets API cannot reverse a
+    # chart axis). The write layer detects this apparatus, arms the
+    # checkboxes, hides the helper, and adds the chart.
+    if rank_arc_rows:
+        periods = sorted({int(r['period']) for r in rank_arc_rows})
+        rank_of = {(r['team_id'], int(r['period'])): int(r['standings_rank'])
+                   for r in rank_arc_rows}
+        last_p = periods[-1]
+        chart_teams = [
+            (r['team_id'], r.get('team_abbrev') or '')
+            for r in sorted(
+                (x for x in rank_arc_rows if int(x['period']) == last_p),
+                key=lambda x: int(x['standings_rank']))
+        ]
+        n_teams = len(chart_teams)
+        flip = n_teams + 1
+        title_idx = len(rows)               # anchor for the side table
+        rows.append([f'{season_year} Rank by Week'])
+        rows.append(['Chart teams:',
+                     *(ab for _, ab in chart_teams), 'ALL'])
+        rows.append(['(check to plot)', *[False] * n_teams, True])
+        checkbox_row = len(rows)            # 1-based
+        # Past the WIDEST table on the tab -- Table A runs ~40 columns
+        # for this stat set, and the write layer HIDES the helper
+        # columns sheet-wide, so parking the helper inside Table A's
+        # width would hide its tail (the Defense/Total/Against
+        # truncation Kyle caught live, 2026-07-17).
+        helper_col0 = max(
+            45, len(standings_header(hitting_specs, pitching_specs)) + 5)
+        raw_col0 = helper_col0 + 1 + n_teams
+        chart_first_row0 = len(rows)        # 0-based helper header row
+        n_chart_rows = max(18, 1 + len(periods))
+        all_cell = f'${col_letter(2 + n_teams)}${checkbox_row}'
+        helper = [[''] * helper_col0
+                  + ['Week', *(ab for _, ab in chart_teams),
+                     *(ab for _, ab in chart_teams)]]
+        for j, p in enumerate(periods):
+            cells = [''] * helper_col0 + [p]
+            helper_row = chart_first_row0 + 1 + j + 1   # 1-based sheet row
+            for t in range(n_teams):
+                own = f'{col_letter(2 + t)}${checkbox_row}'
+                raw_cell = f'{col_letter(raw_col0 + t + 1)}{helper_row}'
+                cells.append(f'=IF(AND(OR({all_cell},{own}),'
+                             f'{raw_cell}<>""),{flip}-{raw_cell},NA())')
+            for tid, _ab in chart_teams:
+                cells.append(rank_of.get((tid, p), ''))
+            helper.append(cells)
+        rows.extend(helper)
+        rows.extend([[]] * (n_chart_rows - len(helper)))
+
+        # Season-finishes table BESIDE the chart (Kyle round 8: a league
+        # with a shallow history parks its finishes to the chart's right,
+        # col V+, on the chart-area rows). Owner names as the spine
+        # (spilling over the empty cells beside them), Titles / all-time
+        # W% / Avg, closed-season columns with 🏆 for the playoff
+        # champion, and the in-flight season's CURRENT reconstructed
+        # rank as the last column (plain number, counts toward nothing).
+        if finishes_rows:
+            f_col0 = 21                     # 0-based col V
+            closed = sorted({int(r['season_year']) for r in finishes_rows
+                             if int(r['season_year']) != int(season_year)})
+            fin_by_team = {}
+            for r in finishes_rows:
+                fin_by_team.setdefault(
+                    r['team_id'], {})[int(r['season_year'])] = r
+            current_rank_by_id = {tid: rank_of.get((tid, last_p))
+                                  for tid, _ in chart_teams}
+
+            def _team_finish_stats(tid):
+                entries = fin_by_team.get(tid, {})
+                titles = sum(1 for y, e in entries.items()
+                             if y in closed and e.get('is_champion'))
+                w = sum(int(e['wins']) for e in entries.values())
+                losses = sum(int(e['losses']) for e in entries.values())
+                t = sum(int(e['ties']) for e in entries.values())
+                games = w + losses + t
+                wpct = (w + 0.5 * t) / games if games else None
+                # Avg INCLUDES the in-flight season (Kyle round 13, 'I
+                # know it's wonky'); Titles stay closed-only.
+                ranks = [int(e['finish']) for e in entries.values()]
+                avg = round(sum(ranks) / len(ranks), 1) if ranks else None
+                return titles, wpct, avg
+
+            ordered = sorted(
+                standings_rows,
+                key=lambda t: (
+                    -_team_finish_stats(t['team_id'])[0],
+                    -(_team_finish_stats(t['team_id'])[1] or 0.0),
+                    t.get('owner_display') or ''))
+            # Kyle rounds 12-13: the side table starts under the frozen
+            # band -- explainer row 3, header row 4, teams from row 5.
+            # The navy 'SEASON FINISHES' band went with the move.
+            side = [
+                ['🏆 = Season Champion. W% = all-time regular-season win '
+                 'rate. Uses current owner names.'],
+                ['Team', '', '', '', 'Titles', 'W%', 'Avg',
+                 *[str(y) for y in closed], str(season_year)],
+            ]
+            for t in ordered:
+                tid = t['team_id']
+                titles, wpct, avg = _team_finish_stats(tid)
+                cells = [t.get('owner_display') or t.get('team_abbrev') or '',
+                         '', '', '',
+                         titles or '',
+                         round(wpct, 3) if wpct is not None else '',
+                         avg if avg is not None else '']
+                for y in closed:
+                    e = fin_by_team.get(tid, {}).get(y)
+                    if e is None:
+                        cells.append('')
+                    elif e.get('is_champion'):
+                        # Trophy AND finish (Kyle 2026-07-18): in an H2H
+                        # league the champion is the PLAYOFF winner, so
+                        # the regular-season finish is real information
+                        # -- McKendry won 2025 from 7th.
+                        cells.append(f'🏆 {int(e["finish"])}')
+                    else:
+                        cells.append(int(e['finish']))
+                cells.append(current_rank_by_id.get(tid) or '')
+                side.append(cells)
+            for k, cells in enumerate(side):
+                target = rows[2 + k]
+                need = f_col0 + len(cells)
+                if len(target) < need:
+                    target.extend([''] * (need - len(target)))
+                target[f_col0:f_col0 + len(cells)] = cells
+
+        rows.append([])
+
+    rows.append(['Detailed Standings (Weekly Averages)'])
+    rows.append(standings_header(hitting_specs, pitching_specs))
     for rank, team in enumerate(standings_rows, start=1):
         rows.append(
             format_standings_row(rank, team, hitting_specs, pitching_specs)
         )
 
-    # Slot columns in dim_roster_slot_counts.sort_order, carried on every
-    # slot row -- no hardcoded slot list.
-    slot_order = {}
-    for r in slot_rows:
-        if r.get('lineup_slot') is not None:
-            slot_order.setdefault(r['lineup_slot'], r.get('sort_order') or 999)
-    slot_cols = sorted(slot_order, key=lambda s: (slot_order[s], s))
+    # All-time Table A twin (Kyle round 8): every season summed, same
+    # spec-driven shape, per-standard-matchup averages over the summed
+    # denominators; stacked beneath (too wide for the L/R split).
+    if standings_rows_alltime:
+        rows.append([])
+        rows.append(['Detailed Standings (Weekly Averages, All-Time)'])
+        rows.append(standings_header(hitting_specs, pitching_specs))
+        for rank, team in enumerate(standings_rows_alltime, start=1):
+            rows.append(
+                format_standings_row(rank, team, hitting_specs,
+                                     pitching_specs)
+            )
 
-    by_team = defaultdict(dict)
-    for r in slot_rows:
-        by_team[r['team_id']][r['lineup_slot']] = r['slot_pts']
+    def _append_slot_grid(title, grid_rows):
+        # Slot columns in dim_roster_slot_counts.sort_order, carried on
+        # every slot row -- no hardcoded slot list. Indented one cell with
+        # Owner added so the grid's Team / Owner columns sit directly
+        # under Table A's (column symmetry between the blocks).
+        slot_order = {}
+        for r in grid_rows:
+            if r.get('lineup_slot') is not None:
+                slot_order.setdefault(r['lineup_slot'],
+                                      r.get('sort_order') or 999)
+        slot_cols = sorted(slot_order, key=lambda s: (slot_order[s], s))
 
-    rows.append([])
-    rows.append([])
-    rows.append(['Points by Lineup Slot (Season Totals)'])
-    # Indented one cell with Owner added so the grid's Team / Owner columns
-    # sit directly under Table A's (column symmetry between the blocks).
-    rows.append(['', 'Team', 'Owner', *slot_cols])
-    for team in standings_rows:
-        team_slots = by_team.get(team['team_id'], {})
-        rows.append([
-            '',
-            team.get('team_abbrev') or '',
-            team.get('owner_display') or '',
-            *[team_slots.get(slot, '') for slot in slot_cols],
-        ])
+        by_team = defaultdict(dict)
+        for r in grid_rows:
+            by_team[r['team_id']][r['lineup_slot']] = r['slot_pts']
+
+        rows.append([])
+        rows.append([title])
+        rows.append(['', 'Team', 'Owner', *slot_cols])
+        for team in standings_rows:
+            team_slots = by_team.get(team['team_id'], {})
+            rows.append([
+                '',
+                team.get('team_abbrev') or '',
+                team.get('owner_display') or '',
+                *[team_slots.get(slot, '') for slot in slot_cols],
+            ])
+
+    if slot_rows_alltime:
+        # Kyle rounds 8+12: one grid, BOTH halves as averages per matchup
+        # (directly comparable L vs R), shared team spine, and the left
+        # half padded so the divider sits at the almanac-wide U column.
+        slot_order = {}
+        for r in [*slot_rows_alltime, *slot_rows]:
+            if r.get('lineup_slot') is not None:
+                slot_order.setdefault(r['lineup_slot'],
+                                      r.get('sort_order') or 999)
+        slot_cols = sorted(slot_order, key=lambda s: (slot_order[s], s))
+        season_by = defaultdict(dict)
+        for r in slot_rows:
+            season_by[r['team_id']][r['lineup_slot']] = r['slot_pts']
+        alltime_by = defaultdict(dict)
+        for r in slot_rows_alltime:
+            alltime_by[r['team_id']][r['lineup_slot']] = r['slot_pts']
+        mp_by_team = {t['team_id']: float(t.get('matchup_periods_played') or 0)
+                      for t in standings_rows}
+        pad = [''] * max(0, ESPN_DIVIDER_COL0 + 1 - (3 + len(slot_cols)))
+
+        rows.append([])
+        rows.append(['Points by Lineup Slot'])
+        sub_labels = [''] * (ESPN_DIVIDER_COL0 + 1)
+        sub_labels[3] = f'{season_year} to date -- Averages per Matchup'
+        sub_labels.append('All-Time -- Averages per Matchup')
+        rows.append(sub_labels)
+        rows.append(['', 'Team', 'Owner', *slot_cols, *pad, *slot_cols])
+
+        def _per_matchup(value, matchups):
+            if value in ('', None) or not matchups:
+                return ''
+            return round(float(value) / matchups, 1)
+
+        for team in standings_rows:
+            season_slots = season_by.get(team['team_id'], {})
+            alltime_slots = alltime_by.get(team['team_id'], {})
+            mp = mp_by_team.get(team['team_id'], 0)
+            rows.append([
+                '',
+                team.get('team_abbrev') or '',
+                team.get('owner_display') or '',
+                *[_per_matchup(season_slots.get(slot, ''), mp)
+                  for slot in slot_cols],
+                *pad,
+                *[alltime_slots.get(slot, '') for slot in slot_cols],
+            ])
+    else:
+        _append_slot_grid('Points by Lineup Slot (Season Totals)', slot_rows)
 
     # Acquisition-channel blocks (MLB-17): production by how each player was
     # acquired, and the production forfeited when they left, under two lenses.
@@ -927,14 +1139,16 @@ def build_advanced_standings_tab_rows(standings_rows, slot_rows, stat_specs,
     # acquisition channel" deliverable), ties broken by abbrev for determinism.
     if acquisition_rows:
         rows.append([])
-        rows.append([])
         rows.append(['Production by Acquisition Channel'])
         rows.append([
             "Points each team's roster produced, split by how each player was "
-            "acquired (Acquired), against the points departed players went on "
-            "to produce elsewhere (Lost). FA Net = FA-add acquired minus "
-            "dropped lost; Trade Net = trade acquired minus traded-away lost."
+            "acquired, against the points departed players went on to produce "
+            "elsewhere. Net FA = pickups acquired minus releases lost; Net "
+            "Trade = trades acquired minus trades lost. The all-time half "
+            "spans the logged transaction era (2026-)."
         ])
+        alltime_acq_by = {r['team_id']: r
+                          for r in (acquisition_rows_alltime or ())}
         lens_blocks = (
             ('active',
              'Active Lens - started points only (Lost = production for other teams)'),
@@ -950,9 +1164,82 @@ def build_advanced_standings_tab_rows(standings_rows, slot_rows, stat_specs,
             )
             rows.append([])
             rows.append([label])
+            sub_labels = [''] * len(ACQUISITION_HEADER)
+            sub_labels[3] = f'{season_year} to date'
+            sub_labels[ESPN_DIVIDER_COL0 + 1] = 'All-Time (2026-)'
+            rows.append(sub_labels)
+            rows.append(list(ACQUISITION_BAND_ROW))
             rows.append(list(ACQUISITION_HEADER))
+            acq_pad = [''] * (ESPN_DIVIDER_COL0 + 1 - 15)
             for team in ranked:
-                rows.append(format_acquisition_row(team, lens))
+                alltime = alltime_acq_by.get(team['team_id'])
+                rows.append([
+                    '',
+                    team.get('team_abbrev') or '',
+                    team.get('owner_display') or '',
+                    *acquisition_half_values(team, lens),
+                    *acq_pad,
+                    *(acquisition_half_values(alltime, lens)
+                      if alltime else [''] * 12),
+                ])
+
+    # Roster affinity (Kyle 2026-07-17): share of each team's active-lineup
+    # games contributed by each MLB club -- season block left, all-time
+    # right, one shared club spine. Clubs come from the data (pro_team
+    # abbrevs); columns are the CURRENT standings teams, so a team that
+    # left the league keeps its history out of the column set without
+    # distorting anyone else's distribution (shares are per-column).
+    if affinity_rows:
+        team_ids = [t['team_id'] for t in standings_rows]
+        id_set = set(team_ids)
+        abbrevs = [t.get('team_abbrev') or '' for t in standings_rows]
+        season_g, alltime_g, clubs = {}, {}, set()
+        for r in affinity_rows:
+            if r['team_id'] not in id_set:
+                continue
+            club = r['pro_team']
+            clubs.add(club)
+            season_g[(r['team_id'], club)] = float(r.get('season_wt') or 0)
+            alltime_g[(r['team_id'], club)] = float(r.get('alltime_wt') or 0)
+        club_name = {c: ESPN_PRO_TEAM_NAMES.get(c, c) for c in clubs}
+        club_list = sorted(clubs, key=lambda c: club_name[c].lower())
+        season_tot = {tid: sum(season_g.get((tid, c), 0.0) for c in club_list)
+                      for tid in team_ids}
+        alltime_tot = {tid: sum(alltime_g.get((tid, c), 0.0) for c in club_list)
+                       for tid in team_ids}
+
+        def _share(games, total):
+            # Fractions, not x100 -- the write layer formats the blocks as
+            # PERCENT ('0.0%'), so 0.123 displays as 12.3%.
+            return round(games / total, 3) if games and total else ''
+
+        n_t = len(team_ids)
+        # Kyle round 12: the season half begins at column C and the right
+        # half starts past the almanac-wide U divider, so the affinity
+        # chart lines up with every other L/R table on the tab.
+        aff_pad = [''] * max(0, ESPN_DIVIDER_COL0 + 1 - (2 + n_t))
+        rows.append([])
+        rows.append(['Roster Affinity by MLB Team'])
+        rows.append([
+            "Share of each team's active-lineup involvement -- defined as "
+            "plate appearances + batters faced -- with each MLB club "
+            "(pure GP would underweight pitchers). Bold indicates highest "
+            "value for given MLB team."
+        ])
+        sub_labels = [''] * (ESPN_DIVIDER_COL0 + 1)
+        sub_labels[2] = f'{season_year} to date'
+        sub_labels.append('All-Time')
+        rows.append(sub_labels)
+        rows.append(['MLB Team', '', *abbrevs, *aff_pad, *abbrevs])
+        for club in club_list:
+            rows.append([
+                club_name[club], '',
+                *[_share(season_g.get((tid, club), 0.0), season_tot[tid])
+                  for tid in team_ids],
+                *aff_pad,
+                *[_share(alltime_g.get((tid, club), 0.0), alltime_tot[tid])
+                  for tid in team_ids],
+            ])
 
     return rows
 

@@ -883,6 +883,219 @@ def get_team_slot_points(season_year):
     """, (season_year,))
 
 
+def get_team_slot_points_alltime():
+    """All-time points at each ACTIVE lineup slot per team, as the
+    per-standard-matchup average: slot production summed across every
+    season over regular-season matchups played (mart_team_season_
+    standings' denominator, so partial seasons average honestly). Same
+    mart the season grid reads -- same scope rules (regular season only,
+    active slots only). 'All-time' means every season the warehouse
+    holds; slot vocabulary drift across seasons unions in the builder."""
+    return query_snowflake(f"""
+        WITH slots AS (
+            SELECT team_id, lineup_slot,
+                   SUM(slot_calculated_points) AS pts,
+                   MIN(sort_order) AS sort_order
+            FROM mart_team_slot_production
+            WHERE is_active_lineup_slot AND {league_predicate()}
+            GROUP BY team_id, lineup_slot
+        ), matchups AS (
+            SELECT team_id, SUM(matchup_periods_played) AS mp
+            FROM mart_team_season_standings
+            WHERE {league_predicate()}
+            GROUP BY team_id
+        )
+        SELECT s.team_id, s.lineup_slot,
+               ROUND(s.pts / NULLIF(m.mp, 0), 1) AS slot_pts,
+               s.sort_order
+        FROM slots s
+        JOIN matchups m ON m.team_id = s.team_id
+        ORDER BY s.sort_order, s.lineup_slot
+    """)
+
+
+def get_espn_season_finishes():
+    """One row per (season, team): the regular-season finish under the
+    almanac's standings ordering, W/L/T for the all-time W%% column, and
+    is_champion = the team won EVERY playoff week that season (the
+    consolation bracket always carries at least one loss; the current
+    season has no playoff rows yet, so it crowns nobody). Feeds the
+    finishes-beside-the-chart table (Kyle 2026-07-17 round 8)."""
+    return query_snowflake(f"""
+        WITH ranked AS (
+            SELECT season_year, team_id, team_abbrev, owner_display,
+                   wins, losses, ties,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY season_year
+                       ORDER BY wins DESC, ties DESC,
+                                calculated_points DESC, team_id) AS finish
+            FROM mart_team_season_standings
+            WHERE {league_predicate()}
+        ),
+        champs AS (
+            SELECT season_year, team_id
+            FROM fct_team_weekly_active_performance
+            WHERE {league_predicate()} AND is_playoff
+            GROUP BY season_year, team_id
+            HAVING SUM(CASE WHEN result = 'W' THEN 0 ELSE 1 END) = 0
+        )
+        SELECT r.season_year, r.team_id, r.team_abbrev, r.owner_display,
+               r.wins, r.losses, r.ties, r.finish,
+               (c.team_id IS NOT NULL) AS is_champion
+        FROM ranked r
+        LEFT JOIN champs c
+          ON c.season_year = r.season_year AND c.team_id = r.team_id
+        ORDER BY r.season_year, r.finish
+    """)
+
+
+def get_team_standings_alltime(stat_specs):
+    """All-time Table A: every season's regular-season rows summed per
+    team (same mart, same scope rules), shaped exactly like
+    get_team_standings so format_standings_row renders it unchanged --
+    the per-standard-matchup normalization divides by the SUMMED
+    scoring days. Ordered by all-time win rate, points as tiebreak."""
+    if not stat_specs:
+        raise RuntimeError("No scored standings stat specs found.")
+    stat_columns = [_fact_stat_column_name(spec['stat_name']) for spec in stat_specs]
+    for column in stat_columns:
+        if not re.match(r'^[a-z][a-z0-9_]*$', column):
+            raise ValueError(f"Unsafe stat column name: {column!r}")
+    stat_select = ',\n            '.join(
+        f'SUM({c}) AS {c}' for c in stat_columns)
+    return query_snowflake(f"""
+        SELECT
+            team_id,
+            MAX_BY(team_abbrev, season_year) AS team_abbrev,
+            MAX_BY(team_name, season_year) AS team_name,
+            MAX_BY(owner_display, season_year) AS owner_display,
+            SUM(wins) AS wins,
+            SUM(losses) AS losses,
+            SUM(ties) AS ties,
+            SUM(matchup_periods_played) AS matchup_periods_played,
+            SUM(scoring_days_played) AS scoring_days_played,
+            MAX(standard_matchup_days) AS standard_matchup_days,
+            SUM(calculated_hitting_pts) AS calculated_hitting_pts,
+            SUM(calculated_pitching_pts) AS calculated_pitching_pts,
+            SUM(calculated_points) AS calculated_points,
+            SUM(against_calculated_points) AS against_calculated_points,
+            {stat_select}
+        FROM mart_team_season_standings
+        WHERE {league_predicate()}
+        GROUP BY team_id
+        -- Aliases, not SUM(...): Snowflake resolves ORDER BY names to
+        -- the output aliases, and SUM(alias) would nest aggregates.
+        ORDER BY (wins + 0.5 * ties)
+                 / NULLIF(wins + losses + ties, 0) DESC,
+                 calculated_points DESC
+    """)
+
+
+def get_team_acquisition_channels_alltime():
+    """The acquisition mart summed across every season it holds, per
+    team -- the all-time half of the acquisition tables. ESPN's logged
+    transaction era starts 2026 (the 2025 topics log isn't cleanly
+    reachable -- MLB-16), so today this equals the season table and
+    deepens as seasons accrue."""
+    return query_snowflake(f"""
+        SELECT
+            team_id,
+            MAX_BY(team_abbrev, season_year) AS team_abbrev,
+            MAX_BY(owner_display, season_year) AS owner_display,
+            SUM(keeper_active_pts) AS keeper_active_pts,
+            SUM(draft_active_pts) AS draft_active_pts,
+            SUM(trade_active_pts) AS trade_active_pts,
+            SUM(fa_add_active_pts) AS fa_add_active_pts,
+            SUM(acquired_active_pts) AS acquired_active_pts,
+            SUM(dropped_active_pts) AS dropped_active_pts,
+            SUM(traded_away_active_pts) AS traded_away_active_pts,
+            SUM(lost_active_pts) AS lost_active_pts,
+            SUM(fa_delta_active_pts) AS fa_delta_active_pts,
+            SUM(trade_delta_active_pts) AS trade_delta_active_pts,
+            SUM(keeper_rostered_pts) AS keeper_rostered_pts,
+            SUM(draft_rostered_pts) AS draft_rostered_pts,
+            SUM(trade_rostered_pts) AS trade_rostered_pts,
+            SUM(fa_add_rostered_pts) AS fa_add_rostered_pts,
+            SUM(acquired_rostered_pts) AS acquired_rostered_pts,
+            SUM(dropped_rostered_pts) AS dropped_rostered_pts,
+            SUM(traded_away_rostered_pts) AS traded_away_rostered_pts,
+            SUM(lost_rostered_pts) AS lost_rostered_pts,
+            SUM(fa_delta_rostered_pts) AS fa_delta_rostered_pts,
+            SUM(trade_delta_rostered_pts) AS trade_delta_rostered_pts
+        FROM mart_team_acquisition_channels
+        WHERE {league_predicate()}
+        GROUP BY team_id
+    """)
+
+
+def get_team_rank_arc(season_year):
+    """Standings position after every regular-season matchup period,
+    reconstructed from the weekly results -- ESPN keeps no intra-season
+    standings snapshots, but every week's result is here, so the
+    standings after week N recompute exactly. Ranking is the almanac's
+    own standings ordering (wins, ties, cumulative calculated points as
+    the tiebreak, team_id as the deterministic last resort); mid-season
+    the OFFICIAL site tiebreakers could order a tied pair differently.
+    Feeds the rank-by-week chart (Kyle 2026-07-17)."""
+    return query_snowflake(f"""
+        WITH weekly AS (
+            SELECT team_id, team_abbrev, matchup_period,
+                   CASE result WHEN 'W' THEN 1 ELSE 0 END AS w,
+                   CASE result WHEN 'T' THEN 1 ELSE 0 END AS t,
+                   COALESCE(calculated_points, 0) AS pts
+            FROM fct_team_weekly_active_performance
+            WHERE {league_predicate()} AND season_year = %s
+              AND NOT is_playoff
+        ),
+        cume AS (
+            SELECT team_id, team_abbrev, matchup_period,
+                   SUM(w) OVER (PARTITION BY team_id
+                                ORDER BY matchup_period) AS cume_w,
+                   SUM(t) OVER (PARTITION BY team_id
+                                ORDER BY matchup_period) AS cume_t,
+                   SUM(pts) OVER (PARTITION BY team_id
+                                  ORDER BY matchup_period) AS cume_pts
+            FROM weekly
+        )
+        SELECT team_id, team_abbrev, matchup_period AS period,
+               ROW_NUMBER() OVER (
+                   PARTITION BY matchup_period
+                   ORDER BY cume_w DESC, cume_t DESC, cume_pts DESC,
+                            team_id) AS standings_rank
+        FROM cume
+        ORDER BY period, standings_rank
+    """, (season_year,))
+
+
+def get_team_affinity_weights(season_year):
+    """Active-lineup INVOLVEMENT per (team, MLB club) -- the affinity-
+    chart substrate, weighted by PA + BF (Kyle 2026-07-17 round 10:
+    pure games-played underweights pitchers ~5:1). PA = AB+BB+HBP+SF,
+    BF = outs+H+BB+HBP allowed, both straight off the daily fact.
+    ESPN's MLB-team signal is the per-scoring-period pro_team snapshot
+    (abbrev strings), day-accurate across trades. Bench/IL and
+    free-agent box rows stay out; playoff weeks count (affinity is a
+    roster-identity lens, not a standings metric)."""
+    involvement = ('(COALESCE(ab, 0) + COALESCE(b_bb, 0) + COALESCE(hbp, 0)'
+                   ' + COALESCE(sf, 0) + COALESCE(outs, 0)'
+                   ' + COALESCE(p_h, 0) + COALESCE(p_bb, 0)'
+                   ' + COALESCE(hbp_p, 0))')
+    return query_snowflake(f"""
+        SELECT team_id, pro_team,
+               ROUND(SUM(CASE WHEN season_year = %s
+                              THEN {involvement}
+                                   * COALESCE(active_weight, 0)
+                              ELSE 0 END), 1) AS season_wt,
+               ROUND(SUM({involvement}
+                         * COALESCE(active_weight, 0)), 1) AS alltime_wt
+        FROM fct_player_daily_performance
+        WHERE {league_predicate()}
+          AND lineup_slot NOT IN ('BE', 'IL', 'FA')
+          AND pro_team IS NOT NULL AND pro_team <> 'FA'
+        GROUP BY team_id, pro_team
+    """, (season_year,))
+
+
 def get_team_acquisition_channels(season_year):
     """Per-team production by acquisition channel and departure type, both
     lenses, from mart_team_acquisition_channels (MLB-17). One row per team;

@@ -99,6 +99,14 @@ def main():
         team_week_stat_specs,
         season_year,
         acquisition_rows=almanac_sheets.get_team_acquisition_channels(season_year),
+        slot_rows_alltime=almanac_sheets.get_team_slot_points_alltime(),
+        affinity_rows=almanac_sheets.get_team_affinity_weights(season_year),
+        rank_arc_rows=almanac_sheets.get_team_rank_arc(season_year),
+        finishes_rows=almanac_sheets.get_espn_season_finishes(),
+        standings_rows_alltime=almanac_sheets.get_team_standings_alltime(
+            team_week_stat_specs),
+        acquisition_rows_alltime=(
+            almanac_sheets.get_team_acquisition_channels_alltime()),
     )
     # Home is built last among the data tabs: its nav band (#23) lists the
     # team tabs + Draft Recap. Preview has no real gids, so nav_targets stays

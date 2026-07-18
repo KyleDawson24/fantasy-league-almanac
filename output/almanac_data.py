@@ -814,6 +814,30 @@ def get_draft_board(season_year):
     """, (season_year,))
 
 
+def get_draft_history_boards(before_season):
+    """Every completed season's draft picks for the all-time board -- one
+    row per historic pick (season_year < before_season), same
+    season-points lens as get_draft_board. No rank/value columns: the
+    all-time re-cut consumes points, slot position, and identity only.
+    Rows ordered (season_year, overall_pick).
+    """
+    return query_snowflake(f"""
+        SELECT
+            season_year,
+            overall_pick,
+            round_num,
+            round_pick,
+            keeper,
+            player_name,
+            official_player_name,
+            season_points
+        FROM mart_draft_board
+        WHERE season_year < %s
+          AND {league_predicate()}
+        ORDER BY season_year, overall_pick
+    """, (before_season,))
+
+
 def get_team_standings(season_year, stat_specs):
     """Season team standings from mart_team_season_standings -- one row per
     team (regular season only; the mart excludes playoff weeks).

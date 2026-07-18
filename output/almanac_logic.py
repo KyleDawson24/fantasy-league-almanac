@@ -74,6 +74,7 @@ from almanac_render import (
     format_all_league_team_row_with_deviation,
     format_all_league_thin_row,
     acquisition_half_values,
+    _bref_link,
     format_draft_board_cell,
     format_draft_value_row,
     format_standings_row,
@@ -703,14 +704,18 @@ def _merge_home_bands(left_rows, right_rows, left_width, right_width):
     return merged
 
 
-def build_draft_tab_rows(board_rows, season_year, league_id=None):
+def build_draft_tab_rows(board_rows, season_year, league_id=None,
+                         history_rows=None):
     """Build the Draft Recap tab: side-by-side Best Value / Biggest Bust
     leaderboards above a keeper-sorted round x team draft board with
-    per-row Min / Median / Max season points (draft tab).
+    per-row Min / Median / Max season points (draft tab), then -- when
+    history_rows carry completed-season picks -- the all-time board
+    re-cut to the current league shape.
 
     board_rows come from almanac_data.get_draft_board (one row per pick,
-    value_delta attached). league_id is unused (no boxscore links here);
-    accepted for signature symmetry with the other builders.
+    value_delta attached); history_rows from get_draft_history_boards.
+    league_id is unused (no boxscore links here); accepted for signature
+    symmetry with the other builders.
     """
     del league_id
     rows = [
@@ -739,7 +744,61 @@ def build_draft_tab_rows(board_rows, season_year, league_id=None):
     rows.append([])
     rows.append([f'Draft Board - {season_year}'])
     rows.extend(_draft_board_grid(board_rows))
+
+    if history_rows:
+        team_count = len({r.get('team_id') for r in board_rows
+                          if r.get('team_id') is not None}) or 1
+        seasons = sorted({r['season_year'] for r in history_rows})
+        rows.append([])
+        rows.append([])
+        rows.append([f'All-Time Draft Board - {team_count}-Team Shape'])
+        rows.append([f'Team-agnostic, re-cut to the current {team_count}-team '
+                     f'shape: all-time Round N = each covered draft\'s overall '
+                     f'picks {team_count}(N-1)+1..{team_count}N, whatever shape '
+                     f'that season really ran. Cell = the slot\'s average season '
+                     f'points; Med/Max summarize the round; Top Pick = the best '
+                     f'single pick ever made in it. '
+                     f'Coverage: {", ".join(str(y) for y in seasons)}; '
+                     f'{season_year} in progress, excluded.'])
+        rows.extend(_alltime_draft_grid(history_rows, team_count))
     return rows
+
+
+def _alltime_draft_grid(history_rows, team_count):
+    """The all-time board: header then one row per re-cut round -- Med /
+    Max / Top Pick ('Player -year', keeper-marked) and the slot cells
+    (average season points across covered drafts; blank where no covered
+    draft reached the slot). The re-cut is by CURRENT team count, so a
+    16-team-era pick #17 lands in today's round 2 (the 2025 board ran 16
+    teams; today's shape is what the slots mean)."""
+    slot_vals = defaultdict(list)
+    round_rows = defaultdict(list)
+    for r in history_rows:
+        overall = r.get('overall_pick')
+        if not overall or r.get('season_points') is None:
+            continue
+        rnd = (overall - 1) // team_count + 1
+        slot = (overall - 1) % team_count + 1
+        slot_vals[(rnd, slot)].append(float(r['season_points']))
+        round_rows[rnd].append(r)
+
+    grid = [['Rd', 'Med', 'Max', 'Top Pick',
+             *[str(s) for s in range(1, team_count + 1)]]]
+    for rnd in sorted(round_rows):
+        in_round = round_rows[rnd]
+        top = max(in_round, key=lambda r: float(r['season_points']))
+        marker = ' (K)' if top.get('keeper') else ''
+        label = f"{top.get('player_name') or ''}{marker} -{top['season_year']}"
+        pts = [float(r['season_points']) for r in in_round]
+        cells = []
+        for slot in range(1, team_count + 1):
+            vals = slot_vals.get((rnd, slot))
+            cells.append(_one_decimal(sum(vals) / len(vals)) if vals else '')
+        grid.append([rnd, _one_decimal(statistics.median(pts)),
+                     _one_decimal(max(pts)),
+                     _bref_link(top.get('official_player_name'), label),
+                     *cells])
+    return grid
 
 
 def _draft_sorted_columns(board_rows):

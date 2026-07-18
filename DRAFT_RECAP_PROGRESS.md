@@ -193,6 +193,44 @@ a "draft class" in all but sequence.)
 
 ---
 
+## Round 9 -- Kyle's morning direction (2026-07-18)
+
+Four asks, all landed:
+
+1. **CBS all-time band reworded to Kyle's text** (rows 53-54): the
+   asterisk "basically broken prior to 2025" caveat rides the band row;
+   the note tightens to his wording with Coverage kept dynamic.
+2. **2026 CBS board got the ESPN color grading**: the exact
+   red->white->green cell math imported from the ESPN writer
+   (`_draft_gradient_color`), painted via a new `cell_colors` writer
+   spec kind -- ONE updateCells request with a backgroundColor-only
+   field mask (the ESPN trick; text cells can't ride a numeric
+   gradient rule). Idempotent under the full-sheet format reset.
+3. **CBS formatting mirrored to ESPN's**: widths now A120 / B-C 70 /
+   D150 (Top Pick links) / board 95 (ESPN's `_apply_draft_tab_
+   dimensions` values, D widened for the new column both books share);
+   board + all-time headers are bold-white-on-navy; leaderboard
+   sub-headers banded; leaderboard Team column switched to franchise
+   ABBREVS (full names were what made column B sprawl).
+4. **ESPN almanac gained the all-time section.** The warehouse only
+   held 2026 -- the 2025 draft was never extracted -- so first:
+   `extract.py --year 2025 --settings-only` backfilled it (416 picks,
+   16 teams, ZERO keepers; Ohtani #1 overall, 637.4). New
+   `get_draft_history_boards` + `_alltime_draft_grid` re-cut to the
+   CURRENT 14-team shape (2025's 16-team rounds spill into 30 re-cut
+   rounds -- the re-cut genuinely matters on ESPN too), wired through
+   both call sites (generate_almanac_sheet + almanac_write), Top Picks
+   as '(K)'-aware 'Player -year' bref links. ESPN byte-diff golden
+   re-anchored intentionally: +35 lines in Draft-Recap.tsv, nothing
+   else moved; suite 234 green.
+
+Renders: CBS Draft Recap tab rewritten to the dev sheet (write-twice
+proven); full ESPN almanac rendered to the ESPN dev sheet. BRAINTHOUGHTS
+wishlist gained the credential-freshness automation idea (Kyle's "flag
+the re-mint plainly for other users").
+
+---
+
 ## Open questions for Kyle (morning review)
 
 1. **Value lens.** Defaulted to calculated season points (the record

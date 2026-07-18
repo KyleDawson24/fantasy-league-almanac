@@ -92,6 +92,7 @@ def main():
     )
     draft_rows = almanac_sheets.build_draft_tab_rows(
         almanac_sheets.get_draft_board(season_year), season_year, league_id=league_id,
+        history_rows=almanac_sheets.get_draft_history_boards(season_year),
     )
     advanced_standings_rows = almanac_sheets.build_advanced_standings_tab_rows(
         almanac_sheets.get_team_standings(season_year, team_week_stat_specs),

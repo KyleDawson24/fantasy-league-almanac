@@ -72,6 +72,10 @@ from almanac_logic import (
     build_team_history_tabs,
     get_optimal_team_selections,
 )
+# The ESPN draft board's red->white->green cell math, reused verbatim so
+# the two books' boards read identically (private import, same doctrine
+# as the almanac_logic ones above).
+from almanac_write import _draft_gradient_color
 from almanac_render import (
     HOME_DEVIATION_LABEL,
     HOME_HEADER,
@@ -3853,11 +3857,16 @@ def build_draft_recap_rows(season_year, franchise_map, value_lens='calc_total',
     formats.append({'range': f'A{header_row}:{_DRAFT_LAST_COL}{header_row}',
                     'format': {'textFormat': {'bold': True}}})
     rows.append([*_DRAFT_VALUE_HEADER, '', *_DRAFT_VALUE_HEADER])
+    for rng in (f'A{len(rows)}:E{len(rows)}', f'G{len(rows)}:K{len(rows)}'):
+        formats.append({'range': rng,
+                        'format': {'textFormat': {'bold': True},
+                                   'backgroundColor': _POWDER}})
     best = sorted(ranked, key=lambda p: (-p['value_delta'], p['overall_pick']))[:10]
     busts = sorted(ranked, key=lambda p: (p['value_delta'], p['overall_pick']))[:10]
 
     def _value_cells(p):
-        return [_draft_link(p), p['team_name_raw'] or '',
+        team = p['team_name_raw'] or ''
+        return [_draft_link(p), abbrev_by_name.get(team, team[:4]),
                 f"R{p['round_num']} #{p['overall_pick']}",
                 _pts0(p[lens]), f"{p['value_delta']:+d}"]
 
@@ -3873,12 +3882,18 @@ def build_draft_recap_rows(season_year, franchise_map, value_lens='calc_total',
             team_order.append(p['team_name_raw'])
     rows.append(['Rd', 'Min', 'Median', 'Max',
                  *[abbrev_by_name.get(t, (t or '')[:4]) for t in team_order]])
-    formats.append({'range': f'A{len(rows)}:{_DRAFT_LAST_COL}{len(rows)}',
-                    'format': {'textFormat': {'bold': True}}})
+    board_header_row = len(rows)
+    formats.append({'range': f'A{board_header_row}:{_DRAFT_LAST_COL}{board_header_row}',
+                    'format': {'textFormat': {'bold': True, 'foregroundColor':
+                                              {'red': 1, 'green': 1, 'blue': 1}},
+                               'backgroundColor': _NAVY}})
     by_round_team = {}
     for p in year_picks:
         by_round_team[(p['round_num'], p['team_name_raw'])] = p
     max_round = max((p['round_num'] or 0) for p in year_picks)
+    lens_vals = [p[lens] for p in year_picks if p.get(lens) is not None]
+    lens_lo, lens_hi = (min(lens_vals), max(lens_vals)) if lens_vals else (0.0, 1.0)
+    color_grid = []
     for rnd in range(1, max_round + 1):
         round_picks = [by_round_team.get((rnd, t)) for t in team_order]
         pts = [p[lens] for p in round_picks if p and p.get(lens) is not None]
@@ -3886,6 +3901,16 @@ def build_draft_recap_rows(season_year, franchise_map, value_lens='calc_total',
                    if pts else ['', '', ''])
         rows.append([rnd, *summary,
                      *[_draft_link(p) if p else '' for p in round_picks]])
+        color_grid.append([
+            _draft_gradient_color(float(p[lens]), lens_lo, lens_hi)
+            if p and p.get(lens) is not None else None
+            for p in round_picks])
+    # ESPN's board scale on the CBS board: red->white->green backgrounds
+    # per player cell, one updateCells request (text cells can't ride a
+    # numeric gradient rule). start_row0 = the 0-based first data row =
+    # the header's 1-based index.
+    formats.append({'cell_colors': {'start_row0': board_header_row,
+                                    'start_col0': 4, 'grid': color_grid}})
     rows.append([])
 
     # ---- Section 2: the all-time board, 16-team shape --------------------
@@ -3893,18 +3918,33 @@ def build_draft_recap_rows(season_year, franchise_map, value_lens='calc_total',
             if p['order_tier'] in _DRAFT_ORDERED_TIERS and p.get('overall_pick')
             and p['season_year'] != season_year and p.get(lens) is not None]
     hist_years = sorted({p['season_year'] for p in hist})
-    _band('All-Time Draft Board -- 16-Team Shape',
-          'Team-agnostic, re-cut to the current shape: all-time Round N = overall '
-          'picks %d*(N-1)+1..%d*N of each season, whatever rounds those really '
-          'were. Cell = average points of that pick slot; Med/Max summarize the '
-          'round; Top Pick = the best single pick ever made in it. Coverage: %s '
-          '-- CBS recorded pick order for no earlier draft (see Draft Classes); '
-          '%d in progress, excluded.'
-          % (16, 16, ', '.join(str(y) for y in hist_years), season_year))
+    # Band + coverage wording per Kyle (2026-07-18): the asterisk caveat
+    # rides the band row itself; Coverage stays dynamic so the sentence
+    # heals as ordered drafts accrue.
+    rows.append(['All-Time Draft Board -- 16-Team Shape', '',
+                 '*the below is basically broken for any drafts prior to 2025, '
+                 'but could be updated if anybody has records of those drafts.'])
+    formats.append({'range': f'A{len(rows)}:{_DRAFT_LAST_COL}{len(rows)}',
+                    'format': {'textFormat': {'bold': True},
+                               'backgroundColor': _POWDER}})
+    formats.append({'range': f'C{len(rows)}:{_DRAFT_LAST_COL}{len(rows)}',
+                    'format': {'textFormat': {'bold': False, 'italic': True,
+                                              'fontSize': 9},
+                               'backgroundColor': _POWDER}})
+    rows.append(['Team-agnostic, re-cut to the current shape: all-time. Cell = '
+                 'average points of that pick slot; Med/Max summarize the round; '
+                 'Top Pick = the best single pick ever made in it. Coverage: %s '
+                 '-- CBS recorded pick order for no earlier draft (see Draft '
+                 'Classes); %d in progress, excluded.'
+                 % (', '.join(str(y) for y in hist_years), season_year)])
+    formats.append({'range': f'A{len(rows)}:{_DRAFT_LAST_COL}{len(rows)}',
+                    'format': {'textFormat': {'italic': True, 'fontSize': 9}}})
     rows.append([])
     rows.append(['Rd', 'Med', 'Max', 'Top Pick', *[str(s) for s in range(1, 17)]])
     formats.append({'range': f'A{len(rows)}:{_DRAFT_LAST_COL}{len(rows)}',
-                    'format': {'textFormat': {'bold': True}}})
+                    'format': {'textFormat': {'bold': True, 'foregroundColor':
+                                              {'red': 1, 'green': 1, 'blue': 1}},
+                               'backgroundColor': _NAVY}})
     slot_vals, round_vals = {}, {}
     for p in hist:
         rnd16 = (p['overall_pick'] - 1) // 16 + 1
@@ -4427,11 +4467,11 @@ _TEAM_WIDTHS = [(0, 1, 25), (1, 2, 75), (3, 4, 40), (4, 5, 50), (5, 6, 50),
                 (20, 21, 50), (21, 22, 50), (22, 23, 50), (23, 24, 50),
                 (24, 25, 55), (25, 26, 40), (26, 31, 80), (31, 32, 325)]
 
-# Draft Recap: A carries player links (leaderboards) AND the Rd/Year
-# stubs; D carries the all-time Top Pick links; E+ is the 16-column
-# board (2026 teams / all-time slots) -- linked names need the room.
-_DRAFT_WIDTHS = [(0, 1, 170), (1, 2, 150), (2, 3, 70), (3, 4, 150),
-                 (4, 20, 100)]
+# Draft Recap widths mirror the ESPN writer's (_apply_draft_tab_
+# dimensions): A wide for player links + Rd/Year stubs, B-C narrow
+# summaries, D fits the all-time Top Pick 'Player -year' links, E+ the
+# 16-column board (2026 teams / all-time slots).
+_DRAFT_WIDTHS = [(0, 1, 120), (1, 3, 70), (3, 4, 150), (4, 20, 95)]
 
 
 def _tab_style_requests(sheet_gid, title, formats):
@@ -4493,6 +4533,33 @@ def _tab_style_requests(sheet_gid, title, formats):
                 'range': dim_range,
                 'properties': {'hiddenByUser': True},
                 'fields': 'hiddenByUser',
+            }})
+            continue
+        if 'cell_colors' in spec:
+            # Precomputed per-cell backgrounds (the draft board's ESPN-style
+            # red->white->green over TEXT cells, which a numeric gradient
+            # rule can't paint): one updateCells request with a
+            # backgroundColor-only field mask, so values survive. The
+            # full-sheet format reset above keeps reruns idempotent.
+            payload = spec['cell_colors']
+            grid = payload['grid']
+            grid_width = max((len(r) for r in grid), default=0)
+            cell_rows = []
+            for grid_row in grid:
+                values = []
+                for col in range(grid_width):
+                    color = grid_row[col] if col < len(grid_row) else None
+                    values.append({'userEnteredFormat': {'backgroundColor':
+                                   color or {'red': 1, 'green': 1, 'blue': 1}}})
+                cell_rows.append({'values': values})
+            requests.append({'updateCells': {
+                'range': {'sheetId': sheet_gid,
+                          'startRowIndex': payload['start_row0'],
+                          'endRowIndex': payload['start_row0'] + len(grid),
+                          'startColumnIndex': payload['start_col0'],
+                          'endColumnIndex': payload['start_col0'] + grid_width},
+                'rows': cell_rows,
+                'fields': 'userEnteredFormat.backgroundColor',
             }})
             continue
         if 'gradient' in spec:

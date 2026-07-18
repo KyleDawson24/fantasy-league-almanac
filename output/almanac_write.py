@@ -26,6 +26,7 @@ import records
 from almanac_data import (
     get_almanac_records,
     get_draft_board,
+    get_draft_history_boards,
     get_team_standings,
     get_team_slot_points,
     get_team_slot_points_alltime,
@@ -134,7 +135,9 @@ def write_almanac(sheet_id, season_year=None, matchup_period=None):
         best_seasons_fn=almanac_data.team_best_seasons_fn(),
     )
     draft_board = get_draft_board(season_year)
-    draft_tab_rows = build_draft_tab_rows(draft_board, season_year, league_id=league_id)
+    draft_tab_rows = build_draft_tab_rows(
+        draft_board, season_year, league_id=league_id,
+        history_rows=get_draft_history_boards(season_year))
     draft_color_grid = build_draft_board_color_grid(draft_board)
     standings_tab_rows = build_advanced_standings_tab_rows(
         get_team_standings(season_year, team_week_stat_specs),
@@ -417,7 +420,8 @@ def _draft_label_formats(rows, last_col):
                 'range': f'G{row_number}:K{row_number}',
                 'format': {'textFormat': {'bold': True, 'fontSize': 12}},
             })
-        if isinstance(first, str) and first.startswith('Draft Board'):
+        if isinstance(first, str) and (first.startswith('Draft Board')
+                                       or first.startswith('All-Time Draft Board')):
             formats.append({
                 'range': f'A{row_number}:{last_col}{row_number}',
                 'format': {'textFormat': {'bold': True, 'fontSize': 12}},
@@ -446,12 +450,14 @@ def _draft_label_formats(rows, last_col):
 
 
 def _apply_draft_tab_dimensions(spreadsheet, worksheet, width):
-    """Col A (Player / Rd) wide; Min/Median/Max + leaderboard meta narrow;
-    team + Value columns sized for player names."""
+    """Col A (Player / Rd) wide; Min/Median + leaderboard meta narrow; D
+    fits the all-time board's 'Player -year' Top Pick links (it is only
+    Max / Pts elsewhere); team + Value columns sized for player names."""
     sheet_id = worksheet.id
     requests = [
         _column_width_request(sheet_id, 0, 1, 120),
-        _column_width_request(sheet_id, 1, 4, 70),
+        _column_width_request(sheet_id, 1, 3, 70),
+        _column_width_request(sheet_id, 3, 4, 150),
         _column_width_request(sheet_id, 4, max(width, 5), 95),
     ]
     _sheets_batch_update(spreadsheet, f'format dimensions {worksheet.title}', requests)

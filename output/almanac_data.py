@@ -828,6 +828,7 @@ def get_draft_history_boards(through_season):
             round_num,
             round_pick,
             keeper,
+            team_id,
             team_abbrev,
             player_name,
             official_player_name,

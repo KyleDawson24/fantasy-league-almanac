@@ -654,24 +654,30 @@ def _draft_player_label(pick):
     return _bref_link(pick.get('official_player_name'), label)
 
 
-def _draft_initial_label(pick):
-    """Board cell: first-initial + last name, keeper-marked, bref-linked --
-    'M Trout', 'F Lindor (K)'. An already-initialised first name (JJ, TJ,
-    CC, AJ) stays whole rather than collapsing to one letter (Kyle
-    2026-07-18); a mononym is left as-is."""
-    name = (pick.get('player_name') or '').strip()
+def draft_initial_text(name):
+    """First-initial + last name -- 'M Trout'. An already-initialised first
+    name (JJ, TJ, CC, AJ) stays whole rather than collapsing to one letter
+    (Kyle 2026-07-18); a mononym is left as-is. Shared by both books'
+    board cells so the short form is identical platform to platform."""
+    name = (name or '').strip()
     if not name:
         return ''
     parts = name.split()
     first, rest = parts[0], ' '.join(parts[1:])
     core = first.replace('.', '')
     if not rest:
-        short = first
-    elif core.isupper() and 2 <= len(core) <= 3:
-        short = core
-    else:
-        short = (core[:1] or first[:1]).upper()
-    label = f'{short} {rest}'.strip()
+        return first
+    if core.isupper() and 2 <= len(core) <= 3:
+        return f'{core} {rest}'
+    return f'{(core[:1] or first[:1]).upper()} {rest}'
+
+
+def _draft_initial_label(pick):
+    """Board cell: first-initial + last name, keeper-marked, bref-linked --
+    'M Trout', 'F Lindor (K)'."""
+    label = draft_initial_text(pick.get('player_name'))
+    if not label:
+        return ''
     if pick.get('keeper'):
         label = f'{label} (K)'
     return _bref_link(pick.get('official_player_name'), label)

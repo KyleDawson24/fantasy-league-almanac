@@ -64,42 +64,52 @@ def test_layout_and_bands():
     assert any(l.startswith('Draft Board - 2026') for l in flat)
     assert any(l.startswith('All-Time Draft Board') for l in flat)
     assert any(l.startswith('Draft Classes') for l in flat)
-    # Title + subtitle formats target A1/A2, and a gradient rides the
-    # all-time grid.
     assert formats[0]['range'].startswith('A1:')
-    assert any('gradient' in f for f in formats)
+    # Both boards paint via cell_colors, and each carries a 'Top Pick'
+    # super-header merge (B:D).
+    assert sum('cell_colors' in f for f in formats) == 2
+    assert sum(bool(f.get('merge')) for f in formats) == 2
 
 
 def test_current_season_value_math():
     rows, _ = _build()
     # points ranks: Stud One 1, Steal Two 2, Meh Two 3, Bust One 4.
     # value_delta = overall - rank: Stud +0, Steal +1, Meh +1, Bust -2.
-    header = next(i for i, r in enumerate(rows) if r and r[0] == 'Best Value Picks')
+    # Row now: buffer A, value Pts/Tm/Player/(Rd)#Pick/ΔRank in B-F, busts G-K.
+    header = next(i for i, r in enumerate(rows) if len(r) > 1 and r[1] == 'Best Value Picks')
     first = rows[header + 2]
-    assert 'Steal Two' in first[0] or 'Meh Two' in first[0]
-    assert first[4] == '+1'
-    assert 'Bust One' in first[6]        # biggest bust, delta -2
-    assert first[10] == '-2'
+    assert 'Steal Two' in first[3] or 'Meh Two' in first[3]   # value Player col (D)
+    assert first[5] == '+1'                                   # value Δ Rank (F)
+    assert 'Bust One' in first[8]                             # bust Player col (I)
+    assert first[10] == '-2'                                  # bust Δ Rank (K)
 
 
-def test_board_round_summaries():
+def test_board_top_pick_and_summary():
     rows, _ = _build()
-    hdr = next(i for i, r in enumerate(rows) if r and r[0] == 'Rd' and r[1] == 'Min')
-    assert rows[hdr][4:] == ['ALP', 'BET']       # round-1 pick order
+    # Current board header: Rd | Pick | Team | Player | Max | Med | teams.
+    hdr = next(i for i, r in enumerate(rows) if r and r[0] == 'Rd' and r[1] == 'Pick')
+    assert rows[hdr][2] == 'Team' and rows[hdr][4] == 'Max' and rows[hdr][5] == 'Med'
+    assert rows[hdr][6:] == ['ALP', 'BET']       # round-1 pick order
     r1 = rows[hdr + 1]
-    assert r1[:4] == [1, 10, 205, 400]           # min/median/max of 400,10
-    assert 'Stud One' in r1[4] and 'Bust One' in r1[5]
+    assert r1[0] == 1
+    assert 'Stud One' in r1[3]                    # round-1 top pick (Player)
+    assert r1[2] == 'ALP'                         # top pick's team
+    assert r1[4] == 400 and r1[5] == 205          # Max, Med of 400 & 10 (int, no Min)
+    # Team cells are first-initial links.
+    assert 'S One' in r1[6] and 'B One' in r1[7]
 
 
-def test_alltime_board_excludes_current_and_recuts():
+def test_alltime_board_includes_current_and_recuts():
     rows, _ = _build()
-    hdr = next(i for i, r in enumerate(rows) if r and r[0] == 'Rd' and r[1] == 'Med')
+    # All-time header: Rd | Year | Team | Player | Max | Med | 1..16.
+    hdr = next(i for i, r in enumerate(rows) if r and r[0] == 'Rd' and r[1] == 'Year')
     r1, r2 = rows[hdr + 1], rows[hdr + 2]
-    # 2026 excluded: only 2025's two picks appear, one per re-cut round.
-    assert r1[0] == 1 and r1[4] == 500 and 'Old Ace -2025' in r1[3]
-    assert r2[0] == 2 and r2[4] == 300 and 'Round Two Guy -2025' in r2[3]
-    # Slots without history stay blank.
-    assert r1[5] == ''
+    # No season_clocks -> uniform pacing. 2026 is INCLUDED now: round-1 slot 1
+    # median of {2025 Old Ace 500, 2026 Stud One 400} = 450; the straight
+    # (raw) Top Pick is 2025's Old Ace at 500.
+    assert r1[0] == 1 and r1[1] == 2025 and 'Old Ace' in r1[3] and r1[4] == 500
+    assert r1[6] == 450                           # slot-1 median across seasons
+    assert r2[0] == 2 and r2[1] == 2025 and 'Round Two Guy' in r2[3] and r2[4] == 300
 
 
 def test_draft_classes_sequence_labels():

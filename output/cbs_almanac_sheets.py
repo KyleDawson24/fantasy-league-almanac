@@ -71,6 +71,7 @@ from almanac_logic import (
     _merge_home_bands,
     build_team_history_tabs,
     get_optimal_team_selections,
+    season_pace_factors,
 )
 # The ESPN draft board's red->white->green cell math, reused verbatim so
 # the two books' boards read identically (private import, same doctrine
@@ -82,6 +83,7 @@ from almanac_render import (
     SLOT_ORDER,
     _bref_link,
     _bref_player_cell,
+    draft_initial_text,
     _hitting_rate,
     _pitching_rate,
     format_all_league_team_row,
@@ -390,6 +392,10 @@ def _diverging_gradient():
 # ESPN Records palette (Kyle 2026-07-13): powder-blue #f2f7fc section/scope
 # headers, and a light-orange recency wash for records held in the live season.
 _POWDER = {'red': 0.949, 'green': 0.969, 'blue': 0.988}   # #f2f7fc
+_WHITE = {'red': 1, 'green': 1, 'blue': 1}
+# Saturated powder for the draft board's Pick/Team/Player header trio against
+# the navy band (matches the ESPN writer's _DRAFT_POWDER_BG; Kyle 2026-07-18).
+_POWDER_HEADER = {'red': 0.72, 'green': 0.85, 'blue': 0.92}
 _ORANGE = {'red': 0.988, 'green': 0.898, 'blue': 0.804}   # #fce5cd
 
 # Inline twin of the dbt cbs_name_key macro (macros/cbs_name_key.sql) --
@@ -3748,8 +3754,8 @@ def build_standings_rows(context, arc, finishes, active_franchises,
 # Draft Recap tab (2026-07-18, first cut for Kyle's QA)
 # ---------------------------------------------------------------------------
 
-_DRAFT_LAST_COL = 'T'   # A-D summary + 16 slot/team columns
-_DRAFT_VALUE_HEADER = ['Player', 'Team', 'Pick', 'Pts', 'Value']
+_DRAFT_LAST_COL = 'V'   # Rd/Pick/Team/Player/Max/Med (A-F) + 16 slot/team cols
+_DRAFT_VALUE_HEADER = ['Pts', 'Tm', 'Player', '(Rd) #Pick', 'Δ Rank']
 # All-time board coverage: pick sequence exists only where CBS recorded
 # it ('true': the 2025/2026 online drafts). Every other year is EXCLUDED
 # from the board and surfaces in Draft Classes instead: the team-list
@@ -3787,7 +3793,7 @@ def _draft_link(pick, label=None):
 
 
 def build_draft_recap_rows(season_year, franchise_map, value_lens='calc_total',
-                           history=None):
+                           history=None, season_clocks=None):
     """The Draft Recap tab: (rows, formats).
 
     Three sections:
@@ -3811,10 +3817,18 @@ def build_draft_recap_rows(season_year, franchise_map, value_lens='calc_total',
     history injects (picks, report) for tests; None fetches live."""
     picks, report = history if history is not None else get_draft_history()
     lens = value_lens
+    n_teams = 16
     abbrev_by_name = {}
     for meta in (franchise_map or {}).values():
         if meta.get('name'):
             abbrev_by_name[meta['name']] = meta.get('abbrev') or meta['name'][:4]
+
+    def _abbrev(team):
+        team = team or ''
+        return abbrev_by_name.get(team, team[:4])
+
+    def _initial_cell(p):
+        return _bref_link(p['player_name_raw'], draft_initial_text(p['player_name_raw']))
 
     rows, formats = [], []
 
@@ -3827,6 +3841,27 @@ def build_draft_recap_rows(season_year, franchise_map, value_lens='calc_total',
             rows.append([note])
             formats.append({'range': f'A{len(rows)}:{_DRAFT_LAST_COL}{len(rows)}',
                             'format': {'textFormat': {'italic': True, 'fontSize': 9}}})
+
+    def _board_headers(header_cols):
+        # Navy 'Top Pick' super-header (merged B:D), then the navy header
+        # row with the Pick/Team/Player trio in powder -- identical to the
+        # ESPN board (Kyle 2026-07-18).
+        rows.append(['', 'Top Pick'])
+        sr = len(rows)
+        formats.append({'range': f'A{sr}:{_DRAFT_LAST_COL}{sr}',
+                        'format': {'textFormat': {'bold': True, 'foregroundColor': _WHITE},
+                                   'backgroundColor': _NAVY,
+                                   'horizontalAlignment': 'CENTER'}})
+        formats.append({'range': f'B{sr}:D{sr}', 'merge': True})
+        rows.append(header_cols)
+        hr = len(rows)
+        formats.append({'range': f'A{hr}:{_DRAFT_LAST_COL}{hr}',
+                        'format': {'textFormat': {'bold': True, 'foregroundColor': _WHITE},
+                                   'backgroundColor': _NAVY}})
+        formats.append({'range': f'B{hr}:D{hr}',
+                        'format': {'textFormat': {'bold': True},
+                                   'backgroundColor': _POWDER_HEADER}})
+        return hr
 
     rows.append([DRAFT_TAB])
     formats.append({'range': f'A1:{_DRAFT_LAST_COL}1',
@@ -3848,44 +3883,48 @@ def build_draft_recap_rows(season_year, franchise_map, value_lens='calc_total',
         p['value_delta'] = p['overall_pick'] - rank
     parts = ' + '.join(dict.fromkeys(p['draft_label'] for p in year_picks))
     _band(f'Draft Recap: {season_year}',
-          f'{parts} stitched as one {len(year_picks)}-pick draft. Value = overall '
-          f'pick minus season Total Points rank (positive = steal).')
+          f'{parts} stitched as one {len(year_picks)}-pick draft. Δ Rank = overall '
+          f'pick minus season Total Points rank (positive = steal). (No keepers '
+          f'in this league.)')
     rows.append([])
-    header_row = len(rows) + 1
-    rows.append(['Best Value Picks', '', '', '', '', '', 'Biggest Busts'])
-    formats.append({'range': f'A{header_row}:{_DRAFT_LAST_COL}{header_row}',
-                    'format': {'textFormat': {'bold': True}}})
-    rows.append([*_DRAFT_VALUE_HEADER, '', *_DRAFT_VALUE_HEADER])
-    for rng in (f'A{len(rows)}:E{len(rows)}', f'G{len(rows)}:K{len(rows)}'):
+    rows.append(['', 'Best Value Picks', '', '', '', '', 'Biggest Busts'])
+    for rng in (f'B{len(rows)}:F{len(rows)}', f'G{len(rows)}:K{len(rows)}'):
+        formats.append({'range': rng,
+                        'format': {'textFormat': {'bold': True, 'fontSize': 12}}})
+    rows.append(['', *_DRAFT_VALUE_HEADER, *_DRAFT_VALUE_HEADER])
+    hdr = len(rows)
+    for rng in (f'B{hdr}:F{hdr}', f'G{hdr}:K{hdr}'):
         formats.append({'range': rng,
                         'format': {'textFormat': {'bold': True},
-                                   'backgroundColor': _POWDER}})
+                                   'backgroundColor': _PALE_BLUE}})
+    for col in ('B', 'G'):
+        formats.append({'range': f'{col}{hdr + 1}:{col}{hdr + 10}',
+                        'format': {'numberFormat': {'type': 'NUMBER', 'pattern': '0.0'}}})
     best = sorted(ranked, key=lambda p: (-p['value_delta'], p['overall_pick']))[:10]
     busts = sorted(ranked, key=lambda p: (p['value_delta'], p['overall_pick']))[:10]
 
     def _value_cells(p):
-        team = p['team_name_raw'] or ''
-        return [_draft_link(p), abbrev_by_name.get(team, team[:4]),
-                f"R{p['round_num']} #{p['overall_pick']}",
-                _pts0(p[lens]), f"{p['value_delta']:+d}"]
+        return [round(p[lens], 1), _abbrev(p['team_name_raw']),
+                _draft_link(p), f"R{p['round_num']} #{p['overall_pick']}",
+                f"{p['value_delta']:+d}"]
 
-    for good, bad in zip(best, busts):
-        rows.append([*_value_cells(good), '', *_value_cells(bad)])
+    blank5 = ['', '', '', '', '']
+    for i in range(max(len(best), len(busts))):
+        good = _value_cells(best[i]) if i < len(best) else list(blank5)
+        bad = _value_cells(busts[i]) if i < len(busts) else list(blank5)
+        rows.append(['', *good, *bad])
     rows.append([])
 
+    # ---- Current-season board (Top Pick trio + Max/Med + team cells) -----
     _band(f'Draft Board - {season_year}')
     team_order, seen = [], set()
     for p in sorted(year_picks, key=lambda p: p['overall_pick']):
         if p['team_name_raw'] not in seen:
             seen.add(p['team_name_raw'])
             team_order.append(p['team_name_raw'])
-    rows.append(['Rd', 'Min', 'Median', 'Max',
-                 *[abbrev_by_name.get(t, (t or '')[:4]) for t in team_order]])
-    board_header_row = len(rows)
-    formats.append({'range': f'A{board_header_row}:{_DRAFT_LAST_COL}{board_header_row}',
-                    'format': {'textFormat': {'bold': True, 'foregroundColor':
-                                              {'red': 1, 'green': 1, 'blue': 1}},
-                               'backgroundColor': _NAVY}})
+    board_header_row = _board_headers(
+        ['Rd', 'Pick', 'Team', 'Player', 'Max', 'Med',
+         *[_abbrev(t) for t in team_order]])
     by_round_team = {}
     for p in year_picks:
         by_round_team[(p['round_num'], p['team_name_raw'])] = p
@@ -3895,27 +3934,33 @@ def build_draft_recap_rows(season_year, franchise_map, value_lens='calc_total',
     color_grid = []
     for rnd in range(1, max_round + 1):
         round_picks = [by_round_team.get((rnd, t)) for t in team_order]
-        pts = [p[lens] for p in round_picks if p and p.get(lens) is not None]
-        summary = ([_pts0(min(pts)), _pts0(statistics.median(pts)), _pts0(max(pts))]
-                   if pts else ['', '', ''])
-        rows.append([rnd, *summary,
-                     *[_draft_link(p) if p else '' for p in round_picks]])
+        present = [p for p in round_picks if p and p.get(lens) is not None]
+        if present:
+            top = max(present, key=lambda p: p[lens])
+            pts = [p[lens] for p in present]
+            head = [(top['overall_pick'] - 1) % n_teams + 1, _abbrev(top['team_name_raw']),
+                    _draft_link(top), round(max(pts)), round(statistics.median(pts))]
+        else:
+            head = ['', '', '', '', '']
+        rows.append([rnd, *head,
+                     *[_initial_cell(p) if p else '' for p in round_picks]])
         color_grid.append([
             _draft_gradient_color(float(p[lens]), lens_lo, lens_hi)
             if p and p.get(lens) is not None else None
             for p in round_picks])
-    # ESPN's board scale on the CBS board: red->white->green backgrounds
-    # per player cell, one updateCells request (text cells can't ride a
-    # numeric gradient rule). start_row0 = the 0-based first data row =
-    # the header's 1-based index.
+    # ESPN's board scale on the CBS board: red->white->green backgrounds per
+    # player cell (text can't ride a numeric gradient rule). Slot cells begin
+    # at col index 6 (after Rd/Pick/Team/Player/Max/Med), one row below the
+    # header (board_header_row is 1-based == the 0-based first data row).
     formats.append({'cell_colors': {'start_row0': board_header_row,
-                                    'start_col0': 4, 'grid': color_grid}})
+                                    'start_col0': 6, 'grid': color_grid}})
     rows.append([])
 
-    # ---- Section 2: the all-time board, 16-team shape --------------------
+    # ---- Section 2: the all-time board, 16-team shape, season-paced ------
+    factors, pace_n = season_pace_factors(season_clocks or {}, season_year)
     hist = [p for p in picks
             if p['order_tier'] in _DRAFT_ORDERED_TIERS and p.get('overall_pick')
-            and p['season_year'] != season_year and p.get(lens) is not None]
+            and p.get(lens) is not None]
     hist_years = sorted({p['season_year'] for p in hist})
     # Band + coverage wording per Kyle (2026-07-18): the asterisk caveat
     # rides the band row itself; Coverage stays dynamic so the sentence
@@ -3931,39 +3976,42 @@ def build_draft_recap_rows(season_year, franchise_map, value_lens='calc_total',
                                               'fontSize': 9},
                                'backgroundColor': _POWDER}})
     rows.append(['Team-agnostic, re-cut to the current shape: all-time. Cell = '
-                 'average points of that pick slot; Med/Max summarize the round; '
-                 'Top Pick = the best single pick ever made in it. Coverage: %s '
-                 '-- CBS recorded pick order for no earlier draft (see Draft '
-                 'Classes); %d in progress, excluded.'
-                 % (', '.join(str(y) for y in hist_years), season_year)])
+                 'the slot’s median Total Points; Med/Max summarize the round; '
+                 'Top Pick = the top-scoring single pick ever made in it. Points '
+                 'are paced to a standard %d-period season so the year in flight '
+                 'counts fairly; the Top Pick stays unpaced. Coverage: %s -- CBS '
+                 'recorded pick order for no earlier draft (see Draft Classes).'
+                 % (int(round(pace_n)), ', '.join(str(y) for y in hist_years))])
     formats.append({'range': f'A{len(rows)}:{_DRAFT_LAST_COL}{len(rows)}',
                     'format': {'textFormat': {'italic': True, 'fontSize': 9}}})
-    rows.append([])
-    rows.append(['Rd', 'Med', 'Max', 'Top Pick', *[str(s) for s in range(1, 17)]])
-    formats.append({'range': f'A{len(rows)}:{_DRAFT_LAST_COL}{len(rows)}',
-                    'format': {'textFormat': {'bold': True, 'foregroundColor':
-                                              {'red': 1, 'green': 1, 'blue': 1}},
-                               'backgroundColor': _NAVY}})
-    slot_vals, round_vals = {}, {}
+    alltime_header_row = _board_headers(
+        ['Rd', 'Year', 'Team', 'Player', 'Max', 'Med',
+         *[str(s) for s in range(1, 17)]])
+    slot_paced, round_paced, round_rows = {}, {}, {}
     for p in hist:
-        rnd16 = (p['overall_pick'] - 1) // 16 + 1
-        slot16 = (p['overall_pick'] - 1) % 16 + 1
-        slot_vals.setdefault((rnd16, slot16), []).append(p[lens])
-        round_vals.setdefault(rnd16, []).append(p)
-    grid_first = len(rows) + 1
-    for rnd in sorted(round_vals):
-        in_round = round_vals[rnd]
-        top = max(in_round, key=lambda p: p[lens])
-        med = statistics.median([p[lens] for p in in_round])
-        cells = []
+        rnd16 = (p['overall_pick'] - 1) // n_teams + 1
+        slot16 = (p['overall_pick'] - 1) % n_teams + 1
+        paced = p[lens] * factors.get(p['season_year'], 1.0)
+        slot_paced.setdefault((rnd16, slot16), []).append(paced)
+        round_paced.setdefault(rnd16, []).append(paced)
+        round_rows.setdefault(rnd16, []).append(p)
+    alltime_color = []
+    for rnd in sorted(round_rows):
+        top = max(round_rows[rnd], key=lambda p: p[lens])   # straight, unpaced
+        cells, cell_colors = [], []
         for slot in range(1, 17):
-            vals = slot_vals.get((rnd, slot))
-            cells.append(_pts0(sum(vals) / len(vals)) if vals else '')
-        rows.append([rnd, _pts0(med), _pts0(top[lens]),
-                     _draft_link(top, f"{top['player_name_raw']} -{top['season_year']}"),
-                     *cells])
-    formats.append({'range': f'E{grid_first}:{_DRAFT_LAST_COL}{len(rows)}',
-                    'gradient': _draft_points_gradient()})
+            vals = slot_paced.get((rnd, slot))
+            cells.append(round(statistics.median(vals)) if vals else '')
+        rows.append([rnd, top['season_year'], _abbrev(top['team_name_raw']),
+                     _draft_link(top), round(top[lens]),
+                     round(statistics.median(round_paced[rnd])), *cells])
+        alltime_color.append(cells)
+    lo = min((c for row in alltime_color for c in row if c != ''), default=0)
+    hi = max((c for row in alltime_color for c in row if c != ''), default=1)
+    color_grid2 = [[_draft_gradient_color(float(c), lo, hi) if c != '' else None
+                    for c in row] for row in alltime_color]
+    formats.append({'cell_colors': {'start_row0': alltime_header_row,
+                                    'start_col0': 6, 'grid': color_grid2}})
     rows.append([])
 
     # ---- Section 3: Draft Classes (order-free, every draft) --------------
@@ -4106,7 +4154,9 @@ def build_all_tabs(nav_targets=None):
         affinity_rows=get_mlb_affinity(season),
     )
 
-    draft = build_draft_recap_rows(season, _fmap)
+    draft = build_draft_recap_rows(
+        season, _fmap,
+        season_clocks={r['season_year']: r['days'] for r in get_season_gameplay_days()})
 
     # Third element: the team-tab title set -- the writer bulk-writes those
     # tabs RAW (zero-padded rate strings survive) + reapplies '=' formulas,
@@ -4470,7 +4520,8 @@ _TEAM_WIDTHS = [(0, 1, 25), (1, 2, 75), (3, 4, 40), (4, 5, 50), (5, 6, 50),
 # dimensions): A wide for player links + Rd/Year stubs, B-C narrow
 # summaries, D fits the all-time Top Pick 'Player -year' links, E+ the
 # 16-column board (2026 teams / all-time slots).
-_DRAFT_WIDTHS = [(0, 1, 120), (1, 3, 70), (3, 4, 150), (4, 20, 95)]
+_DRAFT_WIDTHS = [(0, 1, 25), (1, 3, 40), (3, 4, 125), (4, 5, 75),
+                 (5, 6, 40), (6, 22, 100)]
 
 
 def _tab_style_requests(sheet_gid, title, formats):

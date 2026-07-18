@@ -45,7 +45,7 @@ ADVANCED_STANDINGS_TAB = 'Advanced Standings'
 
 
 # v1.2 draft tab: Best Value / Biggest Bust leaderboard columns.
-DRAFT_VALUE_HEADER = ['Player', 'Team', 'Pick', 'Pts', 'Value']
+DRAFT_VALUE_HEADER = ['Pts', 'Tm', 'Player', '(Rd) #Pick', 'Δ Rank']
 
 
 # v2.0 Advanced Standings, Table A: the identity columns ahead of the
@@ -654,23 +654,47 @@ def _draft_player_label(pick):
     return _bref_link(pick.get('official_player_name'), label)
 
 
+def _draft_initial_label(pick):
+    """Board cell: first-initial + last name, keeper-marked, bref-linked --
+    'M Trout', 'F Lindor (K)'. An already-initialised first name (JJ, TJ,
+    CC, AJ) stays whole rather than collapsing to one letter (Kyle
+    2026-07-18); a mononym is left as-is."""
+    name = (pick.get('player_name') or '').strip()
+    if not name:
+        return ''
+    parts = name.split()
+    first, rest = parts[0], ' '.join(parts[1:])
+    core = first.replace('.', '')
+    if not rest:
+        short = first
+    elif core.isupper() and 2 <= len(core) <= 3:
+        short = core
+    else:
+        short = (core[:1] or first[:1]).upper()
+    label = f'{short} {rest}'.strip()
+    if pick.get('keeper'):
+        label = f'{label} (K)'
+    return _bref_link(pick.get('official_player_name'), label)
+
+
 def format_draft_value_row(pick):
-    """One Best-Value / Biggest-Bust leaderboard row:
-    Player (+K) | Team | Pick | Pts | Value(+/-)."""
+    """One Best-Value / Biggest-Bust leaderboard row (Kyle 2026-07-18
+    order): Pts | Tm | Player (+K) | (Rd) #Pick | Δ Rank(+/-). Pts stay
+    one-decimal; the writer forces the trailing .0."""
     value = pick.get('value_delta')
     return [
-        _draft_player_label(pick),
-        pick.get('team_abbrev') or '',
-        _draft_pick_label(pick),
         _one_decimal(pick.get('season_points')),
+        pick.get('team_abbrev') or '',
+        _draft_player_label(pick),
+        _draft_pick_label(pick),
         f"{int(value):+d}" if value is not None else '',
     ]
 
 
 def format_draft_board_cell(pick):
-    """Round x team grid cell: the drafted player, keeper-marked. Blank for
-    an unfilled (round, team) slot (shouldn't occur in a full keeper draft)."""
-    return _draft_player_label(pick) if pick else ''
+    """Round x team grid cell: the drafted player as a first-initial link,
+    keeper-marked. Blank for an unfilled (round, team) slot."""
+    return _draft_initial_label(pick) if pick else ''
 
 
 def format_standings_row(rank, row, hitting_specs, pitching_specs):
@@ -1250,6 +1274,11 @@ def _slot_sort_key(slot):
 
 def _one_decimal(value):
     return round(value or 0, 1)
+
+
+def _whole(value):
+    """Decimal-free display value (board Max/Med, all-time cells)."""
+    return int(round(value or 0))
 
 
 def _safe_sheet_title(title):

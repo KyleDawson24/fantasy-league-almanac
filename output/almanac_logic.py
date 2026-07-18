@@ -75,6 +75,8 @@ from almanac_render import (
     format_all_league_thin_row,
     acquisition_half_values,
     _bref_link,
+    _draft_player_label,
+    _whole,
     format_draft_board_cell,
     format_draft_value_row,
     format_standings_row,
@@ -704,42 +706,64 @@ def _merge_home_bands(left_rows, right_rows, left_width, right_width):
     return merged
 
 
-def build_draft_tab_rows(board_rows, season_year, league_id=None,
-                         history_rows=None):
-    """Build the Draft Recap tab: side-by-side Best Value / Biggest Bust
-    leaderboards above a keeper-sorted round x team draft board with
-    per-row Min / Median / Max season points (draft tab), then -- when
-    history_rows carry completed-season picks -- the all-time board
-    re-cut to the current league shape.
+def season_pace_factors(clock_by_season, current_season):
+    """Standard-season-clock weights, generalizing Kyle's
+    get_season_gameplay_days idea (2026-07-17 round 3) to any platform:
+    N = the median clock over CLOSED seasons (every season but the one in
+    flight); each season's pace factor = N / its own clock. A partial
+    ongoing season scales UP to a full-season equivalent; a freak short
+    closed season self-reports short instead of diluting an average. The
+    clock is whatever a book counts as a day-equivalent (CBS gameplay
+    days, ESPN daily scoring periods). Returns ({season: factor}, N)."""
+    closed = [c for s, c in clock_by_season.items()
+              if s != current_season and c]
+    n = statistics.median(closed) if closed else (
+        clock_by_season.get(current_season) or 1)
+    factors = {s: (n / c if c else 1.0) for s, c in clock_by_season.items()}
+    return factors, n
 
-    board_rows come from almanac_data.get_draft_board (one row per pick,
-    value_delta attached); history_rows from get_draft_history_boards.
-    league_id is unused (no boxscore links here); accepted for signature
-    symmetry with the other builders.
+
+def build_draft_tab_rows(board_rows, season_year, league_id=None,
+                         history_rows=None, season_clocks=None):
+    """Build the Draft Recap tab (Kyle's 2026-07-18 overhaul): Best Value
+    / Biggest Bust leaderboards, then the current-season board (each
+    round's straight top pick + Max/Med, then every team's pick), then --
+    when history_rows carry the league's other drafts -- the all-time
+    board re-cut to the current shape with season-paced slot medians.
+
+    board_rows: one row per current-season pick (get_draft_board, with
+    value_delta). history_rows: every season's picks incl. the current
+    one (get_draft_history_boards). season_clocks: {season: clock} for
+    the pace weighting (get_season_scoring_periods); None = no pacing.
+    league_id is unused (kept for builder-signature symmetry).
     """
     del league_id
+    # Row 1 title, row 2 blank, row 3 helper notes (Delta at A, keeper at
+    # F -- Kyle 2026-07-18), row 4 blank.
     rows = [
         [f'Draft Recap: {season_year}'],
-        ['Value = overall pick minus season Total Points rank (positive = steal). '
+        [],
+        ['Δ = Overall pick minus Total Points rank (+steal)', '', '', '', '',
          '(K) = keeper.'],
         [],
     ]
 
-    # Side-by-side leaderboards: Best Value (cols A-E) | spacer F | Biggest
-    # Busts (cols G-K). Keepers' draft cost is re-ranked by the keeper-sort
-    # so a team's 5th-best keeper counts as a late keeper, not a round-1 pick.
+    # Leaderboards: a 25px buffer at A, Best Value in B-F, Biggest Busts in
+    # G-K (so each block's Pts sits in a >=40px column and the value block's
+    # Player rides the 125px name column). Keepers' draft cost is re-ranked
+    # by the keeper-sort so a team's 5th-best keeper reads as a late keeper.
     ranked = [r for r in _draft_with_effective_picks(board_rows)
               if r.get('value_delta') is not None]
     best_value = sorted(ranked, key=lambda r: (-r['value_delta'], r['overall_pick']))[:10]
     biggest_bust = sorted(ranked, key=lambda r: (r['value_delta'], r['overall_pick']))[:10]
 
-    rows.append(['Best Value Picks', '', '', '', '', '', 'Biggest Busts'])
-    rows.append([*DRAFT_VALUE_HEADER, '', *DRAFT_VALUE_HEADER])
+    rows.append(['', 'Best Value Picks', '', '', '', '', 'Biggest Busts'])
+    rows.append(['', *DRAFT_VALUE_HEADER, *DRAFT_VALUE_HEADER])
     blank = [''] * len(DRAFT_VALUE_HEADER)
     for index in range(max(len(best_value), len(biggest_bust))):
         left = format_draft_value_row(best_value[index]) if index < len(best_value) else list(blank)
         right = format_draft_value_row(biggest_bust[index]) if index < len(biggest_bust) else list(blank)
-        rows.append([*left, '', *right])
+        rows.append(['', *left, *right])
 
     rows.append([])
     rows.append([])
@@ -749,56 +773,62 @@ def build_draft_tab_rows(board_rows, season_year, league_id=None,
     if history_rows:
         team_count = len({r.get('team_id') for r in board_rows
                           if r.get('team_id') is not None}) or 1
+        factors, n = season_pace_factors(season_clocks or {}, season_year)
         seasons = sorted({r['season_year'] for r in history_rows})
         rows.append([])
         rows.append([])
         rows.append([f'All-Time Draft Board - {team_count}-Team Shape'])
         rows.append([f'Team-agnostic, re-cut to the current {team_count}-team '
-                     f'shape: all-time Round N = each covered draft\'s overall '
-                     f'picks {team_count}(N-1)+1..{team_count}N, whatever shape '
-                     f'that season really ran. Cell = the slot\'s average season '
-                     f'points; Med/Max summarize the round; Top Pick = the best '
-                     f'single pick ever made in it. '
-                     f'Coverage: {", ".join(str(y) for y in seasons)}; '
-                     f'{season_year} in progress, excluded.'])
-        rows.extend(_alltime_draft_grid(history_rows, team_count))
+                     f'shape. Cell = the slot’s median Total Points; Med/Max '
+                     f'summarize the round; Top Pick = the top-scoring single '
+                     f'pick ever made in it. Points are paced to a standard '
+                     f'{int(round(n))}-period season so the year in flight '
+                     f'counts fairly; the Top Pick stays unpaced. '
+                     f'Coverage: {", ".join(str(y) for y in seasons)}.'])
+        rows.extend(_alltime_draft_grid(history_rows, team_count, factors))
     return rows
 
 
-def _alltime_draft_grid(history_rows, team_count):
-    """The all-time board: header then one row per re-cut round -- Med /
-    Max / Top Pick ('Player -year', keeper-marked) and the slot cells
-    (average season points across covered drafts; blank where no covered
-    draft reached the slot). The re-cut is by CURRENT team count, so a
-    16-team-era pick #17 lands in today's round 2 (the 2025 board ran 16
-    teams; today's shape is what the slots mean)."""
-    slot_vals = defaultdict(list)
+def _alltime_draft_grid(history_rows, team_count, factors):
+    """All-time board, re-cut to the current team count: super-header +
+    header, then one row per re-cut round. Each round's slot cell = the
+    MEDIAN of that slot's season-PACED Total Points across every covered
+    draft (a 16-team-era pick #17 lands in today's round 2); Med = the
+    round's paced median, Max + Top Pick = the round's STRAIGHT
+    (unpaced) best single pick, its year / team / player. Blank where no
+    draft reached the slot."""
+    slot_paced = defaultdict(list)
+    round_paced = defaultdict(list)
     round_rows = defaultdict(list)
     for r in history_rows:
         overall = r.get('overall_pick')
-        if not overall or r.get('season_points') is None:
+        pts = r.get('season_points')
+        if not overall or pts is None:
             continue
         rnd = (overall - 1) // team_count + 1
         slot = (overall - 1) % team_count + 1
-        slot_vals[(rnd, slot)].append(float(r['season_points']))
+        paced = float(pts) * factors.get(r['season_year'], 1.0)
+        slot_paced[(rnd, slot)].append(paced)
+        round_paced[rnd].append(paced)
         round_rows[rnd].append(r)
 
-    grid = [['Rd', 'Med', 'Max', 'Top Pick',
-             *[str(s) for s in range(1, team_count + 1)]]]
+    grid = [
+        ['', 'Top Pick'],
+        ['Rd', 'Year', 'Team', 'Player', 'Max', 'Med',
+         *[str(s) for s in range(1, team_count + 1)]],
+    ]
     for rnd in sorted(round_rows):
-        in_round = round_rows[rnd]
-        top = max(in_round, key=lambda r: float(r['season_points']))
-        marker = ' (K)' if top.get('keeper') else ''
-        label = f"{top.get('player_name') or ''}{marker} -{top['season_year']}"
-        pts = [float(r['season_points']) for r in in_round]
+        top = max(round_rows[rnd], key=lambda r: float(r['season_points']))
         cells = []
         for slot in range(1, team_count + 1):
-            vals = slot_vals.get((rnd, slot))
-            cells.append(_one_decimal(sum(vals) / len(vals)) if vals else '')
-        grid.append([rnd, _one_decimal(statistics.median(pts)),
-                     _one_decimal(max(pts)),
-                     _bref_link(top.get('official_player_name'), label),
-                     *cells])
+            vals = slot_paced.get((rnd, slot))
+            cells.append(_whole(statistics.median(vals)) if vals else '')
+        grid.append([
+            rnd, top['season_year'], top.get('team_abbrev') or '',
+            _draft_player_label(top),
+            _whole(float(top['season_points'])),
+            _whole(statistics.median(round_paced[rnd])),
+            *cells])
     return grid
 
 
@@ -873,26 +903,35 @@ def _draft_with_effective_picks(board_rows):
 
 
 def _draft_board_grid(board_rows):
-    """Keeper-sorted round x team board with per-row Min / Median / Max of
-    season points across the teams. Header row then one row per board slot."""
+    """Current-season keeper-sorted round x team board (Kyle 2026-07-18):
+    super-header + header, then one row per board slot. Each row surfaces
+    the round's straight top pick (its pick-in-round / team / full player
+    name), then decimal-free Max / Med of the round, then every team's
+    pick as a first-initial link. Min is dropped."""
     team_order, team_abbrev, sorted_cols = _draft_sorted_columns(board_rows)
     max_slots = max((len(col) for col in sorted_cols.values()), default=0)
 
-    grid = [['Rd', 'Min', 'Median', 'Max', *[team_abbrev[tid] for tid in team_order]]]
+    grid = [
+        ['', 'Top Pick'],
+        ['Rd', 'Pick', 'Team', 'Player', 'Max', 'Med',
+         *[team_abbrev[tid] for tid in team_order]],
+    ]
     for slot in range(max_slots):
         row_picks = [
             sorted_cols[tid][slot] if slot < len(sorted_cols[tid]) else None
             for tid in team_order
         ]
-        pts = [float(p.get('season_points') or 0) for p in row_picks if p is not None]
-        if pts:
-            summary = [_one_decimal(min(pts)),
-                       _one_decimal(statistics.median(pts)),
-                       _one_decimal(max(pts))]
+        present = [p for p in row_picks if p is not None]
+        if present:
+            top = max(present, key=lambda p: float(p.get('season_points') or 0))
+            pts = [float(p.get('season_points') or 0) for p in present]
+            head = [top.get('round_pick'), top.get('team_abbrev') or '',
+                    _draft_player_label(top), _whole(max(pts)),
+                    _whole(statistics.median(pts))]
         else:
-            summary = ['', '', '']
+            head = ['', '', '', '', '']
         grid.append([
-            slot + 1, *summary,
+            slot + 1, *head,
             *[format_draft_board_cell(pick) for pick in row_picks],
         ])
     return grid

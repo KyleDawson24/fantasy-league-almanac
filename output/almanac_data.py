@@ -814,12 +814,12 @@ def get_draft_board(season_year):
     """, (season_year,))
 
 
-def get_draft_history_boards(before_season):
-    """Every completed season's draft picks for the all-time board -- one
-    row per historic pick (season_year < before_season), same
-    season-points lens as get_draft_board. No rank/value columns: the
-    all-time re-cut consumes points, slot position, and identity only.
-    Rows ordered (season_year, overall_pick).
+def get_draft_history_boards(through_season):
+    """Every season's draft picks for the all-time board -- one row per
+    pick (season_year <= through_season, so the ONGOING season is
+    included and paced up by season_pace_factors), same season-points
+    lens as get_draft_board. Carries team_abbrev so the re-cut board can
+    name each round's straight top pick. Rows ordered (season, pick).
     """
     return query_snowflake(f"""
         SELECT
@@ -828,14 +828,30 @@ def get_draft_history_boards(before_season):
             round_num,
             round_pick,
             keeper,
+            team_abbrev,
             player_name,
             official_player_name,
             season_points
         FROM mart_draft_board
-        WHERE season_year < %s
+        WHERE season_year <= %s
           AND {league_predicate()}
         ORDER BY season_year, overall_pick
-    """, (before_season,))
+    """, (through_season,))
+
+
+def get_season_scoring_periods():
+    """Per-season 'clock': distinct scoring periods each season reached --
+    ESPN's day-grain scoring_period from the union daily fact (~184 in a
+    full season, fewer in the year in flight). Feeds season_pace_factors
+    so a partial ongoing season is scaled to a full-season equivalent,
+    the same standard-season-clock idea as the CBS gameplay-days weight.
+    """
+    return query_snowflake(f"""
+        SELECT season_year, COUNT(DISTINCT scoring_period) AS clock
+        FROM fct_player_daily_performance
+        WHERE {league_predicate()}
+        GROUP BY season_year
+    """)
 
 
 def get_team_standings(season_year, stat_specs):

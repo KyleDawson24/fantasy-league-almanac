@@ -27,6 +27,7 @@ from almanac_data import (
     get_almanac_records,
     get_draft_board,
     get_draft_history_boards,
+    get_season_scoring_periods,
     get_team_standings,
     get_team_slot_points,
     get_team_slot_points_alltime,
@@ -137,7 +138,9 @@ def write_almanac(sheet_id, season_year=None, matchup_period=None):
     draft_board = get_draft_board(season_year)
     draft_tab_rows = build_draft_tab_rows(
         draft_board, season_year, league_id=league_id,
-        history_rows=get_draft_history_boards(season_year))
+        history_rows=get_draft_history_boards(season_year),
+        season_clocks={r['season_year']: r['clock']
+                       for r in get_season_scoring_periods()})
     draft_color_grid = build_draft_board_color_grid(draft_board)
     standings_tab_rows = build_advanced_standings_tab_rows(
         get_team_standings(season_year, team_week_stat_specs),
@@ -324,10 +327,15 @@ def _home_label_formats(rows, last_col):
     return formats
 
 
-# Draft board team columns start at index 4 (after Rd / Min / Median / Max).
-_DRAFT_BOARD_TEAM_START = 4
+# Board team/slot columns start at index 6 (after Rd / Pick|Year / Team /
+# Player / Max / Med -- Kyle's 2026-07-18 board).
+_DRAFT_BOARD_TEAM_START = 6
 _DRAFT_HEADER_BG = {'red': 0.90, 'green': 0.94, 'blue': 0.98}
-_DRAFT_BOARD_HEADER_BG = {'red': 0.12, 'green': 0.20, 'blue': 0.30}
+_DRAFT_BOARD_HEADER_BG = {'red': 0.12, 'green': 0.20, 'blue': 0.30}   # navy
+_DRAFT_WHITE = {'red': 1, 'green': 1, 'blue': 1}
+# Powder blue for the Pick/Team/Player (Top Pick) header trio, against the
+# navy band (Kyle 2026-07-18).
+_DRAFT_POWDER_BG = {'red': 0.72, 'green': 0.85, 'blue': 0.92}
 
 
 def _reapply_formula_cells(worksheet, rows):
@@ -391,12 +399,12 @@ def _replace_draft_tab(spreadsheet, rows, color_grid=None):
         _apply_draft_tab_dimensions(spreadsheet, worksheet, width)
         formats = [
             {'range': 'A1', 'format': {'textFormat': {'bold': True, 'fontSize': 14}}},
-            {'range': f'A2:{last_col}2', 'format': {'textFormat': {'italic': True}}},
         ]
         formats.extend(_draft_label_formats(rows, last_col))
         _batch_format(worksheet, formats)
-        if color_grid:
-            _apply_draft_board_colors(spreadsheet, worksheet, rows, color_grid)
+        _sheets_batch_update(spreadsheet, f'draft merges {DRAFT_TAB}',
+                             _draft_merge_requests(rows, worksheet.id))
+        _apply_draft_board_colors(spreadsheet, worksheet, rows, color_grid)
     except Exception as exc:
         print(f"[almanac] formatting skipped for {DRAFT_TAB}: {exc}")
 
@@ -404,108 +412,140 @@ def _replace_draft_tab(spreadsheet, rows, color_grid=None):
 
 
 def _draft_label_formats(rows, last_col):
-    """Bold the Draft Recap section labels (side-by-side leaderboards + the
-    board), the leaderboard column headers, and the board header row."""
+    """Format the Draft Recap tab (Kyle 2026-07-18): italic helper notes,
+    bold leaderboard bands + headers with the reordered Pts one-decimal
+    number format, the navy 'Top Pick' super-header band, and the navy
+    header row with its Pick/Team/Player trio in powder blue."""
     formats = []
+    navy_white = {'textFormat': {'bold': True, 'foregroundColor': _DRAFT_WHITE},
+                  'backgroundColor': _DRAFT_BOARD_HEADER_BG}
     for row_number, row in enumerate(rows, 1):
         first = row[0] if row else ''
-        seventh = row[6] if len(row) > 6 else ''
-        if first == 'Best Value Picks':
-            formats.append({
-                'range': f'A{row_number}:E{row_number}',
-                'format': {'textFormat': {'bold': True, 'fontSize': 12}},
-            })
-        if seventh == 'Biggest Busts':
-            formats.append({
-                'range': f'G{row_number}:K{row_number}',
-                'format': {'textFormat': {'bold': True, 'fontSize': 12}},
-            })
+        second = row[1] if len(row) > 1 else ''
+        # Helper-note row (Delta at A, keeper at F).
+        if isinstance(first, str) and first.startswith('Δ ='):
+            formats.append({'range': f'A{row_number}:F{row_number}',
+                            'format': {'textFormat': {'italic': True}}})
+        # Leaderboard band + column headers (value B-F, busts G-K).
+        if second == 'Best Value Picks':
+            for rng in (f'B{row_number}:F{row_number}', f'G{row_number}:K{row_number}'):
+                formats.append({'range': rng,
+                                'format': {'textFormat': {'bold': True, 'fontSize': 12}}})
+        if second == 'Pts' and len(row) > 3 and row[3] == 'Player':
+            for rng in (f'B{row_number}:F{row_number}', f'G{row_number}:K{row_number}'):
+                formats.append({'range': rng,
+                                'format': {'textFormat': {'bold': True},
+                                           'backgroundColor': _DRAFT_HEADER_BG}})
+            # One-decimal Pts (B / G) for the 10 rows of each block.
+            for col in ('B', 'G'):
+                formats.append({
+                    'range': f'{col}{row_number + 1}:{col}{row_number + 10}',
+                    'format': {'numberFormat': {'type': 'NUMBER', 'pattern': '0.0'}}})
+        # Section titles.
         if isinstance(first, str) and (first.startswith('Draft Board')
                                        or first.startswith('All-Time Draft Board')):
-            formats.append({
-                'range': f'A{row_number}:{last_col}{row_number}',
-                'format': {'textFormat': {'bold': True, 'fontSize': 12}},
-            })
-        if first == 'Player' and len(row) > 1 and row[1] == 'Team':
-            for cell_range in (f'A{row_number}:E{row_number}', f'G{row_number}:K{row_number}'):
-                formats.append({
-                    'range': cell_range,
-                    'format': {
-                        'textFormat': {'bold': True},
-                        'backgroundColor': _DRAFT_HEADER_BG,
-                    },
-                })
+            formats.append({'range': f'A{row_number}:{last_col}{row_number}',
+                            'format': {'textFormat': {'bold': True, 'fontSize': 12}}})
+        if isinstance(first, str) and first.startswith('Team-agnostic'):
+            formats.append({'range': f'A{row_number}:{last_col}{row_number}',
+                            'format': {'textFormat': {'italic': True}}})
+        # Navy 'Top Pick' super-header band (the merge is applied separately).
+        if first == '' and second == 'Top Pick':
+            formats.append({'range': f'A{row_number}:{last_col}{row_number}',
+                            'format': {**navy_white,
+                                       'horizontalAlignment': 'CENTER'}})
+        # Board header row: navy + white, Pick/Team/Player (B:D) in powder.
         if first == 'Rd':
-            formats.append({
-                'range': f'A{row_number}:{last_col}{row_number}',
-                'format': {
-                    'textFormat': {
-                        'bold': True,
-                        'foregroundColor': {'red': 1, 'green': 1, 'blue': 1},
-                    },
-                    'backgroundColor': _DRAFT_BOARD_HEADER_BG,
-                },
-            })
+            formats.append({'range': f'A{row_number}:{last_col}{row_number}',
+                            'format': navy_white})
+            formats.append({'range': f'B{row_number}:D{row_number}',
+                            'format': {'textFormat': {'bold': True},
+                                       'backgroundColor': _DRAFT_POWDER_BG}})
     return formats
 
 
+def _draft_merge_requests(rows, sheet_id):
+    """Merge each board's 'Top Pick' super-header across B:D (columns 1-3),
+    so it centers over the Pick/Team/Player trio."""
+    requests = []
+    for row_index, row in enumerate(rows):
+        if row and row[0] == '' and len(row) > 1 and row[1] == 'Top Pick':
+            requests.append({'mergeCells': {
+                'range': {'sheetId': sheet_id,
+                          'startRowIndex': row_index, 'endRowIndex': row_index + 1,
+                          'startColumnIndex': 1, 'endColumnIndex': 4},
+                'mergeType': 'MERGE_ALL'}})
+    return requests
+
+
 def _apply_draft_tab_dimensions(spreadsheet, worksheet, width):
-    """Col A (Player / Rd) wide; Min/Median + leaderboard meta narrow; D
-    fits the all-time board's 'Player -year' Top Pick links (it is only
-    Max / Pts elsewhere); team + Value columns sized for player names."""
+    """Kyle's 2026-07-18 house grid: 25 buffer / 40 short / 40 short / 125
+    player / 75 longer-number / 40 short, then 100 for every board and
+    leaderboard column after."""
     sheet_id = worksheet.id
     requests = [
-        _column_width_request(sheet_id, 0, 1, 120),
-        _column_width_request(sheet_id, 1, 3, 70),
-        _column_width_request(sheet_id, 3, 4, 150),
-        _column_width_request(sheet_id, 4, max(width, 5), 95),
+        _column_width_request(sheet_id, 0, 1, 25),
+        _column_width_request(sheet_id, 1, 3, 40),
+        _column_width_request(sheet_id, 3, 4, 125),
+        _column_width_request(sheet_id, 4, 5, 75),
+        _column_width_request(sheet_id, 5, 6, 40),
+        _column_width_request(sheet_id, 6, max(width, 7), 100),
     ]
     _sheets_batch_update(spreadsheet, f'format dimensions {worksheet.title}', requests)
 
 
 def _apply_draft_board_colors(spreadsheet, worksheet, rows, color_grid):
-    """Red->white->green per-cell color scale on the board, by player season
-    points. Text cells can't use Sheets' numeric gradient rule, so set the
-    backgrounds directly in one updateCells request (a backgroundColor-only
-    field mask preserves the player-name values)."""
-    rd_index = next(
-        (i for i, row in enumerate(rows) if row and row[0] == 'Rd'), None)
-    if rd_index is None:
-        return
-    all_points = [p for row in color_grid for p in row if p is not None]
-    if not all_points:
-        return
-    low, high = min(all_points), max(all_points)
-    team_count = max((len(row) for row in color_grid), default=0)
-    if not team_count:
-        return
+    """Red->white->green per-cell background on BOTH boards (Kyle
+    2026-07-18). The current board grades player-NAME cells by the passed
+    color_grid (invisible season points); the all-time board grades its
+    own visible paced numbers. Backgrounds are set directly (a numeric
+    gradient rule can't touch the current board's text cells), one
+    updateCells request each, backgroundColor-only so values survive."""
+    requests = []
 
-    cell_rows = []
-    for row in color_grid:
-        values = []
-        for col in range(team_count):
-            points = row[col] if col < len(row) else None
-            color = (_draft_gradient_color(points, low, high)
-                     if points is not None
-                     else {'red': 1, 'green': 1, 'blue': 1})
-            values.append({'userEnteredFormat': {'backgroundColor': color}})
-        cell_rows.append({'values': values})
+    # Current-season board: header row[1]=='Pick', colored by color_grid.
+    current_hdr = next((i for i, row in enumerate(rows)
+                        if row and row[0] == 'Rd' and len(row) > 1
+                        and row[1] == 'Pick'), None)
+    if color_grid and current_hdr is not None:
+        pts = [p for grid_row in color_grid for p in grid_row if p is not None]
+        if pts:
+            requests.append(_draft_color_request(
+                worksheet.id, current_hdr + 1, color_grid, min(pts), max(pts)))
 
-    start_row = rd_index + 1  # board data begins the row after the Rd header
-    request = {
-        'updateCells': {
-            'range': {
-                'sheetId': worksheet.id,
-                'startRowIndex': start_row,
-                'endRowIndex': start_row + len(color_grid),
-                'startColumnIndex': _DRAFT_BOARD_TEAM_START,
-                'endColumnIndex': _DRAFT_BOARD_TEAM_START + team_count,
-            },
-            'rows': cell_rows,
-            'fields': 'userEnteredFormat.backgroundColor',
-        },
-    }
-    _sheets_batch_update(spreadsheet, f'draft board colors {worksheet.title}', [request])
+    # All-time board: header row[1]=='Year', colored by the cells' own
+    # numbers (paced medians in the slot columns).
+    alltime_hdr = next((i for i, row in enumerate(rows)
+                        if row and row[0] == 'Rd' and len(row) > 1
+                        and row[1] == 'Year'), None)
+    if alltime_hdr is not None:
+        num_rows = rows[alltime_hdr + 1:]
+        grid = [[(float(c) if isinstance(c, (int, float)) else None)
+                 for c in row[_DRAFT_BOARD_TEAM_START:]] for row in num_rows]
+        vals = [c for grid_row in grid for c in grid_row if c is not None]
+        if vals:
+            requests.append(_draft_color_request(
+                worksheet.id, alltime_hdr + 1, grid, min(vals), max(vals)))
+
+    _sheets_batch_update(spreadsheet, f'draft board colors {worksheet.title}',
+                         requests)
+
+
+def _draft_color_request(sheet_id, start_row, grid, low, high):
+    """One updateCells background request for a board grid starting at
+    _DRAFT_BOARD_TEAM_START; None cells paint white."""
+    width = max((len(g) for g in grid), default=0)
+    cell_rows = [{'values': [
+        {'userEnteredFormat': {'backgroundColor': (
+            _draft_gradient_color(g[c], low, high)
+            if c < len(g) and g[c] is not None else {'red': 1, 'green': 1, 'blue': 1})}}
+        for c in range(width)]} for g in grid]
+    return {'updateCells': {
+        'range': {'sheetId': sheet_id, 'startRowIndex': start_row,
+                  'endRowIndex': start_row + len(grid),
+                  'startColumnIndex': _DRAFT_BOARD_TEAM_START,
+                  'endColumnIndex': _DRAFT_BOARD_TEAM_START + width},
+        'rows': cell_rows, 'fields': 'userEnteredFormat.backgroundColor'}}
 
 
 def _draft_gradient_color(value, low, high):

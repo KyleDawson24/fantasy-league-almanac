@@ -4728,16 +4728,14 @@ def _tab_style_requests(sheet_gid, title, formats):
         },
     } for start, end, pixels in widths)
     if is_team_tab:
-        # Auto-fit the two Player columns (C and S), like the ESPN writer's
-        # _auto_resize_columns_request.
+        # Fixed 125px Player columns (C and S) -- the house full-name width.
+        # Auto-fit blew them up on long CBS names (Kyle 2026-07-18).
         requests.extend({
-            'autoResizeDimensions': {
-                'dimensions': {
-                    'sheetId': sheet_gid,
-                    'dimension': 'COLUMNS',
-                    'startIndex': start,
-                    'endIndex': end,
-                },
+            'updateDimensionProperties': {
+                'range': {'sheetId': sheet_gid, 'dimension': 'COLUMNS',
+                          'startIndex': start, 'endIndex': end},
+                'properties': {'pixelSize': 125},
+                'fields': 'pixelSize',
             },
         } for start, end in ((2, 3), (18, 19)))
         # Header merges (Roster Days pairs, the Points banners, the CBS

@@ -2072,7 +2072,9 @@ def _best_season_block_rows(data, slot_caps):
     def _display_row(stat_row, season, label, display_slot, slot_code):
         row = dict(stat_row)
         name = row.get('display_name') or row.get('player_name') or ''
-        row['display_name'] = f'{name} ({season})'
+        # No '(year)' parenthetical -- the Year column below carries it
+        # (Kyle 2026-07-18).
+        row['display_name'] = name
         # The Team column doubles as YEAR in this section (Kyle
         # 2026-07-17: pro_team is only season-accurate on the CBS side;
         # a Year column is honest on both leagues). The sub-headers

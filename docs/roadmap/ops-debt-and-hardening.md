@@ -23,4 +23,6 @@ freshness` already covers data staleness.
 **Depends on:** nothing — items slot into gaps between feature sessions.
 
 **Seeded issues:** MLB-23 platform_* two-way fix · MLB-24 float determinism
-· MLB-25 backfill performance · MLB-26 operability baseline
+· MLB-25 backfill performance · MLB-26 operability baseline · MLB-90
+dbt-ify the CBS draft chain (retire the Draft Recap stopgap — greenlit for
+the pre-2.0 "go dbt-heavy" deep clean)

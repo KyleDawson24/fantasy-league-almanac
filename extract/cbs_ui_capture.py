@@ -44,11 +44,13 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import html as htmllib
 import json
 import random
 import re
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -72,9 +74,20 @@ TEMPLATES = {
     "transactions": BASE + "/transactions/all/{filter}/{year}",
     "rosters": BASE + "/teams/roster-report/{team_id}/{year}/",
     "drafts": BASE + "/draft/results/{year}:Pre-season:Pre-season/",
+    # Keyed draft results (2026-07-18): the {year}:Pre-season:Pre-season
+    # guess above only hits drafts literally NAMED Pre-season — the real
+    # keys live in the page's own sort <select> as option values
+    # ('/draft/results/{year}:{period}:{title}/', period 'Pre-season' or a
+    # supplemental-draft number; pre-2017 keys are two-part
+    # '{year}:Pre-season'). {view} is the server-side sort: 'round' is the
+    # only view carrying pick order; 'team' is the only one carrying the
+    # Total/Active Fpts value columns (where CBS has them); '' = the
+    # server's per-draft default.
+    "drafts_keyed": BASE + "/draft/results/{key}/{view}",
     "team_overview": BASE + "/history/team-overview/{team_id}",
 }
 TXN_FILTERS = ("all_but_lineup", "all")
+DRAFT_VIEWS = ("round", "team")
 
 # Per-surface content markers (any-of) — a page lands only if one is
 # present. The roster-report family renders without the league masthead,
@@ -83,6 +96,7 @@ SURFACE_MARKERS = {
     "standings": (MASTHEAD,),
     "transactions": (MASTHEAD,),
     "drafts": (MASTHEAD,),
+    "drafts_keyed": (MASTHEAD,),
     "team_overview": (MASTHEAD,),
     "rosters": ("Own %", "Start %", "TOTALS"),
 }
@@ -442,6 +456,118 @@ def run_transactions_sweep(client: UiClient, ui_dir: Path, last_season: int,
                 f, year, season_rows, pages), flush=True)
 
 
+# --------------------------------------------------------------------------
+# Draft-results sweep (2026-07-18) — every draft the league ever recorded,
+# by its EXACT key, in the two views that carry non-overlapping data.
+# --------------------------------------------------------------------------
+
+# Draft keys ride the sort <select> on every draft-results page: one
+# option per draft ('/draft/results/{key}/', no inner slash) plus the
+# current page's sort views ('{key}/round' — excluded here by [^"/]).
+_DRAFT_OPTION_RE = re.compile(
+    r'<option value="/draft/results/([^"/]+)/"[^>]*>([^<]*)</option>')
+
+
+def draft_catalog(ui_dir: Path) -> list:
+    """Union the draft dropdown across every captured draft page.
+
+    The catalog is discovered from ARCHIVED pages, not guessed: the 10
+    original {year}.html captures each embed the full list (verified
+    identical apart from the current page's own sort options). Entries:
+    key '{year}:{period}[:{title}]' with period 'Pre-season' or the
+    supplemental-draft number; two-part pre-2017 keys have no title.
+    Sorted into draft order within a year: Pre-season before period N —
+    the stitching order for treating same-year drafts as one draft."""
+    seen = {}
+    for page in sorted((ui_dir / "drafts").glob("*.html")):
+        html = page.read_text(encoding="utf-8", errors="replace")
+        for key, label in _DRAFT_OPTION_RE.findall(html):
+            parts = key.split(":")
+            if not parts[0].isdigit():
+                continue
+            period = parts[1] if len(parts) > 1 else "Pre-season"
+            period_order = 0 if period.lower() == "pre-season" else int(period)
+            seen[key] = {"key": key, "year": int(parts[0]), "period": period,
+                         "period_order": period_order,
+                         "title": parts[2] if len(parts) > 2 else "",
+                         "label": htmllib.unescape(label).strip()}
+    return sorted(seen.values(), key=lambda d: (d["year"], d["period_order"]))
+
+
+def _draft_fname(key: str, view: str) -> str:
+    safe = re.sub(r"[^A-Za-z0-9.-]+", "_", key)
+    return "%s__%s.html" % (safe, view or "default")
+
+
+def _draft_shape(html: str) -> dict:
+    """Content evidence for the manifest: subtitles (Round N / team names),
+    the label row's columns, and the pick-link count. Never trust a 200."""
+    subtitles = re.findall(r'<tr class="subtitle"><td[^>]*>(.*?)</td></tr>', html)
+    label = re.findall(r'<tr\s+class="label">(.*?)</tr>', html)
+    cols = [re.sub(r"\s+", " ", c).strip()
+            for c in re.findall(r"<th[^>]*>(.*?)</th>", label[0])] if label else []
+    return {"subtitles": len(subtitles),
+            "first_subtitle": re.sub(r"<[^>]+>", "", subtitles[0]).strip() if subtitles else None,
+            "label_cols": cols,
+            "player_links": len(re.findall(r"class='playerLink'", html))}
+
+
+def run_drafts_sweep(client: UiClient, ui_dir: Path, force: bool) -> None:
+    """Fetch every cataloged draft in both sort views, content-verified.
+
+    ~21 drafts x 2 views at polite pacing. The original {year}.html
+    captures stay untouched (append-only archive); keyed pages land at
+    drafts/keyed/{key}__{view}.html. A page lands if the masthead is
+    present; its pick-table shape is recorded in the manifest and the
+    verification file either way, so configured-but-never-held drafts
+    (the 2022/2024 Pre-season shells) are evidence, not surprises."""
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H%M%SZ")
+    catalog = draft_catalog(ui_dir)
+    if not catalog:
+        raise SystemExit("No draft options found under %s — run --capture first."
+                         % (ui_dir / "drafts"))
+    print("  catalog: %d drafts %d..%d" % (len(catalog), catalog[0]["year"],
+                                           catalog[-1]["year"]), flush=True)
+    report = []
+    for d in catalog:
+        entry = {"key": d["key"], "label": d["label"], "year": d["year"],
+                 "period": d["period"], "views": {}}
+        for view in DRAFT_VIEWS:
+            out = ui_dir / "drafts" / "keyed" / _draft_fname(d["key"], view)
+            if out.is_file() and out.stat().st_size > 0 and not force:
+                html, status = out.read_text(encoding="utf-8", errors="replace"), "present"
+            else:
+                html, meta = client.get("drafts_keyed",
+                                        key=urllib.parse.quote(d["key"], safe=":"),
+                                        view=view)
+                if html is None:
+                    append_manifest(ui_dir, meta, None)
+                    if "AUTH-BOUNCED" in str(meta.get("note", "")):
+                        raise SystemExit("Cookie no longer authenticates (%s) — re-extract "
+                                         "CBS_WEB_COOKIES and rerun; landed pages are kept."
+                                         % meta["url"])
+                    entry["views"][view] = {"status": "failed: %s" % meta.get("note")}
+                    continue
+                land(out, html)
+                meta["shape"] = _draft_shape(html)
+                append_manifest(ui_dir, meta, str(out))
+                status = "landed"
+            shape = _draft_shape(html)
+            shape["status"] = status
+            entry["views"][view] = shape
+        report.append(entry)
+        views = entry["views"]
+        print("  %-38s %s" % (d["label"],
+              " | ".join("%s: %s subs=%s links=%s cols=%s"
+                         % (v, views[v].get("status"), views[v].get("subtitles"),
+                            views[v].get("player_links"),
+                            ",".join(views[v].get("label_cols") or []))
+                         for v in views)), flush=True)
+    write_json(ui_dir / ("verification_drafts_%s.json" % stamp),
+               {"verified_at": stamp, "drafts": report})
+    print("  VERIFY: report at verification_drafts_%s.json" % stamp, flush=True)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     mode = ap.add_mutually_exclusive_group(required=True)
@@ -451,6 +577,8 @@ def main() -> None:
                       help="full-history transaction capture via start_row "
                            "pagination; pair with --last-season 2025 to leave "
                            "the live season to the API capture")
+    mode.add_argument("--drafts-sweep", action="store_true",
+                      help="every draft in the page catalog, round + team views")
     ap.add_argument("--last-season", type=int, default=2026)
     ap.add_argument("--txn-filters", default="all",
                     help="comma list for --transactions-sweep: all (includes the "
@@ -472,6 +600,8 @@ def main() -> None:
     print("cbs_ui_capture: league=%s landing=%s" % (league, ui_dir), flush=True)
     if args.probe:
         run_probe(client)
+    elif args.drafts_sweep:
+        run_drafts_sweep(client, ui_dir, args.force)
     elif args.transactions_sweep:
         filters = tuple(x.strip() for x in args.txn_filters.split(",") if x.strip())
         unknown = [x for x in filters if x not in TXN_FILTERS]

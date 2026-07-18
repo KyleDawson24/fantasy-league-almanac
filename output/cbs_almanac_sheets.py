@@ -51,6 +51,7 @@ of warehouse state, so TSV previews stay golden-able.
 """
 
 import re
+import statistics
 import time
 from datetime import date
 
@@ -59,6 +60,7 @@ import gspread
 import db
 from db import league_predicate, query_snowflake
 from almanac_data import get_optimal_season_candidates, get_optimal_team_candidates
+from cbs_draft_recap_data import get_draft_history
 # Shared board machinery ((a) reuse per Kyle 2026-07-13): the CBS Home
 # mirrors the ESPN Home by CALLING its builders, not by imitating them.
 # The private imports are deliberate and noted in BRAINTHOUGHTS as the
@@ -74,6 +76,7 @@ from almanac_render import (
     HOME_DEVIATION_LABEL,
     HOME_HEADER,
     SLOT_ORDER,
+    _bref_link,
     _bref_player_cell,
     _hitting_rate,
     _pitching_rate,
@@ -91,6 +94,7 @@ from sheets_writer import _get_authorized_client
 HOME_TAB = 'Home'
 RECORDS_TAB = 'Records'
 STANDINGS_TAB = 'Advanced Standings'
+DRAFT_TAB = 'Draft Recap'
 
 # The league's active-lineup shape, verbatim from the captured rules
 # (roster.positions): 19 active = C/1B/2B/3B/SS + OF*3 + DH + U + P*9.
@@ -2753,7 +2757,8 @@ def build_home_rows(context, nav_targets=None):
     for i in range(0, len(team_titles), 2):
         left.append(['', *(home_nav_link(t, t, nav_targets)
                            for t in team_titles[i:i + 2])])
-    left.append(['Draft Recap', 'Coming with the draft-history parse.'])
+    left.append([home_nav_link(DRAFT_TAB, DRAFT_TAB, nav_targets),
+                 'Every recorded draft: 2026 recap + all-time pick value.'])
     left.append([])
     left.append(['Points Glossary & Documentation'])
     left.extend([term, definition] for term, definition in _CBS_GLOSSARY)
@@ -3735,6 +3740,223 @@ def build_standings_rows(context, arc, finishes, active_franchises,
 # shape (see get_cbs_team_history_data + build_all_tabs).
 
 
+# ---------------------------------------------------------------------------
+# Draft Recap tab (2026-07-18, first cut for Kyle's QA)
+# ---------------------------------------------------------------------------
+
+_DRAFT_LAST_COL = 'T'   # A-D summary + 16 slot/team columns
+_DRAFT_VALUE_HEADER = ['Player', 'Team', 'Pick', 'Pts', 'Value']
+# All-time board coverage: pick sequence exists only where CBS recorded
+# it ('true': the 2025/2026 online drafts). Every other year is EXCLUDED
+# from the board and surfaces in Draft Classes instead: the team-list
+# years ride roster order, not draft order (proven: rho ~ -0.3..0.3 vs
+# value; the 2020 'rounds' are entry batches), and the 2024 zip of the
+# order skeleton x team lists inherits the same flaw on the PLAYER side
+# (its first render put Ohtani in all-time Round 19 -- indefensible).
+_DRAFT_ORDERED_TIERS = ('true',)
+_DRAFT_SEQUENCE_LABELS = {
+    'true': 'recorded',
+    'zip': 'not recoverable',
+    'rounds_suspect': 'as-entered (suspect)',
+    'none': 'not recorded',
+}
+
+
+def _draft_points_gradient():
+    """Red -> white -> green over season points, the ESPN board's scale.
+    Fresh dicts per call (the gspread in-place-mutation lesson)."""
+    return {
+        'minpoint': {'type': 'MIN', 'color': _FINISH_RED},
+        'midpoint': {'type': 'PERCENTILE', 'value': '50',
+                     'color': {'red': 1, 'green': 1, 'blue': 1}},
+        'maxpoint': {'type': 'MAX', 'color': _FINISH_GREEN},
+    }
+
+
+def _pts0(value):
+    return int(round(value)) if value is not None else ''
+
+
+def _draft_link(pick, label=None):
+    name = pick.get('player_name_raw') or ''
+    return _bref_link(name, label if label is not None else name)
+
+
+def build_draft_recap_rows(season_year, franchise_map, value_lens='calc_total',
+                           history=None):
+    """The Draft Recap tab: (rows, formats).
+
+    Three sections:
+      1. The current season, mirroring the ESPN Draft Recap: Best Value /
+         Biggest Busts leaderboards (value = overall pick minus season-
+         points rank) over a round x team board with per-round
+         Min/Median/Max. The season's Mini+Mega drafts are stitched.
+      2. The all-time board, TEAM-AGNOSTIC and re-cut to the current
+         16-team shape (Kyle's spec): all-time Round N = overall picks
+         (N-1)*16+1..N*16 of each ordered season; each slot cell is the
+         average points of that slot across seasons; Med/Max/Top Pick
+         summarize each round (Top Pick = the Max's 'Player -year').
+         Coverage is honestly thin -- see _DRAFT_ORDERED_TIERS.
+      3. Draft Classes: the order-free digest every recorded draft gets
+         (best picks by season points), carrying the per-year provenance
+         the no-order years can't put on a board.
+
+    value_lens keys the pick-value metric ('calc_total' now; 'calc_hitting',
+    'calc_pitching', or the page lenses 'page_total_fpts'/'page_active_fpts'
+    are drop-in swaps once Kyle picks -- everything downstream reads it).
+    history injects (picks, report) for tests; None fetches live."""
+    picks, report = history if history is not None else get_draft_history()
+    lens = value_lens
+    abbrev_by_name = {}
+    for meta in (franchise_map or {}).values():
+        if meta.get('name'):
+            abbrev_by_name[meta['name']] = meta.get('abbrev') or meta['name'][:4]
+
+    rows, formats = [], []
+
+    def _band(label, note=None):
+        rows.append([label])
+        formats.append({'range': f'A{len(rows)}:{_DRAFT_LAST_COL}{len(rows)}',
+                        'format': {'textFormat': {'bold': True},
+                                   'backgroundColor': _POWDER}})
+        if note:
+            rows.append([note])
+            formats.append({'range': f'A{len(rows)}:{_DRAFT_LAST_COL}{len(rows)}',
+                            'format': {'textFormat': {'italic': True, 'fontSize': 9}}})
+
+    rows.append([DRAFT_TAB])
+    formats.append({'range': f'A1:{_DRAFT_LAST_COL}1',
+                    'format': {'textFormat': {'bold': True, 'fontSize': 14}}})
+    rows.append(['Every draft CBS recorded for this league, 2011-2026. '
+                 'Value = calculated season points (league scoring) in the draft season.'])
+    formats.append({'range': f'A2:{_DRAFT_LAST_COL}2',
+                    'format': {'textFormat': {'italic': True},
+                               'backgroundColor': _PALE_BLUE}})
+    rows.append([])
+
+    # ---- Section 1: the current season, ESPN-shaped ----------------------
+    year_picks = [p for p in picks
+                  if p['season_year'] == season_year and p.get('overall_pick')]
+    ranked = sorted([p for p in year_picks if p.get(lens) is not None],
+                    key=lambda p: (-p[lens], p['overall_pick']))
+    for rank, p in enumerate(ranked, start=1):
+        p['points_rank'] = rank
+        p['value_delta'] = p['overall_pick'] - rank
+    parts = ' + '.join(dict.fromkeys(p['draft_label'] for p in year_picks))
+    _band(f'Draft Recap: {season_year}',
+          f'{parts} stitched as one {len(year_picks)}-pick draft. Value = overall '
+          f'pick minus season-points rank (positive = steal). Points are '
+          f'{season_year}-to-date.')
+    rows.append([])
+    header_row = len(rows) + 1
+    rows.append(['Best Value Picks', '', '', '', '', '', 'Biggest Busts'])
+    formats.append({'range': f'A{header_row}:{_DRAFT_LAST_COL}{header_row}',
+                    'format': {'textFormat': {'bold': True}}})
+    rows.append([*_DRAFT_VALUE_HEADER, '', *_DRAFT_VALUE_HEADER])
+    best = sorted(ranked, key=lambda p: (-p['value_delta'], p['overall_pick']))[:10]
+    busts = sorted(ranked, key=lambda p: (p['value_delta'], p['overall_pick']))[:10]
+
+    def _value_cells(p):
+        return [_draft_link(p), p['team_name_raw'] or '',
+                f"R{p['round_num']} #{p['overall_pick']}",
+                _pts0(p[lens]), f"{p['value_delta']:+d}"]
+
+    for good, bad in zip(best, busts):
+        rows.append([*_value_cells(good), '', *_value_cells(bad)])
+    rows.append([])
+
+    _band(f'Draft Board - {season_year}')
+    team_order, seen = [], set()
+    for p in sorted(year_picks, key=lambda p: p['overall_pick']):
+        if p['team_name_raw'] not in seen:
+            seen.add(p['team_name_raw'])
+            team_order.append(p['team_name_raw'])
+    rows.append(['Rd', 'Min', 'Median', 'Max',
+                 *[abbrev_by_name.get(t, (t or '')[:4]) for t in team_order]])
+    formats.append({'range': f'A{len(rows)}:{_DRAFT_LAST_COL}{len(rows)}',
+                    'format': {'textFormat': {'bold': True}}})
+    by_round_team = {}
+    for p in year_picks:
+        by_round_team[(p['round_num'], p['team_name_raw'])] = p
+    max_round = max((p['round_num'] or 0) for p in year_picks)
+    for rnd in range(1, max_round + 1):
+        round_picks = [by_round_team.get((rnd, t)) for t in team_order]
+        pts = [p[lens] for p in round_picks if p and p.get(lens) is not None]
+        summary = ([_pts0(min(pts)), _pts0(statistics.median(pts)), _pts0(max(pts))]
+                   if pts else ['', '', ''])
+        rows.append([rnd, *summary,
+                     *[_draft_link(p) if p else '' for p in round_picks]])
+    rows.append([])
+
+    # ---- Section 2: the all-time board, 16-team shape --------------------
+    hist = [p for p in picks
+            if p['order_tier'] in _DRAFT_ORDERED_TIERS and p.get('overall_pick')
+            and p['season_year'] != season_year and p.get(lens) is not None]
+    hist_years = sorted({p['season_year'] for p in hist})
+    _band('All-Time Draft Board -- 16-Team Shape',
+          'Team-agnostic, re-cut to the current shape: all-time Round N = overall '
+          'picks %d*(N-1)+1..%d*N of each season, whatever rounds those really '
+          'were. Cell = average points of that pick slot; Med/Max summarize the '
+          'round; Top Pick = the best single pick ever made in it. Coverage: %s '
+          '-- CBS recorded pick order for no earlier draft (see Draft Classes); '
+          '%d in progress, excluded.'
+          % (16, 16, ', '.join(str(y) for y in hist_years), season_year))
+    rows.append([])
+    rows.append(['Rd', 'Med', 'Max', 'Top Pick', *[str(s) for s in range(1, 17)]])
+    formats.append({'range': f'A{len(rows)}:{_DRAFT_LAST_COL}{len(rows)}',
+                    'format': {'textFormat': {'bold': True}}})
+    slot_vals, round_vals = {}, {}
+    for p in hist:
+        rnd16 = (p['overall_pick'] - 1) // 16 + 1
+        slot16 = (p['overall_pick'] - 1) % 16 + 1
+        slot_vals.setdefault((rnd16, slot16), []).append(p[lens])
+        round_vals.setdefault(rnd16, []).append(p)
+    grid_first = len(rows) + 1
+    for rnd in sorted(round_vals):
+        in_round = round_vals[rnd]
+        top = max(in_round, key=lambda p: p[lens])
+        med = statistics.median([p[lens] for p in in_round])
+        cells = []
+        for slot in range(1, 17):
+            vals = slot_vals.get((rnd, slot))
+            cells.append(_pts0(sum(vals) / len(vals)) if vals else '')
+        rows.append([rnd, _pts0(med), _pts0(top[lens]),
+                     _draft_link(top, f"{top['player_name_raw']} -{top['season_year']}"),
+                     *cells])
+    formats.append({'range': f'E{grid_first}:{_DRAFT_LAST_COL}{len(rows)}',
+                    'gradient': _draft_points_gradient()})
+    rows.append([])
+
+    # ---- Section 3: Draft Classes (order-free, every draft) --------------
+    _band('Draft Classes',
+          'Every recorded draft, ranked by points regardless of pick order. '
+          'CBS holds no draft records for 2009-2010, 2012, 2014, 2016 or '
+          'earlier seasons (2009 kept the pick sequence but lost the players).')
+    rows.append([])
+    rows.append(['Year', 'Picks', 'Rounds', 'Sequence', 'Best Picks', '', '', 'Notes'])
+    formats.append({'range': f'A{len(rows)}:{_DRAFT_LAST_COL}{len(rows)}',
+                    'format': {'textFormat': {'bold': True}}})
+    for year in sorted(report):
+        info = report[year]
+        year_all = [p for p in picks if p['season_year'] == year
+                    and p.get(lens) is not None]
+        top3 = sorted(year_all, key=lambda p: -p[lens])[:3]
+        misses = sum(v for k, v in (info.get('resolution') or {}).items()
+                     if k in ('ambiguous', 'unresolved'))
+        notes = [info.get('note') or '']
+        if misses:
+            notes.append(f'{misses} unresolved name{"s" if misses > 1 else ""}')
+        rows.append([
+            year, info['picks'], info.get('rounds') or '',
+            _DRAFT_SEQUENCE_LABELS.get(info['order'], info['order']),
+            *[_draft_link(p, f"{p['player_name_raw']} ({_pts0(p[lens])})")
+              for p in top3],
+            '; '.join(n for n in notes if n),
+        ])
+
+    return rows, formats
+
+
 def build_all_tabs(nav_targets=None):
     """Assemble every tab: [(title, rows, formats)], Home first, then
     Records, Standings, and one page per active franchise in current-
@@ -3845,12 +4067,15 @@ def build_all_tabs(nav_targets=None):
         affinity_rows=get_mlb_affinity(season),
     )
 
+    draft = build_draft_recap_rows(season, _fmap)
+
     # Third element: the team-tab title set -- the writer bulk-writes those
     # tabs RAW (zero-padded rate strings survive) + reapplies '=' formulas,
     # exactly like the ESPN team tabs.
     team_titles = {title for title, _, _ in team_tabs}
     return ([(HOME_TAB, *home), (RECORDS_TAB, *records),
-             (STANDINGS_TAB, *standings)] + team_tabs), link_map, team_titles
+             (STANDINGS_TAB, *standings), (DRAFT_TAB, *draft)] + team_tabs
+            ), link_map, team_titles
 
 
 # ---------------------------------------------------------------------------
@@ -4202,6 +4427,12 @@ _TEAM_WIDTHS = [(0, 1, 25), (1, 2, 75), (3, 4, 40), (4, 5, 50), (5, 6, 50),
                 (20, 21, 50), (21, 22, 50), (22, 23, 50), (23, 24, 50),
                 (24, 25, 55), (25, 26, 40), (26, 31, 80), (31, 32, 325)]
 
+# Draft Recap: A carries player links (leaderboards) AND the Rd/Year
+# stubs; D carries the all-time Top Pick links; E+ is the 16-column
+# board (2026 teams / all-time slots) -- linked names need the room.
+_DRAFT_WIDTHS = [(0, 1, 170), (1, 2, 150), (2, 3, 70), (3, 4, 150),
+                 (4, 20, 100)]
+
 
 def _tab_style_requests(sheet_gid, title, formats):
     """Every non-value mutation for one tab as raw batch_update requests:
@@ -4211,7 +4442,7 @@ def _tab_style_requests(sheet_gid, title, formats):
     header band, the builder's cell formats, and column widths."""
     # Team tabs freeze through the column-header band (5, like ESPN's
     # worksheet.freeze(rows=5)); the dashboard tabs keep the 2-row band.
-    is_team_tab = title not in (HOME_TAB, RECORDS_TAB, STANDINGS_TAB)
+    is_team_tab = title not in (HOME_TAB, RECORDS_TAB, STANDINGS_TAB, DRAFT_TAB)
     requests = [{
         'repeatCell': {
             'range': {'sheetId': sheet_gid},   # whole sheet
@@ -4316,6 +4547,8 @@ def _tab_style_requests(sheet_gid, title, formats):
         widths = _RECORDS_WIDTHS
     elif title == STANDINGS_TAB:
         widths = _STANDINGS_WIDTHS
+    elif title == DRAFT_TAB:
+        widths = _DRAFT_WIDTHS
     else:
         widths = _TEAM_WIDTHS
     requests.extend({

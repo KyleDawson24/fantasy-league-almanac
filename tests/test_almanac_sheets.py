@@ -1312,22 +1312,25 @@ class TestAdvancedStandingsRows:
         )
 
         assert any(r and r[0] == 'Roster Affinity by MLB Team' for r in rows)
-        # Round 12: the season half begins at column C; the right half
-        # starts past the U divider (idx 21).
-        aff_pad = [''] * 17                 # spine + blank + 2 teams -> V
-        hdr = rows.index(['MLB Team', '', 'AAA', 'BBB', *aff_pad,
+        # Round 14: the season BLOCK indents -- spine at C (riding the
+        # Owner column's width), season columns from E, all-time still
+        # past the U divider; columns alphabetical by abbrev.
+        aff_pad = [''] * 15                 # E + 2 teams -> pad to V
+        hdr = rows.index(['', '', 'MLB Team', '', 'AAA', 'BBB', *aff_pad,
                           'AAA', 'BBB'])
         assert rows[hdr - 1][2] == '2026 to date'
         assert rows[hdr - 1][21] == 'All-Time'
-        # Round 13: the spine shows full club names (static abbrev map).
+        # The spine shows full club names (static abbrev map).
         atl = next(r for r in rows[hdr + 1:]
-                   if r and r[0] == 'Atlanta Braves')
+                   if len(r) > 2 and r[2] == 'Atlanta Braves')
         nyy = next(r for r in rows[hdr + 1:]
-                   if r and r[0] == 'New York Yankees')
+                   if len(r) > 2 and r[2] == 'New York Yankees')
         # Shares are per COLUMN, as FRACTIONS (the write layer formats the
         # blocks as PERCENT): AAA season = 30 + 10 involvement, BBB = 5.
-        assert atl == ['Atlanta Braves', '', 0.75, 1.0, *aff_pad, 0.6, 1.0]
-        assert nyy == ['New York Yankees', '', 0.25, '', *aff_pad, 0.4, '']
+        assert atl == ['', '', 'Atlanta Braves', '', 0.75, 1.0,
+                       *aff_pad, 0.6, 1.0]
+        assert nyy == ['', '', 'New York Yankees', '', 0.25, '',
+                       *aff_pad, 0.4, '']
 
     def test_rank_chart_block_leads_the_tab(self):
         import almanac_write
@@ -1460,10 +1463,12 @@ class TestAdvancedStandingsRows:
         assert len(almanac_write._slot_grid_bounds(rows)) == 1
         assert len(almanac_write._acquisition_table_bounds(rows)) == 2
         (aff,) = almanac_write._affinity_bounds(rows)
-        assert rows[aff['hdr']][0] == 'MLB Team'
+        assert rows[aff['hdr']][aff['spine0']] == 'MLB Team'
         assert aff['end'] - aff['hdr'] - 1 == 1   # one MLB club row
-        # Round-12 geometry: season half at C, all-time past the divider.
-        assert aff['left0'] == 2 and aff['n_t'] == 1
+        # Round-14 geometry: spine at C, season columns from E, all-time
+        # past the divider.
+        assert aff['spine0'] == 2
+        assert aff['left0'] == 4 and aff['n_t'] == 1
         assert aff['right0'] == 21
 
 

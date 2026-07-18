@@ -579,18 +579,21 @@ def _affinity_bounds(rows):
     abbrev runs, so the geometry survives pad-width changes)."""
     bounds = []
     for i, r in enumerate(rows):
-        if r and r[0] == 'MLB Team':
-            end = i + 1
-            while (end < len(rows) and rows[end]
-                   and rows[end][0] not in ('', None)):
-                end += 1
-            left0, n_t = 2, 0
-            while left0 + n_t < len(r) and r[left0 + n_t] not in ('', None):
-                n_t += 1
-            right0 = next((j for j in range(left0 + n_t, len(r))
-                           if r[j] not in ('', None)), None)
-            bounds.append({'hdr': i, 'end': end, 'left0': left0,
-                           'right0': right0, 'n_t': n_t})
+        spine0 = next((j for j in range(0, 5)
+                       if len(r) > j and r[j] == 'MLB Team'), None)
+        if spine0 is None:
+            continue
+        end = i + 1
+        while (end < len(rows) and len(rows[end]) > spine0
+               and rows[end][spine0] not in ('', None)):
+            end += 1
+        left0, n_t = spine0 + 2, 0
+        while left0 + n_t < len(r) and r[left0 + n_t] not in ('', None):
+            n_t += 1
+        right0 = next((j for j in range(left0 + n_t, len(r))
+                       if r[j] not in ('', None)), None)
+        bounds.append({'hdr': i, 'end': end, 'spine0': spine0,
+                       'left0': left0, 'right0': right0, 'n_t': n_t})
     return bounds
 
 

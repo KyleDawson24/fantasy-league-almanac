@@ -1190,9 +1190,13 @@ def build_advanced_standings_tab_rows(standings_rows, slot_rows, stat_specs,
     # left the league keeps its history out of the column set without
     # distorting anyone else's distribution (shares are per-column).
     if affinity_rows:
-        team_ids = [t['team_id'] for t in standings_rows]
+        # Columns alphabetical by abbrev (Kyle round 14 -- find your team
+        # fast; the other tables keep standings order).
+        aff_teams = sorted(standings_rows,
+                           key=lambda t: (t.get('team_abbrev') or '').upper())
+        team_ids = [t['team_id'] for t in aff_teams]
         id_set = set(team_ids)
-        abbrevs = [t.get('team_abbrev') or '' for t in standings_rows]
+        abbrevs = [t.get('team_abbrev') or '' for t in aff_teams]
         season_g, alltime_g, clubs = {}, {}, set()
         for r in affinity_rows:
             if r['team_id'] not in id_set:
@@ -1214,10 +1218,14 @@ def build_advanced_standings_tab_rows(standings_rows, slot_rows, stat_specs,
             return round(games / total, 3) if games and total else ''
 
         n_t = len(team_ids)
-        # Kyle round 12: the season half begins at column C and the right
-        # half starts past the almanac-wide U divider, so the affinity
-        # chart lines up with every other L/R table on the tab.
-        aff_pad = [''] * max(0, ESPN_DIVIDER_COL0 + 1 - (2 + n_t))
+        # Kyle rounds 12-14: the season block INDENTS -- spine at column
+        # C (riding the Owner column's 125px so full club names render),
+        # spilling into blank D, season columns from E -- while the
+        # all-time half stays past the almanac-wide U divider. The title
+        # and explainer keep column A.
+        spine0 = 2
+        season0 = spine0 + 2
+        aff_pad = [''] * max(0, ESPN_DIVIDER_COL0 + 1 - (season0 + n_t))
         rows.append([])
         rows.append(['Roster Affinity by MLB Team'])
         rows.append([
@@ -1227,13 +1235,13 @@ def build_advanced_standings_tab_rows(standings_rows, slot_rows, stat_specs,
             "value for given MLB team."
         ])
         sub_labels = [''] * (ESPN_DIVIDER_COL0 + 1)
-        sub_labels[2] = f'{season_year} to date'
+        sub_labels[spine0] = f'{season_year} to date'
         sub_labels.append('All-Time')
         rows.append(sub_labels)
-        rows.append(['MLB Team', '', *abbrevs, *aff_pad, *abbrevs])
+        rows.append(['', '', 'MLB Team', '', *abbrevs, *aff_pad, *abbrevs])
         for club in club_list:
             rows.append([
-                club_name[club], '',
+                '', '', club_name[club], '',
                 *[_share(season_g.get((tid, club), 0.0), season_tot[tid])
                   for tid in team_ids],
                 *aff_pad,

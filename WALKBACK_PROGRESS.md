@@ -1657,6 +1657,22 @@ It is committed at every checkpoint, so the branch on GitHub mirrors it.
 - Committed + pushed to origin/claude/modest-montalcini-3af8c4. Kyle
   picks it up for the next round = the actual release.
 
+### Round 14 (2026-07-18, post-push follow-up): the affinity indent
+
+- Kyle caught the season block still hugging column A (two renders
+  running). Landed his mock exactly: spine at C -- riding the Owner
+  column's 125px, which is WHY his mock's full club names rendered
+  while the column-A version clipped -- spilling into blank D, season
+  columns from E, all-time untouched at V, title/explainer at A. The
+  writer now derives the spine position from the header row instead of
+  assuming column A.
+- Fantasy-team columns on the affinity chart sort ALPHABETICALLY by
+  abbrev (were standings-ordered; the chart is a find-your-team scan).
+  ESPN only for now -- CBS's affinity columns stay standings-ordered
+  until Kyle wants the same there.
+- Byte-diff golden re-anchored for the new shape; 229 unit + byte-diff
+  green. Pushed as 5d10bba.
+
 ## Round — Gold-standard headers + Best Individual Seasons (2026-07-17)
 
 - **Header gold standard (Kyle's hand-mocked layout, both leagues):**

@@ -88,6 +88,12 @@ WHITELIST = {
     # universes + per-game lines. Same GET-only client, same museum rule.
     "stats": "league/stats",
     "gamelog": "players/gamelog",
+    # Draft-results probe (2026-07-18, the pre-2013 hunt): does the API
+    # serve draft history the site UI lost? Probed with bare/season/year
+    # params, verified by content. Same GET-only client, same museum rule.
+    "draft_results": "league/draft/results",
+    "draft_order": "league/draft/order",
+    "draft_config": "league/draft/config",
 }
 
 # Config snapshots taken once per run (endpoint key -> artifact name).

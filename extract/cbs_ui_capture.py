@@ -85,6 +85,11 @@ TEMPLATES = {
     # server's per-draft default.
     "drafts_keyed": BASE + "/draft/results/{key}/{view}",
     "team_overview": BASE + "/history/team-overview/{team_id}",
+    # Message Board Archive (2026-07-18, the pre-2013 draft hunt): the
+    # one league surface where DRAFT results could survive as human
+    # posts. Feed first; thread template refined after the feed's own
+    # hrefs reveal the real shape.
+    "messages_feed": BASE + "/messages/feed",
 }
 TXN_FILTERS = ("all_but_lineup", "all")
 DRAFT_VIEWS = ("round", "team")
@@ -98,6 +103,7 @@ SURFACE_MARKERS = {
     "drafts": (MASTHEAD,),
     "drafts_keyed": (MASTHEAD,),
     "team_overview": (MASTHEAD,),
+    "messages_feed": (MASTHEAD,),
     "rosters": ("Own %", "Start %", "TOTALS"),
 }
 

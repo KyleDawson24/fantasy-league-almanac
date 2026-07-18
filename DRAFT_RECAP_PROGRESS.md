@@ -168,6 +168,31 @@ suite: **234 passed** (was 229). Warehouse-marked suite untouched.
 
 ---
 
+## Round 8 -- the pre-2013 hunt (Kyle's late-night addendum)
+
+Kyle's recollection ("no draft data until 2013 or 2015") checks out as
+**2013** -- the first full record with player ids (462 picks). What
+exists before it, and where else the old data could hide, is now swept:
+
+| Avenue | Verdict |
+|--------|---------|
+| Draft pages 2009-2012 | 2009 = order skeleton, player cells EMPTY server-side (no ids, no anchors, nothing in attributes; 'Unknown 14/11' team labels smell like the same lossy migration). 2010/2012 = shell pages that don't even render the draft form. 2011 = 118 plain-text names (already in Draft Classes). |
+| Pre-2009 draft pages | Don't exist. The year-by-year dashboards prove it from CBS's own side: 2009+ pages carry a per-year `DRAFT RESULTS` button; the 2001-2008 pages have NO such link -- nothing to link to. |
+| Transaction logs 2001-2013 (both filters, full archive on disk) | ZERO draft events. Every 'draft' token count is exactly the page-furniture constant (29/file). Confirms the handoff's "CBS never logged drafts" for the early era too. |
+| Team-overview pages (34) | Furniture only (2026 mock-draft nav + the March 2026 draft banners). |
+| Message Board Archive | Live surface, honors `print_rows=9999` + `start_row` -- but **retains only the current season** (200 rows, all Apr-Jul 2026; deeper offsets empty; sort param ignored). One human thread ('Monarch draft list', 5/17/26) is mid-season 2026 chatter. Old threads are gone. Index landed at `data/.../ui/messages/feed_all.html`. |
+| API draft endpoints (`league/draft/results` / `draft/order` / `draft/config`, whitelisted read-only in cbs_capture.py) | **INCONCLUSIVE -- CBS_TOKEN has expired** (known-good `league/details` also 401s now; last good 2026-07-09). Re-probe after a token re-mint. Odds are low (the fantasy API layer has been current-season-only under every prior probe), but it's the one un-closed door on CBS. |
+| archive.org | Not probed -- the league site is login-walled, so crawlers only ever saw the login page. Structurally empty. |
+
+**Conclusion: CBS holds no recoverable draft data before 2011, and
+nothing at all before 2009. If pre-2013 completeness matters, the data
+has to come from off-platform artifacts** -- see new questions 12-14.
+(Reminder: the degraded fallback exists regardless -- the walk-back's
+opening-roster recovery can say WHO started each season 2001+, which is
+a "draft class" in all but sequence.)
+
+---
+
 ## Open questions for Kyle (morning review)
 
 1. **Value lens.** Defaulted to calculated season points (the record
@@ -213,6 +238,21 @@ suite: **234 passed** (was 229). Warehouse-marked suite untouched.
 11. **Layout** -- one tab with three sections vs splitting all-time
     onto its own tab; also whether the current-year section should sit
     below the all-time section instead of above.
+12. **CBS_TOKEN re-mint** (reCAPTCHA login, your manual step) -- needed
+    to (a) finish the API draft-endpoint probe (the last un-closed CBS
+    door for old drafts) and (b) unblock the API capture pipeline
+    generally before season-end.
+13. **Off-platform artifacts for 2001-2012 drafts**: CBS emails owners
+    draft-results/recap messages -- worth searching your Gmail for
+    circa-2001-2012 cbssports.com draft mail? Old commissioner
+    spreadsheets / league-email threads count too. The pipeline takes a
+    manual seed CSV cleanly (year, team, player, round/pick optional).
+14. **Did 2001-2008 drafts even happen on CBS?** The site has no
+    artifact at all for those years (round 8). If the early league
+    drafted by email/in-person and hand-entered rosters, there was
+    never anything to lose -- good to know before we mourn it. The
+    opening-roster walk-back fallback covers those years either way,
+    if you want degraded "draft class" rows for them.
 
 ## Ops notes
 

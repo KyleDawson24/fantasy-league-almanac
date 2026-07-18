@@ -327,16 +327,31 @@ sink later).
 # is no scripted credential flow — and these leagues are treated as
 # read-only museums by the capture scripts)
 CBS_LEAGUE=<league slug, e.g. bsb>
-CBS_TOKEN=<fantasy API access_token, extracted from a logged-in league page>
+CBS_TOKEN=<fantasy API access_token — extraction steps below>
 CBS_WEB_COOKIES=<the whole `cookie:` request-header value from devtools>
 ```
 
+Where the token actually hides (re-verified 2026-07-18 — the page has
+SEVERAL token-shaped variables; the old "Ctrl+F `var token`" tip no
+longer matches):
+
+1. Open any logged-in league page (e.g. `/standings/overall`) and View
+   Page Source. The right value is the `access_token` inside the
+   **global player-search function** (~128 chars) — the search widget
+   calls the same `api.cbssports.com/fantasy` API the capture scripts
+   do, which is what makes it the right one. The similarly-shaped CBSi
+   token is CBS Interactive's site-wide identity — not it.
+2. Zero-guess alternative: DevTools → Network → filter `fantasy` →
+   fire the player-search box → read `access_token=` off any
+   `api.cbssports.com/fantasy/...` request URL.
+
 `CBS_TOKEN` drives the API captures (`extract/cbs_capture.py`,
 `extract/cbs_backfill.py`); `CBS_WEB_COOKIES` drives the site-page
-archive (`extract/cbs_ui_capture.py`). Both expire eventually;
-re-extract from the browser when a run reports auth failure — the
-scripts refuse to land anything unauthenticated, so expiry can't
-corrupt the archive.
+archive (`extract/cbs_ui_capture.py`). Both expire eventually — the
+token's one observed lifetime is 2–11 days (minted 2026-07-07, alive
+07-09, dead by 07-18), so assume roughly a week and re-extract when a
+run reports auth failure. The scripts refuse to land anything
+unauthenticated, so expiry can't corrupt the archive.
 
 > `.env` is gitignored. Never commit credentials. The .env.example
 > template stays tracked for new-user onboarding.

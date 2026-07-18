@@ -181,7 +181,7 @@ exists before it, and where else the old data could hide, is now swept:
 | Transaction logs 2001-2013 (both filters, full archive on disk) | ZERO draft events. Every 'draft' token count is exactly the page-furniture constant (29/file). Confirms the handoff's "CBS never logged drafts" for the early era too. |
 | Team-overview pages (34) | Furniture only (2026 mock-draft nav + the March 2026 draft banners). |
 | Message Board Archive | Live surface, honors `print_rows=9999` + `start_row` -- but **retains only the current season** (200 rows, all Apr-Jul 2026; deeper offsets empty; sort param ignored). One human thread ('Monarch draft list', 5/17/26) is mid-season 2026 chatter. Old threads are gone. Index landed at `data/.../ui/messages/feed_all.html`. |
-| API draft endpoints (`league/draft/results` / `draft/order` / `draft/config`, whitelisted read-only in cbs_capture.py) | **INCONCLUSIVE -- CBS_TOKEN has expired** (known-good `league/details` also 401s now; last good 2026-07-09). Re-probe after a token re-mint. Odds are low (the fantasy API layer has been current-season-only under every prior probe), but it's the one un-closed door on CBS. |
+| API draft endpoints (`league/draft/results` / `draft/order` / `draft/config`, whitelisted read-only in cbs_capture.py) | **CLOSED 2026-07-18 (post re-mint): all three are LIVE but current-season-only.** `season`/`year` are cosmetic decoys (2009/2011/2013/2018 byte-identical to bare -- the `point`/`date` pattern again). No history door. CONSOLATION: the current payload is the STRUCTURED source for the 2026 Mega -- per-pick round/overall/team **with team ids** (HTML never had them), full player objects, elapsed times, plus the 90-message draft-room chat log. Landed append-only at `data/cbs_raw/bsb/2026/draft/`; API shows only the season's LATEST draft, so the Mini still rides the HTML capture. Fold into the seasonal capture before rollover. |
 | archive.org | Not probed -- the league site is login-walled, so crawlers only ever saw the login page. Structurally empty. |
 
 **Conclusion: CBS holds no recoverable draft data before 2011, and
@@ -238,19 +238,19 @@ a "draft class" in all but sequence.)
 11. **Layout** -- one tab with three sections vs splitting all-time
     onto its own tab; also whether the current-year section should sit
     below the all-time section instead of above.
-12. **CBS_TOKEN re-mint** (reCAPTCHA login, your manual step) -- needed
-    to (a) finish the API draft-endpoint probe (the last un-closed CBS
-    door for old drafts) and (b) unblock the API capture pipeline
-    generally before season-end. Procedure documented in MLB-13's
-    2026-07-07 "60-second unblock" comment (+ SETUP.md section 6):
-    logged-in browser -> any league page (e.g. /standings/overall) ->
-    View Page Source -> Ctrl+F `var token` -> copy the quoted ~128-char
-    value -> `CBS_TOKEN=<value>` in the root .env. TTL datum MLB-13
-    asked us to record: minted 2026-07-07, verified alive 2026-07-09,
-    dead by 2026-07-18 -- observed lifetime 2-11 days, so plan sweeps
-    accordingly. (`CBS_WEB_COOKIES` is separate and still authenticated
-    as of tonight; grab a fresh cookie header in the same trip if you
-    want both topped up.)
+12. ~~CBS_TOKEN re-mint~~ **RESOLVED 2026-07-18**: Kyle re-minted from
+    the global player-search function's `access_token` in page source
+    (the old "Ctrl+F `var token`" tip no longer matches -- several
+    token-shaped variables exist now; the CBSi one is a decoy).
+    Verified by content (`league/details` -> "Box Score Baseball").
+    Corrected procedure + network-tab alternative documented in
+    SETUP.md section 6 and MLB-13 (2026-07-18 comment). TTL datum:
+    minted 07-07, alive 07-09, dead by 07-18 -- observed lifetime 2-11
+    days; plan sweeps around ~a week. Draft-endpoint probe completed on
+    the fresh token -- verdict in the round-8 table (history door
+    closed; current-season structured feed gained + landed).
+    (`CBS_WEB_COOKIES` is separate and still authenticated; worth
+    topping up on the next login trip.)
 13. **Off-platform artifacts for 2001-2012 drafts**: CBS emails owners
     draft-results/recap messages -- worth searching your Gmail for
     circa-2001-2012 cbssports.com draft mail? Old commissioner

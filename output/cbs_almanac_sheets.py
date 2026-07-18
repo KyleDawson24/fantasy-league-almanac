@@ -3849,8 +3849,7 @@ def build_draft_recap_rows(season_year, franchise_map, value_lens='calc_total',
     parts = ' + '.join(dict.fromkeys(p['draft_label'] for p in year_picks))
     _band(f'Draft Recap: {season_year}',
           f'{parts} stitched as one {len(year_picks)}-pick draft. Value = overall '
-          f'pick minus season-points rank (positive = steal). Points are '
-          f'{season_year}-to-date.')
+          f'pick minus season Total Points rank (positive = steal).')
     rows.append([])
     header_row = len(rows) + 1
     rows.append(['Best Value Picks', '', '', '', '', '', 'Biggest Busts'])

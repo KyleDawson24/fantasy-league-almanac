@@ -720,7 +720,8 @@ def build_draft_tab_rows(board_rows, season_year, league_id=None,
     del league_id
     rows = [
         [f'Draft Recap: {season_year}'],
-        ['Value = Overall pick minus Total Points rank. (K) = keeper.'],
+        ['Value = overall pick minus season Total Points rank (positive = steal). '
+         '(K) = keeper.'],
         [],
     ]
 

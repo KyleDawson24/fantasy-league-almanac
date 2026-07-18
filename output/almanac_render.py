@@ -46,6 +46,7 @@ ADVANCED_STANDINGS_TAB = 'Advanced Standings'
 
 # v1.2 draft tab: Best Value / Biggest Bust leaderboard columns.
 DRAFT_VALUE_HEADER = ['Pts', 'Tm', 'Player', '(Rd) #Pick', 'Δ Rank']
+DRAFT_ALLTIME_CELLS_LABEL = "Each Round × Pick's Historical Median Value"
 
 
 # v2.0 Advanced Standings, Table A: the identity columns ahead of the

@@ -45,6 +45,7 @@ from almanac_render import (
     HOME_DEVIATION_LABEL,
     HOME_HEADER,
     HOME_TAB,
+    DRAFT_ALLTIME_CELLS_LABEL,
     DRAFT_TAB,
     DRAFT_VALUE_HEADER,
     RECORDS_HEADER,
@@ -773,62 +774,93 @@ def build_draft_tab_rows(board_rows, season_year, league_id=None,
     if history_rows:
         team_count = len({r.get('team_id') for r in board_rows
                           if r.get('team_id') is not None}) or 1
-        factors, n = season_pace_factors(season_clocks or {}, season_year)
+        factors, _ = season_pace_factors(season_clocks or {}, season_year)
         seasons = sorted({r['season_year'] for r in history_rows})
+        has_keepers = any(r.get('keeper') for r in history_rows)
+        keeper_note = (" Round K holds keepers, ranked by production (each "
+                       "team's best kept, 2nd-best, and so on)." if has_keepers
+                       else '')
         rows.append([])
         rows.append([])
         rows.append([f'All-Time Draft Board - {team_count}-Team Shape'])
         rows.append([f'Team-agnostic, re-cut to the current {team_count}-team '
-                     f'shape. Cell = the slot’s median Total Points; Med/Max '
-                     f'summarize the round; Top Pick = the top-scoring single '
-                     f'pick ever made in it. Points are paced to a standard '
-                     f'{int(round(n))}-period season so the year in flight '
-                     f'counts fairly; the Top Pick stays unpaced. '
+                     f'shape. Top Pick = the top-scoring single pick ever made '
+                     f'in that round.{keeper_note} '
                      f'Coverage: {", ".join(str(y) for y in seasons)}.'])
         rows.extend(_alltime_draft_grid(history_rows, team_count, factors))
     return rows
 
 
 def _alltime_draft_grid(history_rows, team_count, factors):
-    """All-time board, re-cut to the current team count: super-header +
-    header, then one row per re-cut round. Each round's slot cell = the
-    MEDIAN of that slot's season-PACED Total Points across every covered
-    draft (a 16-team-era pick #17 lands in today's round 2); Med = the
-    round's paced median, Max + Top Pick = the round's STRAIGHT
-    (unpaced) best single pick, its year / team / player. Blank where no
-    draft reached the slot."""
-    slot_paced = defaultdict(list)
-    round_paced = defaultdict(list)
-    round_rows = defaultdict(list)
-    for r in history_rows:
-        overall = r.get('overall_pick')
-        pts = r.get('season_points')
-        if not overall or pts is None:
-            continue
-        rnd = (overall - 1) // team_count + 1
-        slot = (overall - 1) % team_count + 1
-        paced = float(pts) * factors.get(r['season_year'], 1.0)
-        slot_paced[(rnd, slot)].append(paced)
-        round_paced[rnd].append(paced)
-        round_rows[rnd].append(r)
+    """All-time board, re-cut to the current team count. Super-header +
+    header, then (for keeper leagues) a 'K' keeper round, then one row per
+    re-cut DRAFTED round. Cells are the MEDIAN of a slot's season-PACED
+    Total Points across covered drafts; Med = the round's paced median;
+    Max + Top Pick = the round's STRAIGHT (unpaced) best single pick.
+
+    Keepers are pulled out of the pick sequence (they occupy draft slots
+    but weren't competitively drafted, so they'd pollute the slot
+    averages -- Kyle 2026-07-18): the 'K' round's cells are the paced
+    median by keeper RANK (each team's best keeper, 2nd-best, ...), and
+    the drafted picks are RE-SEQUENCED per season with the keeper gaps
+    removed before the team_count re-cut, so drafted round 1 is the first
+    player actually drafted."""
+    def _paced(r):
+        return float(r['season_points']) * factors.get(r['season_year'], 1.0)
+
+    def _usable(r):
+        return r.get('overall_pick') and r.get('season_points') is not None
+
+    keepers = [r for r in history_rows if r.get('keeper') and _usable(r)]
+    drafted = [r for r in history_rows if not r.get('keeper') and _usable(r)]
 
     grid = [
-        ['', 'Top Pick'],
+        ['', 'Top Pick', '', '', '', '', DRAFT_ALLTIME_CELLS_LABEL],
         ['Rd', 'Year', 'Team', 'Player', 'Max', 'Med',
          *[str(s) for s in range(1, team_count + 1)]],
     ]
-    for rnd in sorted(round_rows):
-        top = max(round_rows[rnd], key=lambda r: float(r['season_points']))
-        cells = []
-        for slot in range(1, team_count + 1):
-            vals = slot_paced.get((rnd, slot))
-            cells.append(_whole(statistics.median(vals)) if vals else '')
-        grid.append([
-            rnd, top['season_year'], top.get('team_abbrev') or '',
-            _draft_player_label(top),
-            _whole(float(top['season_points'])),
-            _whole(statistics.median(round_paced[rnd])),
-            *cells])
+
+    def _round_row(label, paced_by_slot, all_paced, top_pool):
+        top = max(top_pool, key=lambda r: float(r['season_points']))
+        cells = [_whole(statistics.median(paced_by_slot[s]))
+                 if paced_by_slot.get(s) else ''
+                 for s in range(1, team_count + 1)]
+        return [label, top['season_year'], top.get('team_abbrev') or '',
+                _draft_player_label(top), _whole(float(top['season_points'])),
+                _whole(statistics.median(all_paced)), *cells]
+
+    # Keeper 'K' round -- columns re-purposed as keeper RANK, not pick slot.
+    if keepers:
+        rank_paced = defaultdict(list)
+        by_team_season = defaultdict(list)
+        for r in keepers:
+            by_team_season[(r['season_year'], r.get('team_id'))].append(r)
+        for group in by_team_season.values():
+            for rank, r in enumerate(
+                    sorted(group, key=lambda r: -float(r['season_points'])), 1):
+                rank_paced[rank].append(_paced(r))
+        grid.append(_round_row('K', rank_paced,
+                               [_paced(r) for r in keepers], keepers))
+
+    # Drafted rounds -- re-sequenced per season (keeper gaps removed).
+    slot_paced = defaultdict(list)
+    round_paced = defaultdict(list)
+    round_pool = defaultdict(list)
+    by_season = defaultdict(list)
+    for r in drafted:
+        by_season[r['season_year']].append(r)
+    for season_picks in by_season.values():
+        for seq, r in enumerate(
+                sorted(season_picks, key=lambda r: r['overall_pick']), 1):
+            rnd = (seq - 1) // team_count + 1
+            slot = (seq - 1) % team_count + 1
+            slot_paced[(rnd, slot)].append(_paced(r))
+            round_paced[rnd].append(_paced(r))
+            round_pool[rnd].append(r)
+    for rnd in sorted(round_pool):
+        by_slot = {s: slot_paced[(rnd, s)] for s in range(1, team_count + 1)
+                   if (rnd, s) in slot_paced}
+        grid.append(_round_row(rnd, by_slot, round_paced[rnd], round_pool[rnd]))
     return grid
 
 

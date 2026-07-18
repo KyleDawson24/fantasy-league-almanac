@@ -65,10 +65,13 @@ def test_layout_and_bands():
     assert any(l.startswith('All-Time Draft Board') for l in flat)
     assert any(l.startswith('Draft Classes') for l in flat)
     assert formats[0]['range'].startswith('A1:')
-    # Both boards paint via cell_colors, and each carries a 'Top Pick'
-    # super-header merge (B:D).
+    # Both boards paint via cell_colors; three merges = a 'Top Pick' (B:D)
+    # on each board + the all-time cells label (G:V).
     assert sum('cell_colors' in f for f in formats) == 2
-    assert sum(bool(f.get('merge')) for f in formats) == 2
+    assert sum(bool(f.get('merge')) for f in formats) == 3
+    assert any(cbs._ALLTIME_CELLS_LABEL in r for r in rows if r)
+    # Data-driven coverage line names the ordered-draft years.
+    assert any('Coverage: 2025' in str(r[0]) for r in rows if r)
 
 
 def test_current_season_value_math():

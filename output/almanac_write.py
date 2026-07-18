@@ -466,9 +466,10 @@ def _draft_label_formats(rows, last_col):
     # board's team cells are names, so only its Max/Med (E:F) center.
     for kind, first_row, last_row in _draft_board_data_ranges(rows):
         end_col = 'F' if kind == 'Pick' else last_col
-        formats.append({
-            'range': f'E{first_row}:{end_col}{last_row}',
-            'format': {'horizontalAlignment': 'CENTER'}})
+        for rng in (f'A{first_row}:B{last_row}',
+                    f'E{first_row}:{end_col}{last_row}'):
+            formats.append({'range': rng,
+                            'format': {'horizontalAlignment': 'CENTER'}})
     return formats
 
 
@@ -489,16 +490,22 @@ def _draft_board_data_ranges(rows):
 
 
 def _draft_merge_requests(rows, sheet_id):
-    """Merge each board's 'Top Pick' super-header across B:D (columns 1-3),
-    so it centers over the Pick/Team/Player trio."""
+    """Merge each board's 'Top Pick' super-header across B:D, plus (on the
+    all-time board) the 'Each Round x Pick...' label across G:end."""
+    def _merge(row_index, c0, c1):
+        return {'mergeCells': {
+            'range': {'sheetId': sheet_id,
+                      'startRowIndex': row_index, 'endRowIndex': row_index + 1,
+                      'startColumnIndex': c0, 'endColumnIndex': c1},
+            'mergeType': 'MERGE_ALL'}}
+
+    width = max((len(r) for r in rows), default=0)
     requests = []
     for row_index, row in enumerate(rows):
         if row and row[0] == '' and len(row) > 1 and row[1] == 'Top Pick':
-            requests.append({'mergeCells': {
-                'range': {'sheetId': sheet_id,
-                          'startRowIndex': row_index, 'endRowIndex': row_index + 1,
-                          'startColumnIndex': 1, 'endColumnIndex': 4},
-                'mergeType': 'MERGE_ALL'}})
+            requests.append(_merge(row_index, 1, 4))
+            if len(row) > 6 and row[6]:
+                requests.append(_merge(row_index, 6, width))
     return requests
 
 
@@ -537,27 +544,32 @@ def _apply_draft_board_colors(spreadsheet, worksheet, rows, color_grid):
             requests.append(_draft_color_request(
                 worksheet.id, current_hdr + 1, color_grid, min(pts), max(pts)))
 
-    # All-time board: header row[1]=='Year', colored by the cells' own
-    # numbers (paced medians in the slot columns).
+    # All-time board: header row[1]=='Year'. Grade the Med column (index 5)
+    # + the cell columns (6+); Max (index 4) stays plain. The min/max scale
+    # is anchored to the CELLS so Med colors relative to the heat map (Kyle
+    # 2026-07-18).
     alltime_hdr = next((i for i, row in enumerate(rows)
                         if row and row[0] == 'Rd' and len(row) > 1
                         and row[1] == 'Year'), None)
     if alltime_hdr is not None:
         num_rows = rows[alltime_hdr + 1:]
         grid = [[(float(c) if isinstance(c, (int, float)) else None)
-                 for c in row[_DRAFT_BOARD_TEAM_START:]] for row in num_rows]
-        vals = [c for grid_row in grid for c in grid_row if c is not None]
-        if vals:
+                 for c in row[5:]] for row in num_rows]
+        cell_vals = [float(c) for row in num_rows for c in row[6:]
+                     if isinstance(c, (int, float))]
+        if cell_vals:
             requests.append(_draft_color_request(
-                worksheet.id, alltime_hdr + 1, grid, min(vals), max(vals)))
+                worksheet.id, alltime_hdr + 1, grid, min(cell_vals), max(cell_vals),
+                start_col=5))
 
     _sheets_batch_update(spreadsheet, f'draft board colors {worksheet.title}',
                          requests)
 
 
-def _draft_color_request(sheet_id, start_row, grid, low, high):
+def _draft_color_request(sheet_id, start_row, grid, low, high,
+                         start_col=_DRAFT_BOARD_TEAM_START):
     """One updateCells background request for a board grid starting at
-    _DRAFT_BOARD_TEAM_START; None cells paint white."""
+    start_col; None cells paint white."""
     width = max((len(g) for g in grid), default=0)
     cell_rows = [{'values': [
         {'userEnteredFormat': {'backgroundColor': (
@@ -567,8 +579,8 @@ def _draft_color_request(sheet_id, start_row, grid, low, high):
     return {'updateCells': {
         'range': {'sheetId': sheet_id, 'startRowIndex': start_row,
                   'endRowIndex': start_row + len(grid),
-                  'startColumnIndex': _DRAFT_BOARD_TEAM_START,
-                  'endColumnIndex': _DRAFT_BOARD_TEAM_START + width},
+                  'startColumnIndex': start_col,
+                  'endColumnIndex': start_col + width},
         'rows': cell_rows, 'fields': 'userEnteredFormat.backgroundColor'}}
 
 

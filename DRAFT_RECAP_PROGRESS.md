@@ -333,6 +333,36 @@ worth it later. Commit aaf8bc8.
 
 ---
 
+## Round 12 -- the 2022-23 pitcher "drift" is a SCORING RULE CHANGE (2026-07-18)
+
+Kyle asked me to dig into the ~15% gap between our calculated pitcher
+points and CBS's own 2022-23 page Fpts. Verdict: **not a bug -- the
+league added two pitcher categories in 2024, and our lens re-scores
+every era under TODAY's rules (as the coverage note says).**
+
+Proof (85 pitchers/2023, 100/2022, page Fpts from the draft pages vs
+`int_cbs__player_season_stats` calc):
+- **Starters, 2022-23**: `page = calc - 4·QS` -- residual mean ~-2,
+  sd 5. So **Quality Starts (QS, now +4) were NOT scored before 2024.**
+- **Relievers, 2022-23**: `page = calc - 4·QS - 2·IRSTR` -- residual
+  **0.0, sd 0.0** (a perfect fit, every reliever). So **Inherited
+  Runners Stranded (IRSTR, now +2) were ALSO not scored before 2024.**
+  (Relievers have ~0 QS, so their whole gap is IRSTR; starters have ~0
+  IRSTR, so theirs is QS.)
+- **2024 + 2025**: calc / page = 1.000 exactly -- the rules match from
+  2024 on, which is why the record book reconciled 594/594 on 2025.
+
+So the ~10-15% inflation is QS + IRSTR credited retroactively to
+2022-23 pitchers who never earned those points under the rules of the
+day. It's the intended cross-era lens (consistent current-league
+scoring), already disclosed on the tab ("Points are calculated using
+current league scoring"). **No code change.** The only alternative --
+era-accurate scoring -- would need the historical rule sets captured
+per season, which the API doesn't serve (fantasy layer is
+current-season-only). Logged as a league-scoring-history fact.
+
+---
+
 ## Open questions for Kyle (morning review)
 
 1. **Value lens.** Defaulted to calculated season points (the record

@@ -231,6 +231,63 @@ the re-mint plainly for other users").
 
 ---
 
+## Round 10 -- the format overhaul (2026-07-18, from Kyle's mockup)
+
+Kyle's annotated ESPN mockup drove a big two-book restructure. Landed on
+BOTH almanacs identically (shared helpers where the writers allow):
+
+- **House column-width grid** adopted (25 buffer / 40 short / 125 name /
+  75 longer-number / 40 / 100+) and logged as a convention in
+  BRAINTHOUGHTS.
+- **Leaderboards** reorder to Pts / Tm / Player / (Rd) #Pick / Δ Rank
+  (one-decimal Pts, forced .0), value block in B-F and busts in G-K over
+  a 25px buffer at A; helper notes split (Δ at A3, italic keeper note at
+  F3 -- ESPN; CBS folds the Δ line into its section band since it has no
+  keepers).
+- **Both boards** surface each round's top pick: a navy 'Top Pick'
+  super-header merged over the powder-blue Pick/Team/Player trio, then
+  decimal-free Max/Med (Min dropped), then per-team/-slot cells as
+  first-initial bref links (`draft_initial_text`: JJ/TJ/CC stay whole).
+- **All-time board** lists Year (was the pick stub), and now **includes
+  the ongoing season, season-paced**: `season_pace_factors` generalizes
+  the get_season_gameplay_days clock (N = median closed-season
+  days/scoring-periods, each season weighed N/its-own; ESPN clock =
+  distinct daily scoring_period, CBS = gameplay days). Cells are the
+  slot's **paced median**; the straight (unpaced) **top pick** keeps its
+  Year/Team/Player, per Kyle's "prorating shouldn't affect Top Picks".
+- **Colour grading** both boards: current grades name cells by invisible
+  points; all-time grades its own visible paced numbers.
+- ESPN byte-diff golden re-anchored; 234 no-warehouse tests green; both
+  tabs rendered write-twice to their dev sheets (formatting verified).
+
+Interpretation calls I made from the mockup (flag if any are off):
+1. **Leaderboard columns**: buffer A, value B-F, busts G-K (so each
+   block's Pts sits in a >=40px column and the value Player rides the
+   125px name column; busts truncate in 100px, as the mockup shows).
+2. **All-time Max vs Med**: Max + Top Pick are the round's STRAIGHT
+   (unpaced) best; Med + the cells are paced. Only the year-in-flight
+   diverges (completed seasons pace ~1.0); matches "top pick stays
+   straight" but means a paced cell can exceed Max in rare cases.
+3. **Cell = median** (not mean) across a slot's seasons, per the mockup
+   note -- robust to the CBS long tail.
+4. **Pacing base = a day-clock** (ESPN ~184 scoring periods, CBS ~180
+   gameplay days), reusing your get_season_gameplay_days precedent
+   rather than 162-MLB-games. One swappable knob if you'd rather.
+5. **CBS keeps its extra furniture** (intro subtitle, powder section
+   bands, Draft Classes, the asterisk caveat) -- "identical" applied to
+   the shared leaderboard/boards, not to CBS dropping its multi-draft
+   sections.
+
+**PARKED (Kyle's own "park it if hairy")**: the keeper-league all-time
+"Round K" idea (top round = keeper slots, cells = avg by Nth-best
+keeper, then drafted picks start at round 1). Not built. Straightforward
+to add later: it's a pre-pass that re-cuts the first `keeper_slots` rows
+off the keeper-sorted columns before the drafted re-cut. bsb has no
+keepers so it only affects ESPN; ESPN's all-time set is 2025-only today,
+so there's no urgency.
+
+---
+
 ## Open questions for Kyle (morning review)
 
 1. **Value lens.** Defaulted to calculated season points (the record

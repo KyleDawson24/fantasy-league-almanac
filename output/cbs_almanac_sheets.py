@@ -3921,17 +3921,18 @@ def build_draft_recap_rows(season_year, franchise_map, value_lens='calc_total',
           f'pick minus season Total Points rank (positive = steal). (No keepers '
           f'in this league.)')
     rows.append([])
-    rows.append(['', 'Best Value Picks', '', '', '', '', 'Biggest Busts'])
-    for rng in (f'B{len(rows)}:F{len(rows)}', f'G{len(rows)}:K{len(rows)}'):
+    # Value block B-F, a buffer column at G, busts block H-L (Kyle
+    # 2026-07-18); the powder banner runs the full width across the buffer.
+    rows.append(['', 'Best Value Picks', '', '', '', '', '', 'Biggest Busts'])
+    for rng in (f'B{len(rows)}:F{len(rows)}', f'H{len(rows)}:L{len(rows)}'):
         formats.append({'range': rng,
                         'format': {'textFormat': {'bold': True, 'fontSize': 12}}})
-    rows.append(['', *_DRAFT_VALUE_HEADER, *_DRAFT_VALUE_HEADER])
+    rows.append(['', *_DRAFT_VALUE_HEADER, '', *_DRAFT_VALUE_HEADER])
     hdr = len(rows)
-    for rng in (f'B{hdr}:F{hdr}', f'G{hdr}:K{hdr}'):
-        formats.append({'range': rng,
-                        'format': {'textFormat': {'bold': True},
-                                   'backgroundColor': _PALE_BLUE}})
-    for col in ('B', 'G'):
+    formats.append({'range': f'B{hdr}:L{hdr}',
+                    'format': {'textFormat': {'bold': True},
+                               'backgroundColor': _PALE_BLUE}})
+    for col in ('B', 'H'):
         formats.append({'range': f'{col}{hdr + 1}:{col}{hdr + 10}',
                         'format': {'numberFormat': {'type': 'NUMBER', 'pattern': '0.0'}}})
     best = sorted(ranked, key=lambda p: (-p['value_delta'], p['overall_pick']))[:10]
@@ -3946,7 +3947,7 @@ def build_draft_recap_rows(season_year, franchise_map, value_lens='calc_total',
     for i in range(max(len(best), len(busts))):
         good = _value_cells(best[i]) if i < len(best) else list(blank5)
         bad = _value_cells(busts[i]) if i < len(busts) else list(blank5)
-        rows.append(['', *good, *bad])
+        rows.append(['', *good, '', *bad])
     rows.append([])
 
     # ---- Current-season board (Top Pick trio + Max/Med + team cells) -----

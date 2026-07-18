@@ -78,13 +78,14 @@ def test_current_season_value_math():
     rows, _ = _build()
     # points ranks: Stud One 1, Steal Two 2, Meh Two 3, Bust One 4.
     # value_delta = overall - rank: Stud +0, Steal +1, Meh +1, Bust -2.
-    # Row now: buffer A, value Pts/Tm/Player/(Rd)#Pick/ΔRank in B-F, busts G-K.
+    # Row now: buffer A, value B-F, buffer G, busts H-L (Kyle 2026-07-18).
     header = next(i for i, r in enumerate(rows) if len(r) > 1 and r[1] == 'Best Value Picks')
     first = rows[header + 2]
     assert 'Steal Two' in first[3] or 'Meh Two' in first[3]   # value Player col (D)
     assert first[5] == '+1'                                   # value Δ Rank (F)
-    assert 'Bust One' in first[8]                             # bust Player col (I)
-    assert first[10] == '-2'                                  # bust Δ Rank (K)
+    assert first[6] == ''                                     # buffer column (G)
+    assert 'Bust One' in first[9]                             # bust Player col (J)
+    assert first[11] == '-2'                                  # bust Δ Rank (L)
 
 
 def test_board_top_pick_and_summary():

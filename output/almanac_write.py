@@ -426,18 +426,18 @@ def _draft_label_formats(rows, last_col):
         if isinstance(first, str) and first.startswith('Δ ='):
             formats.append({'range': f'A{row_number}:F{row_number}',
                             'format': {'textFormat': {'italic': True}}})
-        # Leaderboard band + column headers (value B-F, busts G-K).
+        # Leaderboard band + column headers (value B-F, buffer G, busts H-L).
         if second == 'Best Value Picks':
-            for rng in (f'B{row_number}:F{row_number}', f'G{row_number}:K{row_number}'):
+            for rng in (f'B{row_number}:F{row_number}', f'H{row_number}:L{row_number}'):
                 formats.append({'range': rng,
                                 'format': {'textFormat': {'bold': True, 'fontSize': 12}}})
         if second == 'Pts' and len(row) > 3 and row[3] == 'Player':
-            for rng in (f'B{row_number}:F{row_number}', f'G{row_number}:K{row_number}'):
-                formats.append({'range': rng,
-                                'format': {'textFormat': {'bold': True},
-                                           'backgroundColor': _DRAFT_HEADER_BG}})
-            # One-decimal Pts (B / G) for the 10 rows of each block.
-            for col in ('B', 'G'):
+            # The powder banner runs the whole width, across the buffer (Kyle).
+            formats.append({'range': f'B{row_number}:L{row_number}',
+                            'format': {'textFormat': {'bold': True},
+                                       'backgroundColor': _DRAFT_HEADER_BG}})
+            # One-decimal Pts (value B / busts H) for the 10 rows of each block.
+            for col in ('B', 'H'):
                 formats.append({
                     'range': f'{col}{row_number + 1}:{col}{row_number + 10}',
                     'format': {'numberFormat': {'type': 'NUMBER', 'pattern': '0.0'}}})

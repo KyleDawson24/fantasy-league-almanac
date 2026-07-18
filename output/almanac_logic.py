@@ -758,13 +758,16 @@ def build_draft_tab_rows(board_rows, season_year, league_id=None,
     best_value = sorted(ranked, key=lambda r: (-r['value_delta'], r['overall_pick']))[:10]
     biggest_bust = sorted(ranked, key=lambda r: (r['value_delta'], r['overall_pick']))[:10]
 
-    rows.append(['', 'Best Value Picks', '', '', '', '', 'Biggest Busts'])
-    rows.append(['', *DRAFT_VALUE_HEADER, *DRAFT_VALUE_HEADER])
+    # Value block B-F, a buffer column at G, busts block H-L (Kyle
+    # 2026-07-18) -- the writer runs the powder header banner across the
+    # buffer even though the data leaves it empty.
+    rows.append(['', 'Best Value Picks', '', '', '', '', '', 'Biggest Busts'])
+    rows.append(['', *DRAFT_VALUE_HEADER, '', *DRAFT_VALUE_HEADER])
     blank = [''] * len(DRAFT_VALUE_HEADER)
     for index in range(max(len(best_value), len(biggest_bust))):
         left = format_draft_value_row(best_value[index]) if index < len(best_value) else list(blank)
         right = format_draft_value_row(biggest_bust[index]) if index < len(biggest_bust) else list(blank)
-        rows.append(['', *left, *right])
+        rows.append(['', *left, '', *right])
 
     rows.append([])
     rows.append([])

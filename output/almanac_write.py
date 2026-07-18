@@ -461,7 +461,31 @@ def _draft_label_formats(rows, last_col):
             formats.append({'range': f'B{row_number}:D{row_number}',
                             'format': {'textFormat': {'bold': True},
                                        'backgroundColor': _DRAFT_POWDER_BG}})
+    # Center-align the boards' point totals -- Max/Med on both boards, plus
+    # the all-time board's paced number cells (Kyle 2026-07-18). The current
+    # board's team cells are names, so only its Max/Med (E:F) center.
+    for kind, first_row, last_row in _draft_board_data_ranges(rows):
+        end_col = 'F' if kind == 'Pick' else last_col
+        formats.append({
+            'range': f'E{first_row}:{end_col}{last_row}',
+            'format': {'horizontalAlignment': 'CENTER'}})
     return formats
+
+
+def _draft_board_data_ranges(rows):
+    """(kind, first_data_row, last_data_row) 1-based inclusive for each
+    board, kind = 'Pick' (current) or 'Year' (all-time). Data runs from the
+    row after the 'Rd' header to the next all-blank row."""
+    ranges = []
+    for i, row in enumerate(rows):
+        if row and row[0] == 'Rd' and len(row) > 1 and row[1] in ('Pick', 'Year'):
+            start = i + 1
+            end = start
+            while end < len(rows) and rows[end] and any(c != '' for c in rows[end]):
+                end += 1
+            if end > start:
+                ranges.append((row[1], start + 1, end))
+    return ranges
 
 
 def _draft_merge_requests(rows, sheet_id):

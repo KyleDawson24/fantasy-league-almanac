@@ -3954,6 +3954,11 @@ def build_draft_recap_rows(season_year, franchise_map, value_lens='calc_total',
     # header (board_header_row is 1-based == the 0-based first data row).
     formats.append({'cell_colors': {'start_row0': board_header_row,
                                     'start_col0': 6, 'grid': color_grid}})
+    # Center the board's point totals (Max/Med); team cells are names (Kyle
+    # 2026-07-18).
+    if len(rows) > board_header_row:
+        formats.append({'range': f'E{board_header_row + 1}:F{len(rows)}',
+                        'format': {'horizontalAlignment': 'CENTER'}})
     rows.append([])
 
     # ---- Section 2: the all-time board, 16-team shape, season-paced ------
@@ -4012,6 +4017,11 @@ def build_draft_recap_rows(season_year, franchise_map, value_lens='calc_total',
                     for c in row] for row in alltime_color]
     formats.append({'cell_colors': {'start_row0': alltime_header_row,
                                     'start_col0': 6, 'grid': color_grid2}})
+    # Center every point total on the all-time board: Max/Med + the paced
+    # number cells (Kyle 2026-07-18).
+    if len(rows) > alltime_header_row:
+        formats.append({'range': f'E{alltime_header_row + 1}:{_DRAFT_LAST_COL}{len(rows)}',
+                        'format': {'horizontalAlignment': 'CENTER'}})
     rows.append([])
 
     # ---- Section 3: Draft Classes (order-free, every draft) --------------

@@ -241,7 +241,16 @@ a "draft class" in all but sequence.)
 12. **CBS_TOKEN re-mint** (reCAPTCHA login, your manual step) -- needed
     to (a) finish the API draft-endpoint probe (the last un-closed CBS
     door for old drafts) and (b) unblock the API capture pipeline
-    generally before season-end.
+    generally before season-end. Procedure documented in MLB-13's
+    2026-07-07 "60-second unblock" comment (+ SETUP.md section 6):
+    logged-in browser -> any league page (e.g. /standings/overall) ->
+    View Page Source -> Ctrl+F `var token` -> copy the quoted ~128-char
+    value -> `CBS_TOKEN=<value>` in the root .env. TTL datum MLB-13
+    asked us to record: minted 2026-07-07, verified alive 2026-07-09,
+    dead by 2026-07-18 -- observed lifetime 2-11 days, so plan sweeps
+    accordingly. (`CBS_WEB_COOKIES` is separate and still authenticated
+    as of tonight; grab a fresh cookie header in the same trip if you
+    want both topped up.)
 13. **Off-platform artifacts for 2001-2012 drafts**: CBS emails owners
     draft-results/recap messages -- worth searching your Gmail for
     circa-2001-2012 cbssports.com draft mail? Old commissioner

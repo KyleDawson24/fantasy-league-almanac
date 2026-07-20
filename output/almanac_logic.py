@@ -70,6 +70,12 @@ from almanac_render import (
     TEAM_WEEKS_BASE_HEADER,
     TEAM_WEEKS_SCORE_HEADER,
     TEAM_WEEKS_TAB,
+    TRADE_RECORD_HEADER,
+    TRADE_RECORD_LABEL,
+    TRADES_BLOCK_LABEL,
+    TRADES_HEADER,
+    TRADES_TAB,
+    SLOT_ORDER,
     boxscore_formula,
     format_all_league_team_row,
     format_all_league_team_row_with_deviation,
@@ -81,6 +87,8 @@ from almanac_render import (
     format_draft_board_cell,
     format_draft_value_row,
     format_standings_row,
+    format_trade_record_row,
+    format_trades_row,
     home_nav_link,
     standings_header,
     format_record_matrix_row,
@@ -579,6 +587,10 @@ def _home_left_rows(all_time_rows, team_titles, nav_targets, align_alltime_to=No
     rows.append([
         home_nav_link('Advanced Standings', ADVANCED_STANDINGS_TAB, nav_targets),
         'Standings + points by lineup slot.',
+    ])
+    rows.append([
+        home_nav_link('Trades', TRADES_TAB, nav_targets),
+        'Live trade block + interest marks.',
     ])
     rows.append(['Team Pages', 'Historic production by team.'])
     rows.extend(_home_team_grid_rows(team_titles, nav_targets))
@@ -1383,6 +1395,84 @@ def build_advanced_standings_tab_rows(standings_rows, slot_rows, stat_specs,
                   for tid in team_ids],
             ])
 
+    return rows
+
+
+# Trading Block sort classes (2026-07-20 dev-render feedback): being-
+# shopped first, unmarked-but-watched in the middle, declared-untouchable
+# at the bottom. Unrecognized future statuses sort with the unmarked.
+_TRADE_AVAILABILITY_RANK = {'ON_THE_BLOCK': 0, 'UNTOUCHABLE': 2}
+
+
+def build_trades_tab_rows(trade_data, season_year):
+    """Build the Trades tab (MLB-103): the live Trading Block stacked over
+    the season's executed Trade Record.
+
+    trade_data comes from almanac_data.get_trades_tab_data. Block rows
+    qualify per the ticket spec -- availability set (non-default) OR at
+    least one team marked interest -- and sort On the Block / unmarked /
+    Untouchable, by interest count then season Total Points (both
+    descending) within each class. Record rows are one per received
+    player, grouped per trade (newest first) then per receiving side
+    (name order); the per-side Sum cells and the per-trade Date Executed
+    cell are written once at the top of their spans and merged down by
+    the write layer.
+    """
+    rows = [
+        [f'Trades: {season_year}'],
+        ['The live trade market and the season trade ledger. Block marks '
+         'and Interested In counts come straight from ESPN (counts only -- '
+         'ESPN never reveals which teams). Trade Record points are each '
+         "player's production for the receiving team since the trade."],
+        [f"As of {trade_data.get('as_of') or ''} -- refreshes with every "
+         'almanac publish.'],
+        [],
+        [TRADES_BLOCK_LABEL],
+        list(TRADES_HEADER),
+    ]
+    qualifying = [
+        p for p in trade_data.get('players', [])
+        if p.get('availability') or (p.get('interest') or 0) > 0
+    ]
+    if qualifying:
+        qualifying.sort(key=lambda p: (
+            _TRADE_AVAILABILITY_RANK.get(p.get('availability'), 1),
+            -(p.get('interest') or 0),
+            -(p.get('total_pts') or 0),
+            (p.get('player_name') or '').lower(),
+        ))
+        rows.extend(format_trades_row(p) for p in qualifying)
+    else:
+        rows.append(['Nobody is on the block and nobody is drawing interest '
+                     '-- a quiet market.'])
+
+    rows.append([])
+    rows.append([])
+    rows.append([TRADE_RECORD_LABEL])
+    rows.append(list(TRADE_RECORD_HEADER))
+    trades = trade_data.get('trades') or []
+    if not trades:
+        rows.append(['No trades have been executed yet this season.'])
+        return rows
+    for trade in trades:
+        sides = defaultdict(list)
+        for leg in trade.get('legs') or []:
+            sides[leg.get('receiving_team') or ''].append(leg)
+        first_of_trade = True
+        for team in sorted(sides, key=str.lower):
+            side = sides[team]
+            side.sort(key=lambda l: (-(l.get('total_pts') or 0),
+                                     (l.get('player_name') or '').lower()))
+            sums = (round(sum(l.get('total_pts') or 0 for l in side), 1),
+                    round(sum(l.get('active_pts') or 0 for l in side), 1))
+            for i, leg in enumerate(side):
+                rows.append(format_trade_record_row(
+                    leg,
+                    team_sums=sums if i == 0 else None,
+                    date_display=(trade.get('date_display')
+                                  if first_of_trade else None),
+                ))
+                first_of_trade = False
     return rows
 
 

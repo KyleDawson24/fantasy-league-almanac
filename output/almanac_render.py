@@ -44,6 +44,40 @@ DRAFT_TAB = 'Draft Recap'
 ADVANCED_STANDINGS_TAB = 'Advanced Standings'
 
 
+TRADES_TAB = 'Trades'
+
+
+TRADES_BLOCK_LABEL = 'Trading Block'
+
+
+TRADE_RECORD_LABEL = 'Trade Record'
+
+
+# MLB-103 Trading Block header -- the ticket's column spec plus the season
+# Total / Active points columns from the 2026-07-20 dev-render feedback.
+TRADES_HEADER = ['Fantasy Team', 'MLB', 'Pos Eligibility', 'Player Name',
+                 'Trade Availability', 'Interest Count', 'Total Points',
+                 'Active Points']
+
+
+# Trade Record header, from Kyle's mock verbatim. One row per received
+# player; the two Sum columns hold per-receiving-side sums (merged down
+# the side's rows by the write layer) and Date Executed merges down the
+# whole trade. Points here are since-the-trade, for the receiving team.
+TRADE_RECORD_HEADER = ['Receiving Fantasy Team', 'MLB', 'Pos Eligibility',
+                       'Player Name', 'Sending Fantasy Team', '',
+                       'Total Points', 'Active Points', 'Sum of Trade Total',
+                       'Sum of Active Total', 'Date Executed']
+
+
+# ESPN tradeBlock statuses -> the UI-facing availability labels. A player
+# who qualifies on interest alone (no mark set) renders an empty cell.
+TRADE_AVAILABILITY_LABELS = {
+    'ON_THE_BLOCK': 'On the Block',
+    'UNTOUCHABLE': 'Untouchable',
+}
+
+
 # v1.2 draft tab: Best Value / Biggest Bust leaderboard columns.
 DRAFT_VALUE_HEADER = ['Pts', 'Tm', 'Player', '(Rd) #Pick', 'Δ Rank']
 DRAFT_ALLTIME_CELLS_LABEL = "Each Round × Pick's Historical Median Value"
@@ -868,6 +902,69 @@ def acquisition_gradient_columns():
     return [(base + off, direction)
             for base in (3, ESPN_DIVIDER_COL0 + 1)
             for off, direction in per_half]
+# Umbrella eligibility slots suppressed on the Trades tab: every
+# 1B/2B/3B/SS player is IF-eligible, every LF/CF/RF player is OF-eligible,
+# every SP/RP is P-eligible, and UTIL is universal -- listing them next to
+# the real positions is noise. ESPN's combo slots ('2B/SS', '1B/3B') are
+# not SLOT_ORDER keys, so they drop out of the intersection on their own.
+_TRADE_ELIGIBILITY_UMBRELLAS = {'IF', 'OF', 'UTIL', 'P'}
+
+
+def trade_eligibility_display(slot_names):
+    """Collapse an ESPN eligibleSlots name list to its atomic positions in
+    lineup order, e.g. ['LF', 'CF', 'OF', 'UTIL', 'BE', 'IL'] -> 'LF/CF'.
+
+    Falls back to the umbrella slots when no atomic position is present
+    (a UTIL-only bat), and to '--' when nothing displayable remains."""
+    names = set(slot_names or [])
+    atomic = [s for s in sorted(names & set(SLOT_ORDER), key=SLOT_ORDER.get)
+              if s not in _TRADE_ELIGIBILITY_UMBRELLAS]
+    if atomic:
+        return '/'.join(atomic)
+    umbrella = sorted(names & _TRADE_ELIGIBILITY_UMBRELLAS, key=SLOT_ORDER.get)
+    return '/'.join(umbrella) or '--'
+
+
+def format_trades_row(row):
+    """One Trading Block data row, in TRADES_HEADER order. `availability`
+    is the raw ESPN tradeBlock status (or None); `interest` the count of
+    teams that marked Interested In; the points are the player's season
+    Total / Active (Home-glossary semantics, unscoped by team)."""
+    name = row.get('player_name') or ''
+    return [
+        row.get('fantasy_team') or '',
+        row.get('pro_team') or '',
+        trade_eligibility_display(row.get('eligible_slots')),
+        _bref_link(name, name),
+        TRADE_AVAILABILITY_LABELS.get(row.get('availability'), ''),
+        row.get('interest') or 0,
+        row.get('total_pts') or 0,
+        row.get('active_pts') or 0,
+    ]
+
+
+def format_trade_record_row(leg, team_sums=None, date_display=None):
+    """One Trade Record leg row, in TRADE_RECORD_HEADER order.
+
+    team_sums (total, active) appear only on the first row of a receiving
+    side; date_display only on the first row of the whole trade -- the
+    write layer merges those cells down their spans, so continuation rows
+    carry empty strings there."""
+    name = leg.get('player_name') or ''
+    sum_total, sum_active = team_sums if team_sums else ('', '')
+    return [
+        leg.get('receiving_team') or '',
+        leg.get('pro_team') or '',
+        trade_eligibility_display(leg.get('eligible_slots')),
+        _bref_link(name, name),
+        leg.get('sending_abbrev') or '',
+        '',
+        leg.get('total_pts') or 0,
+        leg.get('active_pts') or 0,
+        sum_total,
+        sum_active,
+        date_display or '',
+    ]
 
 
 def format_record_matrix_row(spec, current_record=None, all_time_record=None,

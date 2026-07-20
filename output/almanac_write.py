@@ -37,6 +37,7 @@ from almanac_data import (
     get_team_rank_arc,
     get_espn_season_finishes,
     get_team_standings_alltime,
+    get_trades_tab_data,
     get_current_team_roster_stats,
     get_latest_matchup_period,
     get_roster_slot_capacities,
@@ -49,6 +50,7 @@ from almanac_data import (
 from almanac_logic import (
     SCORE_RECORD_SPECS,
     build_advanced_standings_tab_rows,
+    build_trades_tab_rows,
     build_draft_board_color_grid,
     build_draft_tab_rows,
     build_home_tab_rows,
@@ -62,6 +64,8 @@ from almanac_render import (
     DRAFT_TAB,
     HOME_TAB,
     RECORDS_TAB,
+    TRADE_AVAILABILITY_LABELS,
+    TRADES_TAB,
     RECORDS_MATRIX_DETAIL_HEADER,
     RECORDS_MATRIX_WIDTH,
     TEAM_HISTORY_DETAIL_HEADER,
@@ -159,6 +163,16 @@ def write_almanac(sheet_id, season_year=None, matchup_period=None):
             team_week_stat_specs),
         acquisition_rows_alltime=get_team_acquisition_channels_alltime(),
     )
+    # Trades is the one live-API tab; an ESPN hiccup shouldn't sink the
+    # whole publish. On failure the previous tab content stands, its
+    # As-of row showing exactly how stale it is.
+    try:
+        trades_tab_rows = build_trades_tab_rows(
+            get_trades_tab_data(season_year), season_year,
+        )
+    except Exception as exc:
+        print(f"[almanac] Trades tab skipped -- live ESPN pull failed: {exc}")
+        trades_tab_rows = None
     client = _get_authorized_client()
     spreadsheet = client.open_by_key(sheet_id)
 
@@ -186,10 +200,14 @@ def write_almanac(sheet_id, season_year=None, matchup_period=None):
     standings_ws = _replace_advanced_standings_tab(
         spreadsheet, standings_tab_rows, team_week_stat_specs,
     )
+    trades_ws = None
+    if trades_tab_rows is not None:
+        trades_ws = _replace_trades_tab(spreadsheet, trades_tab_rows)
 
     nav_targets = {
         ws.title: ws.id
-        for ws in (records_ws, matchup_ws, draft_ws, standings_ws, *team_worksheets)
+        for ws in (records_ws, matchup_ws, draft_ws, standings_ws, trades_ws,
+                   *team_worksheets)
         if ws is not None
     }
     rows = build_home_tab_rows(
@@ -204,7 +222,7 @@ def write_almanac(sheet_id, season_year=None, matchup_period=None):
 
     _sort_almanac_tabs(spreadsheet, [
         HOME_TAB, RECORDS_TAB, TEAM_WEEKS_TAB, ADVANCED_STANDINGS_TAB,
-        *[title for title, _ in team_pages], DRAFT_TAB,
+        TRADES_TAB, *[title for title, _ in team_pages], DRAFT_TAB,
     ])
 
     print(
@@ -1261,6 +1279,220 @@ def _replace_advanced_standings_tab(spreadsheet, rows, stat_specs):
         _batch_format(worksheet, formats)
     except Exception as exc:
         print(f"[almanac] standings formatting skipped: {exc}")
+
+    return worksheet
+
+
+def _trades_section_bounds(rows):
+    """Locate the Trades tab's two tables. Returns (block_hdr, block_end,
+    record_hdr, record_end): 0-based header row indices and the exclusive
+    ends of the data blocks beneath them; None for a missing table."""
+    block_hdr = next((i for i, r in enumerate(rows)
+                      if r and r[0] == 'Fantasy Team'), None)
+    record_hdr = next((i for i, r in enumerate(rows)
+                       if r and r[0] == 'Receiving Fantasy Team'), None)
+
+    def _data_end(start):
+        end = start
+        while end < len(rows) and rows[end] and rows[end][0] not in ('', None):
+            end += 1
+        return end
+
+    block_end = _data_end(block_hdr + 1) if block_hdr is not None else None
+    record_end = _data_end(record_hdr + 1) if record_hdr is not None else None
+    return block_hdr, block_end, record_hdr, record_end
+
+
+def _trade_record_groups(rows, record_hdr, record_end):
+    """Parse the Trade Record data block into its merge / band structure
+    straight from the written cells: a non-empty Date Executed cell (col
+    K) starts a trade, a non-empty Sum of Trade Total cell (col I) starts
+    a receiving side. Returns [{'start', 'end', 'sides': [[start, end],
+    ...]}] in 0-based row indices (ends exclusive). Rows before the first
+    date cell (e.g. the no-trades-yet notice) belong to no group."""
+    groups = []
+    for i in range(record_hdr + 1, record_end):
+        row = rows[i]
+        date_cell = row[10] if len(row) > 10 else ''
+        sum_cell = row[8] if len(row) > 8 else ''
+        if date_cell not in ('', None):
+            groups.append({'start': i, 'end': i + 1, 'sides': []})
+        if not groups:
+            continue
+        groups[-1]['end'] = i + 1
+        if sum_cell not in ('', None):
+            groups[-1]['sides'].append([i, i + 1])
+        elif groups[-1]['sides']:
+            groups[-1]['sides'][-1][1] = i + 1
+    return groups
+
+
+# Subtle per-trade banding + the availability text colors.
+_TRADES_BAND_BG = {'red': 0.945, 'green': 0.952, 'blue': 0.962}
+_TRADES_ON_BLOCK_COLOR = {'red': 0.0, 'green': 0.43, 'blue': 0.15}
+_TRADES_UNTOUCHABLE_COLOR = {'red': 0.72, 'green': 0.11, 'blue': 0.09}
+
+
+def _grid_range(sheet_id, start_row, end_row, start_col, end_col):
+    return {
+        'sheetId': sheet_id,
+        'startRowIndex': start_row,
+        'endRowIndex': end_row,
+        'startColumnIndex': start_col,
+        'endColumnIndex': end_col,
+    }
+
+
+def _apply_trade_record_merges(spreadsheet, worksheet, rows,
+                               record_hdr, record_end):
+    """Merge the per-side Sum cells (cols I / J) and the per-trade Date
+    Executed cells (col K) down their spans. The whole used region is
+    unmerged first: worksheet.clear() keeps old merges, and trade shapes
+    change between publishes, so stale merges would corrupt the layout."""
+    sheet_id = worksheet.id
+    width = max((len(row) for row in rows), default=11)
+    requests = [{
+        'unmergeCells': {
+            'range': _grid_range(sheet_id, 0, len(rows) + 10, 0, width),
+        },
+    }]
+    for group in _trade_record_groups(rows, record_hdr, record_end):
+        if group['end'] - group['start'] > 1:
+            requests.append({'mergeCells': {
+                'range': _grid_range(sheet_id, group['start'], group['end'],
+                                     10, 11),
+                'mergeType': 'MERGE_ALL',
+            }})
+        for side_start, side_end in group['sides']:
+            if side_end - side_start <= 1:
+                continue
+            for col in (8, 9):
+                requests.append({'mergeCells': {
+                    'range': _grid_range(sheet_id, side_start, side_end,
+                                         col, col + 1),
+                    'mergeType': 'MERGE_ALL',
+                }})
+    _sheets_batch_update(spreadsheet, f'trades merges {worksheet.title}',
+                         requests)
+
+
+def _replace_trades_tab(spreadsheet, rows):
+    """Clear / create the Trades tab and write both tables (Trading Block
+    over Trade Record). Returns the worksheet so write_almanac can wire
+    the Home nav band.
+
+    Written RAW so player / team names stay literal text and the point
+    cells stay numeric; the bref player links are then re-coerced to real
+    formulas via _reapply_formula_cells (the 7142278 pattern).
+    Availability cells get direct per-cell text colors rather than
+    conditional-format rules -- worksheet.clear() does not remove rules,
+    so repeated publishes would stack duplicates."""
+    width = max((len(row) for row in rows), default=11)
+    try:
+        worksheet = spreadsheet.worksheet(TRADES_TAB)
+    except gspread.WorksheetNotFound:
+        worksheet = _sheets_call(
+            f'create {TRADES_TAB}',
+            lambda: spreadsheet.add_worksheet(
+                title=TRADES_TAB,
+                rows=max(len(rows) + 10, 50),
+                cols=max(width, 11),
+            ),
+        )
+
+    _sheets_call(f'clear {TRADES_TAB}', worksheet.clear)
+    _sheets_call(
+        f'update {TRADES_TAB}',
+        lambda: worksheet.update(rows, 'A1', value_input_option='RAW'),
+    )
+    _reapply_formula_cells(worksheet, rows)
+
+    try:
+        sheet_id = worksheet.id
+        last_col = _a1_col(width)
+        block_hdr, block_end, record_hdr, record_end = (
+            _trades_section_bounds(rows)
+        )
+        _sheets_batch_update(
+            spreadsheet, f'trades widths {worksheet.title}',
+            [
+                _column_width_request(sheet_id, 0, 1, 190),   # Fantasy Team
+                _column_width_request(sheet_id, 1, 2, 45),    # MLB
+                _column_width_request(sheet_id, 2, 3, 105),   # Pos Eligibility
+                _column_width_request(sheet_id, 3, 4, 160),   # Player Name
+                _column_width_request(sheet_id, 4, 5, 110),   # Availability / Sender
+                _column_width_request(sheet_id, 5, 6, 68),    # Interest / spacer
+                _column_width_request(sheet_id, 6, 8, 62),    # Total / Active Points
+                _column_width_request(sheet_id, 8, 10, 78),   # Sum columns
+                _column_width_request(sheet_id, 10, 11, 88),  # Date Executed
+            ],
+        )
+        if record_hdr is not None:
+            _apply_trade_record_merges(spreadsheet, worksheet, rows,
+                                       record_hdr, record_end)
+
+        formats = [
+            {'range': 'A1', 'format': {'textFormat': {'bold': True, 'fontSize': 13}}},
+            {'range': 'A2:A3',
+             'format': {'textFormat': {'italic': True, 'fontSize': 9}}},
+        ]
+        header_band = {
+            'textFormat': {
+                'bold': True,
+                'foregroundColor': {'red': 1, 'green': 1, 'blue': 1},
+            },
+            'backgroundColor': {'red': 0.12, 'green': 0.20, 'blue': 0.30},
+            'wrapStrategy': 'WRAP',
+            'verticalAlignment': 'MIDDLE',
+        }
+        for header_idx in (block_hdr, record_hdr):
+            if header_idx is None:
+                continue
+            formats.append({
+                'range': f'A{header_idx + 1}:{last_col}{header_idx + 1}',
+                'format': header_band,
+            })
+            if header_idx >= 1:  # bold the section label one row above
+                formats.append({
+                    'range': f'A{header_idx}',
+                    'format': {'textFormat': {'bold': True}},
+                })
+        if block_hdr is not None:
+            availability_colors = {
+                TRADE_AVAILABILITY_LABELS['ON_THE_BLOCK']:
+                    _TRADES_ON_BLOCK_COLOR,
+                TRADE_AVAILABILITY_LABELS['UNTOUCHABLE']:
+                    _TRADES_UNTOUCHABLE_COLOR,
+            }
+            for idx in range(block_hdr + 1, block_end):
+                label = rows[idx][4] if len(rows[idx]) > 4 else ''
+                color = availability_colors.get(label)
+                if color is not None:
+                    formats.append({
+                        'range': f'E{idx + 1}',
+                        'format': {'textFormat': {'bold': True,
+                                                  'foregroundColor': color}},
+                    })
+        if record_hdr is not None:
+            groups = _trade_record_groups(rows, record_hdr, record_end)
+            if groups:
+                # Merged sum / date cells center both ways...
+                formats.append({
+                    'range': (f'I{record_hdr + 2}:{last_col}{record_end}'),
+                    'format': {'horizontalAlignment': 'CENTER',
+                               'verticalAlignment': 'MIDDLE'},
+                })
+            # ...and alternate trades carry a subtle band for readability.
+            for i, group in enumerate(groups):
+                if i % 2 == 1:
+                    formats.append({
+                        'range': (f"A{group['start'] + 1}:"
+                                  f"{last_col}{group['end']}"),
+                        'format': {'backgroundColor': _TRADES_BAND_BG},
+                    })
+        _batch_format(worksheet, formats)
+    except Exception as exc:
+        print(f"[almanac] trades formatting skipped: {exc}")
 
     return worksheet
 

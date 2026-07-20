@@ -3,7 +3,11 @@
 Tier 2c.1 (v1.1.1): SQL data-access surface of the league almanac.
 
 Every function in this module issues at least one Snowflake query via
-`query_snowflake` (or wraps a project-level data module like `records`).
+`query_snowflake` (or wraps a project-level data module like `records`),
+with one exception: the MLB-103 Trades-tab fetches read the live ESPN
+league API at build time -- the trading block is ephemeral current-state
+and the executed-trade ledger lives only in the communication feed, so
+neither has a warehouse landing.
 The module also carries the spec constructors and a small set of helpers
 that participate in the data shape -- they belong here, not in
 almanac_render.py, because render consumes finished spec dicts rather
@@ -18,7 +22,13 @@ re-exports every public name here for backward compatibility, so existing
 `import almanac_sheets` call sites continue to resolve unchanged.
 """
 
+import json
+import os
 import re
+from collections import defaultdict
+from datetime import datetime
+
+import requests
 
 from db import league_predicate, query_snowflake
 import records
@@ -1160,6 +1170,307 @@ def get_team_acquisition_channels(season_year):
         WHERE season_year = %s
           AND {league_predicate()}
     """, (season_year,))
+
+
+# ---------------------------------------------------------------------------
+# MLB-103 Trades tab: live ESPN league-API reads + warehouse points joins.
+# The trading block is ephemeral current-state (marks appear and vanish as
+# managers toggle them) and the executed-trade ledger only exists in the
+# communication feed, so both are fetched at build time rather than landed
+# through the warehouse; the points columns join from the season and daily
+# facts. Same cookie auth as extract/extract.py.
+# ---------------------------------------------------------------------------
+
+# Slot-id and pro-team-id decoders from the espn_api wrapper, mirroring
+# extract/extract.py's defensive getattr pattern.
+try:
+    from espn_api.baseball import constant as _espn_constant
+except ImportError:
+    _espn_constant = None
+_LINEUP_SLOT_MAP = getattr(_espn_constant, 'POSITION_MAP', {})
+_PRO_TEAM_MAP = getattr(_espn_constant, 'PRO_TEAM_MAP', {})
+
+_TRADE_PLAYERCARD_CHUNK = 60
+
+# Communication-feed message types (MLB-16 + MLB-103 spikes): 178 add,
+# 179 drop, 188 lineup noise, 224 trade ACCEPTED (member author), 239
+# trade-block marks, 244 trade EXECUTED (TradeTaskProcessor, ~a day after
+# its accepted-224 twin), 245 a drop-to-waivers baked into an executing
+# trade. The Trade Record keys off 244, so vetoed / still-pending trades
+# never appear; to=0 legs are the baked drops, received by nobody.
+_TRADE_EXECUTED_MSG_TYPE = 244
+
+
+def _espn_league_get(season_year, view, extra_headers=None, path=''):
+    """One cookie-authed GET against the league read API; returns JSON."""
+    league_id = os.getenv('LEAGUE_ID')
+    resp = requests.get(
+        'https://lm-api-reads.fantasy.espn.com/apis/v3/games/flb/seasons/'
+        f'{season_year}/segments/0/leagues/{league_id}{path}',
+        params={'view': view},
+        cookies={'swid': os.getenv('SWID'), 'espn_s2': os.getenv('ESPN_S2')},
+        headers=extra_headers or {},
+        timeout=30,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _espn_communication_topics(season_year):
+    """Every ACTIVITY_TRANSACTIONS topic for the season, paginated by
+    offset until a short page (the MLB-16 contract)."""
+    topics = []
+    offset = 0
+    while True:
+        page_filter = {
+            'topics': {
+                'filterType': {'value': ['ACTIVITY_TRANSACTIONS']},
+                'limit': 200,
+                'offset': offset,
+                'sortMessageDate': {'sortPriority': 1, 'sortAsc': False},
+            }
+        }
+        page = _espn_league_get(
+            season_year,
+            'kona_league_communication',
+            extra_headers={'x-fantasy-filter': json.dumps(page_filter)},
+            path='/communication/',
+        ).get('topics') or []
+        topics.extend(page)
+        if len(page) < 200:
+            break
+        offset += 200
+    return topics
+
+
+def _executed_trades(season_year):
+    """Executed trades from the communication feed, newest first:
+    [{'executed_ms', 'legs': [{'player_id', 'sending_team_id',
+    'receiving_team_id'}]}]. One topic per transaction event; only the
+    msgType-244 executed movements count, and to=0 legs (trade-baked
+    drops to waivers) are excluded."""
+    trades = []
+    for topic in _espn_communication_topics(season_year):
+        legs = [
+            {
+                'player_id': m.get('targetId'),
+                'sending_team_id': m.get('from'),
+                'receiving_team_id': m.get('to'),
+            }
+            for m in topic.get('messages') or []
+            if m.get('messageTypeId') == _TRADE_EXECUTED_MSG_TYPE
+            and m.get('to')
+        ]
+        if legs:
+            trades.append({'executed_ms': topic.get('date') or 0, 'legs': legs})
+    trades.sort(key=lambda t: -t['executed_ms'])
+    return trades
+
+
+def get_player_season_points(season_year):
+    """Season Total / Active points per player, league-wide, one query.
+
+    Home-glossary semantics, unscoped by team: Total = every point the
+    player produced all season (active + bench / IL + FA time); Active =
+    fantasy-credited production (performance_status = 'active').
+    Returns {player_id: {'total_pts', 'active_pts'}}.
+    """
+    rows = query_snowflake(f"""
+        SELECT
+            player_id,
+            ROUND(SUM(calculated_points), 1) AS total_pts,
+            ROUND(SUM(CASE WHEN performance_status = 'active'
+                           THEN calculated_points ELSE 0 END), 1) AS active_pts
+        FROM fct_player_season_performance
+        WHERE season_year = %s
+          AND {league_predicate()}
+        GROUP BY player_id
+    """, (season_year,))
+    return {
+        r['player_id']: {
+            'total_pts': r['total_pts'] or 0,
+            'active_pts': r['active_pts'] or 0,
+        }
+        for r in rows
+    }
+
+
+def _get_season_opener(season_year):
+    """The season's first scoring-period date (dim_matchup_period), for
+    converting a trade's execution date to an ESPN scoring period."""
+    rows = query_snowflake("""
+        SELECT MIN(start_date) AS opener
+        FROM dim_matchup_period
+        WHERE season_year = %s
+    """, (season_year,))
+    return rows[0]['opener'] if rows else None
+
+
+def _get_since_trade_points(season_year, player_ids):
+    """Per (player, team, scoring_period) point sums for trade-leg
+    players, one query; the caller slices per leg (team = receiver,
+    scoring_period >= the execution day's). player_name rides along as a
+    fallback label for players who have since left the ESPN pool."""
+    if not player_ids:
+        return []
+    placeholders = ', '.join(['%s'] * len(player_ids))
+    return query_snowflake(f"""
+        SELECT
+            player_id,
+            team_id,
+            scoring_period,
+            MAX(player_name) AS player_name,
+            SUM(total_stat_pts) AS total_pts,
+            SUM(CASE WHEN performance_status = 'active'
+                     THEN total_stat_pts ELSE 0 END) AS active_pts
+        FROM fct_player_daily_performance
+        WHERE season_year = %s
+          AND {league_predicate()}
+          AND player_id IN ({placeholders})
+        GROUP BY player_id, team_id, scoring_period
+    """, (season_year, *player_ids))
+
+
+def get_trades_tab_data(season_year):
+    """Everything the Trades tab renders: the live trading block plus the
+    season's executed Trade Record (MLB-103).
+
+    Live reads: mTeam (team names + abbrevs), mRoster (the rostered
+    universe -- dropped players with stale block marks fall out here),
+    kona_playercard in chunks (tradeBlock status + teamsWatching, plus
+    name / position metadata that covers traded players no longer
+    rostered), and the communication feed's transaction topics (executed
+    trades). Warehouse reads: season Total / Active points per player and
+    per-day points for the since-trade sums.
+
+    Returns {'as_of', 'players', 'trades'}:
+      players -- one dict per ROSTERED player: fantasy_team, player_name,
+        pro_team, eligible_slots (name list), availability (raw status or
+        None), interest, total_pts, active_pts.
+      trades -- newest first, one dict per EXECUTED trade: date_display
+        plus legs [{receiving_team, receiving_team_id, sending_abbrev,
+        player_name, pro_team, eligible_slots, total_pts, active_pts}],
+        the points scoped to production for the receiving team since the
+        execution day.
+
+    The playercard's teamIdsWatching (WHICH teams marked interest --
+    populated for your own roster only) is deliberately never read: the
+    tab publishes counts, not identities, matching what ESPN shows every
+    manager.
+    """
+    mteam = _espn_league_get(season_year, 'mTeam')
+    team_names, team_abbrevs = {}, {}
+    for t in mteam.get('teams', []):
+        team_names[t['id']] = t.get('name') or f"Team {t['id']}"
+        team_abbrevs[t['id']] = t.get('abbrev') or str(t['id'])
+
+    season_points = get_player_season_points(season_year)
+    mroster = _espn_league_get(season_year, 'mRoster')
+    players = {}
+    for team in mroster.get('teams', []):
+        for entry in (team.get('roster') or {}).get('entries', []):
+            player = (entry.get('playerPoolEntry') or {}).get('player') or {}
+            pid = entry.get('playerId')
+            pts = season_points.get(pid) or {}
+            players[pid] = {
+                'fantasy_team': team_names.get(team['id'], f"Team {team['id']}"),
+                'player_name': player.get('fullName') or str(pid),
+                'pro_team': _PRO_TEAM_MAP.get(player.get('proTeamId'), 'FA'),
+                'eligible_slots': [
+                    _LINEUP_SLOT_MAP.get(slot_id, str(slot_id))
+                    for slot_id in player.get('eligibleSlots') or []
+                ],
+                'availability': None,
+                'interest': 0,
+                'total_pts': pts.get('total_pts', 0),
+                'active_pts': pts.get('active_pts', 0),
+            }
+
+    trades = _executed_trades(season_year)
+    leg_pids = sorted({
+        leg['player_id'] for t in trades for leg in t['legs']
+        if leg.get('player_id')
+    })
+
+    cards = {}
+    card_pids = sorted(set(players) | set(leg_pids))
+    for start in range(0, len(card_pids), _TRADE_PLAYERCARD_CHUNK):
+        chunk = card_pids[start:start + _TRADE_PLAYERCARD_CHUNK]
+        card = _espn_league_get(
+            season_year,
+            'kona_playercard',
+            extra_headers={
+                'X-Fantasy-Filter': json.dumps(
+                    {'players': {'filterIds': {'value': chunk}}}
+                ),
+            },
+        )
+        for entry in card.get('players') or []:
+            cards[entry.get('id')] = entry
+
+    for pid, target in players.items():
+        block = (cards.get(pid) or {}).get('tradeBlock') or {}
+        target['availability'] = block.get('status')
+        target['interest'] = block.get('teamsWatching') or 0
+
+    opener = _get_season_opener(season_year)
+    daily_rows = defaultdict(list)
+    daily_names = {}
+    for r in _get_since_trade_points(season_year, leg_pids):
+        daily_rows[r['player_id']].append(r)
+        daily_names.setdefault(r['player_id'], r.get('player_name'))
+
+    for trade in trades:
+        exec_date = datetime.fromtimestamp(trade['executed_ms'] / 1000).date()
+        trade['date_display'] = (
+            f"{exec_date.month}/{exec_date.day}/{exec_date.year}"
+        )
+        cutoff_sp = max(1, (exec_date - opener).days + 1) if opener else 1
+        for leg in trade['legs']:
+            pid = leg.get('player_id')
+            receiver = leg.get('receiving_team_id')
+            total = active = 0.0
+            for r in daily_rows.get(pid, ()):
+                if (r['team_id'] == receiver
+                        and (r['scoring_period'] or 0) >= cutoff_sp):
+                    total += r['total_pts'] or 0
+                    active += r['active_pts'] or 0
+            card_player = (cards.get(pid) or {}).get('player') or {}
+            rostered = players.get(pid) or {}
+            leg.update({
+                'receiving_team': team_names.get(receiver, f"Team {receiver}"),
+                'sending_abbrev': team_abbrevs.get(
+                    leg.get('sending_team_id'),
+                    str(leg.get('sending_team_id') or ''),
+                ),
+                'player_name': (
+                    card_player.get('fullName')
+                    or rostered.get('player_name')
+                    or daily_names.get(pid)
+                    or str(pid)
+                ),
+                'pro_team': (
+                    _PRO_TEAM_MAP.get(card_player.get('proTeamId'))
+                    or rostered.get('pro_team')
+                    or 'FA'
+                ),
+                'eligible_slots': (
+                    [
+                        _LINEUP_SLOT_MAP.get(slot_id, str(slot_id))
+                        for slot_id in card_player.get('eligibleSlots') or []
+                    ]
+                    or rostered.get('eligible_slots')
+                    or []
+                ),
+                'total_pts': round(total, 1),
+                'active_pts': round(active, 1),
+            })
+
+    return {
+        'as_of': datetime.now().strftime('%Y-%m-%d %H:%M'),
+        'players': list(players.values()),
+        'trades': trades,
+    }
 
 
 def get_slot_capacities(season_year, matchup_period):

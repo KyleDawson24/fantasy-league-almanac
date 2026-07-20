@@ -131,6 +131,61 @@ def append_manifest(out_dir: Path, rec: dict) -> None:
         fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
 
+def discover_season(out_dir: Path, season: int, stamp: str) -> None:
+    """Close the new-player blind spot WITHOUT a full sweep (2026-07-19).
+
+    The main sweep is player-driven (walk the crosswalk, ask each player's
+    yearByYear which seasons exist), so a player whose FIRST appearance
+    postdates his landed season file is invisible until a --force re-fetch
+    of every season file (~3.9k calls). This mode asks the season-scoped
+    question directly: /sports/1/players?season=YYYY returns the season's
+    ENTIRE player pool in ONE call. Any pool member without a landed
+    {season} gamelog file gets his season file re-fetched + that season's
+    gamelogs pulled (~2-3 calls each, typically a few dozen players).
+
+    Universality is the point: the baseball layer deliberately carries
+    every MLB player (no league filter), so debuts land here BEFORE the
+    CBS crosswalk maps them -- when it catches up, the stats are already
+    on disk. Run AFTER a normal sweep; idempotent like everything else."""
+    pool = get("%s/sports/1/players?season=%d" % (API, season))
+    if pool is None:
+        raise SystemExit("player-pool fetch failed; try again")
+    people = pool.get("people", [])
+    missing = [p for p in people
+               if not list((out_dir / "gamelog" / str(p["id"])).glob("%d_*.json" % season))]
+    print("discover %d: pool=%d, missing a %d gamelog file: %d"
+          % (season, len(people), season, len(missing)), flush=True)
+    calls, landed = 1, 0
+    for p in missing:
+        mid = int(p["id"])
+        yby = get("%s/people/%d/stats?stats=yearByYear&group=hitting,pitching" % (API, mid))
+        calls += 1
+        if yby is None:
+            append_manifest(out_dir, {"ts": stamp, "mlbam": mid,
+                                      "note": "discover: season fetch failed"})
+            continue
+        write_json(out_dir / "season" / ("%d.json" % mid),
+                   {"fetched_at": stamp, "mlbam_id": mid, "stat": "yearByYear",
+                    "payload": yby})
+        for grp in sorted(season_groups(yby).get(str(season), ())):
+            g = grp.lower()
+            if g not in GROUPS:
+                continue
+            payload = get("%s/people/%d/stats?stats=gameLog&group=%s&season=%d"
+                          % (API, mid, g, season))
+            calls += 1
+            if payload is None:
+                append_manifest(out_dir, {"ts": stamp, "mlbam": mid, "season": season,
+                                          "group": g, "note": "discover: gamelog failed"})
+                continue
+            write_json(out_dir / "gamelog" / str(mid) / ("%d_%s.json" % (season, g)),
+                       {"fetched_at": stamp, "mlbam_id": mid, "season": str(season),
+                        "group": g, "stat": "gameLog", "payload": payload})
+            landed += 1
+    print("done: discover %d -- %d pool players, %d gamelog files landed, %d API calls."
+          % (season, len(people), landed, calls), flush=True)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--limit", type=int, help="only the first N crosswalk players")
@@ -144,11 +199,19 @@ def main() -> None:
                     help="sweep ONLY yearByYear group=fielding (one call per "
                          "player, all seasons) -- the games-by-position "
                          "eligibility input")
+    ap.add_argument("--discover", type=int, metavar="SEASON",
+                    help="one-call season-pool diff: fetch season+gamelogs for "
+                         "every player in the season's MLB pool missing a "
+                         "gamelog file (new debuts) -- no full sweep needed")
     args = ap.parse_args()
 
     root = find_repo_root(Path(__file__).resolve().parent)
     out_dir = root / "data" / "mlb_stats"
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H%M%SZ")
+
+    if args.discover:
+        discover_season(out_dir, args.discover, stamp)
+        return
 
     if args.players:
         players = [{"mlbam_id": p, "name": None} for p in args.players]

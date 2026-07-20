@@ -73,3 +73,6 @@ data/cbs_raw/
 !dbt_league/seeds/*.csv
 output/leagueNoteHeader.txt
 output/leagueNoteFooter.txt
+
+# Local-only safekeeping from branch/worktree cleanups (2026-07-20)
+archives/

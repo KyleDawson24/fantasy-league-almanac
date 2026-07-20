@@ -47,9 +47,27 @@ ADVANCED_STANDINGS_TAB = 'Advanced Standings'
 TRADES_TAB = 'Trades'
 
 
-# MLB-103 Trades tab header -- the ticket's column spec, verbatim.
-TRADES_HEADER = ['Fantasy Team', 'MLB Team', 'Pos Eligibility', 'Player Name',
-                 'Trade Availability', 'Interest Count']
+TRADES_BLOCK_LABEL = 'Trading Block'
+
+
+TRADE_RECORD_LABEL = 'Trade Record'
+
+
+# MLB-103 Trading Block header -- the ticket's column spec plus the season
+# Total / Active points columns from the 2026-07-20 dev-render feedback.
+TRADES_HEADER = ['Fantasy Team', 'MLB', 'Pos Eligibility', 'Player Name',
+                 'Trade Availability', 'Interest Count', 'Total Points',
+                 'Active Points']
+
+
+# Trade Record header, from Kyle's mock verbatim. One row per received
+# player; the two Sum columns hold per-receiving-side sums (merged down
+# the side's rows by the write layer) and Date Executed merges down the
+# whole trade. Points here are since-the-trade, for the receiving team.
+TRADE_RECORD_HEADER = ['Receiving Fantasy Team', 'MLB', 'Pos Eligibility',
+                       'Player Name', 'Sending Fantasy Team', '',
+                       'Total Points', 'Active Points', 'Sum of Trade Total',
+                       'Sum of Active Total', 'Date Executed']
 
 
 # ESPN tradeBlock statuses -> the UI-facing availability labels. A player
@@ -612,16 +630,44 @@ def trade_eligibility_display(slot_names):
 
 
 def format_trades_row(row):
-    """One Trades tab data row, in TRADES_HEADER order. `availability` is
-    the raw ESPN tradeBlock status (or None); `interest` the count of
-    teams that marked Interested In."""
+    """One Trading Block data row, in TRADES_HEADER order. `availability`
+    is the raw ESPN tradeBlock status (or None); `interest` the count of
+    teams that marked Interested In; the points are the player's season
+    Total / Active (Home-glossary semantics, unscoped by team)."""
+    name = row.get('player_name') or ''
     return [
         row.get('fantasy_team') or '',
         row.get('pro_team') or '',
         trade_eligibility_display(row.get('eligible_slots')),
-        row.get('player_name') or '',
+        _bref_link(name, name),
         TRADE_AVAILABILITY_LABELS.get(row.get('availability'), ''),
         row.get('interest') or 0,
+        row.get('total_pts') or 0,
+        row.get('active_pts') or 0,
+    ]
+
+
+def format_trade_record_row(leg, team_sums=None, date_display=None):
+    """One Trade Record leg row, in TRADE_RECORD_HEADER order.
+
+    team_sums (total, active) appear only on the first row of a receiving
+    side; date_display only on the first row of the whole trade -- the
+    write layer merges those cells down their spans, so continuation rows
+    carry empty strings there."""
+    name = leg.get('player_name') or ''
+    sum_total, sum_active = team_sums if team_sums else ('', '')
+    return [
+        leg.get('receiving_team') or '',
+        leg.get('pro_team') or '',
+        trade_eligibility_display(leg.get('eligible_slots')),
+        _bref_link(name, name),
+        leg.get('sending_abbrev') or '',
+        '',
+        leg.get('total_pts') or 0,
+        leg.get('active_pts') or 0,
+        sum_total,
+        sum_active,
+        date_display or '',
     ]
 
 

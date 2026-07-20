@@ -91,7 +91,7 @@ def main():
     trades_rows = None
     if args.include_trades:
         trades_rows = almanac_sheets.build_trades_tab_rows(
-            almanac_sheets.get_trade_block_data(season_year), season_year,
+            almanac_sheets.get_trades_tab_data(season_year), season_year,
         )
     # Home is built last among the data tabs: its nav band (#23) lists the
     # team tabs + Draft Recap. Preview has no real gids, so nav_targets stays

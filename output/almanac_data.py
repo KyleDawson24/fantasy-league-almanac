@@ -3,7 +3,10 @@
 Tier 2c.1 (v1.1.1): SQL data-access surface of the league almanac.
 
 Every function in this module issues at least one Snowflake query via
-`query_snowflake` (or wraps a project-level data module like `records`).
+`query_snowflake` (or wraps a project-level data module like `records`),
+with one exception: the MLB-103 trade-block fetch reads the live ESPN
+league API at build time -- the trading block is ephemeral current-state
+with no warehouse landing.
 The module also carries the spec constructors and a small set of helpers
 that participate in the data shape -- they belong here, not in
 almanac_render.py, because render consumes finished spec dicts rather
@@ -18,7 +21,12 @@ re-exports every public name here for backward compatibility, so existing
 `import almanac_sheets` call sites continue to resolve unchanged.
 """
 
+import json
+import os
 import re
+from datetime import datetime
+
+import requests
 
 from db import query_snowflake
 import records
@@ -675,6 +683,109 @@ def get_team_slot_points(season_year):
         WHERE season_year = %s
         GROUP BY team_id, lineup_slot
     """, (season_year,))
+
+
+# ---------------------------------------------------------------------------
+# MLB-103 Trades tab: live ESPN league-API reads. The trading block is
+# ephemeral current-state (marks appear and vanish as managers toggle
+# them), so it is fetched at build time rather than landed through the
+# warehouse. Same cookie auth as extract/extract.py.
+# ---------------------------------------------------------------------------
+
+# Slot-id and pro-team-id decoders from the espn_api wrapper, mirroring
+# extract/extract.py's defensive getattr pattern.
+try:
+    from espn_api.baseball import constant as _espn_constant
+except ImportError:
+    _espn_constant = None
+_LINEUP_SLOT_MAP = getattr(_espn_constant, 'POSITION_MAP', {})
+_PRO_TEAM_MAP = getattr(_espn_constant, 'PRO_TEAM_MAP', {})
+
+_TRADE_PLAYERCARD_CHUNK = 60
+
+
+def _espn_league_get(season_year, view, extra_headers=None):
+    """One cookie-authed GET against the league read API; returns JSON."""
+    league_id = os.getenv('LEAGUE_ID')
+    resp = requests.get(
+        'https://lm-api-reads.fantasy.espn.com/apis/v3/games/flb/seasons/'
+        f'{season_year}/segments/0/leagues/{league_id}',
+        params={'view': view},
+        cookies={'swid': os.getenv('SWID'), 'espn_s2': os.getenv('ESPN_S2')},
+        headers=extra_headers or {},
+        timeout=30,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def get_trade_block_data(season_year):
+    """Live trade-market state for the Trades tab (MLB-103).
+
+    Three reads: mTeam (team names), mRoster (the rostered universe --
+    dropped players with stale block marks fall out here), and
+    kona_playercard in chunks (per-player tradeBlock: availability status
+    plus the teamsWatching interest count). Returns
+
+        {'as_of': 'YYYY-MM-DD HH:MM', 'players': [...]}
+
+    with one dict per ROSTERED player: fantasy_team, player_name,
+    pro_team, eligible_slots (name list), availability (raw status or
+    None), interest (int). Row filtering and layout belong to
+    almanac_logic.build_trades_tab_rows.
+
+    The playercard also carries teamIdsWatching (WHICH teams marked
+    interest -- populated for your own roster only). Deliberately never
+    read: the tab publishes counts, not identities, matching what ESPN
+    shows every manager.
+    """
+    mteam = _espn_league_get(season_year, 'mTeam')
+    team_names = {
+        t['id']: t.get('name') or f"Team {t['id']}"
+        for t in mteam.get('teams', [])
+    }
+
+    mroster = _espn_league_get(season_year, 'mRoster')
+    players = {}
+    for team in mroster.get('teams', []):
+        for entry in (team.get('roster') or {}).get('entries', []):
+            player = (entry.get('playerPoolEntry') or {}).get('player') or {}
+            pid = entry.get('playerId')
+            players[pid] = {
+                'fantasy_team': team_names.get(team['id'], f"Team {team['id']}"),
+                'player_name': player.get('fullName') or str(pid),
+                'pro_team': _PRO_TEAM_MAP.get(player.get('proTeamId'), 'FA'),
+                'eligible_slots': [
+                    _LINEUP_SLOT_MAP.get(slot_id, str(slot_id))
+                    for slot_id in player.get('eligibleSlots') or []
+                ],
+                'availability': None,
+                'interest': 0,
+            }
+
+    pids = sorted(players)
+    for start in range(0, len(pids), _TRADE_PLAYERCARD_CHUNK):
+        chunk = pids[start:start + _TRADE_PLAYERCARD_CHUNK]
+        card = _espn_league_get(
+            season_year,
+            'kona_playercard',
+            extra_headers={
+                'X-Fantasy-Filter': json.dumps(
+                    {'players': {'filterIds': {'value': chunk}}}
+                ),
+            },
+        )
+        for entry in card.get('players') or []:
+            block = entry.get('tradeBlock') or {}
+            target = players.get(entry.get('id'))
+            if target is not None:
+                target['availability'] = block.get('status')
+                target['interest'] = block.get('teamsWatching') or 0
+
+    return {
+        'as_of': datetime.now().strftime('%Y-%m-%d %H:%M'),
+        'players': list(players.values()),
+    }
 
 
 def get_slot_capacities(season_year, matchup_period):

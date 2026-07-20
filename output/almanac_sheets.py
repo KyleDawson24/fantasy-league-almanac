@@ -37,6 +37,7 @@ from almanac_data import (
     get_draft_board,
     get_team_standings,
     get_team_slot_points,
+    get_trade_block_data,
     get_home_tab_data,
     get_optimal_team,
     get_slot_capacities,
@@ -92,6 +93,9 @@ from almanac_render import (
     TEAM_WEEKS_TAB,
     TEAM_WEEKS_WHITE_TO_GREEN_STATS,
     TEAM_WEEKS_WHITE_TO_RED_STATS,
+    TRADE_AVAILABILITY_LABELS,
+    TRADES_HEADER,
+    TRADES_TAB,
     _boxscore_url,
     _collapsed_holder,
     _collapsed_owner,
@@ -140,7 +144,9 @@ from almanac_render import (
     format_team_history_matrix_row,
     format_team_roster_row,
     format_team_week_row,
+    format_trades_row,
     team_tab_title,
+    trade_eligibility_display,
 )
 
 # v1.1.1 Tier 2c.3: logic surface lives in almanac_logic.py now.
@@ -164,6 +170,7 @@ from almanac_logic import (
     build_draft_tab_rows,
     build_home_tab_rows,
     build_records_tab_rows,
+    build_trades_tab_rows,
     build_team_history_side,
     build_team_history_tabs,
     build_team_roster_tabs,
@@ -201,6 +208,7 @@ from almanac_write import (
     _replace_records_tab,
     _replace_team_tab,
     _replace_team_weeks_tab,
+    _replace_trades_tab,
     _sheets_batch_update,
     _sheets_call,
     _sort_almanac_tabs,

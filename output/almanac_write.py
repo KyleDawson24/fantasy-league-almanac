@@ -28,6 +28,7 @@ from almanac_data import (
     get_draft_board,
     get_team_standings,
     get_team_slot_points,
+    get_trade_block_data,
     get_current_team_roster_stats,
     get_latest_matchup_period,
     get_roster_slot_capacities,
@@ -40,6 +41,7 @@ from almanac_data import (
 from almanac_logic import (
     SCORE_RECORD_SPECS,
     build_advanced_standings_tab_rows,
+    build_trades_tab_rows,
     build_draft_board_color_grid,
     build_draft_tab_rows,
     build_home_tab_rows,
@@ -53,6 +55,8 @@ from almanac_render import (
     DRAFT_TAB,
     HOME_TAB,
     RECORDS_TAB,
+    TRADE_AVAILABILITY_LABELS,
+    TRADES_TAB,
     RECORDS_MATRIX_DETAIL_HEADER,
     RECORDS_MATRIX_WIDTH,
     TEAM_HISTORY_DETAIL_HEADER,
@@ -130,6 +134,16 @@ def write_almanac(sheet_id, season_year=None, matchup_period=None):
         get_team_slot_points(season_year),
         season_year,
     )
+    # Trades is the one live-API tab; an ESPN hiccup shouldn't sink the
+    # whole publish. On failure the previous tab content stands, its
+    # As-of row showing exactly how stale it is.
+    try:
+        trades_tab_rows = build_trades_tab_rows(
+            get_trade_block_data(season_year), season_year,
+        )
+    except Exception as exc:
+        print(f"[almanac] Trades tab skipped -- live ESPN pull failed: {exc}")
+        trades_tab_rows = None
     client = _get_authorized_client()
     spreadsheet = client.open_by_key(sheet_id)
 
@@ -155,10 +169,14 @@ def write_almanac(sheet_id, season_year=None, matchup_period=None):
     ]
     draft_ws = _replace_draft_tab(spreadsheet, draft_tab_rows, color_grid=draft_color_grid)
     standings_ws = _replace_advanced_standings_tab(spreadsheet, standings_tab_rows)
+    trades_ws = None
+    if trades_tab_rows is not None:
+        trades_ws = _replace_trades_tab(spreadsheet, trades_tab_rows)
 
     nav_targets = {
         ws.title: ws.id
-        for ws in (records_ws, matchup_ws, draft_ws, standings_ws, *team_worksheets)
+        for ws in (records_ws, matchup_ws, draft_ws, standings_ws, trades_ws,
+                   *team_worksheets)
         if ws is not None
     }
     rows = build_home_tab_rows(
@@ -173,7 +191,7 @@ def write_almanac(sheet_id, season_year=None, matchup_period=None):
 
     _sort_almanac_tabs(spreadsheet, [
         HOME_TAB, RECORDS_TAB, TEAM_WEEKS_TAB, ADVANCED_STANDINGS_TAB,
-        *[title for title, _ in team_pages], DRAFT_TAB,
+        TRADES_TAB, *[title for title, _ in team_pages], DRAFT_TAB,
     ])
 
     print(
@@ -604,6 +622,93 @@ def _replace_advanced_standings_tab(spreadsheet, rows):
         _batch_format(worksheet, formats)
     except Exception as exc:
         print(f"[almanac] standings formatting skipped: {exc}")
+
+    return worksheet
+
+
+def _replace_trades_tab(spreadsheet, rows):
+    """Clear / create the Trades tab and write it. Returns the worksheet so
+    write_almanac can wire the Home nav band.
+
+    Written RAW so player / team names stay literal text; the Interest
+    Count cells are ints and stay numeric. Availability cells get direct
+    per-cell text colors rather than conditional-format rules --
+    worksheet.clear() does not remove rules, so repeated publishes would
+    stack duplicates."""
+    width = max((len(row) for row in rows), default=10)
+    try:
+        worksheet = spreadsheet.worksheet(TRADES_TAB)
+    except gspread.WorksheetNotFound:
+        worksheet = _sheets_call(
+            f'create {TRADES_TAB}',
+            lambda: spreadsheet.add_worksheet(
+                title=TRADES_TAB,
+                rows=max(len(rows) + 10, 50),
+                cols=max(width, 10),
+            ),
+        )
+
+    _sheets_call(f'clear {TRADES_TAB}', worksheet.clear)
+    _sheets_call(
+        f'update {TRADES_TAB}',
+        lambda: worksheet.update(rows, 'A1', value_input_option='RAW'),
+    )
+
+    try:
+        sheet_id = worksheet.id
+        last_col = _a1_col(width)
+        header_idx = next(
+            (i for i, r in enumerate(rows) if r and r[0] == 'Fantasy Team'),
+            None,
+        )
+        _sheets_batch_update(
+            spreadsheet, f'trades widths {worksheet.title}',
+            [
+                _column_width_request(sheet_id, 0, 1, 190),  # Fantasy Team
+                _column_width_request(sheet_id, 1, 2, 62),   # MLB Team
+                _column_width_request(sheet_id, 2, 3, 110),  # Pos Eligibility
+                _column_width_request(sheet_id, 3, 4, 160),  # Player Name
+                _column_width_request(sheet_id, 4, 5, 118),  # Trade Availability
+                _column_width_request(sheet_id, 5, 6, 92),   # Interest Count
+            ],
+        )
+        formats = [
+            {'range': 'A1', 'format': {'textFormat': {'bold': True, 'fontSize': 13}}},
+            {'range': 'A2:A3',
+             'format': {'textFormat': {'italic': True, 'fontSize': 9}}},
+        ]
+        if header_idx is not None:
+            r = header_idx + 1
+            formats.append({
+                'range': f'A{r}:{last_col}{r}',
+                'format': {
+                    'textFormat': {
+                        'bold': True,
+                        'foregroundColor': {'red': 1, 'green': 1, 'blue': 1},
+                    },
+                    'backgroundColor': {'red': 0.12, 'green': 0.20, 'blue': 0.30},
+                },
+            })
+            availability_colors = {
+                TRADE_AVAILABILITY_LABELS['ON_THE_BLOCK']:
+                    {'red': 0.0, 'green': 0.43, 'blue': 0.15},
+                TRADE_AVAILABILITY_LABELS['UNTOUCHABLE']:
+                    {'red': 0.72, 'green': 0.11, 'blue': 0.09},
+            }
+            for sheet_row, row in enumerate(rows[header_idx + 1:],
+                                            start=header_idx + 2):
+                label = row[4] if len(row) > 4 else ''
+                color = availability_colors.get(label)
+                if color is None:
+                    continue
+                formats.append({
+                    'range': f'E{sheet_row}',
+                    'format': {'textFormat': {'bold': True,
+                                              'foregroundColor': color}},
+                })
+        _batch_format(worksheet, formats)
+    except Exception as exc:
+        print(f"[almanac] trades formatting skipped: {exc}")
 
     return worksheet
 

@@ -44,6 +44,22 @@ DRAFT_TAB = 'Draft Recap'
 ADVANCED_STANDINGS_TAB = 'Advanced Standings'
 
 
+TRADES_TAB = 'Trades'
+
+
+# MLB-103 Trades tab header -- the ticket's column spec, verbatim.
+TRADES_HEADER = ['Fantasy Team', 'MLB Team', 'Pos Eligibility', 'Player Name',
+                 'Trade Availability', 'Interest Count']
+
+
+# ESPN tradeBlock statuses -> the UI-facing availability labels. A player
+# who qualifies on interest alone (no mark set) renders an empty cell.
+TRADE_AVAILABILITY_LABELS = {
+    'ON_THE_BLOCK': 'On the Block',
+    'UNTOUCHABLE': 'Untouchable',
+}
+
+
 # v1.2 draft tab: Best Value / Biggest Bust leaderboard columns.
 DRAFT_VALUE_HEADER = ['Player', 'Team', 'Pick', 'Pts', 'Value']
 
@@ -569,6 +585,43 @@ def format_standings_row(rank, row):
         row.get('defense_pts'),
         row.get('total_pts'),
         row.get('against_pts'),
+    ]
+
+
+# Umbrella eligibility slots suppressed on the Trades tab: every
+# 1B/2B/3B/SS player is IF-eligible, every LF/CF/RF player is OF-eligible,
+# every SP/RP is P-eligible, and UTIL is universal -- listing them next to
+# the real positions is noise. ESPN's combo slots ('2B/SS', '1B/3B') are
+# not SLOT_ORDER keys, so they drop out of the intersection on their own.
+_TRADE_ELIGIBILITY_UMBRELLAS = {'IF', 'OF', 'UTIL', 'P'}
+
+
+def trade_eligibility_display(slot_names):
+    """Collapse an ESPN eligibleSlots name list to its atomic positions in
+    lineup order, e.g. ['LF', 'CF', 'OF', 'UTIL', 'BE', 'IL'] -> 'LF/CF'.
+
+    Falls back to the umbrella slots when no atomic position is present
+    (a UTIL-only bat), and to '--' when nothing displayable remains."""
+    names = set(slot_names or [])
+    atomic = [s for s in sorted(names & set(SLOT_ORDER), key=SLOT_ORDER.get)
+              if s not in _TRADE_ELIGIBILITY_UMBRELLAS]
+    if atomic:
+        return '/'.join(atomic)
+    umbrella = sorted(names & _TRADE_ELIGIBILITY_UMBRELLAS, key=SLOT_ORDER.get)
+    return '/'.join(umbrella) or '--'
+
+
+def format_trades_row(row):
+    """One Trades tab data row, in TRADES_HEADER order. `availability` is
+    the raw ESPN tradeBlock status (or None); `interest` the count of
+    teams that marked Interested In."""
+    return [
+        row.get('fantasy_team') or '',
+        row.get('pro_team') or '',
+        trade_eligibility_display(row.get('eligible_slots')),
+        row.get('player_name') or '',
+        TRADE_AVAILABILITY_LABELS.get(row.get('availability'), ''),
+        row.get('interest') or 0,
     ]
 
 

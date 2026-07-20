@@ -43,6 +43,13 @@ def main():
         action='store_true',
         help='With --no-sheets, print every tab instead of Home + first team tab.',
     )
+    parser.add_argument(
+        '--include-trades',
+        action='store_true',
+        help='Include the live-API Trades tab in previews. Off by default so '
+             'preview runs (and the pinned byte-diff anchor) stay '
+             'network-free; the Sheets write always includes the tab.',
+    )
     args = parser.parse_args()
 
     if (args.season_year is None) != (args.matchup_period is None):
@@ -81,6 +88,11 @@ def main():
         almanac_sheets.get_team_slot_points(season_year),
         season_year,
     )
+    trades_rows = None
+    if args.include_trades:
+        trades_rows = almanac_sheets.build_trades_tab_rows(
+            almanac_sheets.get_trade_block_data(season_year), season_year,
+        )
     # Home is built last among the data tabs: its nav band (#23) lists the
     # team tabs + Draft Recap. Preview has no real gids, so nav_targets stays
     # None -> nav cells render as plain tab-name text.
@@ -97,6 +109,8 @@ def main():
         ('Records', records_rows),
         (almanac_sheets.TEAM_WEEKS_TAB, team_weeks_rows),
         (almanac_sheets.ADVANCED_STANDINGS_TAB, advanced_standings_rows),
+        *([(almanac_sheets.TRADES_TAB, trades_rows)]
+          if trades_rows is not None else []),
         *team_tabs,
         (almanac_sheets.DRAFT_TAB, draft_rows),
     ]

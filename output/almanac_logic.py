@@ -59,6 +59,8 @@ from almanac_render import (
     TEAM_WEEKS_BASE_HEADER,
     TEAM_WEEKS_SCORE_HEADER,
     TEAM_WEEKS_TAB,
+    TRADES_HEADER,
+    TRADES_TAB,
     SLOT_ORDER,
     boxscore_formula,
     format_all_league_team_row,
@@ -67,6 +69,7 @@ from almanac_render import (
     format_draft_board_cell,
     format_draft_value_row,
     format_standings_row,
+    format_trades_row,
     home_nav_link,
     format_record_matrix_row,
     format_record_row,
@@ -558,6 +561,10 @@ def _home_left_rows(all_time_rows, team_titles, nav_targets, align_alltime_to=No
         home_nav_link('Advanced Standings', ADVANCED_STANDINGS_TAB, nav_targets),
         'Standings + points by lineup slot.',
     ])
+    rows.append([
+        home_nav_link('Trades', TRADES_TAB, nav_targets),
+        'Live trade block + interest marks.',
+    ])
     rows.append(['Team Pages', 'Historic production by team.'])
     rows.extend(_home_team_grid_rows(team_titles, nav_targets))
     # Draft Recap is built, so it links live (gid resolved in the two-pass
@@ -874,6 +881,49 @@ def build_advanced_standings_tab_rows(standings_rows, slot_rows, season_year):
             team.get('team_abbrev') or '',
             *[team_slots.get(slot, '') for slot in slot_cols],
         ])
+    return rows
+
+
+# Sort rank inside each team's Trades block: marked-shopped first, marked-
+# held second, interest-only (no availability mark) last.
+_TRADE_AVAILABILITY_RANK = {'ON_THE_BLOCK': 0, 'UNTOUCHABLE': 1}
+
+
+def build_trades_tab_rows(trade_data, season_year):
+    """Build the Trades tab (MLB-103): the league's live trade market.
+
+    trade_data comes from almanac_data.get_trade_block_data -- every
+    rostered player, availability + interest attached. A row qualifies per
+    the ticket spec: availability set (non-default) OR at least one team
+    marked interest. Grouped by fantasy team (alpha), marked players
+    before interest-only ones. Any unrecognized future ESPN status still
+    qualifies; it just renders an empty availability label.
+    """
+    rows = [
+        [f'Trades: {season_year}'],
+        ['The live trade market -- every player marked On the Block or '
+         'Untouchable in ESPN, plus every player at least one team has '
+         'marked Interested In. Interest counts how many teams; ESPN never '
+         'reveals which.'],
+        [f"As of {trade_data.get('as_of') or ''} -- refreshes with every "
+         'almanac publish.'],
+        [],
+        list(TRADES_HEADER),
+    ]
+    qualifying = [
+        p for p in trade_data.get('players', [])
+        if p.get('availability') or (p.get('interest') or 0) > 0
+    ]
+    if not qualifying:
+        rows.append(['Nobody is on the block and nobody is drawing interest '
+                     '-- a quiet market.'])
+        return rows
+    qualifying.sort(key=lambda p: (
+        (p.get('fantasy_team') or '').lower(),
+        _TRADE_AVAILABILITY_RANK.get(p.get('availability'), 2),
+        (p.get('player_name') or '').lower(),
+    ))
+    rows.extend(format_trades_row(p) for p in qualifying)
     return rows
 
 

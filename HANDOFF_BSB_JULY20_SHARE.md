@@ -204,6 +204,32 @@ DRAFT_RECAP_PROGRESS.md and the CBS memory — spare the gore):
 
 ---
 
+## 4.5 STATUS UPDATE — the §1 data refresh ran 2026-07-19 late-night
+
+Take-home #1 is substantially DONE for the dev sheets: CBS capture PASS
+(118 roster days, 17/17 periods) + loaded; ESPN MP15 + season
+transactions extracted (the Sunday slate was complete at extract time —
+15 games / 440 players in the final scoring period); MLB 2026 gamelogs
+fully re-fetched (1,262 files) PLUS the new `mlb_stats.py --discover
+2026` pass (151 pool players we'd never fetched, Crawford/Lee included,
+now on disk); warehouse reloaded (MLB_GAMELOGS 1.80M rows / 3,995
+players); `dbt build` fully green (548 PASS / 0 ERROR); BOTH dev sheets
+rendered (ESPN summary confirms "2026 MP15"; CBS all 20 tabs).
+
+Remaining for the July-20 share: Kyle's dev eyeball → `--prod` push
+(§1 steps 7-8), and optionally the CBS-side crosswalk refresh (the
+MLB-side stats for the 9 prospect picks are now on disk, but the CBS
+draft tab still shows them 0 until the CBS↔MLBAM crosswalk maps them).
+Weekly-refresh recipe going forward: delete current-season gamelog
+files + `mlb_stats.py --min-season <yr>` (no --force) + `--discover
+<yr>` — never the full-sweep --force again.
+
+Incident log (relevant if numbers look odd): a main-checkout extract at
+20:24 landed 14 BOX_SCORES rows with NULL league_key (main lacks the
+MLB-57 stamping, which lives on this branch); repaired by stamping
+'espn-main' per the MLB-57 backfill rationale, rebuilt green. Until the
+branch merges, extracts should run FROM THE WORKTREE.
+
 ## 5. Suggested working order (differs from the take-home order)
 
 1. Lore workbook + email draft + user guide draft FIRST (no data

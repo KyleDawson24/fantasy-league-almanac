@@ -33,6 +33,13 @@ pytestmark = pytest.mark.warehouse
 REPO = Path(__file__).resolve().parents[1]
 FIX_DIR = REPO / "tests" / "fixtures" / "almanac_v1_1_0"
 
+if not FIX_DIR.exists():
+    # The golden corpus is rendered from the real league, so it lives outside
+    # the public repo (MLB-95). Local clones with the corpus run the full
+    # byte-diff; everyone else skips.
+    pytestmark = [pytest.mark.warehouse,
+                  pytest.mark.skip(reason="private almanac golden corpus not present")]
+
 # Anchor matches the fixture's `Home.tsv` header ("2026 Week 7"). Update
 # both this constant and the fixture in the same commit if the anchor
 # moves.

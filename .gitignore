@@ -76,3 +76,18 @@ output/leagueNoteFooter.txt
 
 # Local-only safekeeping from branch/worktree cleanups (2026-07-20)
 archives/
+
+# Kyle's personal study/reference notes -- local only (2026-07-20).
+Study Material.MD
+
+# MLB-95 public-repo hardening (2026-07-21):
+# - raw league archives were untracked but NOT ignored -- one `git add .`
+#   away from a very bad day
+# - the golden corpora are rendered from the real league (owner names
+#   throughout), so they live locally + on the private dev remote only
+# - the trade-intel handoff must never be committed anywhere
+data/
+tests/fixtures/almanac_v1_1_0/
+tests/fixtures/baseline_summary_current.txt
+tests/fixtures/baseline_records_report.txt
+Trade Intel API Handoff.md

@@ -139,7 +139,7 @@ seeds:
       stg_team_owners); CBS 'cbs-' slugs minted in the cbs_team_owners
       seed (CBS serves no owner identity -- names here are the ONLY name
       source for CBS owners, normalized from the year-end report's free
-      text: 'JACK KLINE' -> Joel Kimball).
+      text: 'JACK KIMBALL' -> Jack Kimball).
 
       Joined into dim_owner (v1.2 owner-display work): owner_display =
       preferred_name when set, else proper-cased "First Last". The raw
@@ -184,7 +184,7 @@ seeds:
     description: >
       MLB-64 owner-identity merges, harvested from the continuity sheet's
       Owners tab. Platform-general (league-keyed; CBS today). owner_id ->
-      canonical_owner_id (collapses Dave/Desmond Foster etc.; a current-era owner
+      canonical_owner_id (collapses Dave/David Foster etc.; a current-era owner
       slug wins the anchor). preferred_name is an optional display override.
       Override-only.
     config:
@@ -259,8 +259,8 @@ seeds:
       The CBS franchise -> owner bridge, CURRENT ERA ONLY (the era the
       seed can attest -- historical custody is MLB-64). Minted 'cbs-'
       owner_id slugs join the shared owner_nicknames seed for names.
-      Co-owned teams carry multiple rows (Junk Drawer All-Stars: Barry Sexton +
-      Solomon Delgado). Sourced from the 2025 year-end report's owner
+      Co-owned teams carry multiple rows (Junk Drawer All-Stars: Bob Sexton +
+      Sanford Delgado). Sourced from the 2025 year-end report's owner
       strings; every ACTIVE franchise must have at least one row (the
       boards render Owner from it).
     columns:

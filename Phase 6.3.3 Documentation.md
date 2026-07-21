@@ -26,7 +26,7 @@ Phase 6 is the Google Sheets sink work. Phase 6.2 was a Python-side refactor tha
 The output is now multi-sink: the league commissioner posts BBCode to the ESPN frontpage, AND a Google Sheet captures the full leaderboard dump (all stats × both directions × both scopes × top-5) for archival and ad-hoc review.
 
 **Concrete validation cases from the most recent run (2026 Week 5, end-to-end):**
-- Chunk 1: New BLSV record fires in the recap — `New Most Blown Saves: No Power, No Panic, 5 BLSV (Prior: 4 BLSV by Seth Hartwell (NPNP) in Week 18 of 2025)` with contributors `Ryan Walker: 2, Luke Weaver: 1, Andres Munoz: 1, Kenley Jansen: 1, 23 others with 0`.
+- Chunk 1: New BLSV record fires in the recap — `New Most Blown Saves: No Power, No Panic, 5 BLSV (Prior: 4 BLSV by Sam Hartwell (NPNP) in Week 18 of 2025)` with contributors `Ryan Walker: 2, Luke Weaver: 1, Andres Munoz: 1, Kenley Jansen: 1, 23 others with 0`.
 - Chunk 1 stats render in the records report: SHO, PK, NH, PG all surface with their respective contributors and second-place tiers.
 - Chunk 2 wasted points: `Most WASTED_POINTS (team, current season, rank 1) -- Atomic Alpaca Armada W2 88.56 pts`.
 - Chunk 2 ERA: `Fewest ERA (team, current season, rank 1) -- Rob Manfred Death Squad W5 1.35` with empty contributors (rate stat — no per-player breakdown).
@@ -522,7 +522,7 @@ Row-width mismatches: 0
 
 Sample player row (Best Total Points all-time):
   Direction: Best        [polarity-aware: most CALCULATED_POINTS = Best]
-  Holder: Zack Wheeler   FNA   Lance Barrett
+  Holder: Zack Wheeler   FNA   Luke Barrett
   Value: 66.67   Week: Week 15
   Contributor1: Innings Pitched   Count1: 17.0   [count not pts; IP notation]
   Contributor2: Strikeouts (Pitcher)   Count2: 22.0
@@ -552,7 +552,7 @@ Playoff week labels: 17 rows with 'Round 1' in Week column for 2025 mp24
 `python output/generate_summary.py` → BBCode renders cleanly. New BLSV record fires:
 ```
 [b]New Most Blown Saves[/b]: No Power, No Panic, 5 BLSV
-(Prior: 4 BLSV by Seth Hartwell (NPNP) in Week 18 of 2025)
+(Prior: 4 BLSV by Sam Hartwell (NPNP) in Week 18 of 2025)
 Contributors: Ryan Walker: 2, Luke Weaver: 1, Andres Munoz: 1, Kenley Jansen: 1, 23 others with 0
 ```
 Active-week heading still `Week 5 Recap` (regular week; would be `Round 1 Recap` for MP24). All record sections render with player + team rows. `league_notes.py` callouts didn't fire this week (the example templates: `zero_steals`, `no_hitters`, `hr_drought` — none of those conditions met).

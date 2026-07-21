@@ -10,7 +10,7 @@ warehouse's franchise + owner continuity faithful:
                           OVERRIDE-ONLY: an unlinked franchise isn't listed and
                           resolves to itself in dim_franchise.
   owner_alias.csv         owner_id -> canonical_owner_id + preferred_name
-                          (collapses Dave/Desmond Foster and friends).
+                          (collapses Dave/David Foster and friends).
   team_owner_by_year.csv  the curated per-season owner (the historian's Owner
                           1/2/3 where entered, else the observed roster-page
                           owner) -> int_cbs__team_owner_season resolves it.

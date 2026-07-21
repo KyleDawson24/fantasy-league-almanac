@@ -202,7 +202,7 @@ def _norm_owner(o):
 
 def _split_owners(s):
     """Co-owned teams store 'A and B' / 'A & B' / 'A, B' in one owner_name
-    cell -- and the tag-stripped source sometimes glues it ('Barry Sextonand
+    cell -- and the tag-stripped source sometimes glues it ('Bob Sextonand
     Sandy'). Split on all those, incl. the glued 'and' after a lowercase."""
     parts = re.split(r'\s*,\s*|\s*&\s*|\s+and\s+|(?<=[a-z])and\s+', s or '')
     return [_norm_owner(p) for p in parts if p and p.strip()]
@@ -210,7 +210,7 @@ def _split_owners(s):
 
 def _surname(name):
     """Last alphabetic token, lowercased -- the stable key for matching an
-    owner across name drift (Dave/Desmond Foster, Rich/Rexford Landon)."""
+    owner across name drift (Dave/David Foster, Rich/Richard Landon)."""
     toks = [t for t in re.sub(r"[^A-Za-z ]", ' ', name).split() if len(t) > 1]
     return toks[-1].lower() if toks else name.lower()
 

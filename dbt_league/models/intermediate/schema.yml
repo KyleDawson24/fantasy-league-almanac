@@ -7,7 +7,7 @@ models:
       team_owner_by_year NAMES to canonical owner IDS: a current owner is
       matched by display name to keep its seeded slug, everyone else is slugged
       from the name; the owner_alias seed then collapses the historian's merges
-      (Dave/Desmond Foster). Grows the owner chain (stg_cbs__team_owners) from
+      (Dave/David Foster). Grows the owner chain (stg_cbs__team_owners) from
       current-era-only to full history.
     tests:
       - dbt_utils.unique_combination_of_columns:

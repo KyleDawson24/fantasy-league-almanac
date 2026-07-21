@@ -4,11 +4,11 @@
 -- roster-page owner) into canonical owner IDS:
 --
 --   name -> owner_id : a CURRENT owner is matched by display name so it keeps
---       its seeded slug ('Julian D. Sherman' -> cbs-julian-sherman, NOT a fresh
+--       its seeded slug ('Jason D. Sherman' -> cbs-jason-sherman, NOT a fresh
 --       cbs-jason-d-scott); everyone else is slugged from the name (matching
 --       build_continuity_sheet._slug).
 --   owner_id -> canonical : the owner_alias seed collapses the drift the
---       historian merged (Dave/Desmond Foster, Rich/Rexford Landon, Sandy/Sanford).
+--       historian merged (Dave/David Foster, Rich/Richard Landon, Sandy/Sanford).
 --
 -- CBS-specific because CBS serves owner NAMES, not ids; it feeds the shared,
 -- platform-general owner chain (stg_cbs__team_owners -> dim_owner).

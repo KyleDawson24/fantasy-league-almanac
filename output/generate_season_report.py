@@ -321,7 +321,7 @@ def get_alltime_record_buffer():
                l.team_id, l.team_name, l.team_abbrev,
                -- Canonical owner label; the leaderboard's owner_name is the
                -- raw per-row fact value and its casing drifts with ESPN
-               -- profile edits (Mcginley vs McAvery on different weeks).
+               -- profile edits (Mcavery vs McAvery on different weeks).
                COALESCE(tod.owner_display, l.owner_name) AS owner_name,
                l.player_id, l.player_name, l.display_name, l.stat_value
         FROM mart_stat_leaderboard l

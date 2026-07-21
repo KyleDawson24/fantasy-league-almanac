@@ -1,34 +1,34 @@
-owner_id,first_name,last_name,preferred_name,email,phone_number
-{E912AA38-9772-4801-92AA-3897727801B9},John,McAvery,Jonas McAvery,,0000000000
-{D410FCCA-0698-4F13-ACF5-CC78B74A080E},Sam,Hartwell,Seth Hartwell,,
-{0F62EAC4-CF41-46D3-8317-D198684ED3C2},Zack,Mercer,Zeke Mercer,,
-{6F0C649E-1C92-450F-8787-1DA0F70AA65B},Keven,McKendry,Kurt McKendry,,
-{F6B3BFF9-218B-43D1-B779-6ED30BFB0833},Greg,Albert,Grant Ashford,,
-{5B878C6C-1036-4D22-AB0D-EFEB8CDD2FE0},Andrew,Brown,Adrian Bishop,,
-{9AF1D94A-C1DA-484E-B51A-2BD15F343BB0},Aidan,Norwood,Avery Norwood,,
-{B25FCCF6-8943-40DE-9EEB-669A63508475},Bret,Landry,Blake Landry,,
-{B4F7971E-9BE2-4559-B797-1E9BE2755914},Luke,Baker,Lance Barrett,,
-{ACB532A8-74AE-4F39-84E2-48C931795CD8},Derek,Whitfield,Damon Whitfield,,0000000000
-{3B6BB61A-EBE7-4596-A583-69A6C1672448},John,Blank,,,
-{6797D9C6-2C1A-4554-97D9-C62C1AF554E3},Dylan,Zane,Dorian Zane,,
-{C0343F80-5469-484A-AB56-C6BCD3CE3AED},Kyle,Dawson,Cryptkeeper Kyle,,0000000000
-{F929DB1F-D001-40C1-A9DB-1FD00140C1DB},Sam,Everett,Silas Everett,,
-cbs-julian-sherman,Jason,Scott,Julian D. Sherman,,
-cbs-barry-sexton,Bob,Sexton,Barry Sexton,,
-cbs-solomon-delgado,Sanford,Delgado,Solomon Delgado,,
-cbs-dexter-nash,Darrell,Newman,Dexter Nash,,
-cbs-abel-holbrook,Andy,Hubsch,Abel Holbrook,,
-cbs-duncan-monroe,Dave,Myers,Duncan Monroe,,
-cbs-jonah-bancroft,Jim,Baker,Jonah Bancroft,,
-cbs-spencer-trevino,Sam,Trevino,Spencer Trevino,,
-cbs-jarrett-fairbanks,James,Ferguson,Jarrett Fairbanks,,
-cbs-lj-crane,L.J.,Cox,L.J. Crane,,
-cbs-marcus-draper,Matt,Draper,Marcus Draper,,
-cbs-oscar-kessler,Owen,King,Oscar Kessler,,
-cbs-joel-kimball,Jack,Kline,Joel Kimball,,
-cbs-preston-larkin,Patrick,Larkin,Preston Larkin,,
-cbs-tobias-fielder,Travis,Frey,Tobias Fielder,,
-cbs-desmond-foster,David,Fulton,Desmond Foster,,
-cbs-malcolm-keating,Michael,Keating,Malcolm Keating,,
-cbs-gavin-corbett,Glen,Corbett,Gavin Corbett,,
-cbs-miles-paxton,Matt,Pulse,Miles Paxton,,
+owner_id,first_name,last_name,preferred_name
+{E912AA38-9772-4801-92AA-3897727801B9},John,McAvery,John McAvery
+{D410FCCA-0698-4F13-ACF5-CC78B74A080E},Sam,Hartwell,Sam Hartwell
+{0F62EAC4-CF41-46D3-8317-D198684ED3C2},Zack,Mercer,Zack Mercer
+{6F0C649E-1C92-450F-8787-1DA0F70AA65B},Keven,McKendry,Keven McKendry
+{F6B3BFF9-218B-43D1-B779-6ED30BFB0833},Greg,Ashford,Greg Ashford
+{5B878C6C-1036-4D22-AB0D-EFEB8CDD2FE0},Andrew,Bishop,Andrew Bishop
+{9AF1D94A-C1DA-484E-B51A-2BD15F343BB0},Aidan,Norwood,Aidan Norwood
+{B25FCCF6-8943-40DE-9EEB-669A63508475},Bret,Landry,Bret Landry
+{B4F7971E-9BE2-4559-B797-1E9BE2755914},Luke,Barrett,Luke Barrett
+{ACB532A8-74AE-4F39-84E2-48C931795CD8},Derek,Whitfield,Derek Whitfield
+{3B6BB61A-EBE7-4596-A583-69A6C1672448},John,Barlow,
+{6797D9C6-2C1A-4554-97D9-C62C1AF554E3},Dylan,Zane,Dylan Zane
+{C0343F80-5469-484A-AB56-C6BCD3CE3AED},Kyle,Dawson,Cryptkeeper Kyle
+{F929DB1F-D001-40C1-A9DB-1FD00140C1DB},Sam,Everett,Sam Everett
+cbs-jason-sherman,Jason,Scott,Jason D. Sherman
+cbs-bob-sexton,Bob,Sexton,Bob Sexton
+cbs-sanford-delgado,Sanford,Delgado,Sanford Delgado
+cbs-darrell-nash,Darrell,Nash,Darrell Nash
+cbs-andy-holbrook,Andy,Holbrook,Andy Holbrook
+cbs-dave-monroe,Dave,Monroe,Dave Monroe
+cbs-jim-bancroft,Jim,Bancroft,Jim Bancroft
+cbs-sam-trevino,Sam,Trevino,Sam Trevino
+cbs-james-fairbanks,James,Fairbanks,James Fairbanks
+cbs-lj-crane,L.J.,Crane,L.J. Crane
+cbs-matt-draper,Matt,Draper,Matt Draper
+cbs-owen-kessler,Owen,Kessler,Owen Kessler
+cbs-jack-kimball,Jack,Kimball,Jack Kimball
+cbs-patrick-larkin,Patrick,Larkin,Patrick Larkin
+cbs-travis-fielder,Travis,Fielder,Travis Fielder
+cbs-david-foster,David,Foster,David Foster
+cbs-michael-keating,Michael,Keating,Michael Keating
+cbs-glen-corbett,Glen,Corbett,Glen Corbett
+cbs-matt-paxton,Matt,Paxton,Matt Paxton

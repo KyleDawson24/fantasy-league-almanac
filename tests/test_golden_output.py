@@ -70,6 +70,9 @@ def _golden(fixture_name: str, actual: str) -> None:
     if os.environ.get("REGENERATE_BASELINES") == "1":
         fixture.write_text(actual, encoding="utf-8")
         return
+    if not fixture.exists():
+        # Real-league baselines live outside the public repo (MLB-95).
+        pytest.skip("private BBCode golden baseline not present")
     expected = fixture.read_text(encoding="utf-8")
     if actual != expected:
         # Surface a short structural diff hint without dumping the whole

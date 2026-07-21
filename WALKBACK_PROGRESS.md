@@ -1,4 +1,4 @@
-# MLB-63 Walk-Back + Almanac v2 — Live Progress Log
+﻿# MLB-63 Walk-Back + Almanac v2 — Live Progress Log
 
 ## MLB-64 CONTINUITY INGESTION — warehouse (2026-07-15)
 
@@ -25,7 +25,7 @@ Kyle took a first pass at the sheet (3 lineage links, 3 owner-alias merges,
       split roster-page owner) so no SQL co-owner splitting is needed.
       `int_cbs__team_owner_season` (new) resolves names → canonical owner ids
       (current owner matched by display to keep its seeded slug; else slugged;
-      then `cbs_owner_alias` collapses Dave/David Foster). `stg_cbs__team_owners`
+      then `cbs_owner_alias` collapses Des/Desmond Foster). `stg_cbs__team_owners`
       re-sourced from it → grew from 16 current-era rows to **328 team-seasons**;
       `dim_owner` grew **19 → 46** CBS owners (ESPN untouched at 16; a
       `seen_name` fallback displays the historical owners the nickname seed
@@ -54,7 +54,7 @@ Kyle took a first pass at the sheet (3 lineage links, 3 owner-alias merges,
         defunct row; 34 ids -> 31 rows. Verified.
   - [x] `_franchise_owner_labels` -> canonical bridge (dim_franchise) + real
         per-lineage owners from dim_team_owner history. Drops the abbrev-inherit
-        hack (false-linked 14/17); id 14 now shows George Osborn (its own 2008
+        hack (false-linked 14/17); id 14 now shows Gideon Osborn (its own 2008
         owner). Records Owner column is correct across renames. (Per-SEASON
         owner on a season record = the team-pages session's refinement.)
   - [ ] Team pages span a franchise's ids; records/team-holder by canonical.
@@ -87,11 +87,11 @@ Kyle took a first pass at the sheet (3 lineage links, 3 owner-alias merges,
       the historian only fills pre-2007; (2) the **Owners tab grew 19 → 49**
       (all-time, co-owners split, casing normalized via `_split_owners`/
       `_norm_owner`); (3) **owner continuity now drives the hints** (surname
-      match): 30→13 (Fulton), 28→22 (Kline), 23→11 (Sutter/Colton/Landon revival)
+      match): 30→13 (Foster), 28→22 (Kimball), 23→11 (Sutter/Colton/Landon revival)
       auto-suggest; **id 26 resolved as a co-owner SPLIT** — Kendrick→31,
       Keating→32 (both partial continuations, not one lineage); 14/17 stay
       distinct (shared owner Osborn noted). Also nailed the ticket's mystery:
-      **2020 id 1 = Jason D. Sherman + Patrick Larkin** ("Ashen Tyrants").
+      **2020 id 1 = Julian D. Sherman + Preston Larkin** ("Ashen Tyrants").
       *Warehouse-side follow-on (MLB-64 ingestion):* `dim_owner`/
       `dim_team_owner` should consume `owner_name` for per-season history — now
       trivial (the data's already in staging), no re-extraction.
@@ -201,7 +201,7 @@ Kyle took a first pass at the sheet (3 lineage links, 3 owner-alias merges,
       * **Franchise registry seed** (`cbs_franchises`, all 34 ids):
         curated abbrevs because CBS's own capture abbrevs are UNUSABLE
         as identity (T2 and T3 each appear on two teams; AH/KR are
-        stale pre-rename). Continuity pairs (13/30 Fulton, 22/28 Kline,
+        stale pre-rename). Continuity pairs (13/30 Foster, 22/28 Kimball,
         14/17 Bent Spokes, 26/31 VCF) deliberately share an abbrev.
         Abbrevs are proposals — tweak the seed freely.
       * **Union contract display columns filled**: the engine now carries
@@ -1502,7 +1502,7 @@ It is committed at every checkpoint, so the branch on GitHub mirrors it.
   always carry a loss), in-flight column = the current reconstructed
   rank. Sorted titles then W%. CBS conventions writer-side (navy band,
   trophy fill, per-year auto-gradient, '0.0%' W%). THE DATA EARNS IT:
-  Greg Ashford won the 2025 regular season (Avg 1.0) but Keven
+  Grant Ashford won the 2025 regular season (Avg 1.0) but Keven
   McKendry swept the bracket and wears the trophy.
 - **All-time detailed standings, BOTH leagues, stacked below (too wide
   for L/R):** ESPN = Table A's twin from mart_team_season_standings

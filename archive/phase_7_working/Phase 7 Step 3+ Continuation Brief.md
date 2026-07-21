@@ -1,4 +1,4 @@
-# Phase 7 Steps 3-5 Continuation Brief — for fresh chat
+﻿# Phase 7 Steps 3-5 Continuation Brief — for fresh chat
 
 **Audience:** A fresh Claude Code session picking up Phase 7 where the prior chat (which shipped Step 2, the big architectural rearchitect) left off. This doc supersedes `Phase 7 Continuation Brief.md` (which covered Step 2). Trust this doc for current state.
 

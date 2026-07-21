@@ -17,7 +17,7 @@ The output is now shippable as the weekly commissioner update without further in
 
 **Concrete validation cases from the most recent run (2026 Week 5):**
 - Player records firing in both records sections: All-Time Top Scorer = Zack Wheeler 66.7 pts (2025 Week 15); Current-Season Top Scorer = Jose Soriano 54.7 pts (Week 2).
-- A new record fired in the recap: `New Worst Team Total Points: Atomic Alpaca Armada, 127.0 pts` with prior-record context (Bret Landry GPGP, 135.9 pts, Week 3 of 2025).
+- A new record fired in the recap: `New Worst Team Total Points: Atomic Alpaca Armada, 127.0 pts` with prior-record context (Blake Landry GPGP, 135.9 pts, Week 3 of 2025).
 - Polarity filter at work: 6 floor-at-zero "Tied Fewest X" records (HBP, QS, SV, HLD, CG, 3B) suppressed automatically.
 - Multi-position eligibility shown: `Brice Matthews (Hou, 2B/LF/CF)` in wasted-performances.
 - Doubly-wasted detected (just below cutoff at position 25): `Michael Busch (ChC, 1B) -- ... -- 17.0+0.9 waste pts (17.0 benched, 0.9 doubly wasted)`.

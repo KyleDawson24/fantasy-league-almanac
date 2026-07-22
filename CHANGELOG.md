@@ -10,765 +10,519 @@ repository root for the architectural detail behind the change.
 
 ## [Unreleased]
 
-Portfolio-readability pass over the dbt project: a layered DAG, enforced
-data-quality tests, and accurate exposures — all byte-neutral for the
-three output surfaces (recap, records report, almanac). Plus the first
-v2.0 feature: the almanac's Advanced Standings tab rebuilt as per-stat
-weekly-average standings over two new reporting marts (intentionally
-output-changing; the almanac goldens were re-anchored under review).
-And the multi-league foundation (MLB-48/MLB-57): a league registry plus
-the `league_key` re-grain of every warehouse layer, held byte-neutral
-for the ESPN league.
+## [1.5.0] — 2026-07-21
+
+The multi-league release, and the longest arc I've let build up between
+public versions. The warehouse gains a league registry and a
+`league_key` re-grain of every layer, and the first non-ESPN, non-H2H
+league ships end-to-end over it: a 25-year almanac for a CBS points
+league (`cbs-bsb`).
+
+Historic player performance derived from a universal MLB stats layer,
+rosters reconstructed using season-end states with transaction-log
+walkbacks, and a record book verified against real MLB history --
+through to a rendered workbook whose team pages share the ESPN almanac's
+builder.
+
+On the ESPN side the almanac gains Advanced Standings, Trades, Baseball
+Reference links throughout and a reworked Draft Recap. The weekly recap
+moves onto the calculated points lens; Transaction Records land on a new
+roster-stint model; all-time team stats arrive; and a season-to-date
+report joins the weekly recap (primarily to be deployed during all-star
+breaks and seasons' ends, but executable at any point).
+
+Under it all, a portfolio-readability pass over the dbt project --
+layered DAG, enforced data-quality tests, accurate exposures -- held
+byte-neutral for the three output surfaces.
+
+Minor, not major: everything here is additive -- a second league, new
+marts, new tabs, a new report. The records BBCode golden held
+byte-identical across the whole arc, and every almanac golden move was a
+reviewed re-anchor. (The weekly-recap golden is re-cut with each week's
+data by design, so it evidences the current week rather than the arc.)
+
+1.3.x/1.4.x were internal working labels during an unreleased stretch;
+skipped to keep internal docs unambiguous.
 
 ### Added
 
-- **Team pages, unified: the CBS team tabs render through the SHARED
-  ESPN builder — one shape, one format source, both leagues.** A CBS
-  data provider (`get_cbs_team_history_data`) emits ESPN's exact row
-  contract from the union daily fact; `get_best_lineup` plugs in as the
-  starters selector; the entire cell-format spec extracted to
-  `almanac_render.team_tab_format_specs` so the two writers cannot
-  drift. In the same arc, the team-sheet overhaul (both leagues): a
-  Total | Active | Inactive points trio under a merged "Points" banner;
-  the gold-standard header (terse "Optimal Lineups" dateline, inline
-  points glossary, CBS-only era-provenance "Lineup Data:" block);
-  Years of Service trailing the all-time side; the Other section
-  capped at 100 with an honest "N more under X points" summary line
-  and the franchise futility chair (worst-ever player by roster days
-  minus total points) pinned last; and the **Best Individual Seasons
-  by Lineup Slot** block — the optimal lineup over player-SEASON
-  candidates, where the same player can hold multiple slots via
-  different years but each player-season is used once. ESPN almanac
-  goldens re-anchored to the new shape.
+- **League registry + `league_key` re-grain (the multi-league
+  foundation).** `config/leagues.yml` + `config/league_registry.py` hold
+  one entry per league; `espn-main` is entry #1 and the default
+  everywhere, so the weekly runbook is unchanged. Extract stamps
+  `league_key` into every RAW row (payloads stay verbatim), all staging
+  emits it, every team/player join and uniqueness key widened, and the
+  incremental facts run on per-league watermarks. Output scripts gain
+  `--league` and a process-wide league context, and surfaces resolve
+  their sinks from the registry -- `--prod` without a configured sink
+  fails loudly. Migration gate: both BBCode goldens held byte-identical;
+  the almanac TSVs moved on exactly 63 cells, all verified
+  rounding-boundary re-rolls, re-anchored under review.
 
-- **`docs/known-data-issues.md`** — the permanent log of source-data
-  defects that are documented and bounded rather than fixed (the
-  warehouse doesn't control the source): CBS's season-grain IRSTR key
-  disagreeing with its own per-game rates (root-caused, ±3, both
-  signs), the UI transaction report's structural pre-season-trade
-  omission, the suspected 2021–23 team pitching cap (open commissioner
-  question), the residual walk-back flags, and the era coverage
-  floors. Each entry carries its full evidence chain.
+- **Dev/prod Sheet targeting.** Every Sheets surface takes an
+  explicit `--prod`; the default target is the dev workbook. The
+  destructive-by-default footgun -- a formatting experiment landing on
+  the workbook the league actually reads -- stops being possible by
+  accident. The registry work above later grew this into per-league sink
+  resolution.
+
+- **`dim_player_identity` -- one identity resolver, id-first joins
+  everywhere.** Name matching is demoted from four separate join seams
+  to a single platform-general dimension mapping every CBS name form
+  onto the MLBAM spine, season-scoped so homonyms resolve by MLB game
+  presence, with a `player_alias` seed carrying the hard renames
+  (Carmona; Mike/Michael Stanton) that generated variants can't bridge.
+  The games/stints, stints/lineup, stints/anchors and anchor-estimator
+  seams equijoin on `mlbam_id` (+ discipline scope) and fall back to the
+  name join only where a name is genuinely ambiguous that season -- a
+  strict superset of the prior behaviour. Anchor CTEs re-aggregate to
+  MLBAM grain so the LEFT JOINs can't silently fan out, guarded by a new
+  `assert_cbs_attribution_no_fanout`. Effect: K-Rod's Angels peak goes
+  6% → ~88% attributed (and becomes the single-season Saves record); the
+  middle-initial class rises 36% → the league-wide ~70% norm; Ohtani's
+  unified 2018–24 entries attribute with the two-way halves kept split;
+  contested attributions hold at 0 of 977k rows.
+
+- **Franchise and owner continuity -- a 25-year league told as
+  lineages, not team ids.** A generated continuity mapping sheet lets
+  the league historian declare which team ids are the same franchise and
+  which owner names are the same person; `harvest_continuity_sheet.py`
+  reads the filled sheet back into override-only seeds (union-find
+  resolves mutual and chained "Same As" pointers to the earliest-id
+  anchor; fuzzy header matching survives the historian retitling or
+  adding columns). From those: `dim_franchise` collapses 34 team ids
+  into 31 canonical franchises, and `int_cbs__team_owner_season`
+  resolves owner names to canonical ids per season -- growing the CBS
+  owner spine from 19 current-era owners to 46 all-time and
+  `dim_team_owner` from 16 rows to 328 team-seasons, with the ESPN
+  branch and every current display verified unchanged. Canonical
+  franchise then threads through the almanac: Season Finishes roll up by
+  lineage (34 → 31 rows) and record boards carry real per-lineage owner
+  labels. The pipeline is platform-agnostic by construction -- nothing
+  in it is CBS-specific.
+
+- **Baseball Reference links throughout the almanac.** Standalone
+  player-name cells -- record holders, All-League Team picks, every
+  per-team roster, and the draft board -- render as hyperlinks to the
+  player's Baseball Reference page. Visible text stays the almanac's
+  display name (nickname-or-official) while the URL keys off the
+  official name, so a nickname never breaks a link; multi-name
+  contributor cells stay plain, since a Sheets cell carries one
+  hyperlink. Tabs written as raw values emit clickable `HYPERLINK`
+  formulas.
+
+- **Advanced Standings (the tab itself).** A new almanac tab
+  pairing a per-team standings block with a Points by Lineup Slot grid.
+  It was reworked twice more inside this same release -- see *Changed*
+  for the per-stat weekly-average rework, and the round-two rebuild
+  below.
+
+- **Advanced Standings round two, both books.** Thirteen live
+  review rounds turned two static tables into the almanacs' densest
+  pages: rank-by-period line charts on both books (self-contained hidden
+  helper blocks, per-team checkboxes with an ALL master, n+1 flip so 1st
+  plots on top -- ESPN's arc reconstructed from weekly results, since no
+  snapshots exist, and matching the final standings order exactly);
+  season-finish matrices with division columns, titles-then-average
+  sorting, division-champion borders and per-year auto-scaled rank
+  gradients; points-by-lineup-slot in season-total and all-time-pace
+  form; and production by acquisition channel on both books. ESPN's
+  finish block carries trophy-**and**-finish cells because the playoff
+  champion and the regular-season leader genuinely differ -- the 2025
+  crown came from 7th.
+
+- **The canonical stat catalog.** One platform-neutral stat
+  vocabulary with per-platform crosswalk seeds, plus the ESPN →
+  canonical bridge, so a stat means the same thing on both books and the
+  record boards can auto-track a stat rather than hardcode it.
+
+- **The CBS preservation program** -- read-only, GET-only captures of a
+  25-season league before the data rots (the museum rule), landed as raw
+  envelopes and loaded into six `raw.cbs_*` tables:
+  - `extract/cbs_capture.py` saves the perishable 2026 fantasy layer
+    (per-date rosters with deployed slot and started/sat, period
+    standings, transaction and config snapshots). Content-based
+    verification caught the API's decoy parameters -- real roster
+    history rides `point=YYYYMMDD`, real standings `period=N` -- and the
+    sweep cross-checks 624/624 against transaction-log ground truth.
+    Rides the weekly runbook as its last step.
+  - `extract/cbs_backfill.py` archives the 20-year API history:
+    per-season player universes and gamelogs for hitters and -- via the
+    `position=P` universe key the documented toggles decoyed --
+    pitchers, 677,151 per-game rows in all, with persistent-500
+    player-seasons tombstoned with evidence. The sweep also surfaced
+    that CBS models a two-way player as two rosterable pseudo-players
+    (900 "Ohtani (Batter)" / 901 "(Pitcher)") invisible to both universe
+    tables; the gamelog fetch handles them explicitly.
+  - `extract/cbs_ui_capture.py` captures what the API denies: site-UI
+    standings 2001+ (final standings derive all 26 champions),
+    transaction reports 2001+, year-end roster reports 2003+, drafts
+    2017+, and per-franchise overview pages -- 526 GETs, verdict PASS.
+
+- **Universal MLB stats layer.** CBS's own stats history turned out to
+  be free-agent-only -- every currently-rostered star was absent from
+  all 20 "historical" years -- so player production now comes from the
+  public MLB Stats API (complete, portable across platforms) joined to
+  CBS's fantasy layer, and the CBS archive is recontextualized as
+  reconciliation ground truth:
+  - `extract/mlb_crosswalk.py` maps CBS ids → MLBAM ids (2,225 rows,
+    99.7%), disambiguated by season overlap AND season-team agreement;
+    the evidence bar caught silent same-name mismatches (Vladimir
+    Guerrero Jr. had been mapped to his father) before they could poison
+    the record book.
+  - `extract/mlb_stats.py` + `mlb_load.py` sweep and land season plus
+    per-game stats for every crosswalked player in two platform-neutral
+    raw tables -- 595,918 gamelog rows, 1991–2026, zero failed fetches.
+    `--discover` later closed the new-player blind spot by sweeping pool
+    players the crosswalk never fetched (~151 on its first live run);
+    with a surgical current-season re-fetch the weekly refresh is ~20
+    minutes.
+  - **The `calculated_` lens.** CBS serves no per-game fantasy points,
+    so `int_cbs__player_game_points` prices every player-game from
+    universal stats × the league's own scoring rules (QS and IRSTR
+    derived per game; the two-way split as a crosswalk join predicate).
+    The one scoring translation -- CBS lists INN but pays per out --
+    verified 587/587 against season FPTS.
+  - `mart_player_fpts_reconciliation` grades the recompute against CBS's
+    own awarded totals: 0.0 residual on all 8,185 reconciled
+    player-seasons, with every large delta traced to the platform's own
+    sparse pre-2023 IRSTR feed -- the calculated lens is more accurate
+    than the platform's -- and the delta report caught (and fixed) two
+    more silent crosswalk mismatches on its first run.
+  - **The 2022–23 pitcher note.** Calculated points run ~10–15%
+    above CBS's own pages for those two years because QS (+4) and IRSTR
+    (+2) entered the league's scoring in 2024. That is by design under
+    current-rules re-scoring, and it is reader-visible, so it is stated
+    rather than smoothed.
 
 - **The CBS walk-back: 25 years of day-by-day rosters reconstructed from
-  the transaction log, graded against the official standings (MLB-63).**
-  The UI-history captures (52,369 player-actions 2001–2026, 10,449
-  year-end anchor states 2003–2025) drive a last-event-wins state
-  machine: `int_cbs__roster_stints` assembles 20,003 membership stints
-  (acquisitions open, departures close, the year-end anchor closes what
-  the lossy log leaves open — every anchor state is reproduced by a
-  season-end stint, 100%), `int_cbs__lineup_intervals` turns
-  activate/reserve events into daily active-state intervals *including
-  the backward half* (state before a player's first event is that
-  event's inverse — without it, set-and-forget starters zero out), and
-  `fct_cbs_player_game_attribution` franchise-attributes every priced
-  player-game with a per-row provenance flag (`captured` /
-  `reconstructed_day` / `estimated_startshare` / `estimated_membership`)
-  — estimates are labeled, never laundered. CBS never logged lineup
-  moves 2004–2020, so those years ride a Start%/Own% conditional
-  estimator from the anchors' global start rates.
-  `mart_team_points_reconciliation` grades the whole reconstruction
-  against 25 seasons of official finishes: **~5–13.5% mean absolute error
-  2003–2019, 2.1–4.2% 2021–2025** (2001–2002 have no anchors and grade
-  honestly worse). The remaining systematic residuals — the estimator
-  era undershoots ~8–13% from 2011 on (roughly unbiased 2005–2010), and
-  2021–2023 official *pitching* runs ~8–11% below reconstructed while
-  hitting tracks within ~3–5% (the signature of a team-level pitching
-  cap CBS later removed: both disciplines converge in 2024–25 and the
-  current rules show `max_total: No Limit`) — are documented in the
-  mart, not calibrated away. The census honesty check: the transaction
-  log is nearly complete on drops — 8,473 of them close stints, and
-  only 22 true missing-departure cases remain across 25 years. Three
-  correctness passes got it there, each caught by decomposing the
-  reconciliation's own residuals: a window-before-filter pairing bug
-  had made every drop invisible as a closer; anchor-refuted final trade
-  legs are now VOIDED (the report renders vetoed/reversed swaps as if
-  they stuck — genuine rentals never match the void signature); and
-  generational suffixes normalize in the shared name key (the roster
-  report drops Jr/IV where the transaction report keeps it, which had
-  split 2023 Vlad Jr into two identities and orphaned his pre-trade
-  months).
-  - **Coverage extension:** the pre-archive population (year-end-roster
-    names the FA-only archive never held — Bonds, Randy Johnson, and
-    every star who retired before 2026) enters via a name→MLBAM
-    crosswalk (`--ui-population`, 2,736/2,753 = 99.4%) and synthetic
-    `ui-<mlbam>` engine ids; 1.2M new gamelog rows priced. The record
-    book's season floor moves from the platform archive's min (2004) to
-    the league's true first season per the UI standings (2001): Bonds's
-    73 HR / 867 hitting points (2001) and Randy Johnson's 372 K (2001)
-    now lead their boards, and Johnson's 2002 (1,142 points) is the
-    all-time fantasy season.
+  the transaction log, graded against the official standings.** The
+  UI-history captures (52,369 player-actions 2001–2026, 10,449 year-end
+  anchor states) drive a last-event-wins state machine:
+  `int_cbs__roster_stints` (20,003 membership stints; every anchor state
+  reproduced, 100%), `int_cbs__lineup_intervals` (daily active state,
+  including the backward half so set-and-forget starters don't zero
+  out), and `fct_cbs_player_game_attribution`, which
+  franchise-attributes every priced player-game under a per-row fidelity
+  flag (`captured` / `reconstructed_day` / `estimated_startshare` /
+  `estimated_membership` -- estimates are labeled, never laundered; the
+  no-lineup-log 2004–2020 era rides a Start%/Own% estimator).
+  `mart_team_points_reconciliation` grades the reconstruction against 25
+  seasons of official finishes: ~5–13.5% mean absolute error 2003–2019,
+  2.1–4.2% 2021–2025, with the systematic residuals -- the estimator-era
+  undershoot, and 2021–2023 official pitching running ~8–11% low (the
+  signature of a since-removed team pitching cap) -- documented in the
+  mart, not calibrated away. Only 22 true missing departures remain
+  across 25 years.
+  - **Coverage extension:** year-end-roster names the FA-only archive
+    never held (Bonds, Randy Johnson, every star who retired before
+    2026) enter via a name→MLBAM crosswalk (99.4%) and synthetic ids;
+    1.2M more gamelog rows priced, and the record book's floor moves
+    from the archive's 2004 to the league's true first season, 2001.
 
-- **The union layer (MLB-72): CBS day-grain production flows through the
-  ESPN fact family.** `int_cbs__player_daily` re-expresses the walk-back's
+- **The union layer: CBS day-grain production flows through the ESPN
+  fact family.** `int_cbs__player_daily` re-expresses walk-back
   attribution × the priced engine in `int_player_daily`'s exact column
-  contract, and the union means `fct_player_daily_performance` →
+  contract, so `fct_player_daily_performance` →
   `fct_player_position_pts` serve both leagues from one shape. Shared
-  columns both branches fill: `player_key` (the cross-league grain),
-  `game_date`, `active_weight` (1/0 where the day's state is known, the
-  start-share estimator on 2004–2020), `provenance`. New lenses on the
-  position fact: `weighted_active_pts` (≡ active points wherever state is
-  known — the CBS Best-Lineup axis) and `rostered_pts` (the bench-ranking
-  axis). Weekly facts assert their own precondition (`matchup_period IS
-  NOT NULL` — weekly grain needs platform periods; a no-op for ESPN).
-  **ESPN byte-neutrality held**: BBCode goldens exact; the almanac
-  byte-diff drifted on exactly two cells whose raw sums sit at dead-center
-  rounding boundaries (382.75 / 443.05 — the coin-flip-per-rebuild class),
-  verified and re-anchored.
+  columns both branches fill: `player_key` (the cross-league player
+  grain), `active_weight`, `provenance`; new lenses
+  `weighted_active_pts` and `rostered_pts`. ESPN byte-neutrality held --
+  BBCode goldens exact; the almanac drifted on exactly two dead-center
+  rounding cells, verified and re-anchored.
 
-- **CBS position eligibility as a shared, date-scoped model.** The league's
-  own captured rule ("Players are eligible at their primary position, plus
-  positions they've played 20 games last year or 10 games this year";
-  "Everyone is eligible at DH") lands as after-achievement windows in
-  `int_cbs__eligibility_windows`: primary + prior-year-20 open on opening
-  day, in-season-10 opens ON the 10th game's date. Inputs are a new
-  fielding sweep (`mlb_stats.py --fielding`: yearByYear games-by-position,
-  all careers — pre-league seasons feed the league's first years) and a
-  no-refetch discovery: the gamelog files on disk already carry per-game
-  `positionsPlayed`, so a new loader family (`gamepos` →
-  `MLB_GAME_POSITIONS`, 1.9M rows) dates every in-season achievement.
-  Eligibility arrays ride the CBS day rows exactly where ESPN's
-  platform-served `eligible_slots` ride theirs — no CBS silo. Graded
-  against CBS's own 2026 per-day captured eligibility: **93.26% exact-set
-  agreement** (the DH-display rule — DH listed only when it's the sole
-  position — came straight out of the grading's miss decomposition), with
-  the Ohtani pseudo-id canary exact (900 → `['DH']`, 901 → `['P']` via the
-  crosswalk's scope guard).
+- **CBS position eligibility as a shared, date-scoped model.** The
+  league's own captured rule lands as after-achievement windows in
+  `int_cbs__eligibility_windows`, fed by a career fielding sweep and a
+  no-refetch discovery -- the gamelog files already carry per-game
+  `positionsPlayed` (1.9M rows loaded). Graded against CBS's own 2026
+  captured eligibility: 93.26% exact-set agreement, with the Ohtani
+  pseudo-id canary exact.
 
-- **`mart_player_career_records`** — the accumulation axis (MLB-69):
-  top-10 league-era career totals per record-candidate stat, the Records
-  tab's second column next to the best-season book. Pujols's 703 HR and
-  11,824 calculated points lead; ui-only identities are collision-free by
-  construction so careers never double-count.
+- **The CBS record book, season × career, on the calculated lens.**
+  `mart_player_season_records` ranks the top-10 single seasons per
+  record-candidate stat over the universal layer;
+  `mart_player_career_records` adds the accumulation axis (Pujols's 703
+  HR and 11,824 points lead). With the 2001 floor, Bonds's 73 HR and
+  Randy Johnson's 372 K lead their boards and Johnson's 2002 (1,142
+  points) is the all-time fantasy season; archive-era marquees (Judge's
+  62 HR in 2022, Cole's 326 K in 2019, Verlander's 1,010-point 2011)
+  content-verified along the way. The platform lens is record-ineligible
+  by design (population bias). No-hitters derive cleanly; perfect games
+  are deliberately absent -- a pitcher's aggregate line can't
+  distinguish a real perfecto from a bf = outs no-hitter, and 3 of the
+  archive's 4 candidates would be false positives.
 
-- **The CBS almanac v2 renderer** (`output/cbs_almanac_sheets.py`,
-  rebuilt): the workbook now mirrors the ESPN almanac's architecture on
-  the unified facts — nav-first Home (live `#gid` links, two-pass write)
-  with Season-to-Date + All-Time All-League boards, Records = best season
-  × best career side by side, Standings = the 2026 period arc + a
-  25-season finish matrix with champions marked, and one page per
-  currently-active franchise: Best Lineup (weighted active points per
-  eligible position, CBS's slot template C/1B/2B/3B/SS/OF×3/DH/U/P×9)
-  current season × all-time, bench blocks ranked by rostered points, and
-  a provenance sentence on every page. Franchise scoping is isolated
-  behind one seam (`_entity_where`) for the future owner re-key (MLB-64).
+- **The CBS almanac.** `output/cbs_almanac_sheets.py` mirrors the ESPN
+  almanac's architecture on the unified facts: nav-first Home (live
+  `#gid` links, two-pass write) with Season-to-Date + All-Time
+  All-League boards; Records = best season × best career side by side;
+  Standings = the 2026 period arc (over the new platform-neutral
+  `mart_period_standings`) + a 25-season finish matrix with champions
+  marked; and one page per active franchise with Best Lineup (current
+  season × all-time), ranked bench blocks, and a provenance sentence on
+  every page. The generator dispatches by data presence (a points league
+  is a league with period standings), never a platform check. No
+  wall-clock cells -- previews are deterministic and golden-able from
+  day one. Franchise scoping sits behind one seam (`_entity_where`).
+  - **The Records page, in full.** Auto-cataloged from the stat
+    vocabulary and rebuilt to mirror ESPN's shape across five review
+    rounds: two-scope (season × career) format with an active-only
+    career lens, polarity-split boards in box-score order, a **Hall of
+    Fame** with years-of-service stint lists and slash/stat lines, a
+    **Wasted Hall of Shame** ranked by points left on the bench and
+    split Pitchers | Hitters, and a **Lineup Slot Records** section
+    crediting each player's actual deployed slot (so a utility player
+    ranks on his own slot rather than against the whole hitter pool).
+    Owner labels resolve through the franchise-continuity bridge to real
+    per-lineage owners.
+  - **The Home page, in full.** Five review rounds added a Team of
+    the Week board, a **running Team of the Month** (rolling over on the
+    8th, with month-deviation callouts), bench blocks ordered by total
+    points, a stat-sources table, and an all-time roster split into
+    active and retired.
+  - **Team pages, unified.** The CBS team tabs render through the shared
+    ESPN builder -- one row contract, one format source
+    (`almanac_render.team_tab_format_specs`) -- so the two writers
+    cannot drift. The team-sheet overhaul ships on both leagues: a Total
+    | Active | Inactive points trio under a merged banner, the
+    gold-standard header with inline glossary (plus a CBS-only
+    era-provenance block), Years of Service, the Other section capped at
+    100 with the franchise futility chair pinned last, and a Best
+    Individual Seasons by Lineup Slot block. ESPN almanac goldens
+    re-anchored to the new shape.
 
-- **Universal stats layer: the CBS record book's stats source pivoted to the
-  MLB Stats API (MLB-70).** CBS's `league/stats` history is free-agent-only —
-  every currently-rostered player is absent from all 20 "historical" years
-  (verified by content: universe ∩ rosters = ∅), so a record book built on it
-  silently lacked Cole, Judge, Trout, and Ohtani. Player production is now
-  sourced from the public statsapi.mlb.com (complete for all MLB players,
-  portable across platforms) and joined to CBS's fantasy layer (membership +
-  scoring rules); the CBS gamelog archive is recontextualized as
-  reconciliation ground-truth for the `platform_` lens.
-  - **`extract/mlb_crosswalk.py`** — CBS player id → MLBAM id (2,225 rows,
-    99.7%). Name-normalized matching disambiguated by season overlap AND
-    season-team agreement: CBS's per-season `TM` column against the statsapi
-    season listings' `currentTeam` (verified season-accurate), with the CBS
-    team-code map *learned* from unique-name co-occurrence (31 codes, 3×
-    dominance guard) rather than hardcoded. Fuzzy initial-key matches are
-    rejected when team evidence disagrees in every comparable season. The
-    team pass resolved all 21 flagged same-name collisions (three Luis
-    Garcías, two Will Smiths, two Max Muncys…) and caught three unflagged
-    silent mismatches — Vladimir Guerrero **Jr.** had been mapped to his
-    father, Eury Pérez to a 2012 outfielder of the same name, Juan Morillo
-    to a 2006 reliever. Content-verified: Vladdy Jr 2021 HR=48, catcher
-    Will Smith 2024 HR=20, Astros Luis García 2021 W=11, Eury 2023 K=108.
-  - **`extract/mlb_stats.py`** — season (yearByYear) + per-game (gameLog)
-    sweeps for every crosswalked MLBAM id (idempotent/resumable, polite
-    pacing, no key needed). 2,227 players, 14,518 gamelog-season files,
-    zero failed fetches.
-  - **`extract/mlb_load.py`** — lands the files verbatim in two
-    platform-neutral raw tables (deliberately no `league_key`: this is the
-    shared baseball layer every league joins to): `RAW.MLB_SEASON_STATS`
-    (16,957 rows) and `RAW.MLB_GAMELOGS` (595,918 per-game rows,
-    1991–2026). Content-verified: Cole 2019 K=326, Judge 2022 HR=62 — the
-    totals the free-agent-only source could never produce.
+- **Draft Recap, both books.** CBS gains the tab, mirroring the
+  ESPN layout: the 2026 board with Value and Bust leaderboards, all-time
+  draft-slot boards (pace-adjusted for part-seasons; single-pick
+  Top-Pick values never scaled), and year-by-year Draft Classes under an
+  honest coverage line -- true pick order exists for 2025–26 only,
+  classes 2011–23 are orderless, and nothing survives pre-2011. ESPN's
+  existing tab is overhauled to match: Top-Pick boards, season pacing,
+  and a keeper "K" row ranked per team rather than league-wide. Both
+  books share one house width grid (25/40/40/125/75/40 + 100) and one
+  value-definition note.
 
-- **The `calculated_` lens: per-game CBS fantasy points recomputed from the
-  universal stats layer (MLB-62).** CBS serves no per-game FPTS, so the
-  almanac's per-game-capable scoring view is computed here: universal
-  per-game stats × the league's own scoring rules, on CBS player identity.
-  The dbt chain, staging → intermediate → reporting:
-  - **`mlb_stat_map` seed + `stg_mlb__player_game`** — the statsapi
-    vocabulary census (both stat groups, every observed key dispositioned)
-    mapped into the canonical catalog; the staging model unpivots
-    `RAW.MLB_GAMELOGS` into long canonical-keyed per-game stat rows.
-    (statsapi_key, stat_group)-keyed because the API reuses names across
-    disciplines — pitching `hits` is hits allowed, pitching `strikeOuts`
-    the scored K.
-  - **`stg_cbs__scoring_settings`** — the platform's own scoring_rules
-    feed staged into effective weights (the ESPN staging convention:
-    current season's rules, applied universally). The one translation:
-    CBS lists INN at 3/inning but *pays* at out-granularity — the row
-    lands as `outs_recorded` at 1 pt/out (verified 587/587 against 2025
-    season FPTS where `floor(INN)` reconciles only 559/587). A singular
-    test pins the feed to the `cbs_stat_map` seed's documented weights.
-  - **`stg_cbs__mlbam_crosswalk` + `int_cbs__player_game_points`** — the
-    engine: one priced row per (league, player, discipline-line, game).
-    QS derived per start (`gamesStarted=1 AND outs≥18 AND ER≤3`), IRSTR
-    derived as `inheritedRunners − inheritedRunnersScored`, and the
-    MLB-68 two-way split implemented as a crosswalk join predicate —
-    Ohtani's hitting games feed CBS 900 "(Batter)", pitching games 901
-    "(Pitcher)", reported as two players. Content-verified: Cole 2019 =
-    326 K / 26 QS / 637 outs; Ohtani 2021 = 103 R/100 RBI/318 TB on 900
-    and 156 K/9 W on 901, with zero cross-discipline leakage.
-  - **`mart_player_fpts_reconciliation`** — the delta report:
-    season-summed `calculated_` vs CBS's own awarded FPTS (`platform_`),
-    per-category drivers, and an era-rule detector
-    (`platform_identity_residual`). The findings: the residual is 0.0 on
-    all 8,185 reconciled player-seasons (CBS's archive totals are exactly
-    self-consistent under current weights — no era-rule changes anywhere),
-    2023–25 reconcile ~97% exact, and every large delta is the platform's
-    own IRSTR feed gap (sparse pre-2023): Kirby Yates 2019 = 559
-    calculated vs 541 platform — 9 stranded runners CBS never tracked;
-    Rich Hill 2013 is +102 on 51 missing strands. The `calculated_` lens
-    is *more* accurate than the platform's own totals — the delta is a
-    feature, surfaced per-player for the almanac's asterisks.
-  - **The delta report caught two more silent crosswalk mismatches on its
-    first run** — CBS's "Michael Taylor" (11 production seasons) had
-    exact-name-matched a 2011–14 stranger because the real player lives
-    under statsapi's "Michael **A.** Taylor", and "Jose Hernandez"
-    (2023–24 LHP) had matched the 1990s infielder. The crosswalk build
-    gained the missing guard: UNIQUE exact-name candidates must now pass
-    the same evidence bar as fuzzy ones (zero season overlap = a
-    same-name stranger; and the wider initial-key pool can override a
-    bare-name match by strictly beating it on team agreement). Rebuild
-    diff: exactly 2 rows changed, both content-verified — all 14 affected
-    player-seasons now reconcile at **exactly 0.0** delta, and zero
-    platform player-seasons with real production are missing from the
-    reconciliation.
+- **The CBS draft data pipeline.** Every CBS draft surface swept
+  and parsed into draft rows joined to the priced player layer. The
+  provider currently reads the parsed NDJSON and an intermediate model
+  directly rather than a mart -- a deliberate, loudly-flagged stopgap;
+  the dbt-ification is tracked and deferred, not forgotten.
 
-- **The record book rebuilt on the calculated_ lens — the pivot's payoff
-  (MLB-62 → MLB-65).** `mart_player_season_records` now reads
-  `int_cbs__player_season_stats`, a player-season LONG model over the
-  universal layer (bridged counting stats + exact derived shapes 1B/XBH +
-  the engine's QS/IRSTR/NH season counts and CALCULATED_POINTS with its
-  hitting/pitching splits — stat_names the shared seed already marks as
-  record candidates). The book the free-agent-only source could never
-  produce, now verified real: **Cole 2019's 326 K is the #1 strikeout
-  season** (Sale 308, Kershaw 301 behind him), **Judge 2022's 62 HR the
-  #1 homer season** (Raleigh's 2025 60 at #2), Verlander 2011 the best
-  fantasy season at 1010 — matching the platform's own total for the old
-  FA-only marquee record to the point — and Ohtani's 2024 batter-half
-  (815) the best hitting season. The platform_ lens is record-INELIGIBLE
-  by design (population bias) and lives in the reconciliation mart;
-  IRSTR surfaces here per its seed note (CBS-scored, ESPN-suppressed).
-  Honest-derivation line drawn in data: NH derives cleanly (CG + 0 H +
-  27 outs — Scherzer's two-no-hitter 2015 tops the list), while PG is
-  **deliberately absent**: `battersFaced = outs` means *faced the
-  minimum*, not *nobody reached* — a walk erased on a double play
-  (Verlander 2011, Valdez 2023) or a dropped-third-strike runner caught
-  stealing (Means 2021) produces bf = outs = 27 on a non-perfect game,
-  and the erasure events that separate those from Germán's real perfecto
-  never appear in a pitcher's aggregate line. 3 of the archive's 4
-  minimum-faced no-hitters would be false perfectos under any
-  line-derivable predicate (the feed itself is consistent — walkers who
-  stay on base do make bf > outs, 18 of 22 no-hitters). Interim TOTAL
-  lens clearly labeled until MLB-63 membership scopes it; archive-era
-  seasons (2004+, data-driven floor).
-
-- **The CBS almanac renders: home tab + 16 team tabs, registry-resolved
-  sinks (MLB-58 / MLB-66).** The multi-league foundation's last leg —
-  output surfaces now resolve their destination from the league registry
-  (`sinks.sheets_almanac_env` / `sheets_dev_env` name per-league .env
-  variables; `--prod` without a configured sink fails loudly before
-  anything generates, a missing dev sink stays preview-only, BBCode
-  surfaces refuse leagues that don't declare them, log files are
-  league-scoped) — and the first non-ESPN surface ships over it.
-  `generate_almanac_sheet.py --league cbs-bsb` dispatches by **data
-  presence** (rows in `mart_period_standings` = a points league; the
-  format-modularity rule, never a platform check) to the points-league
-  almanac: current standings with movement, the calculated_-lens record
-  book (fantasy-point seasons + curated hitting/pitching records), and
-  per-team tabs with the season trajectory and the current roster —
-  active/reserve split, each player carrying their season calculated
-  FPTS from the new `stg_cbs__rosters` (F3: the perishable deployed-slot
-  + started/benched layer the capture program exists to save). Every
-  section states its own data horizon (champions and the league-shape
-  timeline arrive with the history parse; roster-scoped records with
-  membership) — the almanac gets more truthful every season, on the
-  sheet. No wall-clock cells: previews are deterministic and golden-able
-  from day one. The ESPN H2H path is proven byte-safe by the warehouse
-  golden suite (one pre-existing round-boundary re-anchor, ±0.1 cells,
-  verified against a stashed working tree).
+- **The Trades tab (ESPN).** The live trade block plus per-team
+  interest counts, sourced from the live API rather than the warehouse,
+  reporting counts rather than identities. Its two warehouse queries
+  were league-scoped during the merge -- they had been written
+  pre-scoping, the exact cross-league leak class that briefly wrecked
+  the dev sheet.
 
 - **Transaction Records: production by acquisition channel on Advanced
-  Standings (MLB-16 spike / MLB-17).** The named key output — team rankings
-  by how each player's production was acquired.
-  - **The ESPN transaction log, found by content (MLB-16).** The durable,
-    full-season add/drop/trade log lives on the league *message board* — the
-    `communication/?view=kona_league_communication` endpoint's
-    `ACTIVITY_TRANSACTIONS` topics, paged to exhaustion — NOT in `mTransactions2`,
-    which for `flb` is a current-scoring-period decoy (200 OK, ~40 rows, no
-    filter widens it). Verified 3,028 topics spanning draft day → today.
-    `extract/extract.py` gains `--include-transactions` / `--transactions-only`,
-    landing the verbatim topics in a new append-only `RAW.TRANSACTIONS`
-    (league_key-stamped, `ADD COLUMN IF NOT EXISTS` self-heal, dbt source +
-    migration list updated). Current-season only for now (prior seasons 404 the
-    per-season path; `leagueHistory`'s communication view rejects the topics
-    filter — a documented follow-up).
-  - **`stg_transactions`** decodes the messageTypeId vocabulary (178 add / 179
-    drop / 224·239·244 trade legs / 188 lineup-noise dropped) into a
-    platform-neutral directed-event shape (a NULL team side = free agency) that
-    a future `stg_cbs__transactions` converges onto.
-  - **`fct_roster_stints`** (marts/core): one row per contiguous window a player
-    spent on a team, tagged with how it opened (KEEPER / DRAFT / TRADE / FA_ADD)
-    and closed (DROPPED / TRADED_AWAY). Membership is the DENSE lineup shell
-    (`stg_box_scores`, gaps-and-islands over a per-league dense period index, so
-    an unloaded All-Star gap doesn't split a stint while a real off-roster gap
-    does); the log supplies the directed 224/244 TRADE edges — the only thing
-    roster state can't tell from a same-window drop+add. Draft/keeper from
-    `stg_draft`; scoped to seasons that have a transaction log so no season
-    silently mislabels team-changes as adds. Locked stint semantics (Per Offline
-    Chat 2026-07-09): most-recent event governs, no channel inheritance, the
-    lost-clock keyed on player so the thrice-dropped guy isn't double-counted.
-  - **`mart_team_acquisition_channels`** (marts/reporting): wide per-team, two
-    lenses — ACTIVE (started points; lost = for other teams) and ROSTERED (all
-    points incl. bench/IL; lost = other teams AND unowned) — with FA and Trade
-    Net deltas. Reconciles exactly: the four acquired channels sum to each
-    team's own active (and rostered) production.
-  - **Advanced Standings** grows two stacked blocks under the weekly grid
-    (Active + Rostered lenses), teams as rows ranked by Acquired total, with
-    write-layer gradients (acquired green-high, lost green-low, the Nets
-    zero-centered diverging / polarity-aware). The almanac golden re-anchored on
-    `Advanced-Standings.tsv` ONLY — a pure append; the recap and records BBCode
-    goldens held byte-identical. On the `league_almanac` exposure; grain-tested;
-    full `dbt build` green (337 nodes), 7 new almanac unit tests.
+  Standings.** Team rankings by how each player's production was
+  acquired:
+  - The durable ESPN transaction log was found by content on the league
+    message board (`kona_league_communication` topics -- 3,028 verified,
+    draft day → today; `mTransactions2` is a current-period decoy).
+    Extract gains `--include-transactions` / `--transactions-only`,
+    landing verbatim topics in an append-only `RAW.TRANSACTIONS`, and
+    skips gracefully on seasons the endpoint won't serve. Current season
+    only for now -- the prior-season endpoints reject the topics filter,
+    a documented follow-up.
+  - `stg_transactions` decodes the messageTypeId vocabulary into a
+    platform-neutral directed-event shape; `fct_roster_stints` builds
+    one row per contiguous roster window, tagged how it opened (KEEPER /
+    DRAFT / TRADE / FA_ADD) and closed (DROPPED / TRADED_AWAY), on the
+    dense lineup shell so an unloaded All-Star gap doesn't split a stint
+    while a real off-roster gap does.
+  - `mart_team_acquisition_channels` reports two lenses -- ACTIVE and
+    ROSTERED -- with FA and Trade Net deltas, reconciling exactly to
+    each team's own production.
 
-- **CBS player record book — the first tangible CBS almanac content
-  (MLB-61 F1 / MLB-65), and the vocabulary bridge under it.** The
-  ESPN→canonical bridge (`stat_classification.canonical_key` + an `IRSTR`
-  row, exposed on `dim_stat`, byte-neutral for ESPN) lets CBS converge on
-  the stat_names the DAG already speaks. `stg_cbs__player_season_stats`
-  unpivots `CBS_SEASON_STATS` through it — 252,224 stat-rows across 8,926
-  player-seasons (2004–2025), season FPTS as `PLATFORM_POINTS`, innings
-  via `OUTS`, the scored strand as `IRSTR`. `mart_player_season_records`
-  ranks the top-10 single-season performances all-time per stat, reusing
-  the shared `dim_stat` catalog for candidacy/polarity/display (CBS
-  records need zero CBS-specific stat metadata). Content-verified against
-  real MLB history: best season ever = Verlander 2011 (1,010 pts), most K
-  = Kershaw 2015 (301), most HR = J.D. Martinez 2017 (45). No recompute
-  needed for the platform lens (season FPTS is in the data); the
-  calculated lens + best single *games* follow with the gamelog recompute
-  (MLB-62). 18 schema tests + full suite green.
+- **All-time ESPN team stats.** `fct_team_season_performance` is the
+  season-grain team spine both platforms can feed: the stat rollup is
+  format-agnostic (it sums the player-active fact), while the W-L /
+  platform-total overlay is format-conditional by data presence, never a
+  platform check. `mart_team_alltime` rolls it into franchise records --
+  all-time accumulation + best single season -- with league-wide
+  all-time wins == losses (282-282) confirming the overlay.
 
-- **Shared format-modular team-season fact + all-time ESPN team stats
-  (MLB-69).** `fct_team_season_performance` is the season-grain team-stats
-  spine both platforms feed: the stat rollup is *format-agnostic* (sums
-  the player-active fact, so any format produces team stats once players
-  carry a `team_id`), while the W-L / authoritative-platform-total
-  *overlay* is *format-conditional* — a LEFT JOIN of the matchup-gated
-  team-week fact, populated where the league delivers matchups (H2H, any
-  platform) and NULL where it doesn't (points, any platform). The toggle
-  is data-presence, never a platform check; the playoff filter is
-  NULL-safe so a no-schedule league isn't silently dropped. Season is the
-  grain atom — all-time is a rollup, so the same fact serves single-season
-  and all-time. Verified against `mart_team_season_standings`: counting +
-  W-L match exactly on all 30 ESPN team-seasons (calculated points within
-  0.4, this fact being the more-correct round-once-at-season). On top,
-  `mart_team_alltime` rolls it into franchise records (all-time
-  accumulation + best single season) — the long-wanted all-time ESPN
-  team stats, with league-wide all-time wins == losses (282-282)
-  confirming the overlay. Both models additive; no shared ESPN model
-  changed. CBS team stats drop in unchanged once the player-performance
-  convergence lands.
+- **Season-to-date report** (`output/generate_season_report.py`) -- the
+  milestone-summary entry point, built for the All-Star break post and
+  extendable to an end-of-season edition. Deliberately
+  calendar-agnostic: run any week, it reports "Through Week N." Sections
+  mirror the weekly recap's BBCode idiom: best/worst team callouts on
+  the per-gameplay-week lens, season Top Scorer/Hitter/Pitcher cards,
+  Season Superlatives (including Game and Loss of the Week as weekly
+  team awards and draft-value superlatives), the season-to-date
+  All-League Team, all-time records set or tied this season, and Top
+  Wasted Performances. Occasion flavor comes from new optional
+  header/footer note files (`output/note_files.py`, gitignored), printed
+  verbatim on every summary -- blank or missing files contribute
+  nothing, so output is byte-identical until the commissioner writes
+  one.
 
-- **First CBS reporting mart: the 2026 standings arc (MLB-61 F7).** CBS
-  becomes adapter #2 at the staging boundary, starting with the
-  lowest-risk feed. `stg_cbs__standings` reads `raw.cbs_standings`
-  directly (F7 standings are *platform-delivered* — a non-H2H points
-  league has no matchups to derive standings from), and
-  `mart_period_standings` computes the arc: one row per
-  `(league_key, season_year, period, team_id)` with cumulative points +
-  rank and derived movement (points earned that period, rank change,
-  distance behind the leader). Platform-neutral by name and shape — any
-  future points league reuses it. The six `raw.cbs_*` tables are declared
-  as dbt sources. No shared ESPN DAG model changed (zero goldens risk);
-  256 rows, 19 schema tests + the full 194-test suite green.
-  Content-verified against the real 2026 pennant race. Scope: 2026
-  in-progress only (the API is current-season); historical champions
-  land from the parsed UI pages (MLB-53) into the same mart shape.
+- **Recap: all-time records set in the most recent week are called
+  out** in the weekly post, so a record set this week is visible where
+  the league reads it rather than only in the records report.
 
-- **League registry + `league_key` re-grain (multi-league foundation,
-  MLB-48 design / MLB-57 implementation).** One warehouse namespace,
-  `league_key` as a first-class dimension in every grain — the accepted
-  alternative to per-league schemas (consumers say "go to the mart and
-  pull the league's data," never "pull CBS from the CBS mart").
-  - `config/leagues.yml` + `config/league_registry.py`: one entry per
-    league (platform, env-referenced league id, credential list, seasons,
-    sinks — no format fields; format stays settings-derived at staging).
-    `espn-main` is entry #1 and the default everywhere, so the weekly
-    runbook is unchanged; `cbs-bsb` is the read-only museum entry. Loud
-    failures: unknown keys list the known ones, missing credentials name
-    the exact `.env` variables.
-  - Extract stamps `league_key` into every RAW row (payloads stay
-    verbatim — it's load metadata); tables self-heal the column via
-    `ADD COLUMN IF NOT EXISTS`; the box-score idempotency DELETE is
-    league-scoped; `tools/migrate_raw_league_key.py` backfilled the 312
-    pre-registry rows. `--league` flag on the extract, which validates
-    it was pointed at an espn-platform league before touching anything.
-  - dbt: all staging models emit `league_key` (latest-snapshot windows
-    and "current season" resolve per league); every join carrying
-    team/player coordinates widened (team_id 1 in two leagues is two
-    teams; each league's scoring weights apply only to its own rows);
-    every `unique_combination_of_columns` test and incremental
-    `unique_key` widened; the three incremental facts filter through a
-    new `league_period_watermark` macro (per-league watermarks, so one
-    league mid-backfill can't be skipped because another sits at the
-    current week). Leaderboard rankings, league averages, and
-    weeks-in-history percentiles all partition per league. Seed-derived
-    dims (`dim_stat`, `dim_matchup_period`) stay unscoped until the
-    crosswalk/schedule workstreams (MLB-4/MLB-5). One `dbt build` still
-    builds every league — no per-league vars or targets.
-  - Output layer: a process-wide league context in `output/db.py`
-    (`set_league()` / `league_predicate()`); every league-scoped query
-    across the recap, records report, season report, league notes, and
-    almanac filters the active league, including whole-fact CTE legs and
-    MAX(season) bootstraps; joins between scoped surfaces add
-    `league_key` to their join keys. `--league` on all four render
-    scripts (the weekly recap gained its first argparse), defaulting to
-    the registry default.
-  - Migration gate: RAW backfill + full-refresh rebuild, then the golden
-    suite. Both BBCode goldens held **byte-identical**. The almanac TSVs
-    moved on exactly 63 cells, every one a `ROUND(SUM(float),1)`
-    .x5-boundary re-roll from the rebuild's new summation order
-    (verified at the warehouse: e.g. an opponent total sitting at
-    exactly 216.25) — re-anchored under review, same phenomenon that
-    originally pinned the score-sum marts to tables.
+- **`docs/known-data-issues.md`** -- the permanent log of source-data
+  defects that are documented and bounded rather than fixed (the
+  warehouse doesn't control the source): the IRSTR season-key
+  disagreement, the UI transaction report's structural pre-season-trade
+  omission, the suspected 2021–23 team pitching cap, the residual
+  walk-back flags, and the era coverage floors -- each entry with its
+  full evidence chain.
 
-- **CBS raw archives loaded into the warehouse (MLB-59, API-JSON
-  half).** `extract/cbs_load.py` lands `data/cbs_raw/bsb/` as six
-  `raw.cbs_*` tables — rosters, standings periods, transaction and
-  config snapshots, season stats, and per-game gamelog rows (556,493
-  verbatim game objects from all 3,809 player-season files, empty
-  captures represented by sentinel rows) — every row carrying
-  `league_key` plus envelope lineage (endpoint, params, captured_at,
-  source_path). Staged-NDJSON `COPY INTO` mechanics, idempotent by
-  source path, `--dry-run`/`--force`/`--families` flags; payloads stay
-  untouched VARIANTs (staging owns interpretation). The parsed-UI half
-  of the loader waits on the HTML parsers.
+- **Project hygiene for readers:** no-warehouse CI (unit suite + `dbt
+  parse` on every push; warehouse goldens stay local by design), source
+  freshness on the settings-style raw tables, shared stat-column doc
+  blocks replacing 62 definitions the two wide facts repeated verbatim,
+  a "Reading the DAG" README section on the three deliberate cross-layer
+  edges, and the missing seed/grain column docs.
 
-- **CBS pitching archive swept + crosswalked (MLB-45 reopened / MLB-60).**
-  The historical archive was hitters-only because the universe query was:
-  `league/stats` serves the hitter table by default, and `position=P` is
-  the pitcher-universe key (the `stats_type=pitching`-style toggles all
-  decoy — empty 200 or the hitter default, failing silently). `extract/
-  cbs_backfill.py` gained a `--backfill-pitching` mode that sweeps
-  per-season pitcher universes under that param (validated against the
-  2025 anchor before trusting any sparse-era emptiness) and their
-  gamelogs under the same content-authenticity gate as the hitter sweep.
-  - Landed 2026-07-09: **22 pitcher-universe season files (5,116
-    player-season rows), 5,109 pitcher-season gamelogs (2007–2025),
-    ~120,700 per-appearance rows**, verdict PASS. Pitcher gamelogs are
-    appearance-grain (only games pitched), unlike the schedule-grain
-    hitter logs.
-  - The two-way check turned up a structural fact: CBS models a two-way
-    player as **two separately-rosterable pseudo-players** under sentinel
-    ids (900 "Ohtani (Batter)" / 901 "(Pitcher)", on different teams in
-    2026), which `league/stats` omits from both universe tables — so the
-    person was invisible to the whole 20-year archive. `players/gamelog`
-    serves the ids directly, so the sweep fetches them explicitly (901's
-    2021 log = his real 23 starts; 2020 = 2, the injury year).
-  - The pre-2007 era serves no per-game data for anyone (hitters empty,
-    pitchers HTTP 500); 7 star pitcher-seasons tombstoned as
-    `KNOWN_UNAVAILABLE` with two-run evidence.
-  - `extract/cbs_load.py`'s season-stats walker now also walks the
-    `stats_pitching/` directory (both universes share `CBS_SEASON_STATS`,
-    told apart by `params.position`); reloaded idempotently —
-    `CBS_SEASON_STATS` 44 rows, `CBS_GAMELOGS` 677,151. Warehouse
-    content-verified: an in-universe ace's gamelog matches file-for-file,
-    and **2025 season FPTS reconciles 594/594 exact** under the recompute
-    formula (the MLB-62 anchor). Read-only throughout (museum rule).
+- **Public-readiness guard rails.** The five owner-identity seeds
+  are tracked in anonymized form while the pipeline continues to run on
+  real data locally, so the published repo carries no real league member
+  or team names. Two guards keep it that way: a gitleaks workflow on
+  every push and pull request, and a local pre-push hook that fails the
+  push if the tree reintroduces a real-league string.
 
-- **Canonical stat catalog + CBS crosswalk (MLB-4 design / MLB-60).**
-  `canonical_stats` seed: 56 project-owned stat slugs (fielding
-  first-class) with Baseball-Reference alignment as a nullable
-  `bref_key` column — populated only for stats with a real-world
-  identity, honest NULLs for fantasy constructs (QS, holds, IRSTR).
-  `cbs_stat_map` seed: full-vocabulary accounting of every key in the
-  loaded CBS archives plus all 16 scored categories, dispositioned
-  mapped / metadata / derived_composite / vestigial / unknown, with
-  scored-coverage enforced by dbt + unit tests against a committed
-  scoring-rules fixture. The census behind it surfaced that the current
-  CBS rules score NO fielding (vocabulary ≠ rules), and — at the time —
-  that the captured feeds held no pitching stats, which reopened the
-  backfill ticket (MLB-45) for a pitching sweep. That sweep has since
-  landed (next entry), and the crosswalk now carries the full pitching
-  vocabulary.
+- **Platform adapter contract v1.** The written contract a second
+  platform must satisfy -- proposed, reviewed, and accepted inside this
+  release -- plus the verified CBS capability manifest recording what
+  that platform can and cannot serve.
 
 ### Changed
 
-- **Advanced Standings tab reworked (v2.0 feature #1).** The standings
-  block now shows each scored stat individually — the same seed-driven
-  stat set and order as Matchup History — plus the Offense / Defense /
-  Total / Against points columns, with every value a per-standard-matchup
-  average: `value * standard_matchup_days / scoring_days_played`, where
-  gameplay days are scoring periods rather than calendar days (the
-  14-calendar-day All-Star week counts its ~11 game days) and the
-  standard matchup length is derived per season (modal regular-week
-  length — 7 here — so a 2-week-matchup league would normalize per-14
-  with no code change). Raw season totals left the block; the weekly
-  shape is how the league actually reads scores. IP renders as a base-10
-  decimal (thirds notation doesn't survive averaging). The Points by
-  Lineup Slot grid keeps season totals but drops BE / IL (a future
-  bench/IL view belongs on the inactive-points lens), and its column
-  order now comes from `dim_roster_slot_counts.sort_order` instead of a
-  hardcoded Python map. Write-layer column gradients are polarity-aware
-  per stat (negative-weighted stats like L / ER / BLSV paint green-low),
-  positioned structurally rather than by header label since several
-  abbrevs (K / BB / H / HR / R) repeat across the hitting and pitching
-  blocks. Both blocks read the new marts; the almanac's two inline
-  standings aggregations were deleted from `output/almanac_data.py`.
-  Post-review polish: the slot grid is indented one cell with an Owner
-  column added so its Team / Owner columns sit directly under Table A's;
-  column widths are set by column type derived from the header layout
-  (identity 52px, Owner 125px, value columns 40px, buffers 25px) rather
-  than hardcoded letters; and none of the write-layer requests touch
-  column visibility, so manually hidden columns (a stat the league
-  never records, e.g. NH / PG) survive reruns — the tab is
-  clear-and-rewrite, never delete-and-recreate.
+- **Advanced Standings tab reworked.** The standings block now shows
+  each scored stat individually -- the same seed-driven stat set and
+  order as Matchup History, plus the Offense / Defense / Total / Against
+  points columns -- with every value a per-standard-matchup average over
+  gameplay days (the 14-calendar-day All-Star week counts its ~11 game
+  days; the standard week length is derived per season, so a
+  2-week-matchup league would normalize per-14 with no code change). Raw
+  season totals left the block; the weekly shape is how the league
+  actually reads scores. The Points by Lineup Slot grid keeps season
+  totals but drops BE / IL, ordered from `dim_roster_slot_counts`
+  instead of a hardcoded map. Gradients are polarity-aware per stat and
+  positioned structurally; the tab is clear-and-rewrite, so manually
+  hidden columns survive reruns. Both blocks read two new reporting
+  marts -- `mart_team_season_standings` and `mart_team_slot_production`
+  (tables, grain-tested, on the `league_almanac` exposure) -- and the
+  almanac's two inline standings aggregations were deleted from
+  `output/almanac_data.py`, the same lift that created
+  `mart_team_matchup` in v1.1.1. Intentionally output-changing; the
+  almanac goldens were re-anchored under review.
 
-- **marts/ re-layered into `marts/core` + `marts/reporting`.** The 4 dims
-  and 7 facts (the contract layer) now live under `marts/core/`; the five
-  consumer `mart_*` models under `marts/reporting/`. Pure file moves — no
-  relation names, configs, or compiled SQL changed. The v1.2-era
-  `_owner_models.yml` is folded into the per-directory schema files.
-- **`analyses/check_*.sql` converted to singular tests.** The three
-  assertion-shaped checks now run on every `dbt build` as
-  `tests/assert_*` (season-rollup fidelity, full-partition, BE/IL
-  eligibility leak) plus a severity-warn data-canary test (Trout / Soto /
-  FA presence). The exploratory eligible-slots profile was deleted. The
-  season-rollup check needed rewriting when enforced: the old analysis
-  predated the season fact's round-once-per-row float freeze and no
-  longer described the model's contract.
-- **Exposures trued up.** `league_almanac` now declares its real reads
-  (`mart_draft_board`, `int_player_position_pts`,
-  `int_team_owner_display`, `stg_scoring_settings`) and drops the unread
-  benchmarks mart; the below-core dependencies are documented on the
-  exposure instead of hidden.
-- **Weekly facts renamed to the entity-first scheme.** Every fact now
-  reads `fct_<entity>_<grain>_...`: `fct_weekly_player_performance` →
-  `fct_player_weekly_slot_performance` (the `_slot_` marker also fixes
-  the long-standing grain-misleading name), `fct_weekly_player_active/
-  inactive_performance` → `fct_player_weekly_active/inactive_performance`,
-  and `fct_weekly_team_active/inactive_performance` →
-  `fct_team_weekly_active/inactive_performance`. Warehouse relation
-  renames; all dbt refs, exposures, singular tests, and ~45 Python query
-  references updated in the same commit.
-- **Season-grain float sums frozen.** `fct_player_season_performance`
-  and `mart_team_matchup` are tables now -- as views their per-query
-  float re-summation could flip .x5-boundary values between two reads
-  with no data change. Regens between builds are now deterministic.
+- **The weekly recap moved to the calculated points lens.** Every
+  superlative -- Top Scorer, Top Hitter, Top Pitcher, the All-League
+  Team -- now reads the calculated lens rather than the platform's own
+  attribution, and the platform point stats were untracked as record
+  candidates entirely. The platform lens exists to mirror the host
+  site's award, and where the two disagree on two-way production the
+  calculated lens is the one that reconciles against the settled score.
+
+- **New-record presentation in the recap.** Records broken before
+  a tie are handled correctly, the redundant "New" prefix is dropped,
+  the prior record is stated inline, and the abbreviation suffix is
+  gone. A first-ever record set by several teams at once is framed as a
+  new record rather than a tie.
+
+- **Team-name introduction in recap prose.** A team is introduced
+  by full name and abbreviated on repeat mention, rather than
+  abbreviated throughout.
+
+- **marts/ re-layered and facts renamed.** The contract layer (4 dims, 7
+  facts) now lives under `marts/core/`, the consumer marts under
+  `marts/reporting/`; every fact reads entity-first
+  (`fct_player_weekly_...`, `fct_team_weekly_...`, with a `_slot_`
+  marker fixing one grain-misleading name), and the two
+  consumer-contract intermediates are promoted
+  (`fct_player_position_pts`, `dim_team_owner`). The seven pre-rename
+  relations are left standing so un-merged checkouts keep working; drop
+  them once a post-release `dbt build` has run.
+
 - **"Only staging reads sources" is now absolute.** The matchup-grain
-  extraction that lived inside `fct_team_weekly_active_performance`
-  moved verbatim into `stg_matchup_scores` (final team score per
-  matchup) and `stg_matchup_pairs` (the who-played-whom spine), and
-  `dim_roster_slot_counts`'s raw flatten moved into a long-form
-  `stg_roster_settings`. A multi-grain source now feeds one staging
-  model per grain. Proven equivalent: symmetric EXCEPT between the old
-  inline SQL and the new staging views returned zero rows in both
-  directions, and the team fact's deterministic-field hash and the
-  roster dim's full-row hash are byte-identical pre/post.
-- **The two consumer-contract intermediates promoted into core.**
-  `int_player_position_pts` → `fct_player_position_pts` and
-  `int_team_owner_display` → `dim_team_owner`: both were already
-  consumer contracts in practice (the almanac reads them directly; four
-  marts join the owner bridge), which per the v1.1.0
-  `fct_player_daily_performance` precedent means they belong in
-  `marts/core` with layer-correct names. Warehouse relation renames; the
-  almanac's two queries updated in the same commit. All renamed
-  relations' predecessors are left standing so an un-merged checkout
-  keeps working — after this line merges and a `dbt build` has run from
-  it, drop the seven orphans:
-  `DROP TABLE ESPN_FANTASY.ANALYTICS.INT_PLAYER_POSITION_PTS;`
-  `DROP VIEW ESPN_FANTASY.ANALYTICS.INT_TEAM_OWNER_DISPLAY;`
-  `DROP TABLE ESPN_FANTASY.ANALYTICS.FCT_WEEKLY_PLAYER_PERFORMANCE;`
-  `DROP TABLE ESPN_FANTASY.ANALYTICS.FCT_WEEKLY_PLAYER_ACTIVE_PERFORMANCE;`
-  `DROP TABLE ESPN_FANTASY.ANALYTICS.FCT_WEEKLY_PLAYER_INACTIVE_PERFORMANCE;`
-  `DROP TABLE ESPN_FANTASY.ANALYTICS.FCT_WEEKLY_TEAM_ACTIVE_PERFORMANCE;`
-  `DROP TABLE ESPN_FANTASY.ANALYTICS.FCT_WEEKLY_TEAM_INACTIVE_PERFORMANCE;`
-- **Docs refreshed where stale.** dbt project README rewritten as a
-  layer-by-layer architecture narrative; `dbt_project.yml` starter
-  boilerplate replaced with purposeful comments; stale claims fixed
-  (dim_stat's UNPIVOT-source note, owner_nicknames' "not joined yet",
-  int_player_daily references in `generate_summary.py` comments); model
-  counts corrected in the root README / docs overview; HANDOFF's model
-  catalog brought current.
+  extraction inside the team fact moved into `stg_matchup_scores` +
+  `stg_matchup_pairs`, and the roster-settings flatten into
+  `stg_roster_settings` -- proven equivalent by symmetric EXCEPT and
+  pre/post row hashes. Season-grain float sums are frozen as tables so
+  .x5-boundary values can't flip between two reads with no data change.
 
-### Added
-
-- **CBS 2026 fantasy-layer capture** (`extract/cbs_capture.py`, MLB-44):
-  read-only preservation of the perishable owner layer of the CBS
-  points league before season rollover — rosters for every season date
-  with the deployed slot (`roster_pos`) and the started/sat split
-  (`roster_status` A/RS), period-end standings, transaction-log and
-  league/scoring-config snapshots. GET-only endpoint whitelist enforced
-  in code (the museum rule), polite pacing with backoff, token never
-  logged — and content-based verification that caught two decoys on the
-  first runs. Rosters: the obvious `date` parameter answers HTTP 200
-  with the *current* roster dressed in date-varying news headlines —
-  byte-distinct payloads, zero history (105 dates, 2 distinct payloads,
-  0 membership changes) — real history runs on `point=YYYYMMDD`, which
-  maps dates to scoring periods; discovery accepts a parameter only
-  when roster *membership* changes across two past dates, and the
-  landed sweep cross-checks clean against transaction-log ground truth
-  (624/624 adds/drops/trades consistent with day-before/day-of
-  membership). Standings: `point` is the decoy there (echoes a period
-  label over current totals; 105 dates, 1 distinct state) — real
-  history uses the scoring-period NUMBER `period=N`, and every landed
-  file must echo the period it was asked for (16/16 periods, mutually
-  distinct, totals growing 94→4,795-style with first≤last asserted;
-  strict monotonicity deliberately not — negative-scoring stats can
-  shrink a total across one bad period). Full 16-team coverage asserted
-  everywhere (`league/rosters` silently scopes to the token's own team
-  without `team_id=all` — 1 team / 30 `roster_pos` vs 16 / 480).
-  Transactions read from `league/transaction-list/log` (plain
-  `league/transactions` 404s here); the first snapshot caught the full
-  20260325→20260706 window (197 entries) before the rolling cap starts
-  eating it. Lands raw append-only JSON envelopes under gitignored
-  `data/cbs_raw/`; adapter-shaped staging comes later with the
-  format-abstraction work. Weekly cadence: the capture rides the ESPN
-  weekly runbook as its last step (SETUP.md) — idempotent, and
-  positioned so a CBS token expiry can never block the ESPN update.
-- **CBS historical backfill** (`extract/cbs_backfill.py`, MLB-45): the
-  real half of the 20-year archive — per-season player universes from
-  `league/stats?timeframe` and authentic per-game lines from
-  `players/gamelog` (shape re-verified 2026-07-07: Votto 2015 = 159
-  entries, `game_date` YYYYMMDD), landed as raw envelopes under
-  `data/cbs_raw/<league>/history/`. A gamelog is landed only when every
-  entry dates inside the requested season — a dated entry from another
-  year means fake history and the file is rejected, while null-date
-  rows (postponed/cancelled games; 2021's COVID-makeup era has ~145)
-  validate on their in-year `point` field instead. Idempotent per
-  player-season; rerun to resume; player-seasons CBS's endpoint
-  persistently 500s on are tombstoned as `KNOWN_UNAVAILABLE` with
-  evidence (one so far: Votto 2006, a zero-MLB-games rostered
-  prospect) so the verification verdict stays meaningful. First full
-  sweep landed 2026-07-07: 3,809 player-season gamelogs across
-  2004-2025 — 556,460 daily rows, 237,181 true player-games (the
-  gamelog is a team-schedule-shaped daily log; `G` flags actual
-  appearances) — with per-year universes fully covered and verdict
-  PASS. Notably absent from per-game rows: FPTS — fantasy points per
-  game must be recomputed from scoring rules at staging time, anchored
-  against the authoritative season-grain FPTS in `league/stats`.
-  Reuses the capture's GET-only whitelisted client (museum rule). The
-  pitcher half followed 2026-07-09 (`--backfill-pitching`, see the
-  Unreleased entry) once the `position=P` universe key was found.
-- **CBS site-UI league-history capture** (`extract/cbs_ui_capture.py`,
-  MLB-47): the site UI serves fantasy-layer history the API denies
-  under every probed parameter — the maintainer found it browsing, and
-  every mechanism turned out to be a clean GET. Lands raw HTML for
-  standings 2001+ (champions were never formally named; final
-  standings derive all 26 of them), transaction reports 2001+ under
-  both filters (bench/start moves ride the log — in a pure points
-  league the active set IS the scoring lineup, so active-points
-  attribution back two decades becomes a measurable reconstruction),
-  year-end roster reports 2003+ (the Time Period pulldown's option
-  values are `/teams/roster-report/{team}/{year}/` URLs; per-year team
-  ids parse from that year's standings page), drafts 2017+ (offline
-  order, soft signal), and per-franchise `/history/team-overview/{id}`
-  pages (franchise ids are stable across renames — the continuity
-  join). Session cookie from `CBS_WEB_COOKIES` in the root `.env`,
-  never logged; auth verified by content per page (login-bounce
-  detection, per-surface markers); idempotent; ground-truthed against
-  the maintainer's pasted 2021 roster before sweeping. First sweep
-  landed 2026-07-08: 526 GETs, verdict PASS — 26 standings years, 52
-  transaction pages (both filters; Activated/Reserved moves confirmed
-  present in the 2001 log), 375 roster reports across 2003–2025 with
-  per-year team counts that record the league's own shape (12–19
-  teams by era), 10 drafts, 34 franchise overviews. The live season's
-  roster-report pages render differently and are skipped — the API
-  capture owns 2026. Era-specific parse notes (transaction verb
-  vocabulary, draft page structure, embedded player-picker furniture)
-  ride with the format-abstraction staging work.
-- **Source freshness** on the four settings-style raw tables (seasonal
-  thresholds over `extracted_at`); `box_scores` documented as pending an
-  extract-side load timestamp.
-- **Missing column docs**: `stat_classification.qualifier_stat` /
-  `qualifier_min` seed columns, `mart_daily_roster_snapshot` grain
-  columns.
-- **A "Reading the DAG" section** in the dbt README explaining the three
-  deliberate cross-layer edges (raw → team fact, the stat_classification
-  hub, staging → roster snapshot) and the grain-wholesale rule of thumb
-  they follow.
-- **Shared stat-column doc blocks** (`marts/core/_stat_column_docs.md`):
-  the 62 per-stat definitions the two wide active facts repeated
-  verbatim now live once, referenced via `doc()`.
-- **No-warehouse CI** (`.github/workflows/ci.yml`): unit suite + `dbt
-  parse` against a placeholder profile on every push/PR; warehouse
-  goldens stay local by design.
-- **`mart_team_season_standings`** — season-grain standings contract:
-  one row per (season_year, team_id) with the official W-L-T record,
-  season sums of every scored-stat counting column, the calculated
-  score lenses, points conceded, and the per-week normalization
-  denominators (`scoring_days_played`, `standard_matchup_days`).
-  Regular season only (`is_playoff = false`) — a standings freezes at
-  the end of the regular season — while abnormal weeks stay in and are
-  handled by the gameplay-day denominator. Lifted from the inline
-  standings query in `output/almanac_data.py`, the same move that
-  created `mart_team_matchup` in v1.1.1.
-- **`mart_team_slot_production`** — season-grain lineup-slot production:
-  one row per (season_year, team_id, lineup_slot) of calculated points
-  produced while *deployed* in the slot (box-score slot, not position
-  eligibility), joined to `dim_roster_slot_counts` for display order
-  and the active / BE-IL cut. The mart keeps every deployed slot with
-  an `is_active_lineup_slot` flag so the future bench/IL view reads the
-  same contract; the v2.0 grid filters to active. Both new marts are
-  tables (float sums feeding byte-diff goldens; same determinism
-  rationale as `mart_team_matchup`), grain-tested, and declared on the
-  `league_almanac` exposure.
-
-- **Season-to-date report** (`output/generate_season_report.py`, MLB-1) —
-  the milestone-summary entry point, built for the All-Star break post
-  and extendable to the end-of-season edition. Deliberately
-  calendar-agnostic: run any week, it reports through the latest loaded
-  matchup period ("Through Week N"); occasion flavor comes from the note
-  files below, not break-aware code. Sections mirror the weekly recap's
-  BBCode idiom: best/worst team callouts on the per-gameplay-week lens
-  (with top-3 season contributors on the bests), season Top
-  Scorer/Hitter/Pitcher cards, Season Superlatives (best team and
-  individual weeks, most points by a hero on the league_notes platform
-  convention, biggest blowout, most points in a loss, fewest in a win —
-  abnormal weeks excluded per the records convention — plus Game/Loss of
-  the Week: the season's highest/lowest combined matchup totals and
-  per-team weekly GotW/LotW appearance tallies), the season-to-date
-  All-League Team (the almanac's optimal-lineup rows rendered as text
-  with stat + slash lines), all-time records set or tied this season, and
-  season Top Wasted Performances plus per-team wasted totals.
-- **Optional summary header/footer note files**
-  (`output/leagueNoteHeader.txt` / `leagueNoteFooter.txt`, gitignored;
-  `output/note_files.py`) — printed verbatim as the first/last lines of
-  every summary, weekly recap included; blank or missing files contribute
-  nothing, so output is byte-identical until the commissioner writes one.
-  LeagueNote.txt / Additional Notes keeps its locked behavior unchanged.
+- **Checks promoted, exposures trued, docs refreshed.** The
+  `analyses/check_*.sql` assertions now run on every `dbt build` as
+  singular tests, plus a severity-warn data canary; `league_almanac`
+  declares its real reads; the dbt README is rewritten as a
+  layer-by-layer architecture narrative and stale claims across the docs
+  were fixed. Byte-neutral for all three output surfaces.
 
 ### Fixed
 
-- **Quota retry during formula reapply turned into a hard 400.** gspread's
-  `Worksheet.batch_update` rewrites each payload entry's `range` in place
-  to `'<tab>'!<range>` before posting, so when a live write hit the Sheets
-  per-minute quota mid-`_reapply_formula_cells`, the `_sheets_call` retry
-  resent the already-prefixed list and the title doubled
-  (`'HH'!'HH'!C7` → 400 "Unable to parse range"), killing the run a
-  70-second wait should have saved. The reapply now hands gspread fresh
-  dicts on every attempt; regression-tested with a fake worksheet that
-  mimics the in-place mutation and a first-call 429. Latent since the
-  v1.2 bref-links pass — it needed a quota hit to land exactly on a
-  formula-reapply call (audited: the only values-API `batch_update` call
-  site; the formatting-request batches don't get mutated).
+- **Quota retry during formula reapply turned into a hard 400.**
+  gspread's `batch_update` rewrites each payload entry's `range` in
+  place, so a Sheets-quota retry resent already-prefixed ranges
+  (`'HH'!'HH'!C7` → "Unable to parse range"), killing a run a 70-second
+  wait should have saved. The reapply now hands gspread fresh dicts on
+  every attempt; regression-tested against the in-place mutation. Latent
+  since the bref-links pass earlier in this release.
 
-Verification: dbt parse with zero deprecation warnings (the three
-top-level test-arg blocks now use `arguments:`); dbt build green
-(PASS=221 including the new marts' grain tests); all four singular
-tests pass; recap / records goldens byte-identical. Almanac goldens
-re-anchored for the Advanced Standings rework after a reviewed diff —
-the only movement beyond that tab was the documented float-summation
-residual (six 0.1-boundary point flips surfacing as ppg cells on four
-team tabs, plus one Matchup History matchup whose Week-13 pitching
-cell moved 148.0 → 148.1 from the latest-MP incremental re-merge —
-the new values are the self-consistent ones).
+- **Team totals were rounded per component, not once.** Calculated
+  team totals summed already-rounded round-level values, so a team score
+  could differ from the sum of its parts. Totals now round once, at team
+  grain.
+
+- **Two-way production misbucketed between hitting and pitching.**
+  `platform_points` split all-or-nothing by lineup slot, so a two-way
+  player's pitching dumped into `platform_hitting_pts` on a DH or UTIL
+  day -- which mislabeled him as Top Hitter on a combined hit+pitch
+  total and suppressed the two-way Top Scorer line. The split now
+  follows each day's per-category stat contribution; single-role days
+  collapse to the prior behaviour. (A separate slot-awareness defect in
+  the same lens remains open and is documented; the recap no longer
+  reads this lens.)
+
+- **Optimal-team attribution for multi-team players.** A player
+  who changed fantasy teams mid-season could be credited to the wrong
+  team in the optimal-lineup calculation. Owner display names are also
+  pre-resolved rather than resolved per row.
+
+- **Google OAuth token expiry killed the run.** An expired Sheets
+  token now triggers a graceful re-consent instead of an unhandled
+  failure mid-render.
+
+- **Sheets per-minute write quota.** The almanac writers survive
+  the per-minute quota ceiling, adopting the backoff the ESPN writer
+  already used.
+
+- **The recap golden depended on gitignored local state.** The
+  commissioner's optional note files are read from disk at render time,
+  so a baseline captured on a machine that had them could never match a
+  run on a machine that didn't. `SUPPRESS_LEAGUE_NOTES=1` now makes
+  every note read empty, and the golden harness sets it -- so the
+  fixture pins the recap engine rather than whatever flavor is in play
+  that week.
+
+- **Logged drops didn't close roster stints.** The stint-pairing
+  window missed drops recorded in the transaction log, leaving stints
+  open past their real end and over-attributing production.
+
+- **Season-report rate stats.** Rate statistics were computed on
+  the wrong denominator in the season-to-date report.
+
+### Verification
+
+Full `dbt build` green -- 552 nodes, PASS=548 / WARN=0 / ERROR=0 /
+SKIP=0, including the new marts' grain tests and the promoted singular
+tests. Unit suite 250 passed; warehouse suite 16 passed. The records
+BBCode golden held byte-identical. The ESPN almanac goldens re-anchored
+on 3 of 19 tabs (10 lines total, anchor 2026 Week 7): four
+points/points-per-game cells at float-summation boundaries, one of which
+re-sorted a single row inside a ranked overflow block -- the documented
+`.x5` residual class, no structural or identity change. CBS output is
+content-verified against real MLB history and reconciles against the
+platform's own totals (594/594 exact on the 2025 pitcher recompute; 0.0
+residual on all 8,185 reconciled player-seasons).
+
+---
 
 ## [1.2.0] — 2026-05-30
 

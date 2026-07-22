@@ -43,6 +43,20 @@ vars:
   # facts capture full stat lines.
   strict_slot_validity: true
 
+  # THE HOLDING PEN (MLB-115). A synthetic franchise that catches production
+  # we can attribute to a LEAGUE but not to a team: CBS's 2001-2002 zero-event
+  # players, and any franchise-season the lineage seed declares unowned. Record
+  # books fence it out of every TEAM aggregation (a holding pen is not a
+  # franchise) and it gets no team page.
+  #
+  # The label is a pure placeholder. These two vars are the ONLY place it is
+  # pinned in the transform layer, so swapping it -- if '####' ever trips a
+  # parser, a formula bar, or a URL -- is a one-line edit here rather than a
+  # hunt through models and seeds. Keep the id numeric: it lands in
+  # franchise_id columns that are typed numeric.
+  holding_pen_franchise_id: 9999
+  holding_pen_label: '####'
+
 seeds:
   dbt_league:
     matchup_schedule:

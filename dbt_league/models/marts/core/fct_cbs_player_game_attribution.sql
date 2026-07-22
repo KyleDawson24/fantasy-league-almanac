@@ -308,14 +308,17 @@ reconstructed as (
 
 -- SENTINEL (Kyle, 2026-07-14): the 2001-2002 zero-event players -- real
 -- gamelog production but NO stint at all (never transacted, no log line, no
--- year-end anchor to bootstrap membership). Parked on a synthetic holding-pen
--- franchise (9999, '####') at weight 1 -- assume-active until the backfill
--- learns otherwise -- so their production surfaces in PLAYER/league records
--- now. The record book FENCES 9999 out of every TEAM aggregation (a holding
--- pen isn't a franchise) and it gets no team page (not in the active set);
--- the 2001-2002 real teams' team records stay incomplete until the backfill
--- reassigns these players off ####. Law 1 already applied upstream, so a
--- sentinel pitcher carries pitching rows only.
+-- year-end anchor to bootstrap membership). Parked on the synthetic holding-pen
+-- franchise at weight 1 -- assume-active until the backfill learns otherwise --
+-- so their production surfaces in PLAYER/league records now. The record book
+-- FENCES the holding pen out of every TEAM aggregation (a holding pen isn't a
+-- franchise) and it gets no team page (not in the active set); the 2001-2002
+-- real teams' team records stay incomplete until the backfill reassigns these
+-- players off it. Law 1 already applied upstream, so a sentinel pitcher
+-- carries pitching rows only.
+--
+-- The id and label come from the holding_pen_* project vars (MLB-115) rather
+-- than literals, so the placeholder can be swapped in one place.
 sentinel as (
     select
         g.league_key,
@@ -327,8 +330,8 @@ sentinel as (
         g.game_date,
         g.game_pk,
         g.game_index,
-        9999                             as franchise_id,
-        cast('####' as varchar)          as team_name,
+        {{ var('holding_pen_franchise_id') }} as franchise_id,
+        cast('{{ var("holding_pen_label") }}' as varchar) as team_name,
         'sentinel'                       as provenance,
         'sentinel'                       as state_source,
         true                             as is_active,

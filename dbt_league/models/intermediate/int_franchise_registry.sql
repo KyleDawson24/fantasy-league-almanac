@@ -5,28 +5,81 @@
 -- makes available to us" layer -- dim_franchise resolves the human's continuity
 -- overrides (the franchise_lineage seed) onto THIS. Keeping the observed input
 -- behind a general seam is what makes the whole continuity pipeline
--- platform-agnostic: a new platform (ESPN's "Baseball Buns In The Sun", etc.)
--- adds ONE branch here in the same shape, and optionally rows to the
--- franchise_lineage seed -- no league needs an override to flow through.
+-- platform-agnostic: every league flows through the same shape, and no league
+-- needs an override just to appear.
+--
+-- Two observed sources, in precedence order. A league is served by exactly one:
+--
+--   1. CURATED -- a franchises seed, for leagues whose names are historical and
+--      cannot be re-derived. CBS's 26 seasons live here because the platform
+--      serves no franchise API; the names were reconstructed once from the
+--      parsed UI standings history and are frozen data now.
+--
+--   2. DERIVED -- per-season team identity observed in the box scores, taking
+--      the franchise's LATEST season as its display. Leagues whose platform
+--      reports team names live belong here: a mid-season rename propagates on
+--      the next extract with no seed maintenance, which a curated seed would
+--      silently defeat.
+--
+-- Precedence is by league, not by row: the derived branch excludes any league
+-- the curated seed already covers, so the two can never fight over a franchise
+-- and the grain stays one row per (league_key, franchise_id).
+--
+-- Neither branch names a platform. A new league joins whichever branch matches
+-- how its data actually behaves -- historical-and-frozen, or live-and-observed.
 --
 -- ==========================================================================
 -- GRAIN: one row per (league_key, franchise_id).
 -- ==========================================================================
 {{ config(materialized='view') }}
 
--- CBS: the curated registry (display abbrevs + latest name) built from the
--- parsed UI standings history.
-select
-    league_key,
-    cast(franchise_id as varchar) as franchise_id,
-    franchise_name                as observed_name,
-    abbrev                        as observed_abbrev
-from {{ ref('cbs_franchises') }}
+with curated as (
+    select
+        league_key,
+        cast(franchise_id as varchar) as franchise_id,
+        franchise_name                as observed_name,
+        abbrev                        as observed_abbrev
+    from {{ ref('cbs_franchises') }}
+),
 
--- Future platforms plug in here with the SAME shape, e.g. ESPN:
---   union all
---   select league_key, cast(team_id as varchar), team_name, team_abbrev
---   from <espn per-franchise registry>
--- (ESPN carries per-season names in mart_team_season_standings today; a thin
---  franchise-grain staging model would be its registry. No override needed to
---  appear here -- unlinked franchises just resolve to themselves.)
+-- Distinct team identity per season. stg_box_scores is player-grain, so the
+-- same (season, team) repeats once per rostered player per matchup.
+observed_seasons as (
+    select distinct
+        league_key,
+        season_year,
+        cast(team_id as varchar) as franchise_id,
+        team_name,
+        team_abbrev
+    from {{ ref('stg_box_scores') }}
+    where team_id is not null
+      and league_key not in (select league_key from curated)
+),
+
+-- The franchise's latest observed season wins its display, so a rename shows
+-- up everywhere the moment it lands in RAW.
+derived as (
+    select
+        league_key,
+        franchise_id,
+        team_name   as observed_name,
+        team_abbrev as observed_abbrev
+    from (
+        select
+            observed_seasons.*,
+            row_number() over (
+                partition by league_key, franchise_id
+                order by season_year desc
+            ) as recency_rank
+        from observed_seasons
+    )
+    where recency_rank = 1
+)
+
+select league_key, franchise_id, observed_name, observed_abbrev
+from curated
+
+union all
+
+select league_key, franchise_id, observed_name, observed_abbrev
+from derived

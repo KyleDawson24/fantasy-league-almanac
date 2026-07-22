@@ -1,6 +1,42 @@
 version: 2
 
 models:
+  - name: int_franchise_registry
+    description: >
+      Platform-general OBSERVED franchise registry (MLB-64): one row per
+      (league_key, franchise_id) with the franchise's observed display name and
+      abbrev. dim_franchise resolves the franchise_lineage continuity overrides
+      onto this seam, so every league reaches the team-grain surfaces through
+      one shape. Two observed sources, one per league by precedence: CURATED
+      (a franchises seed, for leagues whose names are historical and cannot be
+      re-derived) and DERIVED (latest-season team identity observed in the box
+      scores, for leagues whose platform reports names live -- a rename
+      propagates on the next extract). The derived branch excludes any league
+      the curated seed covers, so the two can never contest a franchise.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - franchise_id
+    columns:
+      - name: league_key
+        description: The league this franchise belongs to.
+        tests:
+          - not_null
+      - name: franchise_id
+        description: >
+          Platform team id as varchar -- the franchise's stable identity within
+          its league, before lineage resolution collapses re-mints.
+        tests:
+          - not_null
+      - name: observed_name
+        description: >
+          Display name as observed: the curated seed's name, or the franchise's
+          latest observed season in the box scores.
+      - name: observed_abbrev
+        description: Display abbreviation, from the same source as observed_name.
+
   - name: int_cbs__team_owner_season
     description: >
       Per-season CBS team ownership (MLB-64), all-time. Resolves the curated

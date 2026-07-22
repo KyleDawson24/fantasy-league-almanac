@@ -167,16 +167,29 @@ seeds:
       to themselves in dim_franchise. canonical_franchise_id is the earliest id
       in the lineage. name/abbrev are optional display overrides (blank -> use
       the anchor's).
+      SEASON-SCOPED since MLB-115: a blank season_year means "all seasons" (what
+      every row meant before the column existed), and a filled one speaks about
+      a single franchise-season. That is what lets the seed SPLIT as well as
+      MERGE -- a platform that reuses a live team id for a new team can say so,
+      where before it could only say "A is the same as B".
     config:
       column_types:
         league_key: varchar
         franchise_id: varchar
+        season_year: varchar
         canonical_franchise_id: varchar
         canonical_name: varchar
         canonical_abbrev: varchar
     columns:
       - name: franchise_id
         tests: [not_null]
+      - name: season_year
+        description: >
+          Blank = the row applies to every season (harvested rows are always
+          blank; the continuity sheet states franchise-level identity). Filled =
+          the row applies to that season alone, which only dim_franchise_season
+          can express -- dim_franchise, being franchise-grain, ignores these.
+          Varchar so a blank is not type-inferred as numeric.
       - name: canonical_franchise_id
         tests: [not_null]
 

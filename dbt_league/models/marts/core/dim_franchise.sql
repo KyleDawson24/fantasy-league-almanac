@@ -34,6 +34,12 @@ with franchises as (
     from {{ ref('int_franchise_registry') }}
 ),
 
+-- ALL-SEASON lineage rows only. The seed is season-scoped (MLB-115): a row
+-- carrying a season_year speaks about one franchise-season, which this
+-- franchise-grain dim has no key to express -- applying it here would silently
+-- rewrite the franchise across its whole history. Those rows belong to
+-- dim_franchise_season; a blank season_year means "always," which is every row
+-- the seed held before it gained the column.
 lineage as (
     select
         league_key,
@@ -42,6 +48,7 @@ lineage as (
         nullif(cast(canonical_name as varchar), '')      as canonical_name,
         nullif(cast(canonical_abbrev as varchar), '')    as canonical_abbrev
     from {{ ref('franchise_lineage') }}
+    where nullif(cast(season_year as varchar), '') is null
 ),
 
 resolved as (

@@ -108,7 +108,11 @@ def harvest(league_key, sheet_id):
         nm = over_name.get(fid) or over_name.get(cid) or ''
         ab = over_ab.get(fid) or over_ab.get(cid) or ''
         if cid != fid or nm or ab:             # override-only: skip self+empty
-            lineage_rows.append((league_key, fid, cid, nm, ab))
+            # Blank season_year = "all seasons" (MLB-115). The continuity sheet
+            # states franchise-level identity, so everything it yields is
+            # all-season; season-scoped rows are hand-authored and preserved by
+            # _write rather than harvested.
+            lineage_rows.append((league_key, fid, '', cid, nm, ab))
 
     # ---- owner aliases (Owners tab) ---------------------------------------
     hdr, body = _load(ss, 'Owners')
@@ -169,12 +173,37 @@ def harvest(league_key, sheet_id):
     return lineage_rows, alias_rows, oby_rows
 
 
-def _write(path, header, rows):
+def _write(path, header, rows, keep=None):
+    """Write a seed, carrying through existing rows that keep(row) accepts.
+
+    These seeds are platform-general but the harvest is per-league: it reads
+    one league's continuity sheet and knows nothing about the others. A plain
+    overwrite therefore deleted every other league's rows -- harmless while CBS
+    was the only league loaded, and silent data loss the moment a second league
+    gained one.
+
+    It also can't speak for rows the sheet has no way to state. The continuity
+    sheet asserts franchise-level identity, so a season-scoped row (MLB-115) is
+    hand-authored and must survive a re-harvest of its OWN league. Rows are kept
+    only when their width matches the header, so a stale-format file is
+    discarded rather than written back misaligned.
+    """
+    kept = []
+    if keep is not None and path.exists():
+        with open(path, newline='', encoding='utf-8') as f:
+            r = csv.reader(f)
+            old_header = next(r, None)
+            if old_header == list(header):
+                kept = [row for row in r
+                        if row and len(row) == len(header) and keep(row)]
+
     with open(path, 'w', newline='', encoding='utf-8') as f:
         w = csv.writer(f)
         w.writerow(header)
         w.writerows(rows)
-    print(f"  wrote {path.name}  ({len(rows)} rows)")
+        w.writerows(kept)
+    extra = f"  (+{len(kept)} preserved)" if kept else ''
+    print(f"  wrote {path.name}  ({len(rows)} rows){extra}")
 
 
 def main():
@@ -186,14 +215,20 @@ def main():
     lineage, alias, oby = harvest(args.league, _sheet_id_from(args.sheet_id))
     # Platform-general override seeds (league-keyed rows), matching the shared
     # owner_nicknames / player_alias convention -- any league writes here.
+    other_league = lambda row: row[0] != args.league
     _write(_SEEDS / 'franchise_lineage.csv',
-           ['league_key', 'franchise_id', 'canonical_franchise_id',
-            'canonical_name', 'canonical_abbrev'], lineage)
+           ['league_key', 'franchise_id', 'season_year',
+            'canonical_franchise_id', 'canonical_name', 'canonical_abbrev'],
+           lineage,
+           # Another league's rows, plus this league's season-scoped ones --
+           # the sheet states all-season identity and cannot author those.
+           keep=lambda row: other_league(row) or row[2].strip())
     _write(_SEEDS / 'owner_alias.csv',
            ['league_key', 'owner_id', 'canonical_owner_id', 'preferred_name'],
-           alias)
+           alias, keep=other_league)
     _write(_SEEDS / 'team_owner_by_year.csv',
-           ['league_key', 'season_year', 'franchise_id', 'owner_name'], oby)
+           ['league_key', 'season_year', 'franchise_id', 'owner_name'], oby,
+           keep=other_league)
     print(f"\nHarvested: {len(lineage)} lineage links, {len(alias)} owner "
           f"aliases, {len(oby)} owner-year rows.")
 

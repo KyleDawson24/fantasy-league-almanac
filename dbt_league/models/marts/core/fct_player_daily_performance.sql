@@ -36,6 +36,8 @@
 
 {{ config(materialized='view') }}
 
+with base as (
+
 select
     -- Identifiers
     league_key,
@@ -115,3 +117,39 @@ select
     total_stat_pts
 
 from {{ ref('int_player_daily') }}
+
+)
+
+-- TEAM DISPLAY RESOLVES HERE, for both books at once (MLB-113). Every column
+-- above carries the name the PLATFORM reported for that row, straight out of
+-- RAW. That is the wrong source for display: it ignores the franchise override
+-- layer, so a rename never propagates backward, a re-minted franchise wears two
+-- names across its own history, and -- the reason this became urgent -- an
+-- anonymized render leaks the real names it was supposed to replace.
+--
+-- This is the single seam for the whole player/team fact chain. int_player_daily
+-- has already converged both books by this point, and every downstream fact and
+-- mart inherits team_name/team_abbrev from here, so resolving once reaches the
+-- chain without a platform branch anywhere.
+--
+-- Joined at SEASON grain: a franchise-season the lineage seed reassigns (a
+-- platform reusing a live team id, MLB-115) displays what it actually was that
+-- year rather than what the id became later.
+--
+-- * REPLACE swaps the two values in place so column order is untouched --
+-- int_player_daily's UNION is positional by design and downstream models select
+-- by name against this shape.
+--
+-- COALESCE is a safety net, not a fallback we expect to lean on: an unresolved
+-- franchise keeps its platform name rather than blanking a real one. Free
+-- agents (team_id NULL) miss the join by construction and keep their NULLs.
+-- assert_team_display_resolves_through_dim proves the net stays load-free.
+select b.* replace (
+    coalesce(d.canonical_name, b.team_name)     as team_name,
+    coalesce(d.canonical_abbrev, b.team_abbrev) as team_abbrev
+)
+from base b
+left join {{ ref('dim_franchise_season') }} d
+    on b.league_key = d.league_key
+    and cast(b.team_id as varchar) = d.franchise_id
+    and b.season_year = d.season_year

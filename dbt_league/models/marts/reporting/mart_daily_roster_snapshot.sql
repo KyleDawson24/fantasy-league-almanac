@@ -25,8 +25,11 @@ select
     b.matchup_period,
     b.scoring_period,
     b.team_id,
-    b.team_name,
-    b.team_abbrev,
+    -- Display resolves through the franchise dim (MLB-113). This mart reads
+    -- stg_box_scores directly, so the shared seam at
+    -- fct_player_daily_performance never sees it and it joins for itself.
+    coalesce(d.canonical_name, b.team_name)     as team_name,
+    coalesce(d.canonical_abbrev, b.team_abbrev) as team_abbrev,
     b.owner_name,
     -- v1.3: canonical preferred owner display, resolved here (like the other
     -- consumption surfaces) so the per-team-tab consumer reads owner_display
@@ -65,5 +68,9 @@ left join {{ ref('dim_team_owner') }} tod
     on b.league_key = tod.league_key
     and b.season_year = tod.season_year
     and b.team_id = tod.team_id
+left join {{ ref('dim_franchise_season') }} d
+    on b.league_key = d.league_key
+    and cast(b.team_id as varchar) = d.franchise_id
+    and b.season_year = d.season_year
 where b.team_id is not null
   and b.lineup_slot <> 'FA'

@@ -80,7 +80,14 @@ select
     m.season_year,
     m.period,
     m.team_id,
-    m.team_name,
+    -- Display resolves through the franchise dim (MLB-113), not the name the
+    -- feed delivered. This mart reads stg_cbs__standings directly -- there is
+    -- no convergence layer between it and RAW -- so it is one of the few
+    -- surfaces the shared seam at fct_player_daily_performance cannot reach,
+    -- and it has to make the join itself. Season grain, so a franchise-season
+    -- the lineage seed reassigns shows what it was that year. COALESCE keeps an
+    -- unresolved franchise readable rather than blanking a real name.
+    coalesce(d.canonical_name, m.team_name) as team_name,
     m.division_name,
     m.standings_rank,
     m.points,
@@ -92,4 +99,8 @@ from with_movement m
 inner join max_period mp
     on m.league_key = mp.league_key
     and m.season_year = mp.season_year
+left join {{ ref('dim_franchise_season') }} d
+    on m.league_key = d.league_key
+    and cast(m.team_id as varchar) = d.franchise_id
+    and m.season_year = d.season_year
 order by m.league_key, m.season_year, m.period, m.standings_rank

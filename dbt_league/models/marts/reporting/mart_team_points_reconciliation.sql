@@ -66,7 +66,10 @@ select
     o.league_key,
     o.season_year,
     o.franchise_id,
-    o.team_name,
+    -- Display resolves through the franchise dim (MLB-113). This mart reads
+    -- the parsed UI standings directly, so it joins for itself rather than
+    -- inheriting from the shared seam.
+    coalesce(d.canonical_name, o.team_name) as team_name,
     o.standings_rank,
     o.is_champion,
     o.official_total_points,
@@ -84,4 +87,8 @@ left join reconstructed r
     on o.league_key = r.league_key
     and o.season_year = r.season_year
     and o.franchise_id = r.franchise_id
+left join {{ ref('dim_franchise_season') }} d
+    on o.league_key = d.league_key
+    and cast(o.franchise_id as varchar) = d.franchise_id
+    and o.season_year = d.season_year
 order by o.season_year, o.standings_rank

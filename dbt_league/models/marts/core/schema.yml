@@ -265,6 +265,59 @@ models:
         tests:
           - not_null
 
+  - name: dim_franchise_season
+    description: >
+      Canonical franchise identity AT A SEASON (MLB-115) -- the season-grain
+      twin of dim_franchise, and the only place a season-scoped lineage row is
+      honoured. dim_franchise answers "which franchise is this id?" with one
+      answer for all time, which cannot express a platform reusing a LIVE id for
+      a new team (an abandoned slot taken over by a new manager is the same id
+      and genuinely different franchises either side of the handover). Applying
+      such a row at franchise grain would rewrite the franchise across its whole
+      history, so those rows are read here and ignored there. Precedence per
+      franchise-season: a season-scoped lineage row, else dim_franchise's
+      franchise-level answer. Display always resolves from the CANONICAL
+      franchise, so a season parked on the holding pen shows the pen's label
+      rather than the team that later inherited the id. Most surfaces should
+      keep joining dim_franchise; reach for this one when the surface is
+      season-grain AND attribution matters.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - franchise_id
+              - season_year
+    columns:
+      - name: league_key
+        description: 'League registry key. Part of the grain.'
+        tests:
+          - not_null
+      - name: franchise_id
+        description: 'Platform team id (per league). Part of the grain.'
+        tests:
+          - not_null
+      - name: season_year
+        description: 'The season this row speaks about. Part of the grain.'
+        tests:
+          - not_null
+      - name: canonical_franchise_id
+        description: >
+          The franchise this id belonged to IN THIS SEASON, which can differ
+          from dim_franchise's all-time answer when a season-scoped row splits
+          a reused id.
+        tests:
+          - not_null
+      - name: is_season_override
+        description: >
+          True when a season-scoped lineage row decided this row, rather than
+          the franchise-level fallback. The audit handle for "why does this
+          season resolve differently from the franchise?"
+      - name: canonical_name
+        description: 'Display name of the canonical franchise for this season.'
+        tests:
+          - not_null
+
   - name: dim_owner
     description: >
       Owner dimension. One row per (league_key, owner_id), spined off

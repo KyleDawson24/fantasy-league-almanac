@@ -45,6 +45,13 @@ with curated as (
         franchise_name                as observed_name,
         abbrev                        as observed_abbrev
     from {{ ref('cbs_franchises') }}
+    -- The holding pen is synthesized below for EVERY league from the
+    -- holding_pen_* vars, so a curated seed's own pen row is skipped here.
+    -- Otherwise the pen's label would come from the seed on the leagues that
+    -- happen to seed one and from the var everywhere else, and swapping the
+    -- placeholder would silently miss the former.
+    where cast(franchise_id as varchar)
+          != '{{ var("holding_pen_franchise_id") }}'
 ),
 
 -- Distinct team identity per season, carrying the last period each name was
@@ -97,33 +104,36 @@ derived as (
 ),
 
 -- When was each franchise last seen playing? DISPLAY recency only -- identity
--- anchoring stays the lineage seed's job (dim_franchise). Platform-general by
--- union: every league contributes whatever season-grain source it has, which is
--- what gives a CURATED league a recency signal its flat seed cannot carry. Add
--- a league's season source here when it joins. Overlap between sources is safe
--- -- this is a max(), not a count().
+-- anchoring stays the lineage seed's job (dim_franchise).
 franchise_recency as (
     select
         league_key,
         franchise_id,
         max(season_year) as last_observed_season
-    from (
-        select
-            league_key,
-            cast(team_id as varchar) as franchise_id,
-            season_year
-        from {{ ref('stg_box_scores') }}
-        where team_id is not null
-
-        union all
-
-        select
-            league_key,
-            cast(franchise_id as varchar) as franchise_id,
-            season_year
-        from {{ ref('stg_cbs__ui_standings') }}
-    )
+    from {{ ref('int_franchise_seasons') }}
     group by league_key, franchise_id
+),
+
+leagues as (
+    select league_key from curated
+    union
+    select league_key from derived
+),
+
+-- THE HOLDING PEN, platform-general (MLB-115): one synthetic franchise per
+-- league, catching production attributable to the LEAGUE but not to any team --
+-- CBS's 2001-2002 zero-event players, and any franchise-season the lineage seed
+-- declares unowned. Record books fence it out of every TEAM aggregation and it
+-- gets no team page. Synthesized for every league from the vars -- one id, one
+-- label, one place to change them -- so the pen is a property of the warehouse
+-- rather than an artifact of whichever league happened to seed one.
+holding_pen as (
+    select
+        league_key,
+        '{{ var("holding_pen_franchise_id") }}' as franchise_id,
+        '{{ var("holding_pen_label") }}'        as observed_name,
+        '{{ var("holding_pen_label") }}'        as observed_abbrev
+    from leagues
 ),
 
 observed as (
@@ -134,6 +144,11 @@ observed as (
 
     select league_key, franchise_id, observed_name, observed_abbrev
     from derived
+
+    union all
+
+    select league_key, franchise_id, observed_name, observed_abbrev
+    from holding_pen
 )
 
 select

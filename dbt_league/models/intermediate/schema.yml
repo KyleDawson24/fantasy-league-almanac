@@ -46,6 +46,36 @@ models:
           pen); such a franchise is always its own lineage, so a null never
           decides a display race.
 
+  - name: int_franchise_seasons
+    description: >
+      Platform-general OBSERVED franchise seasons (MLB-115): one row per
+      (league_key, franchise_id, season_year) a franchise was actually seen
+      playing, unioned from every league's season-grain source. The season-grain
+      twin of int_franchise_registry. Two consumers want opposite ends of it --
+      int_franchise_registry rolls it up to each franchise's latest season for
+      the display-recency signal, dim_franchise_season uses it as the spine of
+      every franchise-season that can be spoken about at all.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - franchise_id
+              - season_year
+    columns:
+      - name: league_key
+        description: The league this franchise belongs to.
+        tests:
+          - not_null
+      - name: franchise_id
+        description: Platform team id as varchar, before lineage resolution.
+        tests:
+          - not_null
+      - name: season_year
+        description: A season this franchise was observed playing.
+        tests:
+          - not_null
+
   - name: int_cbs__team_owner_season
     description: >
       Per-season CBS team ownership (MLB-64), all-time. Resolves the curated

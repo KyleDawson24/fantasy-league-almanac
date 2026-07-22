@@ -88,6 +88,7 @@ Study Material.MD
 # - the trade-intel handoff must never be committed anywhere
 data/
 tests/fixtures/almanac_v1_1_0/
+tests/fixtures/cbs_almanac/
 tests/fixtures/baseline_summary_current.txt
 tests/fixtures/baseline_records_report.txt
 Trade Intel API Handoff.md

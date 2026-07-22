@@ -295,6 +295,18 @@ reconstructed as (
     -- stint whose anchored position matches the game's discipline
     -- (catcher games don't credit the reliever of the same name), then
     -- the most recent stint. Losers surface via attribution_contested.
+    -- The trailing keys are a DETERMINISM guard (MLB-117). Position-match and
+    -- stint_start alone are not unique: one player can hold two stints with the
+    -- same start -- the same franchise adding him twice on one day under two
+    -- name forms, or a same-day add/drop beside a real rostering. Until MLB-117
+    -- those siblings truncated each other to zero, so only one ever reached
+    -- here and this partition never saw a tie (attribution_contested read 0
+    -- league-wide). Now that both survive, the tie is real, and without a
+    -- unique final key row_number() would pick between them differently
+    -- between builds -- moving the same games this ticket just stopped moving.
+    -- name_key then stint_index is arbitrary but STABLE, which is the whole
+    -- requirement; genuinely contested rows still surface via
+    -- attribution_contested.
     qualify row_number() over (
         partition by g.league_key, g.cbs_player_id, g.stat_group,
                      g.game_pk, g.game_date, g.game_index
@@ -302,7 +314,9 @@ reconstructed as (
             case when ae.primary_pos in ('SP', 'RP', 'P')
                  then g.stat_group = 'pitching'
                  else g.stat_group = 'hitting' end, 0, 1),
-            s.stint_start desc
+            s.stint_start desc,
+            s.name_key,
+            s.stint_index
     ) = 1
 ),
 
@@ -361,8 +375,37 @@ sentinel as (
       )
 )
 
+, unioned as (
+
 select * from captured
 union all
 select * from reconstructed
 union all
 select * from sentinel
+
+)
+
+-- Display resolves through the franchise dim (MLB-113). This fact is read
+-- directly by the CBS renderer and does not pass through the shared seam at
+-- fct_player_daily_performance, so it makes the join itself -- once over the
+-- union, which keeps all three branches on one rule.
+--
+-- NULLs are preserved deliberately. The reconstructed branch carries no team
+-- name by design (it infers a franchise from stints, it does not capture a
+-- name), and this ticket is about where a DISPLAYED name comes from, not about
+-- inventing names for rows that never had one. Filling them would be a
+-- semantic change wearing a display change's clothes.
+--
+-- The sentinel branch resolves to nothing -- the holding pen has no observed
+-- seasons by construction -- so it keeps the label it was built with, which is
+-- already the holding_pen_label var.
+select u.* replace (
+    iff(u.team_name is null,
+        null,
+        coalesce(d.canonical_name, u.team_name)) as team_name
+)
+from unioned u
+left join {{ ref('dim_franchise_season') }} d
+    on u.league_key = d.league_key
+    and cast(u.franchise_id as varchar) = d.franchise_id
+    and u.season_year = d.season_year

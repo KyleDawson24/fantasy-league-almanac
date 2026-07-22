@@ -47,22 +47,36 @@ with curated as (
     from {{ ref('cbs_franchises') }}
 ),
 
--- Distinct team identity per season. stg_box_scores is player-grain, so the
--- same (season, team) repeats once per rostered player per matchup.
+-- Distinct team identity per season, carrying the last period each name was
+-- seen under. stg_box_scores is player-grain, so the same (season, team)
+-- repeats once per rostered player per matchup.
+--
+-- A team can rename MID-season, which puts two names in one season_year and
+-- makes season alone an insufficient sort: the two rows tie, and row_number()
+-- then picks between them arbitrarily -- a franchise's display name could flip
+-- between rebuilds. The period each name was last seen under is the within-
+-- season recency signal that breaks it.
 observed_seasons as (
-    select distinct
+    select
         league_key,
         season_year,
         cast(team_id as varchar) as franchise_id,
         team_name,
-        team_abbrev
+        team_abbrev,
+        max(matchup_period) as last_matchup_period
     from {{ ref('stg_box_scores') }}
     where team_id is not null
       and league_key not in (select league_key from curated)
+    group by
+        league_key,
+        season_year,
+        cast(team_id as varchar),
+        team_name,
+        team_abbrev
 ),
 
--- The franchise's latest observed season wins its display, so a rename shows
--- up everywhere the moment it lands in RAW.
+-- The franchise's latest observed name wins its display, so a rename shows
+-- up everywhere the moment it lands in RAW -- mid-season ones included.
 derived as (
     select
         league_key,
@@ -74,7 +88,8 @@ derived as (
             observed_seasons.*,
             row_number() over (
                 partition by league_key, franchise_id
-                order by season_year desc
+                order by season_year desc,
+                         last_matchup_period desc nulls last
             ) as recency_rank
         from observed_seasons
     )

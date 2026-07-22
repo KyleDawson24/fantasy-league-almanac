@@ -51,12 +51,17 @@ def _normalize(s: str) -> str:
 
 
 def _run_script(*args) -> str:
+    # The commissioner's optional note files are gitignored local state, so
+    # a baseline rendered with them can never match a run without them.
+    # Suppress them here: the golden pins the recap engine, not the flavor.
+    env = dict(os.environ, SUPPRESS_LEAGUE_NOTES="1")
     proc = subprocess.run(
         [sys.executable, *args],
         cwd=str(REPO),
         capture_output=True,
         text=True,
         encoding="utf-8",
+        env=env,
     )
     assert proc.returncode == 0, (
         f"script failed (exit {proc.returncode}):\n"

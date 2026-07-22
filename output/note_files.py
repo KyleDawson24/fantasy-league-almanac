@@ -23,7 +23,16 @@ FOOTER_FILE = 'leagueNoteFooter.txt'
 
 
 def read_note(filename):
-    """Stripped contents of an optional note file; '' when missing/blank."""
+    """Stripped contents of an optional note file; '' when missing/blank.
+
+    Setting SUPPRESS_LEAGUE_NOTES=1 makes every note read empty. The note
+    files are gitignored local state, so a golden baseline rendered on a
+    machine that has them can never match one rendered on a machine that
+    doesn't -- the goldens set this so they pin the recap engine rather
+    than whatever flavor the commissioner is running this week.
+    """
+    if os.environ.get('SUPPRESS_LEAGUE_NOTES') == '1':
+        return ''
     path = os.path.join(_OUTPUT_DIR, filename)
     if not os.path.exists(path):
         return ''

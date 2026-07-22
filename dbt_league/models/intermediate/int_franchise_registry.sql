@@ -28,6 +28,11 @@
 -- Neither branch names a platform. A new league joins whichever branch matches
 -- how its data actually behaves -- historical-and-frozen, or live-and-observed.
 --
+-- Both branches also carry last_observed_season, the recency signal
+-- dim_franchise anchors DISPLAY on (MLB-113). The derived branch has one
+-- natively; a curated league's seed is flat, so recency comes from the
+-- season-grain union below rather than from a column the human must maintain.
+--
 -- ==========================================================================
 -- GRAIN: one row per (league_key, franchise_id).
 -- ==========================================================================
@@ -74,12 +79,55 @@ derived as (
         from observed_seasons
     )
     where recency_rank = 1
+),
+
+-- When was each franchise last seen playing? DISPLAY recency only -- identity
+-- anchoring stays the lineage seed's job (dim_franchise). Platform-general by
+-- union: every league contributes whatever season-grain source it has, which is
+-- what gives a CURATED league a recency signal its flat seed cannot carry. Add
+-- a league's season source here when it joins. Overlap between sources is safe
+-- -- this is a max(), not a count().
+franchise_recency as (
+    select
+        league_key,
+        franchise_id,
+        max(season_year) as last_observed_season
+    from (
+        select
+            league_key,
+            cast(team_id as varchar) as franchise_id,
+            season_year
+        from {{ ref('stg_box_scores') }}
+        where team_id is not null
+
+        union all
+
+        select
+            league_key,
+            cast(franchise_id as varchar) as franchise_id,
+            season_year
+        from {{ ref('stg_cbs__ui_standings') }}
+    )
+    group by league_key, franchise_id
+),
+
+observed as (
+    select league_key, franchise_id, observed_name, observed_abbrev
+    from curated
+
+    union all
+
+    select league_key, franchise_id, observed_name, observed_abbrev
+    from derived
 )
 
-select league_key, franchise_id, observed_name, observed_abbrev
-from curated
-
-union all
-
-select league_key, franchise_id, observed_name, observed_abbrev
-from derived
+select
+    o.league_key,
+    o.franchise_id,
+    o.observed_name,
+    o.observed_abbrev,
+    fr.last_observed_season
+from observed o
+left join franchise_recency fr
+    on o.league_key = fr.league_key
+    and o.franchise_id = fr.franchise_id

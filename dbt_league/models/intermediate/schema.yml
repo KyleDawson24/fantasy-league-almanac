@@ -36,6 +36,15 @@ models:
           latest observed season in the box scores.
       - name: observed_abbrev
         description: Display abbreviation, from the same source as observed_name.
+      - name: last_observed_season
+        description: >
+          Latest season this franchise was seen playing, from the union of every
+          league's season-grain source. The recency signal dim_franchise anchors
+          DISPLAY on (MLB-113), which is what lets a CURATED league order its
+          eras without a maintained column in its flat seed. Null only for
+          franchises that never appear in a season source (the CBS #### holding
+          pen); such a franchise is always its own lineage, so a null never
+          decides a display race.
 
   - name: int_cbs__team_owner_season
     description: >

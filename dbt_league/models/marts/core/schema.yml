@@ -234,10 +234,12 @@ models:
       curated franchise_lineage seed (harvested from the historian's continuity
       sheet), resolved onto the observed int_franchise_registry seam:
       franchise_id -> canonical_franchise_id (the earliest id in a
-      lineage) plus the canonical display name/abbrev (the anchor's, unless
-      the seed overrides). Unlinked franchises and the #### sentinel map to
-      themselves. The join every team-grain surface uses to tell a
-      franchise's story across renames and re-mints.
+      lineage) plus the canonical display name/abbrev. Unlinked franchises and
+      the #### sentinel map to themselves. The join every team-grain surface
+      uses to tell a franchise's story across renames and re-mints.
+      Two anchors, deliberately (MLB-113): identity anchors on the earliest id
+      in a lineage, display on the latest-seen one, so a franchise that left and
+      came back shows its most recent name rather than its oldest era's.
     tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
@@ -256,7 +258,10 @@ models:
         tests:
           - not_null
       - name: canonical_name
-        description: 'Display name of the canonical franchise.'
+        description: >
+          Display name of the canonical franchise: the franchise_lineage seed's
+          override when one is given, else the name worn by the lineage's
+          most-recently-seen member (Kyle's rule, 2026-07-22).
         tests:
           - not_null
 

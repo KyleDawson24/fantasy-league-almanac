@@ -1401,9 +1401,9 @@ def get_cbs_records_data():
         return {
             'holder': ab, 'owner': owner_by_abbrev.get(ab, ''),
             'value': avg,
-            # Averages want a decimal; _rec_value would round to whole. OUTS
-            # renders as its IP average.
-            'value_disp': fmt_ip(avg) if stat == 'OUTS' else f'{avg:,.1f}',
+            # Team-career averages display WHOLE (Kyle 2026-07-20) -- the
+            # record reads as a counting stat; IP alone keeps its thirds.
+            'value_disp': fmt_ip(avg) if stat == 'OUTS' else f'{avg:,.0f}',
             'period': _span_from_years(a['seasons']),
             'last_season': max(a['seasons']),
             'details': _contribs(   # Details stay TOTALS, not averages (Kyle)
@@ -1817,7 +1817,12 @@ def get_stat_sources():
     )
     tier_of = {'captured': 'captured', 'reconstructed_day': 'reconstructed',
                'estimated_startshare': 'estimated',
-               'estimated_membership': 'estimated'}
+               'estimated_membership': 'estimated',
+               # 2026-07-20: the two codes the table used to drop -- their
+               # ~9% share made the column sum to 91. Both are estimation
+               # flavors to a reader.
+               'estimated_adjacent': 'estimated',
+               'sentinel': 'estimated'}
     tier_years = {}
     for r in seasons:
         tier_years.setdefault(tier_of.get(r['provenance']), []).append(r['season_year'])
@@ -1840,7 +1845,8 @@ def get_stat_sources():
          'desc': 'Rostered States reconstructed on daily level. Active Stats '
                  'estimated by year-end start share. See the Almanac User '
                  'Guide for the full method.',
-         'pct': pct('estimated_startshare', 'estimated_membership')},
+         'pct': pct('estimated_startshare', 'estimated_membership',
+                    'estimated_adjacent', 'sentinel')},
     ]
 
 
@@ -2822,7 +2828,8 @@ def build_home_rows(context, nav_targets=None):
     left.extend([term, definition] for term, definition in _CBS_GLOSSARY)
     left.append([])
     left.append(['Stat sources'])
-    for src in get_stat_sources():
+    _sources = get_stat_sources()
+    for src in _sources:
         left.append([src['dates'], src['desc'], '', f"{src['pct']}%"])
 
     rows = [
@@ -2854,6 +2861,13 @@ def build_home_rows(context, nav_targets=None):
         if row and row[0] in _left_labels:
             formats.append({'range': f'A{i}:D{i}',
                             'format': {'textFormat': {'bold': True}}})
+            if row[0] == 'Stat sources':
+                # The share strings arrive via USER_ENTERED as numeric
+                # fractions; without an explicit PERCENT format they render
+                # as 0.03 instead of 3% (Kyle 2026-07-20).
+                formats.append({'range': f'D{i + 1}:D{i + len(_sources)}',
+                                'format': {'numberFormat':
+                                           {'type': 'PERCENT', 'pattern': '0%'}}})
     # Right-band per-row formats from meta (merged row i -> sheet row i+4).
     for i, m in enumerate(meta):
         r = i + 4
@@ -2961,12 +2975,19 @@ def build_records_rows(context, catalog, data):
                         'format': {'textFormat': {'bold': True},
                                    'backgroundColor': _POWDER}})
 
-    def _section(label):
+    def _section(label, note=None):
         # Scope labels sit OVER their blocks: 'Season' at col B (the first
-        # Holder), 'All-Time Total' at col H (the second Holder).
+        # Holder), 'All-Time Total' at col H (the second Holder). A note
+        # rides beside the scope label at col I -- the same pattern as the
+        # Lineup Slot caveat (Kyle 2026-07-20: I62).
         rows.append([label, 'Season', '', '', '', '', '',
-                     'All-Time Total', '', '', ''])
+                     'All-Time Total', note or '', '', ''])
         _band()
+        if note:
+            formats.append({'range': f'I{len(rows)}',
+                            'format': {'textFormat': {'bold': False,
+                                                      'italic': True,
+                                                      'fontSize': 9}}})
 
     def _header():
         rows.append(list(HDR))
@@ -3027,12 +3048,24 @@ def build_records_rows(context, catalog, data):
         for cat_label, stats in (('Hitting', hitting), ('Pitching', pitching)):
             if not stats:
                 continue
-            _section(f'{grain} {cat_label} Records')
+            _section(f'{grain} {cat_label} Records',
+                     note=None if player else
+                     '(Franchise Average per Standard Season)')
             _header()
             for stat in stats:
                 _emit_stat(_disp(stat), stat, player)
             for rk in _rate_by_cat[cat_label]:
                 _emit_stat(_rate_label[rk], rk, player)
+                # Rate display precision (Kyle 2026-07-20): AVG/OBP/SLG/OPS
+                # read as .000 (0.300, never 0.3); other rates as 0.00. The
+                # values land numeric via USER_ENTERED, so the fix is a
+                # format, not a string (a string would re-trim on parse).
+                _pat = '0.000' if rk in ('AVG', 'OBP', 'SLG', 'OPS') else '0.00'
+                for _vcol in ('D', 'J'):
+                    formats.append({'range': f'{_vcol}{len(rows)}',
+                                    'format': {'numberFormat':
+                                               {'type': 'NUMBER',
+                                                'pattern': _pat}}})
             rows.append([])
 
     # ---- Lineup Slot Records (Kyle 2026-07-14): the CURRENT-roster shape --

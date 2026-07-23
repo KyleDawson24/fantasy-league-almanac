@@ -558,7 +558,23 @@ def _txn_page_sort_key(path):
 
 
 def walk_transactions(ui_root):
-    root = ui_root / "transactions" / "all"
+    # Prefer the seam-free corpus (MLB-119). transactions_v2/ holds one
+    # whole-season file per year, fetched with ?print_rows=9999, so there are no
+    # page boundaries. The old transactions/ archive was captured by walking
+    # ?start_row, whose stride is derived from the rows WE parse and can drift
+    # from CBS's own row numbering on unusually-grouped entries -- a four-line
+    # commissioner trade in 2022 lost its "Traded from" line exactly that way,
+    # which left two franchises both holding Lance Lynn for the whole season.
+    #
+    # The old archive is deliberately kept on disk (diffing, rollback) but is no
+    # longer read when the v2 corpus exists. Do NOT merge the two: CBS assigns
+    # row ids per query, so the same id denotes different content in the two
+    # captures and any id-keyed reconciliation is meaningless.
+    root = ui_root / "transactions_v2" / "all"
+    if not root.is_dir():
+        root = ui_root / "transactions" / "all"
+        print("  transactions: v2 corpus absent -- falling back to the "
+              "start_row archive (known lossy, see MLB-119)")
     unparsed = 0
     row_total = 0
     overlap_dropped = 0

@@ -1171,10 +1171,58 @@ def get_cbs_records_data():
             for s in stat_names:
                 a[s] = a.get(s, 0.0) + _rec_fnum(r.get(s.lower()))
         return acc
-    # Career TEAM records: currently-active franchises only, keyed by ABBREV so
-    # a franchise's re-registrations (FULT 13 + 30) combine into one career
-    # (Kyle item 6.1). Season records stay fid-grained; sentinel already fenced.
-    _abbrev_of = {f: m['abbrev'] for f, m in owner_label.items()}
+    # Career TEAM records: currently-active franchises only, keyed by a display
+    # CODE so a franchise's re-registrations (FULT 13 + 30) combine into one
+    # career (Kyle item 6.1). Season records stay fid-grained; sentinel fenced.
+    #
+    # That code used to be the raw abbrev, which was the right idea before
+    # MLB-64 existed -- a shared abbrev was the only thing tying a re-minted id
+    # back to its predecessor. It is wrong now for one reason: CBS has two pairs
+    # of SEPARATE franchises that happen to share an abbrev (14/17 both BENT,
+    # 26/31 both VCF), and keying on the abbrev silently merged their careers --
+    # precisely what the cbs_franchises seed forbids ("a shared abbrev is
+    # DISPLAY ONLY -- it does NOT aggregate the franchises' records").
+    #
+    # So the code is canonical-DERIVED and made unique: re-registrations still
+    # combine (they share a canonical id), and where two distinct canonical
+    # franchises would collide, each gets its era appended. Keying below is
+    # unchanged because the code is now bijective with the canonical franchise;
+    # the disambiguated form only ever surfaces on franchises that collide.
+    #
+    # Kyle 2026-07-22: treat the shared-abbrev pairs as SEPARATE until the
+    # league historian says otherwise. If they turn out to be one franchise the
+    # fix is two franchise_lineage rows and a rebuild, not a code change.
+    _canon_of = {f: m['canonical_id'] for f, m in get_franchise_map().items()}
+
+    def _canon_fid(fid):
+        return _canon_of.get(fid, fid)
+
+    _era = {}
+    for r in team_season:
+        c = _canon_fid(_fid(r.get('team_id')))
+        if c is None or r.get('season_year') is None:
+            continue
+        y = int(r['season_year'])
+        lo, hi = _era.get(c, (y, y))
+        _era[c] = (min(lo, y), max(hi, y))
+
+    _plain, _sharing = {}, {}
+    for f, m in owner_label.items():
+        _plain.setdefault(_canon_fid(f), m['abbrev'])
+    for c, ab in _plain.items():
+        _sharing.setdefault(ab, []).append(c)
+
+    _code_of = {}
+    for ab, canons in _sharing.items():
+        if len(canons) == 1:
+            _code_of[canons[0]] = ab
+            continue
+        for c in canons:                    # collision -> disambiguate by era
+            span = _era.get(c)
+            _code_of[c] = f'{ab} ({span[0]}-{str(span[1])[-2:]})' if span else ab
+
+    _abbrev_of = {f: _code_of.get(_canon_fid(f), m['abbrev'])
+                  for f, m in owner_label.items()}
     active_fids = {int(r['team_id']) for r in query_snowflake(
         f"SELECT DISTINCT team_id FROM stg_cbs__rosters WHERE {league_predicate()}"
         f" AND roster_date = (SELECT MAX(roster_date) FROM stg_cbs__rosters"

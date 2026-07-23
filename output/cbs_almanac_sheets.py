@@ -1056,15 +1056,30 @@ def _rec_agg(group_cols, extra_selects=''):
     'real baseball league' lens -- production only counts while the player
     was actively started; the 2004-2020 estimated era weights fractionally).
     group_cols sets the grain (season+team, season+player, season+team+
-    player)."""
+    player).
+
+    MLB-121 -- ROUND ONCE, AND ORDER. These rows are accumulated in Python
+    to build career totals, then rounded AGAIN for display (`_rec_value`
+    formats `.0f`). Rounding here to 1dp made that a DOUBLE round: a true
+    3027.4914 was lifted to 3027.5 and then displayed as 3,028, when the
+    honest answer is 3,027. It fired on ~3% of players for hits alone.
+    Carrying 6dp keeps the payload sane while leaving the display round the
+    only one that decides a digit.
+
+    The ORDER BY matters just as much. Summing pre-rounded floats in Python
+    over an UNORDERED result set is not reproducible: a total landing on
+    .5 renders 3,027 or 3,028 depending purely on the order the warehouse
+    handed back the rows, with no code or data change. That is what made
+    the CBS byte-diff golden flap. Ordering by the grain pins it."""
     cols = ", ".join(
-        f'ROUND(SUM({c} * COALESCE(active_weight, 0)), 1) AS "{n}"'
+        f'ROUND(SUM({c} * COALESCE(active_weight, 0)), 6) AS "{n}"'
         for n, c in {**_REC_STAT_COL, **_REC_RATE_COL, **_REC_POINTS_COL}.items())
     return query_snowflake(f"""
         SELECT {group_cols}{extra_selects}, {cols}
         FROM fct_player_daily_performance
         WHERE {league_predicate()} AND game_date IS NOT NULL
         GROUP BY {group_cols}
+        ORDER BY {group_cols}
     """)
 
 
@@ -2362,39 +2377,53 @@ def get_cbs_team_history_data(context, franchises, franchise_map):
 
     # Shared aggregate columns: the whole-history query below and the
     # by-season query (the Best Individual Seasons block) sum the same
-    # fields at different grains. Rate inputs keep 1dp; stats the tab
-    # displays as bare integers round to whole.
+    # fields at different grains. Stats the tab displays as bare integers
+    # round to whole -- that is a single, final round and stays.
+    #
+    # Everything a RATE divides, plus the points columns, carries 6dp
+    # (MLB-121). At 1dp these were double-rounded: Brian Dozier's TB on
+    # this tab summed to exactly 98.45, which 1dp lifted to 98.5, pushing
+    # SLG to 98.5/228.8 = .4305 -- itself dead on the 3-decimal display
+    # boundary, so it rendered .431 or .430 run to run. Full precision
+    # gives 98.45/228.8 = .4303 -> a stable .430, which is also his real
+    # 2019 mark. Divide from the honest sums; let the display round once.
     agg_cols = f"""
                 MAX_BY(player_name, game_date)  AS player_name,
                 MAX_BY(display_name, game_date) AS display_name,
                 MAX_BY(position, game_date)     AS position,
                 MAX_BY(pro_team, game_date)     AS pro_team,
-                ROUND(SUM(total_stat_pts * {w}), 1)          AS active_points,
-                ROUND(SUM(total_hitting_stat_pts * {w}), 1)  AS active_hitting_points,
-                ROUND(SUM(total_pitching_stat_pts * {w}), 1) AS active_pitching_points,
-                ROUND(SUM(total_stat_pts * (1 - {w})), 1)    AS bench_il_points,
+                ROUND(SUM(total_stat_pts * {w}), 6)          AS active_points,
+                ROUND(SUM(total_hitting_stat_pts * {w}), 6)  AS active_hitting_points,
+                ROUND(SUM(total_pitching_stat_pts * {w}), 6) AS active_pitching_points,
+                ROUND(SUM(total_stat_pts * (1 - {w})), 6)    AS bench_il_points,
                 ROUND(SUM(games_played * {w}))               AS active_games,
-                ROUND(SUM(h * {w}), 1)    AS h,
-                ROUND(SUM(ab * {w}), 1)   AS ab,
-                ROUND(SUM(b_bb * {w}), 1) AS b_bb,
-                ROUND(SUM(hbp * {w}), 1)  AS hbp,
-                ROUND(SUM(sf * {w}), 1)   AS sf,
-                ROUND(SUM(tb * {w}), 1)   AS tb,
+                ROUND(SUM(h * {w}), 6)    AS h,
+                ROUND(SUM(ab * {w}), 6)   AS ab,
+                ROUND(SUM(b_bb * {w}), 6) AS b_bb,
+                ROUND(SUM(hbp * {w}), 6)  AS hbp,
+                ROUND(SUM(sf * {w}), 6)   AS sf,
+                ROUND(SUM(tb * {w}), 6)   AS tb,
                 ROUND(SUM(hr * {w}))      AS hr,
                 ROUND(SUM(sb * {w}))      AS sb,
                 ROUND(SUM(w * {w}))       AS w,
                 ROUND(SUM(l * {w}))       AS l,
                 ROUND(SUM(sv * {w}))      AS sv,
-                ROUND(SUM(er * {w}), 1)   AS er,
-                ROUND(SUM(outs * {w}), 1) AS outs,
+                ROUND(SUM(er * {w}), 6)   AS er,
+                ROUND(SUM(outs * {w}), 6) AS outs,
                 ROUND(SUM(k * {w}))       AS k,
                 ROUND(SUM(p_bb * {w}))    AS p_bb,
-                ROUND(SUM(p_h * {w}), 1)  AS p_h,
+                ROUND(SUM(p_h * {w}), 6)  AS p_h,
                 LISTAGG(DISTINCT CASE
                     WHEN {w} > 0
                      AND lineup_slot NOT IN ('BE', 'IL', 'FA', 'RS', 'EST', 'ACT')
                     THEN lineup_slot END, ',') AS active_slots_played"""
 
+    # Both queries below ORDER BY their grain (MLB-121). Precision alone is
+    # not enough here: these rows feed a points-descending display sort, and
+    # EXACT ties are real -- Sidney Ponson and Lance Lynn each total exactly
+    # 632.000000 rostered points for FLV. Python's sort is stable, so a tie
+    # keeps input order, which without an ORDER BY is whatever the warehouse
+    # happened to return. That silently swapped the two rows between runs.
     rows = query_snowflake(f"""
         WITH scoped AS (
             SELECT 'current_season' AS scope, f.*
@@ -2434,6 +2463,7 @@ def get_cbs_team_history_data(context, franchises, franchise_map):
         LEFT JOIN service s
             ON t.scope = s.scope AND t.team_id = s.team_id
            AND t.player_key = s.player_key
+        ORDER BY t.scope, t.team_id, t.player_key
     """)
 
     # Season-grain rows for the Best Individual Seasons block (Kyle
@@ -2446,6 +2476,7 @@ def get_cbs_team_history_data(context, franchises, franchise_map):
         WHERE {league_predicate()} AND game_date IS NOT NULL
           AND team_id IN ({id_list})
         GROUP BY team_id, player_key, season_year
+        ORDER BY team_id, player_key, season_year
     """)
 
     by_key, by_name = get_current_rostered()

@@ -419,6 +419,58 @@ def _txn_rows(html: str) -> list:
             and m.group(2).count('<td') >= 4]
 
 
+def run_transactions_full_sweep(client: UiClient, ui_dir: Path, last_season: int,
+                                force: bool, filters=("all",)) -> None:
+    """One request per (filter, season) via print_rows -- the seam-free
+    replacement for the start_row walk (MLB-119).
+
+    The walk advanced by the rows IT parsed, which drifts from CBS's own row
+    indexing, so rows fell between consecutive pages and appeared in neither.
+    Measured on 2022: the walk landed 1,345 unique rows where a single
+    print_rows response carries 1,375 -- 30 lost, including a real trade whose
+    absence left two franchises both holding one player all season. Requests
+    drop from ~900 across the history to ~52, which is also gentler on a league
+    we may only read.
+
+    Lands to transactions_v2/ ON PURPOSE. The parser globs {year}*.html and
+    merges overlapping windows, so a whole-season file dropped beside the
+    paginated archive would double-count. Writing alongside keeps the 2026-07-12
+    capture intact for diffing and rollback, and makes adopting the new corpus a
+    separate, deliberate step rather than a side effect of fetching.
+
+    Idempotent: an existing non-empty file is skipped, so an interrupted sweep
+    resumes by rerunning."""
+    for f in filters:
+        for year in range(FIRST_SEASON, last_season + 1):
+            out = ui_dir / "transactions_v2" / f / ("%d.html" % year)
+            if out.is_file() and out.stat().st_size > 0 and not force:
+                print("  transactions_v2/%s %d: present, skipping" % (f, year),
+                      flush=True)
+                continue
+            html, meta = client.get("transactions", filter=f, year=year,
+                                    print_rows=9999)
+            if html is None:
+                append_manifest(ui_dir, meta, None)
+                if "AUTH-BOUNCED" in str(meta.get("note", "")):
+                    raise SystemExit(
+                        "Cookie no longer authenticates (%s) -- re-extract "
+                        "CBS_WEB_COOKIES and rerun; landed seasons are kept."
+                        % meta["url"])
+                print("  transactions_v2/%s %d: %s" % (f, year, meta.get("note")),
+                      flush=True)
+                continue
+            rows = _txn_rows(html)
+            if not rows:
+                meta["note"] = "zero transaction rows"
+                append_manifest(ui_dir, meta, None)
+                print("  transactions_v2/%s %d: zero rows" % (f, year), flush=True)
+                continue
+            land(out, html)
+            append_manifest(ui_dir, meta, str(out))
+            print("  transactions_v2/%s %d: %d rows (%d bytes)" % (
+                f, year, len(rows), meta.get("bytes", 0)), flush=True)
+
+
 def run_transactions_sweep(client: UiClient, ui_dir: Path, last_season: int,
                            force: bool, filters=("all",)) -> None:
     """Full-history transaction capture via start_row pagination -- the real
@@ -599,6 +651,11 @@ def main() -> None:
                       help="full-history transaction capture via start_row "
                            "pagination; pair with --last-season 2025 to leave "
                            "the live season to the API capture")
+    mode.add_argument("--transactions-full-sweep", action="store_true",
+                      help="MLB-119: one print_rows request per season instead "
+                           "of the lossy start_row walk. Lands to "
+                           "transactions_v2/ so the existing archive is left "
+                           "intact for diffing")
     mode.add_argument("--drafts-sweep", action="store_true",
                       help="every draft in the page catalog, round + team views")
     ap.add_argument("--last-season", type=int, default=2026)
@@ -630,6 +687,13 @@ def main() -> None:
         if unknown:
             raise SystemExit("unknown txn filters %s; known %s" % (unknown, TXN_FILTERS))
         run_transactions_sweep(client, ui_dir, args.last_season, args.force, filters)
+    elif args.transactions_full_sweep:
+        filters = tuple(x.strip() for x in args.txn_filters.split(",") if x.strip())
+        unknown = [x for x in filters if x not in TXN_FILTERS]
+        if unknown:
+            raise SystemExit("unknown txn filters %s; known %s" % (unknown, TXN_FILTERS))
+        run_transactions_full_sweep(client, ui_dir, args.last_season, args.force,
+                                    filters)
     else:
         run_capture(client, ui_dir, args.last_season, args.force)
     print("done: %d GETs, read-only." % client.calls, flush=True)

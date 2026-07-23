@@ -135,9 +135,25 @@ class UiClient:
         # AND on the `all` filter (2021 -- the filter carrying the lineup/
         # slot moves the walk-back needs). Left unwired here so the switch
         # is a deliberate change; adopt it on the next capture sweep.
+        # print_rows is now WIRED (MLB-119, 2026-07-22). The start_row walk was
+        # proven lossy: its stride does not always match the page's actual row
+        # count, so rows fall into the seam between consecutive pages. One
+        # confirmed casualty is a real trade (Lance Lynn, 2022-07-03, FLV->VCF)
+        # whose trade_in row exists in neither the page that ends just above it
+        # nor the one that starts just below -- which left two franchises both
+        # holding him all season and corrupted the record book. 2022 alone has
+        # 13 page boundaries with no overlap. print_rows=9999 returns the whole
+        # season in ONE response, so there are no seams to lose rows at, and it
+        # replaces ~900 requests across the history with ~52.
+        params = []
+        extra_rows = kwargs.get("print_rows")
+        if extra_rows:
+            params.append("print_rows=%d" % int(extra_rows))
         extra_start = kwargs.get("start_row")
         if extra_start and int(extra_start) > 1:
-            url += "?start_row=%d" % int(extra_start)
+            params.append("start_row=%d" % int(extra_start))
+        if params:
+            url += ("&" if "?" in url else "?") + "&".join(params)
         meta = {"url": url, "ts": datetime.now(timezone.utc).isoformat(timespec="seconds")}
         last_err = None
         for backoff in [0] + RETRY_BACKOFF:

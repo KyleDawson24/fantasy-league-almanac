@@ -42,9 +42,23 @@
 --                      to another franchise).
 --
 -- Chronology: effective_date wins over txn_date (retroactive edits);
--- same-day event ORDER falls back to the report's reverse row order
--- (row_seq walks newest-first). Season bounds = the MLB season's actual
--- game-date span (universal layer), so stints speak real dates.
+-- same-day event ORDER falls back to the report's own row order. The two
+-- sequence columns run in OPPOSITE directions and it matters (MLB-118):
+--   row_seq   walks NEWEST-first across the report  -> DESC is forward
+--   entry_seq counts UP within ONE multi-line row   -> ASC  is forward
+-- so forward chronology is (event_date, row_seq DESC, entry_seq ASC) and
+-- reverse is its exact mirror. Sorting entry_seq DESC inverted the lines
+-- inside a single transaction: verified across all 22 multi-entry rows in
+-- the corpus, entry 1 is always the membership verb and entry 2 its
+-- consequence (trade_in->reserve x10, add->drop x9, trade_in->activate
+-- x2, trade_in->slot_move x1). Read backwards those become "bench a
+-- player you don't roster" and "drop before adding" -- and the damage was
+-- real: Joe Ryan 2023's trade_in sorted BEHIND its own bench line, so his
+-- first 2023 event read as lineup evidence and opened a phantom
+-- season-start stint on the ACQUIRING team, handing Kansas City the 3.5
+-- months he actually spent on Kimball Drives.
+-- Season bounds = the MLB season's actual game-date span (universal
+-- layer), so stints speak real dates.
 --
 -- Identity: name_key (the cbs_name_key normalization) -- anchors carry
 -- no ids, so names are the join spine; resolved_cbs_player_id rides
@@ -73,6 +87,11 @@ moves_raw as (
         franchise_id,
         {{ cbs_name_key('player_name_raw') }}        as name_key,
         coalesce(effective_date, txn_date)           as event_date,
+        -- MLB-118: the EXECUTION instant, deliberately distinct from
+        -- event_date (the STATE date). A manager can queue a move days
+        -- before it takes effect, so the two orderings are not the same
+        -- stream -- and LAW 2 below needs to know which came first.
+        coalesce(txn_ts, txn_date::timestamp)        as exec_ts,
         row_seq,
         entry_seq,
         case when move_type in ('add', 'trade_in')
@@ -92,6 +111,7 @@ moves_raw as (
         counterparty_franchise_id,
         {{ cbs_name_key('player_name_raw') }},
         coalesce(effective_date, txn_date),
+        coalesce(txn_ts, txn_date::timestamp),
         row_seq,
         entry_seq,
         'departure',
@@ -129,7 +149,7 @@ last_acquisitions as (
     where event_kind = 'acquisition'
     qualify row_number() over (
         partition by league_key, season_year, name_key
-        order by event_date desc, row_seq asc, entry_seq asc
+        order by event_date desc, row_seq asc, entry_seq desc
     ) = 1
 ),
 
@@ -166,6 +186,7 @@ lineup_events as (
         franchise_id,
         {{ cbs_name_key('player_name_raw') }}        as name_key,
         coalesce(effective_date, txn_date)           as event_date,
+        coalesce(txn_ts, txn_date::timestamp)        as exec_ts,
         row_seq,
         entry_seq
     from {{ ref('stg_cbs__ui_transactions') }}
@@ -192,7 +213,7 @@ lineup_openings as (
     )
     qualify row_number() over (
         partition by league_key, season_year, name_key
-        order by event_date, row_seq desc, entry_seq desc
+        order by event_date, row_seq desc, entry_seq asc
     ) = 1 and kind = 'evidence'
 ),
 
@@ -210,21 +231,49 @@ lineup_reopens as (
                 ignore nulls over (
                     partition by e.league_key, e.season_year,
                                  e.franchise_id, e.name_key
-                    order by e.event_date, e.row_seq desc, e.entry_seq desc
+                    order by e.event_date, e.row_seq desc, e.entry_seq asc
                     rows between unbounded preceding and 1 preceding
-                ) as prev_membership_kind
+                ) as prev_membership_kind,
+            last_value(case when e.kind != 'evidence' then e.exec_ts end)
+                ignore nulls over (
+                    partition by e.league_key, e.season_year,
+                                 e.franchise_id, e.name_key
+                    order by e.event_date, e.row_seq desc, e.entry_seq asc
+                    rows between unbounded preceding and 1 preceding
+                ) as prev_membership_exec_ts
         from (
             select league_key, season_year, franchise_id, name_key,
-                   event_date, row_seq, entry_seq, event_kind as kind
+                   event_date, exec_ts, row_seq, entry_seq, event_kind as kind
             from moves
             union all
             select league_key, season_year, franchise_id, name_key,
-                   event_date, row_seq, entry_seq, 'evidence'
+                   event_date, exec_ts, row_seq, entry_seq, 'evidence'
             from lineup_events
         ) e
     )
     where kind = 'evidence'
         and coalesce(prev_membership_kind, 'departure') = 'departure'
+        -- MLB-118 (Kyle's rule 3, from the Brad Lord 2025 trace): a
+        -- departure CANCELS a lineup move that was already queued for a
+        -- later date. Evidence only counts if it was EXECUTED while the
+        -- player was still rostered -- i.e. at or after the departure that
+        -- turned membership OFF. A move queued BEFORE that departure is a
+        -- stale instruction the drop pre-empted, not proof of a re-add.
+        --
+        -- Mitch Spence 2024 is the canonical case: BWS queued an activate
+        -- on 06-13 effective 06-24, then dropped him on 06-16 effective
+        -- 06-17. Honoring the stale 06-24 activate reopened a phantom
+        -- stint that ran to season end and contested El Gran Gato's real
+        -- 06-24 acquisition. Ordering by state date alone cannot see this;
+        -- only the execution instant separates the two.
+        --
+        -- NULL-permissive on purpose: an unknown timestamp falls back to
+        -- the old behaviour, so this only ever fires on positive evidence
+        -- of staleness. LAW 2's recovery power is untouched -- a genuine
+        -- re-acquisition's lineup move is executed AFTER the drop.
+        and (prev_membership_exec_ts is null
+             or exec_ts is null
+             or exec_ts >= prev_membership_exec_ts)
 ),
 
 -- The state machine wants one ordered event stream per (season,
@@ -239,7 +288,7 @@ first_events as (
     from moves
     qualify row_number() over (
         partition by league_key, season_year, franchise_id, name_key
-        order by event_date, row_seq desc, entry_seq desc
+        order by event_date, row_seq desc, entry_seq asc
     ) = 1
 ),
 
@@ -342,7 +391,7 @@ ordered as (
         e.*,
         lag(event_kind) over (
             partition by league_key, season_year, franchise_id, name_key
-            order by event_date, row_seq desc, entry_seq desc
+            order by event_date, row_seq desc, entry_seq asc
         ) as prev_kind
     from events e
 ),
@@ -373,11 +422,11 @@ paired as (
             c.event_detail as open_channel,
             lead(c.event_date) over (
                 partition by c.league_key, c.season_year, c.franchise_id, c.name_key
-                order by c.event_date, c.row_seq desc, c.entry_seq desc
+                order by c.event_date, c.row_seq desc, c.entry_seq asc
             )              as next_change_date,
             lead(c.event_detail) over (
                 partition by c.league_key, c.season_year, c.franchise_id, c.name_key
-                order by c.event_date, c.row_seq desc, c.entry_seq desc
+                order by c.event_date, c.row_seq desc, c.entry_seq asc
             )              as next_change_detail
         from changes c
     )

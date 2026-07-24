@@ -223,7 +223,7 @@ lineup_openings as (
 -- collapses consecutive evidence rows to the first.
 lineup_reopens as (
     select league_key, season_year, franchise_id, name_key,
-           event_date, row_seq, entry_seq
+           event_date, exec_ts, row_seq, entry_seq
     from (
         select
             e.*,
@@ -359,14 +359,31 @@ openings as (
 events as (
     select
         league_key, season_year, franchise_id, name_key,
-        event_date, row_seq, entry_seq, event_kind, event_detail
+        event_date, exec_ts, row_seq, entry_seq, event_kind, event_detail
     from moves
 
     union all
 
+    -- Synthetic openings are the BASELINE assertion: in execution order
+    -- they must precede every real transaction so the log always outranks
+    -- them (Kyle: the walk-back's openings sit next to the log, as the
+    -- floor the log overwrites). A season-dawn instant is NOT early
+    -- enough -- PRE-SEASON transactions execute before opening day
+    -- (Konerko 2007: traded 03-30, effective opening day 04-01; a dawn-
+    -- executed synthetic outranked the real trade_out and the sender
+    -- kept him all season). A year before season start predates any
+    -- real activity in the league's annual cycle.
+    --
+    -- At the baseline tie, row_seq DESC runs first->1000000 then
+    -- ->999999. The stint LABEL is taken from the EARLIEST-executed
+    -- acquisition at the flip boundary (first_assertion below), so the
+    -- plain 'opening' carries the bigger sentinel to sort first and keep
+    -- its label precedence over 'lineup_opening' -- the old assembly's
+    -- choice. (State is unaffected either way: both are acquisitions.)
     select
         o.league_key, o.season_year, o.franchise_id, o.name_key,
         b.season_start,
+        dateadd(year, -1, b.season_start)::timestamp,
         iff(o.opening_reason = 'lineup_opening', 999999, 1000000),
         0, 'acquisition', o.opening_reason
     from openings o
@@ -374,30 +391,119 @@ events as (
 
     union all
 
-    -- LAW 2(b): evidence-backed reopenings at the evidence date.
+    -- LAW 2(b): evidence-backed reopenings at the evidence date. exec_ts
+    -- is the lineup move's own execution instant (evidence proves
+    -- membership when the manager ACTED -- Kyle 2026-07-24).
     select
         r.league_key, r.season_year, r.franchise_id, r.name_key,
-        r.event_date, r.row_seq, r.entry_seq, 'acquisition', 'lineup_evidence'
+        r.event_date, r.exec_ts, r.row_seq, r.entry_seq,
+        'acquisition', 'lineup_evidence'
     from lineup_reopens r
 ),
 
--- Last-event-wins: keep only state CHANGES, giving a strictly
--- alternating acquisition/departure sequence per partition. Same-day
--- ordering: the report walks newest-first, so higher row_seq = earlier
--- that day (synthetic openings sort first via row_seq 1e6... which walk
--- DESC places at the dawn of the season-start day).
+-- THE RESOLUTION (MLB-118, Kyle's rule): "a player's status on day D is
+-- set by the most recently EXECUTED transaction whose EFFECTIVE date is
+-- on or before D." The walk-back itself is unchanged -- synthetic
+-- openings and LAW 2 evidence enter the stream as season-dawn /
+-- their-own-instant executions, so every real transaction outranks them.
+-- What changes is the assembly: instead of pairing adjacent events in
+-- effective order (which silently assumes execution order and effective
+-- order agree -- the bug), each distinct effective date becomes a
+-- BOUNDARY, the governing event at a boundary is the max-execution event
+-- effective by then, and a stint is a maximal run of governing-ON
+-- boundaries.
+--
+-- Execution recency (Kyle 2026-07-24): exec date -> hour -> minute ->
+-- report row order (row_seq: closer to 1 = newer -> DESC walks forward;
+-- entry_seq ASC within one multi-line row).
+--
+-- Where the two orders agree -- every normal season -- this is IDENTICAL
+-- to the old pairing, including the same-kind-run cases (an opening
+-- followed by a logged add with no drop between still yields one stint
+-- from season start: the governing event changes, the state does not).
+-- It differs exactly where they invert:
+--   Hamilton 2024   drop eff 06-10 then re-add eff 06-10 cancel (a 0-day
+--                   absence is not an absence); the last-executed retro
+--                   drop eff 06-03 governs -> FF stint ends 06-03.
+--   Gardner 2016    the re-forced add (eff 04-03) outranks the stale
+--                   queued one (eff 04-11) -> rostered opening week.
+--   Kemp 2010       a 38-minute trade flurry collapses to its final
+--                   version (eff 08-09).
 ordered as (
     select
         e.*,
-        lag(event_kind) over (
+        row_number() over (
             partition by league_key, season_year, franchise_id, name_key
-            order by event_date, row_seq desc, entry_seq asc
-        ) as prev_kind
+            order by exec_ts, row_seq desc, entry_seq asc
+        ) as exec_seq
     from events e
 ),
 
+-- One row per (partition, effective date): who governs as of end of that
+-- day. RANGE includes every event sharing the boundary's effective date.
+boundaries as (
+    select distinct
+        league_key, season_year, franchise_id, name_key,
+        event_date as boundary_date,
+        max(exec_seq) over (
+            partition by league_key, season_year, franchise_id, name_key
+            order by event_date
+            range between unbounded preceding and current row
+        ) as gov_exec_seq
+    from ordered
+),
+
+-- A stint's ORIGIN is its earliest-executed assertion; its BOUNDARIES are
+-- governed by the latest. At an ON flip the boundary date always equals
+-- the governing acquisition's effective date, and the earliest-executed
+-- acquisition asserting that same date names the channel -- so a drafted
+-- player whose opening-day lineup move out-executes his synthetic opening
+-- still reads 'opening', while a mid-season evidence reopen (nothing else
+-- asserting its date) honestly reads 'lineup_evidence'. Departure detail
+-- stays with the governor: a reprocessed drop's final version is the one
+-- that closed the stint.
+first_assertion as (
+    select
+        league_key, season_year, franchise_id, name_key,
+        event_date,
+        min_by(event_detail, exec_seq) as first_acq_detail
+    from ordered
+    where event_kind = 'acquisition'
+    group by 1, 2, 3, 4, 5
+),
+
+-- State at each boundary = the governing event's kind; keep only
+-- boundaries where the STATE flips (a governing handover that stays ON
+-- does not break a stint).
 changes as (
-    select * from ordered
+    select *
+    from (
+        select
+            b.league_key, b.season_year, b.franchise_id, b.name_key,
+            b.boundary_date as event_date,
+            g.event_kind,
+            iff(g.event_kind = 'acquisition',
+                coalesce(fa.first_acq_detail, g.event_detail),
+                g.event_detail) as event_detail,
+            lag(g.event_kind) over (
+                partition by b.league_key, b.season_year, b.franchise_id,
+                             b.name_key
+                order by b.boundary_date
+            ) as prev_kind
+        from boundaries b
+        join ordered g
+            on  g.league_key  = b.league_key
+            and g.season_year = b.season_year
+            and g.franchise_id = b.franchise_id
+            and g.name_key     = b.name_key
+            and g.exec_seq     = b.gov_exec_seq
+        left join first_assertion fa
+            on  fa.league_key  = b.league_key
+            and fa.season_year = b.season_year
+            and fa.franchise_id = b.franchise_id
+            and fa.name_key     = b.name_key
+            and fa.event_date   = b.boundary_date
+    )
     where event_kind != coalesce(prev_kind, 'departure')
 ),
 
@@ -420,13 +526,16 @@ paired as (
             c.event_kind,
             c.event_date   as stint_start,
             c.event_detail as open_channel,
+            -- changes is one row per boundary DATE (post-resolution), so
+            -- the date alone orders it; the old row_seq/entry_seq
+            -- tiebreaks no longer exist at this grain.
             lead(c.event_date) over (
                 partition by c.league_key, c.season_year, c.franchise_id, c.name_key
-                order by c.event_date, c.row_seq desc, c.entry_seq asc
+                order by c.event_date
             )              as next_change_date,
             lead(c.event_detail) over (
                 partition by c.league_key, c.season_year, c.franchise_id, c.name_key
-                order by c.event_date, c.row_seq desc, c.entry_seq asc
+                order by c.event_date
             )              as next_change_detail
         from changes c
     )

@@ -1,0 +1,2 @@
+platform,cbs_name_key,mlbam_id,mlbam_name,note
+cbs,jeremi gonzalez,114928,Geremi Gonzalez,"Kyle 2026-07-24: MLB spells him Geremi (mlb.com/player/geremi-gonzalez-114928). The ui matcher collided BOTH 2004 Gonzalezes onto Juan (114932, method fuzzy_overlap_COLLISION) and the per-mlbam dedupe then picked 'Jeremi' as 114932's display name, so Juan's 33 hitting games rendered as Jeremi and contested his franchise-9 roster-sit."

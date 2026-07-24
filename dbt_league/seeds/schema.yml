@@ -480,3 +480,83 @@ seeds:
           - not_null
       - name: note
         description: 'Why the alias exists + how the season/presence gate keeps any same-name other person apart.'
+
+  - name: player_identity_overrides
+    description: >
+      The human escape hatch of the identity resolver (MLB-120): one row
+      REPOINTS a platform name form to the mlbam a person confirmed, applied in
+      stg_cbs__mlbam_crosswalk upstream of everything (display names,
+      dim_player_identity candidates, the attribution name-fallback). Differs
+      from player_alias, which ADDS a candidate name form; an override
+      REPLACES a wrong machine match. First row: the ui matcher collided both
+      2004 Gonzalezes onto Juan (114932, its own method column says
+      fuzzy_overlap_COLLISION) and the per-mlbam display dedupe then picked
+      'Jeremi' as Juan's name. Reseed with
+      `dbt seed --full-refresh -s player_identity_overrides`.
+    columns:
+      - name: platform
+        description: 'Platform the name form belongs to (cbs, ...).'
+        tests:
+          - not_null
+      - name: cbs_name_key
+        description: 'cbs_name_key()-normalized name form being repointed.'
+        tests:
+          - not_null
+          - unique
+      - name: mlbam_id
+        description: 'The mlbam this name form ACTUALLY denotes (human-verified).'
+        tests:
+          - not_null
+      - name: mlbam_name
+        description: 'MLB''s own spelling, which also joins the candidate pool as a name form.'
+      - name: note
+        description: 'The evidence trail: who verified it, when, against what.'
+
+  - name: player_identity_context_overrides
+    description: >
+      The FRANCHISE-SCOPED human fill-in of the identity resolver (MLB-120,
+      Kyle's worklist design): where int_player_identity_context's machine
+      evidence cannot decide which person a franchise rostered under an
+      ambiguous name ("which Luis Garcia did BWS add in July 2025?"), a human
+      reads the team page and enters the mlbam here. A row REPLACES the
+      machine row at the same (league, season, franchise, name) key. Rows
+      with a blank mlbam_id are ignored -- the worklist ships pre-filled with
+      blanks, and only filled rows take effect. Reseed with
+      `dbt seed --full-refresh -s player_identity_context_overrides`.
+    config:
+      column_types:
+        league_key: varchar
+        season_year: integer
+        franchise_id: integer
+        cbs_name_key: varchar
+        mlbam_id: integer
+        note: varchar
+    columns:
+      - name: cbs_name_key
+        description: 'cbs_name_key()-normalized name form as the stint carries it.'
+      - name: mlbam_id
+        description: 'The person this franchise actually rostered. Blank = not yet decided.'
+      - name: note
+        description: 'The evidence trail: who decided, when, from what.'
+
+  - name: mlb_team_abbrevs
+    description: >
+      MLBAM team_id -> the CBS club abbrev(s) that denote that franchise
+      (MLB-120): the vocabulary bridge between the MLB spine's team ids and the
+      abbrevs CBS paperwork speaks (transaction pos/club strings, anchor
+      mlb_team). Multi-row per team where eras used different abbrevs
+      (TB/TBD, FLA/MIA, MON/WAS/WSH, ANA/LAA, CHW/CWS, LA/LAD, OAK/ATH).
+      Feeds int_player_identity_context's club-evidence match.
+    config:
+      column_types:
+        team_id: integer
+        cbs_abbrev: varchar
+    columns:
+      - name: team_id
+        description: 'MLBAM team id (statsapi vocabulary).'
+        tests:
+          - not_null
+      - name: cbs_abbrev
+        description: 'A CBS abbrev that has denoted this club in some era.'
+        tests:
+          - not_null

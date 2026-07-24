@@ -103,6 +103,9 @@ stints as (
 -- attribution_contested). Two-way splits (Ohtani 2025: batter + pitcher
 -- anchor rows) stay separate via scope_key.
 anchors_resolved as (
+    -- MLB-120: ctx supplies the per-franchise resolution where the season-
+    -- grain dim stays ambiguous -- an anchor row is franchise paperwork, so
+    -- the franchise-context id applies to it by construction.
     select
         r.league_key,
         r.season_year,
@@ -111,15 +114,21 @@ anchors_resolved as (
         r.est_start_share,
         r.primary_pos,
         r.roster_status,
-        pid.mlbam_id,
-        coalesce(to_varchar(pid.mlbam_id),
+        coalesce(ctx.mlbam_id, pid.mlbam_id)                      as mlbam_id,
+        coalesce(to_varchar(coalesce(ctx.mlbam_id, pid.mlbam_id)),
                  'name:' || {{ cbs_name_key('r.player_name_raw') }}) as ident,
-        coalesce(pid.stat_group_scope, '')                        as scope_key
+        coalesce(coalesce(ctx.stat_group_scope, pid.stat_group_scope), '') as scope_key
     from {{ ref('stg_cbs__ui_rosters') }} r
     left join {{ ref('dim_player_identity') }} pid
         on pid.platform = 'cbs'
         and pid.name_key = {{ cbs_name_key('r.player_name_raw') }}
         and pid.season_year = r.season_year
+    left join {{ ref('int_player_identity_context') }} ctx
+        on ctx.platform = 'cbs'
+        and ctx.league_key = r.league_key
+        and ctx.season_year = r.season_year
+        and ctx.franchise_id = r.franchise_id
+        and ctx.name_key = {{ cbs_name_key('r.player_name_raw') }}
 ),
 
 anchors_est as (
@@ -234,9 +243,21 @@ reconstructed as (
         coalesce(s.is_ambiguous_name, false)               as is_ambiguous_name,
         (s.was_truncated or coalesce(s.missing_departure, false))
                                                            as membership_end_inferred,
-        (count(*) over (
+        -- Contested = more than one FRANCHISE claims the game (MLB-118/120,
+        -- Kyle: two same-franchise candidate stints -- era name-forms of one
+        -- player, Tony A./F. Pena -- credit the same team either way, so the
+        -- flag lied when it counted stints. Which STINT wins within a
+        -- franchise stays the qualify's stable pick; which FRANCHISE gets the
+        -- game is the only genuine uncertainty).
+        -- (min != max stands in for COUNT(DISTINCT) > 1, which Snowflake
+        -- does not allow over a window.)
+        (min(s.franchise_id) over (
             partition by g.league_key, g.cbs_player_id, g.stat_group,
-                         g.game_pk, g.game_date, g.game_index) > 1)
+                         g.game_pk, g.game_date, g.game_index)
+         <>
+         max(s.franchise_id) over (
+            partition by g.league_key, g.cbs_player_id, g.stat_group,
+                         g.game_pk, g.game_date, g.game_index))
                                                            as attribution_contested,
         g.calculated_fpts,
         g.calculated_hitting_pts,

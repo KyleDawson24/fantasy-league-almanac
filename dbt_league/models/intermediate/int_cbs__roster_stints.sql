@@ -597,9 +597,14 @@ select
     -- pid resolves the season's name form to its mlbam; NULL where the name
     -- is ambiguous that season or has no candidate -- the attribution fact
     -- falls back to the name-join for exactly those rows.
-    pid.mlbam_id,
-    pid.stat_group_scope,
-    coalesce(pid.is_ambiguous, false)                  as is_ambiguous_name,
+    -- MLB-120: where the season-grain dim stays ambiguous, ctx may still have
+    -- EARNED a per-franchise resolution from this franchise's own pos/club
+    -- paperwork (the two Will Smiths each resolve on their own franchise).
+    -- A stint is franchise-scoped, so the context id applies exactly here.
+    coalesce(ctx.mlbam_id, pid.mlbam_id)               as mlbam_id,
+    coalesce(ctx.stat_group_scope, pid.stat_group_scope) as stat_group_scope,
+    coalesce(pid.is_ambiguous, false)
+        and ctx.mlbam_id is null                       as is_ambiguous_name,
     case when d.n_ids = 1 then d.any_id end            as resolved_cbs_player_id
 from stints s
 inner join flags f
@@ -611,3 +616,9 @@ left join {{ ref('dim_player_identity') }} pid
     on pid.platform = 'cbs'
     and pid.name_key = s.name_key
     and pid.season_year = s.season_year
+left join {{ ref('int_player_identity_context') }} ctx
+    on ctx.platform = 'cbs'
+    and ctx.league_key = s.league_key
+    and ctx.season_year = s.season_year
+    and ctx.franchise_id = s.franchise_id
+    and ctx.name_key = s.name_key

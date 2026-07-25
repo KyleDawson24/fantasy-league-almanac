@@ -601,3 +601,86 @@ models:
           - accepted_values:
               arguments:
                 values: ['lineup_event', 'prior_inverse', 'prior_direct']
+
+  # ------------------------------------------------------------------
+  # CBS draft assembly (MLB-90)
+  # ------------------------------------------------------------------
+
+  - name: int_cbs__draft_picks
+    description: >
+      CBS draft picks, ASSEMBLED: the Python port of build_picks() +
+      zip_2024() from the retired output/cbs_draft_recap_data.py stopgap
+      (MLB-90). One row per pick actually made, where staging holds one row
+      per line printed on a captured page.
+
+      Staging is a pure reshape and keeps both the `round` and `team`
+      renderings plus playerless order-only rows; this model applies the
+      draft_assembly_plan seed to choose which recording of each season to
+      believe, drops the furniture, renumbers stitched parts under the
+      continuation rule, and marries 2024's order skeleton to its player
+      lists on (team, k).
+
+      Carries NO franchise id, deliberately: draft pages print a team name
+      only, team_name_raw is what the Draft Recap renderer keys on end to
+      end, and resolving it would add a consumer to the identity edge
+      MLB-130 is retiring for nothing. See the model header before reaching
+      for the JSON team blob on the pages -- it is a current-roster widget,
+      not era-accurate.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - assembly_seq
+    columns:
+      - name: league_key
+        tests:
+          - not_null
+      - name: season_year
+        description: 'Draft season. Only seasons named in draft_assembly_plan appear.'
+        tests:
+          - not_null
+      - name: draft_label
+        description: 'Display name of the draft this pick came from ("Mega Draft", "Pre-season"); the zip year names both of its parts.'
+        tests:
+          - not_null
+      - name: order_tier
+        description: 'Inherited from the plan. Only ''true'' reaches ordered surfaces; the renderer''s _DRAFT_ORDERED_TIERS is the consumer.'
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['true', 'rounds_suspect', 'zip', 'none']
+      - name: round_num
+        description: 'Round, renumbered to continue the previous stitched part. NULL on unordered years -- never synthesised, because a fabricated round is indistinguishable downstream from a recorded one.'
+      - name: round_pick
+        description: 'Pick within the round, as printed. NULL on unordered years.'
+      - name: overall_pick
+        description: 'Stitched pick sequence across the season''s parts. NULL on unordered years, which is 9 of 13 seasons -- any consumer keying on it must tolerate that.'
+      - name: list_seq
+        description: 'Position within this team''s list, restarting each part. Order-free years have only this, and it rides ROSTER order, not draft order.'
+        tests:
+          - not_null
+      - name: team_name_raw
+        description: 'Drafting team as printed. Not resolved to a franchise -- see the description.'
+        tests:
+          - not_null
+      - name: player_cbs_id
+        description: 'CBS player id. NULL across the plain-text early era; ''900''/''901'' are the two-way split pseudo-ids.'
+      - name: player_name_raw
+        description: 'Player as printed, including any ''(Batter)''/''(Pitcher)'' two-way marker.'
+        tests:
+          - not_null
+      - name: page_total_fpts
+        description: 'The page''s own Total Fpts column (2022+ pages). Reconciliation evidence, not a value source.'
+      - name: page_active_fpts
+        description: 'The page''s own Active Fpts column. The only place pre-walk-back ACTIVE points exist.'
+      - name: assembly_seq
+        description: >
+          Emission order of the original Python assembly, preserved as a
+          column. LOAD-BEARING: the all-time board picks its Top Pick with
+          max() and no tiebreak, which returns the first maximum in row
+          order, so a points tie renders a different player under a
+          different order. SQL guarantees no order without an order by.
+        tests:
+          - not_null

@@ -1,0 +1,17 @@
+league_key,season_year,part_seq,draft_key,view,part_role,order_tier,note
+cbs-bsb,2011,1,2011:Pre-season,team,part,none,"plain-text names, no CBS ids; 15 teams"
+cbs-bsb,2013,1,2013:Pre-season,team,part,none,
+cbs-bsb,2015,1,2015:Pre-season,team,part,none,
+cbs-bsb,2017,1,2017:Pre-season:Pre-season,team,part,none,96-pick top-up draft
+cbs-bsb,2018,1,2018:Pre-season:Pre-season,team,part,none,
+cbs-bsb,2019,1,2019:Pre-season:Pre-season,team,part,none,96-pick top-up draft
+cbs-bsb,2020,1,2020:Pre-season:BSB 2020 Draft,round,part,rounds_suspect,"'2020 - 2' is the same 240 players recorded twice; deduped"
+cbs-bsb,2021,1,2021:Pre-season:Pre-season,team,part,none,"'2021 - 2' is the same 433 players recorded twice; deduped"
+cbs-bsb,2022,1,2022:2:MEGA-DRAFT,team,part,none,
+cbs-bsb,2023,1,2023:Pre-season:Pre-season,team,part,none,160-pick top-up draft
+cbs-bsb,2024,1,2024:Pre-season:BSB DRAFT-A-GANZA,round,zip_skeleton,zip,"order skeleton + player lists married on (team, k); the player side rides roster order, so the marriage is NOT draft order (Ohtani landed in round 19) -- excluded from ordered surfaces"
+cbs-bsb,2024,2,2024:2:2,team,zip_players,zip,
+cbs-bsb,2025,1,2025:Pre-season:Mini Draft,round,part,true,
+cbs-bsb,2025,2,2025:2:Mega Draft,round,part,true,
+cbs-bsb,2026,1,2026:Pre-season:Mini Draft,round,part,true,
+cbs-bsb,2026,2,2026:2:Mega Draft,round,part,true,

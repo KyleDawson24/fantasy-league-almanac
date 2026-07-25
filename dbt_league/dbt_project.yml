@@ -59,6 +59,18 @@ vars:
 
 seeds:
   dbt_league:
+    # MLB-90: which recording of each draft season to trust, and how to
+    # stitch the ones that ran two drafts. Curation, so it is data.
+    draft_assembly_plan:
+      +column_types:
+        league_key: varchar
+        season_year: integer
+        part_seq: integer
+        draft_key: varchar
+        view: varchar
+        part_role: varchar
+        order_tier: varchar
+        note: varchar
     matchup_schedule:
       +column_types:
         season_year: integer

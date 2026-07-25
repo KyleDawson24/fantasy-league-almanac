@@ -1102,3 +1102,104 @@ models:
         description: 'The estimated_startshare share of the total.'
       - name: players_attributed
         description: 'Distinct players contributing any attributed game.'
+
+  - name: mart_cbs_draft_recap
+    description: >
+      The CBS Draft Recap tab's consumer row: every assembled pick, priced at
+      the season the player was drafted into (MLB-90). One row per pick, in
+      assembly order.
+
+      This model retired the project's loudest stopgap. The Draft Recap
+      provider used to parse the draft pages' NDJSON off disk AND read the
+      int_cbs__player_season_stats intermediate directly from Python -- two
+      exceptions to the output-reads-marts rule. Both are gone: assembly
+      moved to int_cbs__draft_picks, value resolution moved here, and the
+      provider is a single warehouse read.
+
+      Value resolution is a behaviour-for-behaviour port of the retired
+      attach_values(): split two-way halves take their own half's points, a
+      unified name sums every CBS id its mlbam maps to that season, a page id
+      outranks an ambiguous name, and an ambiguous name-only pick is flagged
+      and never guessed. Migration gate was full-precision positional
+      equality against the stopgap -- 4,269 picks x 18 fields, exact.
+
+      Sums are exact decimal rather than float, so they are order-independent
+      by construction (MLB-128's class cannot arise here). 6dp is carried
+      because the renderer's round(value, 1) must stay the only rounding step.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - assembly_seq
+    columns:
+      - name: league_key
+        tests:
+          - not_null
+      - name: season_year
+        tests:
+          - not_null
+      - name: draft_label
+        description: 'Which draft within the season this pick came from.'
+        tests:
+          - not_null
+      - name: order_tier
+        description: 'How trustworthy the pick sequence is. Only ''true'' reaches ordered surfaces.'
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['true', 'rounds_suspect', 'zip', 'none']
+      - name: round_num
+        description: 'Round, renumbered across stitched parts. NULL where the era recorded no order.'
+      - name: round_pick
+        description: 'Pick within the round, as printed. NULL where unrecorded.'
+      - name: overall_pick
+        description: 'Stitched pick sequence. NULL on 9 of 13 seasons -- consumers must tolerate it.'
+      - name: list_seq
+        description: 'Position in this team''s list, restarting each part. Rides ROSTER order on the order-free years, not draft order.'
+        tests:
+          - not_null
+      - name: team_name_raw
+        description: 'Drafting team as PRINTED. Deliberately not resolved to a franchise id -- see int_cbs__draft_picks.'
+        tests:
+          - not_null
+      - name: player_cbs_id
+        description: 'CBS player id; NULL across the plain-text early era. ''900''/''901'' are two-way split pseudo-ids.'
+      - name: player_name_raw
+        description: 'Player as printed, including any ''(Batter)''/''(Pitcher)'' marker.'
+        tests:
+          - not_null
+      - name: page_total_fpts
+        description: 'The page''s own Total Fpts (2022+). Reconciliation evidence, not a value source.'
+      - name: page_active_fpts
+        description: 'The page''s own Active Fpts. The only surviving pre-walk-back ACTIVE points.'
+      - name: resolution
+        description: >
+          How the pick was priced. id = the page''s own player id carried
+          points. name = resolved through an unambiguous name key. zero_fill =
+          identified but never played, a genuine zero. ambiguous = a shared
+          name with no id to break the tie, left unvalued. unresolved = no
+          identity at all.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['id', 'name', 'zero_fill', 'ambiguous', 'unresolved']
+      - name: calc_total
+        description: 'Calculated season points for the draft season. NULL only where resolution could not value the pick (ambiguous / unresolved); zero_fill picks carry a real 0.'
+      - name: calc_hitting
+        description: 'The hitting half of calc_total.'
+      - name: calc_pitching
+        description: 'The pitching half of calc_total.'
+      - name: twoway_sum
+        description: 'True where the value summed MORE THAN ONE CBS id -- i.e. a two-way player whose production hid under split pseudo-ids.'
+        tests:
+          - not_null
+      - name: assembly_seq
+        description: >
+          Emission order, inherited from int_cbs__draft_picks. LOAD-BEARING:
+          the all-time board resolves a points tie with max() and no
+          tiebreak, so row order decides which player is shown.
+        tests:
+          - not_null

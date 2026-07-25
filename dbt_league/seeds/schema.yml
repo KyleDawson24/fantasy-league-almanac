@@ -560,3 +560,78 @@ seeds:
         description: 'A CBS abbrev that has denoted this club in some era.'
         tests:
           - not_null
+
+  - name: draft_assembly_plan
+    description: >
+      Which recording of each draft season to trust, and how to stitch the
+      seasons that ran two drafts (MLB-90). One row per PART, in stitch order.
+
+      The CBS draft-results capture holds both a `round` and a `team`
+      rendering of every draft, and the two do not agree about what is
+      knowable: true pick order exists for 2025-26 only, 2011-2023 carry
+      per-team lists with no order at all, 2020 and 2021 recorded the same
+      player set twice, and 2024 split an order skeleton away from its
+      player lists entirely. RAW keeps all of it and staging reshapes all of
+      it, on purpose -- so the judgement about which evidence to believe has
+      to live somewhere, and it is curation rather than logic, so it lives
+      here as data. int_cbs__draft_picks does the assembly this describes.
+
+      Adding a season is a CSV edit + reseed, no SQL change. Reseed with
+      `dbt seed --full-refresh -s draft_assembly_plan` (plain `dbt seed` may
+      treat the existing table as already-loaded and skip).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - season_year
+              - part_seq
+    columns:
+      - name: league_key
+        description: 'Owning league. The plan is per-league because it grades that league''s own capture.'
+        tests:
+          - not_null
+      - name: season_year
+        description: 'Draft season. Seasons absent from the seed contribute no picks -- 2009 recorded order with zero players, 2010 and 2012 recorded nothing.'
+        tests:
+          - not_null
+      - name: part_seq
+        description: 'Stitch order within the season, 1-based. Round numbers in part 2 renumber to continue part 1.'
+        tests:
+          - not_null
+      - name: draft_key
+        description: 'Joins stg_cbs__draft.draft_key -- ''season:period[:name]''.'
+        tests:
+          - not_null
+      - name: view
+        description: 'Which rendering of the draft to read: ''round'' carries the pick sequence, ''team'' carries per-franchise lists.'
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['round', 'team']
+      - name: part_role
+        description: >
+          part = an ordinary part, playerless rows dropped. zip_skeleton /
+          zip_players = the two halves of a split-brain season, married on
+          (team, k); the skeleton is playerless BY NATURE, so it keeps its
+          playerless rows.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['part', 'zip_skeleton', 'zip_players']
+      - name: order_tier
+        description: >
+          How much the pick sequence can be trusted. true = round and pick
+          straight off the page. rounds_suspect = rounds recorded but shaped
+          oddly. zip = order skeleton married to team lists, so ordered on
+          the slot side but roster-ordered on the player side. none = no
+          order exists anywhere. Only ''true'' reaches ordered surfaces.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['true', 'rounds_suspect', 'zip', 'none']
+      - name: note
+        description: 'Free-text provenance for the season -- why this part and not the other.'

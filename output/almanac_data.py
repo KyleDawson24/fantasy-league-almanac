@@ -507,9 +507,12 @@ def get_team_player_season_stats():
         season_active AS (
             SELECT
                 team_id, player_id, season_year,
-                ROUND(SUM(calculated_points), 1)      AS active_points,
-                ROUND(SUM(calculated_hitting_pts), 1) AS active_hitting_points,
-                ROUND(SUM(calculated_pitching_pts), 1) AS active_pitching_points,
+                -- MLB-123: 6dp, round once at display (mirrors MLB-121 and the
+                -- team-history query). These season rows feed the same shared
+                -- renderer that sums active+bench and re-rounds for display.
+                ROUND(SUM(calculated_points), 6)      AS active_points,
+                ROUND(SUM(calculated_hitting_pts), 6) AS active_hitting_points,
+                ROUND(SUM(calculated_pitching_pts), 6) AS active_pitching_points,
                 SUM(h) AS h, SUM(ab) AS ab, SUM(b_bb) AS b_bb,
                 SUM(hbp) AS hbp, SUM(sf) AS sf, SUM(tb) AS tb,
                 SUM(hr) AS hr, SUM(sb) AS sb, SUM(w) AS w, SUM(l) AS l,
@@ -523,7 +526,7 @@ def get_team_player_season_stats():
 
         season_inactive AS (
             SELECT team_id, player_id, season_year,
-                   ROUND(SUM(calculated_points), 1) AS bench_il_points
+                   ROUND(SUM(calculated_points), 6) AS bench_il_points
             FROM fct_player_season_performance
             WHERE team_id IS NOT NULL AND {league_predicate()}
               AND performance_status = 'inactive'
@@ -1702,14 +1705,21 @@ def get_team_roster_history_stats(season_year):
                 scope,
                 team_id,
                 player_id,
-                ROUND(SUM(calculated_points), 1) AS active_points,
+                -- MLB-123: carry 6dp and let the display round decide the
+                -- digit. These point totals are summed in Python (Total =
+                -- active + bench) and handed to the shared team renderer,
+                -- which rounds them for display -- rounding to 1dp HERE made
+                -- that a double round and lifted boundary cells a full unit.
+                -- Mirrors the CBS fix (MLB-121) so both books feed the shared
+                -- _team_history_display_row identical precision.
+                ROUND(SUM(calculated_points), 6) AS active_points,
                 -- v1.2: per-category active points so the per-team tab can
                 -- show slot-decomposed points for two-way players (Ohtani
                 -- gets hitting pts at his DH slot, pitching pts at SP).
                 -- Single-discipline players: one equals active_points, the
                 -- other is 0 -- so their displayed points don't move.
-                ROUND(SUM(calculated_hitting_pts), 1) AS active_hitting_points,
-                ROUND(SUM(calculated_pitching_pts), 1) AS active_pitching_points,
+                ROUND(SUM(calculated_hitting_pts), 6) AS active_hitting_points,
+                ROUND(SUM(calculated_pitching_pts), 6) AS active_pitching_points,
                 SUM(h) AS h,
                 SUM(ab) AS ab,
                 SUM(b_bb) AS b_bb,
@@ -1741,7 +1751,9 @@ def get_team_roster_history_stats(season_year):
                 scope,
                 team_id,
                 player_id,
-                ROUND(SUM(calculated_points), 1) AS bench_il_points
+                -- MLB-123: 6dp -- summed into Total with active_points, so
+                -- pre-rounding to 1dp double-rounds the displayed Total.
+                ROUND(SUM(calculated_points), 6) AS bench_il_points
             FROM scoped_season
             WHERE performance_status = 'inactive'
             GROUP BY 1, 2, 3
@@ -1842,7 +1854,12 @@ def get_team_roster_history_stats(season_year):
             ON rt.scope = ss.scope
             AND rt.team_id = ss.team_id
             AND rt.player_id = ss.player_id
-        ORDER BY ct.team_name, rt.scope, rt.rostered_days DESC, pl.display_name
+        -- MLB-123: end the order on player_id so this is a TOTAL order. The
+        -- shared renderer re-sorts these rows by points (a stable sort), and
+        -- exact ties are real -- without a unique final key the tie order is
+        -- whatever the warehouse happened to return, which flips run to run.
+        ORDER BY ct.team_name, rt.scope, rt.rostered_days DESC,
+                 pl.display_name, rt.player_id
     """, (season_year, season_year, season_year, season_year))
 
     # v1.1.1: the days-active-at-slot Starters selection (and its

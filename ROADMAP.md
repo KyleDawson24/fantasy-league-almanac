@@ -3,8 +3,10 @@
 This project shipped v1.0.0 on 2026-05-13, v1.0.1 on 2026-05-18
 (polish + flavor expansion), v1.0.2 on 2026-05-19 (DAG hygiene and
 dbt-architecture cleanup; refactor-only), and v1.1.0 on 2026-05-22
-(Google Sheets league almanac). See CHANGELOG.md for the per-release
-entries. The items below are what's still on deck, organized by
+(Google Sheets league almanac). It has since shipped through v1.5.0
+(the multi-league foundation and a 25-year CBS almanac) and v1.5.1
+(a correctness pass over the CBS record book, 2026-07-25). See
+CHANGELOG.md for the per-release entries. The items below are what's still on deck, organized by
 priority and ambition. v1.x = incremental polish on the current
 architecture; v2.0 = structural change.
 

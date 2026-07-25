@@ -38,8 +38,9 @@ lands), not on a calendar. Hard backstop: if `[Unreleased]` exceeds
 
 - [ ] Linear: flip shipped issues with paired comments; note the release
       number on each.
-- [ ] Mirror board changes to `ROADMAP.md` + `docs/roadmap/` in the
-      SAME commit as the board change.
+- [ ] Add a one-line narrative note for the release to `ROADMAP.md`. The
+      per-ticket `docs/roadmap/` mirror is retired (that directory no
+      longer exists); Linear is the roadmap's working source of truth.
 - [ ] README: refresh version references / screenshots if the release
       changed a surface.
 - [ ] New `[Unreleased]` section seeded at the top of the changelog.

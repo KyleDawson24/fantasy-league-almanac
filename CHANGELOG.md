@@ -8,7 +8,119 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Each entry links to the corresponding `Phase X.Y Documentation.md` in the
 repository root for the architectural detail behind the change.
 
-## [Unreleased]
+## [1.5.1] — 2026-07-25
+
+A correctness pass on the CBS record book -- the story of this release,
+and several days longer than it looked. Finishing the multi-league
+identity work (routing every team's display through the franchise
+dimension) surfaced the CBS almanac's first byte-diff golden. Within an
+hour that golden caught a silent corruption: attribution had been
+mis-crediting player-games across the league's entire 26-season history,
+and the record book didn't even produce the same answer twice.
+
+Pulling that thread ran the length of the release, each fix uncovering the
+next. The golden's non-determinism traced to same-day roster stints
+truncating each other; that to a transaction capture silently dropping
+~408 rows at pagination seams across the whole history; a display headline
+that disagreed with its own breakdown to record values being rounded
+twice.
+
+Then the two big ones. The roster walk-back had paired transactions in
+effective-date order, silently assuming managers never reprocess a move --
+so a queued lineup change, a retroactive drop, or a same-minute trade
+flurry each mis-credited a franchise or stranded a real roster as free
+agents. Rebuilt to resolve each day's state by the most-recently-executed
+transaction effective by then, it now reconstructs the league's roster
+history as the transaction log actually describes it. And player identity,
+which returned nothing whenever a name had two live candidates, now
+resolves each ambiguous name per-franchise from that franchise's own
+position-and-club paperwork against the universal MLB stats spine -- so the
+two Will Smiths and the three Luis Garcias land on the right rosters.
+
+The measurable end: `attribution_contested` went from 0 (silently, because
+the flag itself miscounted) to 0 (provably -- every player-game across 26
+seasons credits exactly one franchise). Reconstruction accuracy, measured
+against the platform's own published standings, improved across the
+seasons the work touched (the recent captured era most visibly: 2023's
+mean team error 4.4% -> 3.9%). The record book now produces the same
+answer twice.
+
+Patch, not minor: everything here corrects existing surfaces rather than
+adding new ones.
+
+### Fixed
+
+- **The record book was non-deterministic.** Same-day roster stints
+  truncated each other in a rebuild-order-dependent way, so career and
+  season records changed between builds. Fixed at the root (a stint's end
+  is capped only by *strictly later* acquisitions); five consecutive
+  rebuilds now byte-identical.
+
+- **The transaction capture silently lost rows.** The paginated sweep
+  dropped entries at every page seam -- ~408 across the 26-year history,
+  including trades that vanished from a franchise's record. Re-captured
+  seam-free via `print_rows`; the walk-back now reads the complete log.
+  Lance Lynn's 2022 trade, the case that exposed it, reconstructs exactly
+  as the log describes.
+
+- **Record values were rounded twice and rendered unstably.** Aggregates
+  carried at one decimal, summed in Python, then rounded again for
+  display -- inflating ~3% of career counting-stat records by a full unit
+  and flipping boundary cells run-to-run. Now carried at full precision
+  and rounded once, with a deterministic sort so genuine ties resolve the
+  same way every time.
+
+- **The ESPN almanac's team pages got the same rounding hardening.** The
+  fix above had a sibling on the ESPN side: the per-team point aggregates
+  were carried at one decimal, summed in Python, then rounded again for
+  display, with ties that could resolve by row order. The team-history and
+  Best-Seasons aggregates now carry full precision, round once, and sort on
+  a stable key. The current two-season ESPN data lands no cell on a rounding
+  boundary, so today's output is byte-identical -- this is a safeguard
+  against boundary inflation as the league accumulates seasons, and it keeps
+  both books' renderers symmetric.
+
+- **The roster walk-back mis-credited reprocessed transactions.** It
+  paired events in effective-date order, which breaks whenever a manager
+  reprocesses a move -- a queued activation, a retroactive drop, a rapid
+  trade flurry. Rebuilt to resolve each day's roster state by the
+  most-recently-*executed* transaction effective by then; verified against
+  the platform's published standings, every affected season moved toward
+  the official numbers and every untouched season stayed identical. A
+  companion inversion in the report's own row ordering (which had sent a
+  trade behind its own bench line) is fixed in the same pass.
+
+- **Player identity gave up on ambiguous names.** Two real players sharing
+  a name (the Dodgers-catcher and reliever Will Smiths; three Luis
+  Garcias) left every stint unidentified and every game credited to both
+  franchises. Now resolved per-franchise from the franchise's own
+  position/club paperwork against the MLB spine, with a human-owned
+  override seed for the residue that genuinely cannot be decided from
+  evidence.
+
+- **A slugger's season displayed under a minor-leaguer's misspelled
+  name.** A fuzzy crosswalk match collided two 2004 Gonzalezes onto one
+  id, so Juan González's 33-game season rendered as "Jeremi Gonzalez."
+  Fixed by a name-form override seed.
+
+### Changed
+
+- **Franchise identity resolves through one dimension, at season grain.**
+  `dim_franchise` splits identity (the earliest id) from display (the
+  latest seen); the lineage seed gains a season scope so a reused id can
+  be *split*, not only merged; a platform-general holding pen handles
+  synthesised franchises. Every team-display surface, and the last
+  direct-from-RAW marts, route through it.
+
+- **The CBS almanac gains a byte-diff golden.** Rendered from the real
+  league (so it lives outside the public repo and skips when absent), it
+  pins the 20-tab workbook byte-for-byte -- the test that caught
+  everything above.
+
+- **Identity is a reusable, platform-general resolver.** A split candidate
+  pipeline, the season resolver, a franchise-context layer, and two
+  human-owned override seeds (one name-form, one franchise-scoped) form a
+  single id-first identity map keyed on MLBAM rather than names.
 
 ## [1.5.0] — 2026-07-21
 

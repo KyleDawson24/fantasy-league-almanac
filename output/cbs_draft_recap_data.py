@@ -116,12 +116,31 @@ def fetch_report() -> dict:
     """
     report = {}
     for row in query_snowflake(sql):
-        report[int(row["season_year"])] = {
+        info = {
             "picks": int(row["picks"]),
             "order": row["order_tier"],
-            "rounds": int(row["rounds"]) if row["rounds"] is not None else None,
-            "note": row["note"] or None,
         }
+        # The zip year carries no round count at all rather than a null one:
+        # its rounds come from the order skeleton while its players ride
+        # roster order, so reporting one would dress up a marriage as a
+        # draft order.
+        if row["order_tier"] != "zip":
+            info["rounds"] = int(row["rounds"]) if row["rounds"] is not None else None
+        info["note"] = row["note"] or None
+        report[int(row["season_year"])] = info
+
+    # Fill-rate accounting for the marriage seasons -- the check that a
+    # re-parse hasn't quietly changed how many slots found players.
+    fill_sql = f"""
+        select season_year, unfilled_slots, unslotted_players
+        from mart_cbs_draft_zip_fill
+        where {league_predicate()}
+    """
+    for row in query_snowflake(fill_sql):
+        year = int(row["season_year"])
+        if year in report:
+            report[year]["unfilled_slots"] = int(row["unfilled_slots"])
+            report[year]["unslotted_players"] = int(row["unslotted_players"])
 
     tally_sql = f"""
         select season_year, resolution, count(*) as n

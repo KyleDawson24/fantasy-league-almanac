@@ -1203,3 +1203,56 @@ models:
           tiebreak, so row order decides which player is shown.
         tests:
           - not_null
+
+  - name: mart_cbs_draft_zip_fill
+    description: >
+      Fill-rate accounting for the draft seasons assembled by MARRYING two
+      pages rather than reading one (MLB-90). One row per zip season.
+
+      A zip season is the one case where picks are inferred: an order
+      skeleton with no players, married to per-team player lists with no
+      order, on (team, k). That marriage is an inner join, so it silently
+      discards skeleton slots a team had no player left for and any listed
+      player that found no slot. These counts make the discard visible --
+      without them a re-parse that changed the fill would just render a
+      different number of picks with nothing to say so.
+
+      Zip seasons only, on purpose: every other season is a record rather
+      than an inference, so emitting 0s for them would imply a check that
+      was never performed.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - season_year
+    columns:
+      - name: league_key
+        tests:
+          - not_null
+      - name: season_year
+        tests:
+          - not_null
+      - name: skeleton_slots
+        description: 'Printed pick slots on the order page.'
+        tests:
+          - not_null
+      - name: listed_players
+        description: 'Players on the per-team list pages.'
+        tests:
+          - not_null
+      - name: picks
+        description: 'Slots that found a player -- what int_cbs__draft_picks emitted.'
+        tests:
+          - not_null
+      - name: unfilled_slots
+        description: 'Slots a team had no player left for: passed late picks.'
+        tests:
+          - not_null
+      - name: unslotted_players
+        description: >
+          Listed players that never found a slot. Expected 0 -- a non-zero
+          means the skeleton is smaller than the lists it is marrying, i.e.
+          the pairing is losing real picks.
+        tests:
+          - not_null

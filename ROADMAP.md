@@ -119,6 +119,15 @@ Larger changes that would re-shape parts of the project.
   hardcoded into mart UNPIVOT lists. Externalizing the stat-mapping to a
   YAML or seed would let other leagues with different scoring settings
   reuse the project without forking.
+- **One draft builder for both leagues.** ESPN and CBS render their draft
+  tabs through two entirely separate builders; the CBS one
+  (`build_draft_recap_rows`) exists because CBS never joined the ESPN
+  chain. Converging them retires the duplicate and stops a third platform
+  from adding a third builder. The warehouse half already landed — the
+  CBS mart's columns are shaped on `mart_draft_board`'s contract — so
+  what remains is renderer work plus four contract seams (NULL
+  `overall_pick` on most CBS seasons, varchar player ids, no `team_id` on
+  CBS draft pages, and two different value contracts).
 
 ### Warehouse / target flexibility
 

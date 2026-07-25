@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Each entry links to the corresponding `Phase X.Y Documentation.md` in the
 repository root for the architectural detail behind the change.
 
+## [Unreleased]
+
+_Nothing yet._
+
 ## [1.5.1] — 2026-07-25
 
 A correctness pass on the CBS record book -- the story of this release,

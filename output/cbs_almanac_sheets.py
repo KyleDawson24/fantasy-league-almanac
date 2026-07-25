@@ -58,6 +58,7 @@ from datetime import date
 import gspread
 
 import db
+from config.dbt_vars import get_dbt_var
 from db import league_predicate, query_snowflake
 from almanac_data import get_optimal_season_candidates, get_optimal_team_candidates
 from cbs_draft_recap_data import get_draft_history
@@ -291,7 +292,12 @@ def _best_rate(items, key, higher, qual_col, qual_min):
 # The synthetic holding-pen franchise for 2001-2002 zero-event players (see
 # fct_cbs_player_game_attribution). Fenced out of team records + team pages;
 # its players still surface in player/league records.
-_CBS_SENTINEL_FID = 9999
+#
+# MLB-115: read from dbt_project.yml rather than repeating the literal. The
+# warehouse fences this id too, so a hardcoded copy here meant changing it
+# in two places -- and a renderer that disagreed with the warehouse would
+# silently fence the WRONG franchise out of every team board.
+_CBS_SENTINEL_FID = int(get_dbt_var('holding_pen_franchise_id'))
 
 # The player-record Details stat-line: marquee counting stats, headline first.
 # A hitter's pitching cells are zero and vice-versa, so one combined order

@@ -1,11 +1,6 @@
-# Release Notes — v1.5.1 (DRAFT)
+# Release Notes — v1.5.1
 
 *The record book, made correct. A waypoint on the road to 2.0.*
-
-> Status: ready to tag. **MLB-123** — the ESPN renderer's twin rounding fix —
-> has landed. It is byte-neutral on the current two-season data (a preventive
-> hardening rather than a visible correction), keeping both books' rounding
-> consistent.
 
 ## In one line
 

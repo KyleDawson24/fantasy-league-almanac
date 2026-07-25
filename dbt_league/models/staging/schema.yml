@@ -173,6 +173,77 @@ models:
       - name: points_per_unit
         description: 'Fantasy points awarded per unit of this stat under the current season''s scoring rules.'
 
+  - name: stg_cbs__draft
+    description: >
+      CBS draft picks, reshaped from the parsed draft-results pages (MLB-90).
+      A pure reshape: both the `round` and `team` view of every draft survive,
+      playerless order-only rows included, because the two views disagree per
+      season about what is knowable and discarding either here would destroy
+      evidence. Selecting a view per season, dropping furniture, marrying
+      2024's order skeleton to its player lists and stitching the 2025/26
+      two-part drafts are assembly decisions and live in the intermediate
+      layer -- the same staging/intermediate split the other CBS UI families
+      use. Pick coordinates are NULL wherever the era's pages never recorded
+      them (true order exists for 2025-26 only) and are deliberately not
+      synthesised. player_cbs_id is VARCHAR and NULL across the plain-text
+      early era; the two-way pseudo-ids 900/901 are real ids here.
+      Grain: one row per (league_key, source_path, page_seq).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - source_path
+              - page_seq
+    columns:
+      - name: league_key
+        description: 'League registry key.'
+        tests:
+          - not_null
+      - name: season_year
+        description: 'Season the draft belongs to.'
+        tests:
+          - not_null
+      - name: draft_key
+        description: 'Stable per-draft key (e.g. "2026:2:Mega Draft"); a season can hold more than one draft.'
+        tests:
+          - not_null
+      - name: view
+        description: 'Which rendering the row came from: "round" (carries pick sequence) or "team" (per-franchise lists).'
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['round', 'team']
+      - name: page_seq
+        description: 'Sequential position of the row within its (draft_key, view); the ordering key the assembly layer reads.'
+        tests:
+          - not_null
+      - name: round_num
+        description: 'Draft round as PRINTED; NULL for the orderless era.'
+      - name: round_pick
+        description: 'Pick within the round as PRINTED; NULL for the orderless era.'
+      - name: pick_no
+        description: 'Overall pick number as PRINTED; NULL for the orderless era. Never synthesised.'
+      - name: team_name_raw
+        description: 'Drafting team name exactly as printed. No franchise id exists on a draft page; resolution is per-season and happens downstream.'
+      - name: player_cbs_id
+        description: 'CBS player id as VARCHAR; NULL across the plain-text early era. 900/901 are the Ohtani two-way pseudo-ids.'
+      - name: player_name_raw
+        description: 'Player name exactly as printed.'
+      - name: is_playerless
+        description: 'True for an order-only row: a pick slot printed with no player attached (all of 2009). A real row, not corruption.'
+        tests:
+          - not_null
+      - name: page_total_fpts
+        description: "The page's own total fantasy points. Reconciliation evidence only -- production is priced from the universal stats layer."
+      - name: page_active_fpts
+        description: "The page's own active fantasy points. Reconciliation evidence only."
+      - name: source_path
+        description: 'Repo-relative path of the captured page; the loader idempotency key.'
+        tests:
+          - not_null
+
   - name: stg_draft
     description: >
       One row per draft pick, flattened from the append-only RAW.DRAFT_PICKS

@@ -95,6 +95,46 @@ TABLES = {
         source_path     VARCHAR,
         loaded_at       TIMESTAMP_NTZ
     )""",
+    # MLB-90: the draft picks the Draft Recap tab has been reading straight
+    # off disk. Unlike the families above, the HTML is already parsed --
+    # cbs_draft_parse.py wrote draft_rows.ndjson as the evidence layer,
+    # explicitly waiting on the modeling shape to be signed off. So the
+    # walker below re-reads that NDJSON rather than re-parsing pages, and
+    # RAW takes it VERBATIM: both the round and team views of each draft,
+    # playerless order-only rows included. Selecting one view per season and
+    # dropping the furniture is staging's job, exactly as it is everywhere
+    # else in this file.
+    "CBS_DRAFT": """CREATE TABLE IF NOT EXISTS CBS_DRAFT (
+        league_key      VARCHAR,
+        season_year     INTEGER,
+        draft_key       VARCHAR,
+        draft_label     VARCHAR,
+        period          VARCHAR,
+        period_order    INTEGER,
+        view            VARCHAR,
+        section_seq     INTEGER,
+        section_kind    VARCHAR,
+        section_label   VARCHAR,
+        row_seq         INTEGER,
+        page_seq        INTEGER,
+        pick_no         INTEGER,
+        round_num       INTEGER,
+        round_pick      INTEGER,
+        team_name_raw   VARCHAR,
+        player_cbs_id   VARCHAR,
+        player_name_raw VARCHAR,
+        pos_team_raw    VARCHAR,
+        elig_raw        VARCHAR,
+        salary_raw      VARCHAR,
+        elapsed_raw     VARCHAR,
+        rank_raw        VARCHAR,
+        total_fpts      FLOAT,
+        active_fpts     FLOAT,
+        is_playerless   BOOLEAN,
+        parsed_at       VARCHAR,
+        source_path     VARCHAR,
+        loaded_at       TIMESTAMP_NTZ
+    )""",
 }
 
 _TABLE_RE = re.compile(
@@ -630,8 +670,69 @@ def walk_transactions(ui_root):
           f"(land with action_raw NULL -- inspect at staging)")
 
 
+# ---------------------------------------------------------------------------
+# drafts (MLB-90): ui/drafts/parsed/draft_rows.ndjson -> CBS_DRAFT.
+#
+# The odd one out. Every other family here parses captured HTML; the draft
+# pages were already parsed by cbs_draft_parse.py, which deliberately
+# stopped at NDJSON ("the evidence layer the RAW load will read when the
+# modeling shape is signed off"). This walker is that load: it re-reads the
+# parsed rows and lands them unchanged.
+#
+# Verbatim on purpose. The file holds BOTH the round and team views of each
+# draft plus playerless order-only rows, and the per-season choice of which
+# view to trust -- along with the is_playerless filter -- is a modeling
+# decision that belongs in staging, not in the loader. Landing one view
+# here would bake a judgement into RAW and throw away the evidence the
+# other view provides.
+#
+# The rows already carry league_key and a repo-relative source_path, so
+# idempotency works on the same key as every other family with no extra
+# handling; only loaded_at is stamped by load_family().
+# ---------------------------------------------------------------------------
+
+DRAFT_NDJSON_REL = Path("drafts") / "parsed" / "draft_rows.ndjson"
+
+# RAW mirrors the parsed record exactly. Named explicitly rather than
+# splatting the dict so an upstream key addition surfaces here as a visible
+# diff instead of silently vanishing at COPY (MATCH_BY_COLUMN_NAME drops
+# unknown keys without complaint).
+_DRAFT_FIELDS = (
+    "league_key", "season_year", "draft_key", "draft_label", "period",
+    "period_order", "view", "section_seq", "section_kind", "section_label",
+    "row_seq", "page_seq", "pick_no", "round_num", "round_pick",
+    "team_name_raw", "player_cbs_id", "player_name_raw", "pos_team_raw",
+    "elig_raw", "salary_raw", "elapsed_raw", "rank_raw", "total_fpts",
+    "active_fpts", "is_playerless", "parsed_at", "source_path",
+)
+
+
+def walk_drafts(ui_root):
+    path = ui_root / DRAFT_NDJSON_REL
+    if not path.is_file():
+        print(f"  drafts: {path} not found -- run extract/cbs_draft_parse.py "
+              f"first; skipping")
+        return
+    seen, unknown_keys = 0, set()
+    with path.open(encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            parsed = json.loads(line)
+            unknown_keys |= set(parsed) - set(_DRAFT_FIELDS)
+            seen += 1
+            yield "CBS_DRAFT", {k: parsed.get(k) for k in _DRAFT_FIELDS}
+    if unknown_keys:
+        print(f"  drafts: WARNING -- parsed rows carry keys RAW has no column "
+              f"for: {sorted(unknown_keys)}. Add them to CBS_DRAFT + "
+              f"_DRAFT_FIELDS or they are dropped silently.")
+    print(f"  drafts: {seen} parsed pick rows walked (all views, playerless "
+          f"rows included -- staging selects)")
+
+
 FAMILIES = {"rosters": walk_rosters, "standings": walk_standings,
-            "transactions": walk_transactions}
+            "transactions": walk_transactions, "drafts": walk_drafts}
 
 
 def build_config():

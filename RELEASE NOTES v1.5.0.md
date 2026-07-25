@@ -53,8 +53,8 @@ The short version, for people who read the almanacs rather than build them.
 The multi-league release, and the longest arc I've let build up between
 public versions. The warehouse gains a league registry and a
 `league_key` re-grain of every layer, and the first non-ESPN, non-H2H
-league ships end-to-end over it: a 25-year almanac for a CBS points
-league (`cbs-bsb`).
+league ships end-to-end over it: an almanac for a CBS points league
+(`cbs-bsb`) covering its 25 completed seasons, back to 2001.
 
 Historic player performance derived from a universal MLB stats layer,
 rosters reconstructed using season-end states with transaction-log
@@ -119,7 +119,9 @@ skipped to keep internal docs unambiguous.
   6% → ~88% attributed (and becomes the single-season Saves record); the
   middle-initial class rises 36% → the league-wide ~70% norm; Ohtani's
   unified 2018–24 entries attribute with the two-way halves kept split;
-  contested attributions hold at 0 of 977k rows.
+  contested attributions read 0 of 977k rows -- which v1.5.1 later showed
+  was a miscount by the flag itself rather than a real zero; it is 0
+  provably as of that release.
 
 - **Franchise and owner continuity -- a 25-year league told as
   lineages, not team ids.** A generated continuity mapping sheet lets
@@ -484,7 +486,9 @@ skipped to keep internal docs unambiguous.
   `stg_matchup_pairs`, and the roster-settings flatten into
   `stg_roster_settings` -- proven equivalent by symmetric EXCEPT and
   pre/post row hashes. Season-grain float sums are frozen as tables so
-  .x5-boundary values can't flip between two reads with no data change.
+  those layers' .x5-boundary values can't flip between two reads with no
+  data change. (Partial, as v1.5.1 established: several reporting marts
+  still carry unfrozen sums and do re-roll a boundary cell on rebuild.)
 
 - **Checks promoted, exposures trued, docs refreshed.** The
   `analyses/check_*.sql` assertions now run on every `dbt build` as

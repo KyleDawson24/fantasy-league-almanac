@@ -308,7 +308,14 @@ unpivoted as (
         player_id,
         player_name,
         display_name,
-        stat_name,
+        -- MLB-134: pin the case rather than inherit it. UNPIVOT folds the
+        -- column NAME into a value, and engines disagree on what case that
+        -- name comes out in -- Snowflake emits the stored identifier
+        -- (uppercase 'AB'), others emit it as written here (lowercase
+        -- 'ab'). Everything downstream keys on uppercase (SEED_TO_LEADERBOARD,
+        -- the dim_stat joins, records.py), so an engine default must not be
+        -- what decides it. No-op on Snowflake by construction.
+        upper(stat_name) as stat_name,
         stat_value
     from combined_with_owner
     unpivot (stat_value for stat_name in (

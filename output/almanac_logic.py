@@ -836,7 +836,14 @@ def _alltime_draft_grid(history_rows, team_count, factors):
     ]
 
     def _round_row(label, paced_by_slot, all_paced, top_pool):
-        top = max(top_pool, key=lambda r: float(r['season_points']))
+        # Breaks an exact tie -- see the note in the season board below. On
+        # equal points the LATER pick wins (Kyle 2026-07-26): identical
+        # production from a later selection is the better pick. Season is
+        # the final stabilizer once even that ties.
+        top = max(top_pool,
+                  key=lambda r: (float(r['season_points']),
+                                 r.get('overall_pick') or 0,
+                                 r.get('season_year') or 0))
         cells = [_whole(statistics.median(paced_by_slot[s]))
                  if paced_by_slot.get(s) else ''
                  for s in range(1, team_count + 1)]
@@ -851,8 +858,11 @@ def _alltime_draft_grid(history_rows, team_count, factors):
         for r in keepers:
             by_team_season[(r['season_year'], r.get('team_id'))].append(r)
         for group in by_team_season.values():
+            # Same convention as the boards: on equal points the LATER pick
+            # ranks first (Kyle 2026-07-26).
             for rank, r in enumerate(
-                    sorted(group, key=lambda r: -float(r['season_points'])), 1):
+                    sorted(group, key=lambda r: (-float(r['season_points']),
+                                                 -(r.get('overall_pick') or 0))), 1):
                 rank_paced[rank].append(_paced(r))
         grid.append(_round_row('K', rank_paced,
                                [_paced(r) for r in keepers], keepers))
@@ -970,7 +980,19 @@ def _draft_board_grid(board_rows):
         ]
         present = [p for p in row_picks if p is not None]
         if present:
-            top = max(present, key=lambda p: float(p.get('season_points') or 0))
+            # The trailing overall_pick is a TIE-BREAK and looks odd on
+            # purpose: max() returns the FIRST maximum in list order, so two
+            # picks level on season points would display whichever one the
+            # warehouse happened to return first -- which has no guarantee and
+            # changes when a table is rebuilt, moving a rendered name with no
+            # code or data change. Points still decide everything; this only
+            # settles dead heats, and settles them the same way forever: on
+            # equal points the LATER pick wins, because identical production
+            # from a later selection is the better pick (Kyle 2026-07-26).
+            # MLB-128.
+            top = max(present,
+                      key=lambda p: (float(p.get('season_points') or 0),
+                                     p.get('overall_pick') or 0))
             pts = [float(p.get('season_points') or 0) for p in present]
             head = [top.get('round_pick'), top.get('team_abbrev') or '',
                     _draft_player_label(top), _whole(max(pts)),

@@ -442,11 +442,11 @@ def get_optimal_season_candidates(team_id):
             MAX(pro_team)     AS pro_team,
             position,
             season_year,
-            ROUND(SUM(weighted_active_pts), 1) AS position_pts
+            ROUND(CAST(SUM(CAST(weighted_active_pts AS DECIMAL(18, 6))) AS FLOAT), 1) AS position_pts
         FROM fct_player_position_pts
         WHERE {league_predicate()} AND team_id = %s
         GROUP BY player_key, position, season_year
-        HAVING SUM(weighted_active_pts) > 0
+        HAVING CAST(SUM(CAST(weighted_active_pts AS DECIMAL(18, 6))) AS FLOAT) > 0
         ORDER BY position, position_pts DESC, player_id, player_key,
                  season_year
     """, (team_id,))
@@ -510,9 +510,9 @@ def get_team_player_season_stats():
                 -- MLB-123: 6dp, round once at display (mirrors MLB-121 and the
                 -- team-history query). These season rows feed the same shared
                 -- renderer that sums active+bench and re-rounds for display.
-                ROUND(SUM(calculated_points), 6)      AS active_points,
-                ROUND(SUM(calculated_hitting_pts), 6) AS active_hitting_points,
-                ROUND(SUM(calculated_pitching_pts), 6) AS active_pitching_points,
+                ROUND(CAST(SUM(CAST(calculated_points AS DECIMAL(18, 6))) AS FLOAT), 6)      AS active_points,
+                ROUND(CAST(SUM(CAST(calculated_hitting_pts AS DECIMAL(18, 6))) AS FLOAT), 6) AS active_hitting_points,
+                ROUND(CAST(SUM(CAST(calculated_pitching_pts AS DECIMAL(18, 6))) AS FLOAT), 6) AS active_pitching_points,
                 SUM(h) AS h, SUM(ab) AS ab, SUM(b_bb) AS b_bb,
                 SUM(hbp) AS hbp, SUM(sf) AS sf, SUM(tb) AS tb,
                 SUM(hr) AS hr, SUM(sb) AS sb, SUM(w) AS w, SUM(l) AS l,
@@ -526,7 +526,7 @@ def get_team_player_season_stats():
 
         season_inactive AS (
             SELECT team_id, player_id, season_year,
-                   ROUND(SUM(calculated_points), 6) AS bench_il_points
+                   ROUND(CAST(SUM(CAST(calculated_points AS DECIMAL(18, 6))) AS FLOAT), 6) AS bench_il_points
             FROM fct_player_season_performance
             WHERE team_id IS NOT NULL AND {league_predicate()}
               AND performance_status = 'inactive'
@@ -654,7 +654,7 @@ def _enrich_optimal_team_with_stats(selected_rows, season_year, matchup_period,
     where_sql = ' AND '.join(where_clauses)
 
     stat_select = ',\n        '.join(
-        f'SUM({col}) AS {col}, SUM({col}_pts) AS {col}_pts'
+        f'SUM({col}) AS {col}, CAST(SUM(CAST({col}_pts AS DECIMAL(18, 6))) AS FLOAT) AS {col}_pts'
         for col in _OPTIMAL_TEAM_STAT_COLUMNS
     )
 
@@ -948,7 +948,7 @@ def get_team_slot_points_alltime():
     return query_snowflake(f"""
         WITH slots AS (
             SELECT team_id, lineup_slot,
-                   SUM(slot_calculated_points) AS pts,
+                   CAST(SUM(CAST(slot_calculated_points AS DECIMAL(18, 6))) AS FLOAT) AS pts,
                    MIN(sort_order) AS sort_order
             FROM mart_team_slot_production
             WHERE is_active_lineup_slot AND {league_predicate()}
@@ -1029,10 +1029,10 @@ def get_team_standings_alltime(stat_specs):
             SUM(matchup_periods_played) AS matchup_periods_played,
             SUM(scoring_days_played) AS scoring_days_played,
             MAX(standard_matchup_days) AS standard_matchup_days,
-            SUM(calculated_hitting_pts) AS calculated_hitting_pts,
-            SUM(calculated_pitching_pts) AS calculated_pitching_pts,
-            SUM(calculated_points) AS calculated_points,
-            SUM(against_calculated_points) AS against_calculated_points,
+            CAST(SUM(CAST(calculated_hitting_pts AS DECIMAL(18, 6))) AS FLOAT) AS calculated_hitting_pts,
+            CAST(SUM(CAST(calculated_pitching_pts AS DECIMAL(18, 6))) AS FLOAT) AS calculated_pitching_pts,
+            CAST(SUM(CAST(calculated_points AS DECIMAL(18, 6))) AS FLOAT) AS calculated_points,
+            CAST(SUM(CAST(against_calculated_points AS DECIMAL(18, 6))) AS FLOAT) AS against_calculated_points,
             {stat_select}
         FROM mart_team_season_standings
         WHERE {league_predicate()}
@@ -1056,26 +1056,26 @@ def get_team_acquisition_channels_alltime():
             team_id,
             MAX_BY(team_abbrev, season_year) AS team_abbrev,
             MAX_BY(owner_display, season_year) AS owner_display,
-            SUM(keeper_active_pts) AS keeper_active_pts,
-            SUM(draft_active_pts) AS draft_active_pts,
-            SUM(trade_active_pts) AS trade_active_pts,
-            SUM(fa_add_active_pts) AS fa_add_active_pts,
-            SUM(acquired_active_pts) AS acquired_active_pts,
-            SUM(dropped_active_pts) AS dropped_active_pts,
-            SUM(traded_away_active_pts) AS traded_away_active_pts,
-            SUM(lost_active_pts) AS lost_active_pts,
-            SUM(fa_delta_active_pts) AS fa_delta_active_pts,
-            SUM(trade_delta_active_pts) AS trade_delta_active_pts,
-            SUM(keeper_rostered_pts) AS keeper_rostered_pts,
-            SUM(draft_rostered_pts) AS draft_rostered_pts,
-            SUM(trade_rostered_pts) AS trade_rostered_pts,
-            SUM(fa_add_rostered_pts) AS fa_add_rostered_pts,
-            SUM(acquired_rostered_pts) AS acquired_rostered_pts,
-            SUM(dropped_rostered_pts) AS dropped_rostered_pts,
-            SUM(traded_away_rostered_pts) AS traded_away_rostered_pts,
-            SUM(lost_rostered_pts) AS lost_rostered_pts,
-            SUM(fa_delta_rostered_pts) AS fa_delta_rostered_pts,
-            SUM(trade_delta_rostered_pts) AS trade_delta_rostered_pts
+            CAST(SUM(CAST(keeper_active_pts AS DECIMAL(18, 6))) AS FLOAT) AS keeper_active_pts,
+            CAST(SUM(CAST(draft_active_pts AS DECIMAL(18, 6))) AS FLOAT) AS draft_active_pts,
+            CAST(SUM(CAST(trade_active_pts AS DECIMAL(18, 6))) AS FLOAT) AS trade_active_pts,
+            CAST(SUM(CAST(fa_add_active_pts AS DECIMAL(18, 6))) AS FLOAT) AS fa_add_active_pts,
+            CAST(SUM(CAST(acquired_active_pts AS DECIMAL(18, 6))) AS FLOAT) AS acquired_active_pts,
+            CAST(SUM(CAST(dropped_active_pts AS DECIMAL(18, 6))) AS FLOAT) AS dropped_active_pts,
+            CAST(SUM(CAST(traded_away_active_pts AS DECIMAL(18, 6))) AS FLOAT) AS traded_away_active_pts,
+            CAST(SUM(CAST(lost_active_pts AS DECIMAL(18, 6))) AS FLOAT) AS lost_active_pts,
+            CAST(SUM(CAST(fa_delta_active_pts AS DECIMAL(18, 6))) AS FLOAT) AS fa_delta_active_pts,
+            CAST(SUM(CAST(trade_delta_active_pts AS DECIMAL(18, 6))) AS FLOAT) AS trade_delta_active_pts,
+            CAST(SUM(CAST(keeper_rostered_pts AS DECIMAL(18, 6))) AS FLOAT) AS keeper_rostered_pts,
+            CAST(SUM(CAST(draft_rostered_pts AS DECIMAL(18, 6))) AS FLOAT) AS draft_rostered_pts,
+            CAST(SUM(CAST(trade_rostered_pts AS DECIMAL(18, 6))) AS FLOAT) AS trade_rostered_pts,
+            CAST(SUM(CAST(fa_add_rostered_pts AS DECIMAL(18, 6))) AS FLOAT) AS fa_add_rostered_pts,
+            CAST(SUM(CAST(acquired_rostered_pts AS DECIMAL(18, 6))) AS FLOAT) AS acquired_rostered_pts,
+            CAST(SUM(CAST(dropped_rostered_pts AS DECIMAL(18, 6))) AS FLOAT) AS dropped_rostered_pts,
+            CAST(SUM(CAST(traded_away_rostered_pts AS DECIMAL(18, 6))) AS FLOAT) AS traded_away_rostered_pts,
+            CAST(SUM(CAST(lost_rostered_pts AS DECIMAL(18, 6))) AS FLOAT) AS lost_rostered_pts,
+            CAST(SUM(CAST(fa_delta_rostered_pts AS DECIMAL(18, 6))) AS FLOAT) AS fa_delta_rostered_pts,
+            CAST(SUM(CAST(trade_delta_rostered_pts AS DECIMAL(18, 6))) AS FLOAT) AS trade_delta_rostered_pts
         FROM mart_team_acquisition_channels
         WHERE {league_predicate()}
         GROUP BY team_id
@@ -1107,7 +1107,7 @@ def get_team_rank_arc(season_year):
                                 ORDER BY matchup_period) AS cume_w,
                    SUM(t) OVER (PARTITION BY team_id
                                 ORDER BY matchup_period) AS cume_t,
-                   SUM(pts) OVER (PARTITION BY team_id
+                   SUM(CAST(pts AS DECIMAL(18, 6))) OVER (PARTITION BY team_id
                                   ORDER BY matchup_period) AS cume_pts
             FROM weekly
         )
@@ -1136,12 +1136,12 @@ def get_team_affinity_weights(season_year):
                    ' + COALESCE(hbp_p, 0))')
     return query_snowflake(f"""
         SELECT team_id, pro_team,
-               ROUND(SUM(CASE WHEN season_year = %s
+               ROUND(CAST(SUM(CAST(CASE WHEN season_year = %s
                               THEN {involvement}
                                    * COALESCE(active_weight, 0)
-                              ELSE 0 END), 1) AS season_wt,
-               ROUND(SUM({involvement}
-                         * COALESCE(active_weight, 0)), 1) AS alltime_wt
+                              ELSE 0 END AS DECIMAL(18, 6))) AS FLOAT), 1) AS season_wt,
+               ROUND(CAST(SUM(CAST({involvement}
+                         * COALESCE(active_weight, 0) AS DECIMAL(18, 6))) AS FLOAT), 1) AS alltime_wt
         FROM fct_player_daily_performance
         WHERE {league_predicate()}
           AND lineup_slot NOT IN ('BE', 'IL', 'FA')
@@ -1281,9 +1281,9 @@ def get_player_season_points(season_year):
     rows = query_snowflake(f"""
         SELECT
             player_id,
-            ROUND(SUM(calculated_points), 1) AS total_pts,
-            ROUND(SUM(CASE WHEN performance_status = 'active'
-                           THEN calculated_points ELSE 0 END), 1) AS active_pts
+            ROUND(CAST(SUM(CAST(calculated_points AS DECIMAL(18, 6))) AS FLOAT), 1) AS total_pts,
+            ROUND(CAST(SUM(CAST(CASE WHEN performance_status = 'active'
+                           THEN calculated_points ELSE 0 END AS DECIMAL(18, 6))) AS FLOAT), 1) AS active_pts
         FROM fct_player_season_performance
         WHERE season_year = %s
           AND {league_predicate()}
@@ -1323,9 +1323,9 @@ def _get_since_trade_points(season_year, player_ids):
             team_id,
             scoring_period,
             MAX(player_name) AS player_name,
-            SUM(total_stat_pts) AS total_pts,
-            SUM(CASE WHEN performance_status = 'active'
-                     THEN total_stat_pts ELSE 0 END) AS active_pts
+            CAST(SUM(CAST(total_stat_pts AS DECIMAL(18, 6))) AS FLOAT) AS total_pts,
+            CAST(SUM(CAST(CASE WHEN performance_status = 'active'
+                     THEN total_stat_pts ELSE 0 END AS DECIMAL(18, 6))) AS FLOAT) AS active_pts
         FROM fct_player_daily_performance
         WHERE season_year = %s
           AND {league_predicate()}
@@ -1712,14 +1712,14 @@ def get_team_roster_history_stats(season_year):
                 -- that a double round and lifted boundary cells a full unit.
                 -- Mirrors the CBS fix (MLB-121) so both books feed the shared
                 -- _team_history_display_row identical precision.
-                ROUND(SUM(calculated_points), 6) AS active_points,
+                ROUND(CAST(SUM(CAST(calculated_points AS DECIMAL(18, 6))) AS FLOAT), 6) AS active_points,
                 -- v1.2: per-category active points so the per-team tab can
                 -- show slot-decomposed points for two-way players (Ohtani
                 -- gets hitting pts at his DH slot, pitching pts at SP).
                 -- Single-discipline players: one equals active_points, the
                 -- other is 0 -- so their displayed points don't move.
-                ROUND(SUM(calculated_hitting_pts), 6) AS active_hitting_points,
-                ROUND(SUM(calculated_pitching_pts), 6) AS active_pitching_points,
+                ROUND(CAST(SUM(CAST(calculated_hitting_pts AS DECIMAL(18, 6))) AS FLOAT), 6) AS active_hitting_points,
+                ROUND(CAST(SUM(CAST(calculated_pitching_pts AS DECIMAL(18, 6))) AS FLOAT), 6) AS active_pitching_points,
                 SUM(h) AS h,
                 SUM(ab) AS ab,
                 SUM(b_bb) AS b_bb,
@@ -1753,7 +1753,7 @@ def get_team_roster_history_stats(season_year):
                 player_id,
                 -- MLB-123: 6dp -- summed into Total with active_points, so
                 -- pre-rounding to 1dp double-rounds the displayed Total.
-                ROUND(SUM(calculated_points), 6) AS bench_il_points
+                ROUND(CAST(SUM(CAST(calculated_points AS DECIMAL(18, 6))) AS FLOAT), 6) AS bench_il_points
             FROM scoped_season
             WHERE performance_status = 'inactive'
             GROUP BY 1, 2, 3
@@ -1776,7 +1776,7 @@ def get_team_roster_history_stats(season_year):
                 FROM scoped_season
                 WHERE performance_status = 'active'
                 GROUP BY scope, team_id, player_id, season_year
-                HAVING ROUND(SUM(calculated_points), 1) <> 0
+                HAVING ROUND(CAST(SUM(CAST(calculated_points AS DECIMAL(18, 6))) AS FLOAT), 1) <> 0
             )
             GROUP BY scope, team_id, player_id
         )
@@ -1924,11 +1924,11 @@ def get_current_team_roster_stats(season_year):
                 COUNT(DISTINCT CASE
                     WHEN roster_status = 'active' THEN scoring_period
                 END) AS active_days,
-                ROUND(SUM(CASE
+                ROUND(CAST(SUM(CAST(CASE
                     WHEN roster_status = 'inactive'
                         THEN COALESCE(platform_points, 0)
                     ELSE 0
-                END), 1) AS inactive_points
+                END AS DECIMAL(18, 6))) AS FLOAT), 1) AS inactive_points
             FROM mart_daily_roster_snapshot
             WHERE season_year = %s
               AND team_id IS NOT NULL
@@ -1943,7 +1943,7 @@ def get_current_team_roster_stats(season_year):
                 team_id,
                 player_id,
                 COUNT(DISTINCT matchup_period) AS active_weeks,
-                ROUND(SUM(platform_points), 1) AS active_points,
+                ROUND(CAST(SUM(CAST(platform_points AS DECIMAL(18, 6))) AS FLOAT), 1) AS active_points,
                 SUM(hr) AS hr,
                 SUM(rbi) AS rbi,
                 SUM(r) AS r,

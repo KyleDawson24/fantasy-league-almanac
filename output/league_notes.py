@@ -652,7 +652,7 @@ def no_negative_days(ctx):
             d.season_year,
             d.matchup_period,
             d.team_id,
-            SUM(CASE WHEN d.platform_points < 0 THEN 1 ELSE 0 END) AS neg_days,
+            CAST(SUM(CAST(CASE WHEN d.platform_points < 0 THEN 1 ELSE 0 END AS DECIMAL(18, 6))) AS FLOAT) AS neg_days,
             COUNT(DISTINCT CASE WHEN d.games_played >= 1 THEN d.player_id END) AS fielded
           FROM fct_player_daily_performance d
           JOIN dim_matchup_period s

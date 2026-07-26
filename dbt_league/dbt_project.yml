@@ -22,12 +22,33 @@ clean-targets:
 # to table for float determinism, and thin contract dims / windowed
 # derivations stay views. marts/core (dims + facts) and marts/reporting
 # (consumer marts) both inherit the marts default.
+#
+# staging/intermediate default to TABLE, not view (MLB-134). A view over
+# fat JSON re-runs the whole reshape for every consumer AND every schema
+# test that reads it. Snowflake's warehouse absorbed that cost quietly
+# enough that it looked free; the MLB-9 spike put a number on it by
+# running the same tests both ways on a laptop-class engine -- 25-80s
+# each as views, 0.04-0.05s each as tables. Materialization is a
+# decision, so it is made here rather than inherited.
+#
+# A model-level config() still wins, so this moves 14 staging models --
+# including the fat-JSON reshapes stg_box_scores,
+# stg_player_stat_breakdowns, stg_mlb__player_game and
+# stg_cbs__ui_transactions, which are the ones that were paying the cost.
+# The other 8 staging models pin `view` themselves and keep it.
+#
+# The intermediate line changes nothing TODAY -- all 15 intermediate
+# models already pin their own materialization, int_player_daily among
+# them (its header argues the daily grain reads fine live and the table
+# cost belongs one layer up at the weekly grain). It is here so a new
+# intermediate model added without a pin lands as a table rather than
+# inheriting a view by accident.
 models:
   dbt_league:
     staging:
-      +materialized: view
+      +materialized: table
     intermediate:
-      +materialized: view
+      +materialized: table
     marts:
       +materialized: table
 

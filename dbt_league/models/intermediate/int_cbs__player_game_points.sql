@@ -110,7 +110,7 @@ derived_long as (
         is_home, is_win,
         'quality_starts'   as canonical_key,
         'pitching'         as stat_category,
-        iff(gs = 1 and outs >= 18 and er <= 3, 1, 0)::float as stat_value
+        iff(gs = 1 and outs >= 18 and er <= 3, 1, 0)::double as stat_value
     from pitching_games
 
     union all
@@ -121,7 +121,7 @@ derived_long as (
         is_home, is_win,
         'inherited_runners_stranded' as canonical_key,
         'pitching'                   as stat_category,
-        (ir - irs)::float            as stat_value
+        (ir - irs)::double            as stat_value
     from pitching_games
 ),
 

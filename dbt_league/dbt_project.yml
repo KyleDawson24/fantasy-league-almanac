@@ -133,7 +133,9 @@ seeds:
         stat_category: varchar
         disposition: varchar
         in_scoring_rules_2026: boolean
-        points_2026: float
+        # DOUBLE, not FLOAT: same 64-bit type on Snowflake, but FLOAT is
+        # 32-bit on some engines and would narrow the scoring weights.
+        points_2026: double
         appears_in: varchar
         needs_confirmation: boolean
         notes: varchar

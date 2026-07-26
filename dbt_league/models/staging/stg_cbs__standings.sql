@@ -40,7 +40,7 @@ teams as (
         t.value:Total:rank::integer                       as standings_rank,
         -- Season points can carry thousands separators in the feed; strip
         -- before casting so a "5,519" never lands as NULL.
-        replace(t.value:Total:points::string, ',', '')::float as points
+        replace(t.value:Total:points::string, ',', '')::double as points
     from latest_per_period s,
         lateral flatten(input => s.payload:body:overall_standings:divisions) d,
         lateral flatten(input => d.value:teams) t

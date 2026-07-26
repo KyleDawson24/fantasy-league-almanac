@@ -19,17 +19,23 @@
     real data -- verified 0 changed values across 76,428 CBS and 5,857 ESPN
     points rows.
 
-    The result casts back to FLOAT deliberately. The determinism is already
-    won at sum time, and keeping the column's type means consumers keep
-    receiving floats rather than Decimals -- Python formats the two
+    The result casts back to a 64-bit float deliberately. The determinism is
+    already won at sum time, and keeping the column's type means consumers
+    keep receiving floats rather than Decimals -- Python formats the two
     differently (round(Decimal, 1) renders '531' where round(float, 1)
     gives '531.0'), so changing the type would move rendered output for no
     benefit.
 
+    The cast is spelled DOUBLE, not FLOAT (MLB-134). On Snowflake the two
+    names are the same 64-bit type, so this spelling is a no-op here. On
+    engines where they differ -- DuckDB's FLOAT is 32-bit -- FLOAT would
+    silently narrow the result (12345.6789 -> 12345.6787109375) and throw
+    away the precision this macro exists to protect.
+
     scale=none skips the rounding step for sites that round later. -#}
 {%- if scale is none -%}
-cast(sum(cast({{ expr }} as decimal(18, 6))) as float)
+cast(sum(cast({{ expr }} as decimal(18, 6))) as double)
 {%- else -%}
-cast(round(sum(cast({{ expr }} as decimal(18, 6))), {{ scale }}) as float)
+cast(round(sum(cast({{ expr }} as decimal(18, 6))), {{ scale }}) as double)
 {%- endif -%}
 {% endmacro %}

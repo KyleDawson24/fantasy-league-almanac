@@ -81,8 +81,8 @@ select
     -- The page's OWN fantasy-point columns. Kept for reconciliation only --
     -- the record book prices production from the universal stats layer, so
     -- these are evidence about the platform, not a source of truth.
-    total_fpts::float             as page_total_fpts,
-    active_fpts::float            as page_active_fpts,
+    total_fpts::double             as page_total_fpts,
+    active_fpts::double            as page_active_fpts,
 
     -- True for order-only rows: a pick slot printed with no player attached
     -- (2009's round pages are entirely these). Real rows, not corruption.

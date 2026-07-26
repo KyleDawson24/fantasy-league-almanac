@@ -45,13 +45,13 @@ last_sp_matchups as (
 select
     league_key, season_year, matchup_period,
     m.value:home_team_id::integer as team_id,
-    m.value:home_score::float     as platform_points
+    m.value:home_score::double     as platform_points
 from last_sp_matchups,
     lateral flatten(input => matchups_json) m
 union all
 select
     league_key, season_year, matchup_period,
     m.value:away_team_id::integer,
-    m.value:away_score::float
+    m.value:away_score::double
 from last_sp_matchups,
     lateral flatten(input => matchups_json) m

@@ -61,7 +61,7 @@ categories as (
         s.season_year                as settings_season,
         f.value:name::string         as cbs_key,
         f.value:group::string        as rules_group,
-        f.value:points::float        as feed_points
+        f.value:points::double        as feed_points
     from latest_snapshot s,
         lateral flatten(input => s.payload:body:scoring_rules:categories) f
 )

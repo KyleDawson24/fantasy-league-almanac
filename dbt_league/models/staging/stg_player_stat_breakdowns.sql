@@ -37,7 +37,7 @@ flattened as (
         lineup_slot,
         lineup_slot_category,
         b.key::string   as stat_name,
-        b.value::float  as stat_value
+        b.value::double  as stat_value
     from players,
         lateral flatten(input => breakdown) b
     where breakdown is not null

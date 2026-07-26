@@ -370,7 +370,7 @@ sentinel as (
         'sentinel'                       as provenance,
         'sentinel'                       as state_source,
         true                             as is_active,
-        1.0::float                       as active_weight,
+        1.0::double                       as active_weight,
         false                            as is_ambiguous_name,
         false                            as membership_end_inferred,
         false                            as attribution_contested,

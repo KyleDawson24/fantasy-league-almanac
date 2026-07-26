@@ -74,7 +74,7 @@ home_players as (
         p.value:position::string           as position,
         p.value:lineupSlot::string         as lineup_slot,
         p.value:proTeam::string            as pro_team,
-        p.value:points::float              as points,
+        p.value:points::double              as points,
         p.value:breakdown                  as breakdown,
         p.value:eligibleSlots              as eligible_slots,
         coalesce(
@@ -101,7 +101,7 @@ away_players as (
         p.value:position::string           as position,
         p.value:lineupSlot::string         as lineup_slot,
         p.value:proTeam::string            as pro_team,
-        p.value:points::float              as points,
+        p.value:points::double              as points,
         p.value:breakdown                  as breakdown,
         p.value:eligibleSlots              as eligible_slots,
         coalesce(
@@ -131,7 +131,7 @@ free_agents as (
         f.value:position::string           as position,
         f.value:lineupSlot::string         as lineup_slot,
         f.value:proTeam::string            as pro_team,
-        f.value:points::float              as points,
+        f.value:points::double              as points,
         f.value:breakdown                  as breakdown,
         f.value:eligibleSlots              as eligible_slots,
         coalesce(

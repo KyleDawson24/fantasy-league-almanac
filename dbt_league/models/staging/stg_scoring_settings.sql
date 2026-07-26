@@ -51,8 +51,8 @@ flattened as (
         f.value:statId::integer as espn_stat_id,
         case
             when f.value:isReverseItem::boolean
-                then -1.0 * f.value:points::float
-            else f.value:points::float
+                then -1.0 * f.value:points::double
+            else f.value:points::double
         end                     as points_per_unit
     from latest_extraction e,
         lateral flatten(input => e.raw_json) f

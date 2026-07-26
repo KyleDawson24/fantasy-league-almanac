@@ -76,13 +76,13 @@ select
     -- freezing an answer.
     cast(avg(cast(t.calculated_hitting_pts as decimal(18, 6))) over (
         partition by t.league_key, t.season_year, t.matchup_period
-    ) as float) as league_avg_hitting_points,
+    ) as double) as league_avg_hitting_points,
     cast(avg(cast(t.calculated_pitching_pts as decimal(18, 6))) over (
         partition by t.league_key, t.season_year, t.matchup_period
-    ) as float) as league_avg_pitching_points,
+    ) as double) as league_avg_pitching_points,
     cast(avg(cast(t.calculated_points as decimal(18, 6))) over (
         partition by t.league_key, t.season_year, t.matchup_period
-    ) as float) as league_avg_total_points
+    ) as double) as league_avg_total_points
 
 from {{ ref('fct_team_weekly_active_performance') }} t
 left join {{ ref('fct_team_weekly_active_performance') }} opp

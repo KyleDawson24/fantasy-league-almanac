@@ -126,7 +126,7 @@ team_active_source as (
             {%- set qual_min = row[3] -%}
             {%- set lc = name | lower %},
         {% if name == 'WASTED_POINTS' -%}
-        null::float                as {{ lc }}
+        null::double                as {{ lc }}
         {%- elif deriv -%}
         ({{ deriv }})              as {{ lc }}
         {%- elif qual_min -%}
@@ -171,9 +171,9 @@ team_inactive_source as (
         -- v1.1.1: rate stats absent from inactive facts (bench rates
         -- aren't meaningful). Driven by qual_min flag in dim_stat
         -- rather than a hardcoded stat list.
-        null::float                as {{ lc }}
+        null::double                as {{ lc }}
         {%- elif name in ['PLATFORM_POINTS', 'PLATFORM_HITTING_PTS', 'PLATFORM_PITCHING_PTS'] -%}
-        null::float                as {{ lc }}
+        null::double                as {{ lc }}
         {%- elif deriv -%}
         ({{ deriv }})              as {{ lc }}
         {%- else -%}
@@ -205,13 +205,13 @@ player_active_source as (
             {%- set qual_min = row[3] -%}
             {%- set lc = name | lower %},
         {% if name == 'WASTED_POINTS' -%}
-        null::float                as {{ lc }}
+        null::double                as {{ lc }}
         {%- elif qual_min -%}
         -- v1.1.1: rate stats deliberately dropped at player grain
         -- (Phase 6.3.3 Path A: single-IP relief produces 27.00 WHIP
         -- outliers that dominate without signal). qual_min flag in
         -- dim_stat drives this, replacing the hardcoded rate-stat list.
-        null::float                as {{ lc }}
+        null::double                as {{ lc }}
         {%- elif deriv -%}
         ({{ deriv }})              as {{ lc }}
         {%- else -%}
@@ -247,13 +247,13 @@ player_inactive_source as (
             {%- set qual_min = row[3] -%}
             {%- set lc = name | lower %},
         {% if name == 'WASTED_POINTS' -%}
-        null::float                as {{ lc }}
+        null::double                as {{ lc }}
         {%- elif qual_min -%}
         -- v1.1.1: rate stats absent from player inactive (same Path A
         -- reasoning as player active). Driven by qual_min flag.
-        null::float                as {{ lc }}
+        null::double                as {{ lc }}
         {%- elif name in ['PLATFORM_POINTS', 'PLATFORM_HITTING_PTS', 'PLATFORM_PITCHING_PTS'] -%}
-        null::float                as {{ lc }}
+        null::double                as {{ lc }}
         {%- elif deriv -%}
         ({{ deriv }})              as {{ lc }}
         {%- else -%}

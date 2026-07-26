@@ -10,7 +10,7 @@
 select 1
 from (
     select
-        sum(iff(attribution_contested, 1, 0))::float as contested,
+        sum(iff(attribution_contested, 1, 0))::double as contested,
         count(*)                                      as total
     from {{ ref('fct_cbs_player_game_attribution') }}
 )

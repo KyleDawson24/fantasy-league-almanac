@@ -276,9 +276,9 @@ select
         else d.lineup_slot != 'RS'
     end                                          as is_active_slot,
     d.games_played,
-    cast(null as float)                          as platform_points,
-    cast(null as float)                          as platform_hitting_pts,
-    cast(null as float)                          as platform_pitching_pts,
+    cast(null as double)                          as platform_points,
+    cast(null as double)                          as platform_hitting_pts,
+    cast(null as double)                          as platform_pitching_pts,
 
     -- Hitting counting stats (CBS scores R/RBI/BB/SB/TB; H/AB/HBP/SF +
     -- HR/2B/3B ride as unpriced context -- the last three feed the

@@ -21,12 +21,12 @@ select
     sto.league_key,
     sto.season_year,
     sto.team_id,
-    listagg(do.owner_display, ' / ')
-        within group (order by do.owner_display) as owner_display
+    listagg(own.owner_display, ' / ')
+        within group (order by own.owner_display) as owner_display
 from {{ ref('stg_team_owners') }} sto
-inner join {{ ref('dim_owner') }} do
-    on sto.league_key = do.league_key
-    and sto.owner_id = do.owner_id
+inner join {{ ref('dim_owner') }} own
+    on sto.league_key = own.league_key
+    and sto.owner_id = own.owner_id
 group by 1, 2, 3
 
 union all
@@ -42,11 +42,11 @@ select
     sto.season_year,
     sto.team_id,
     iff(count(*) > 1,
-        listagg(do.first_name, ', ')
-            within group (order by do.first_name),
-        max(do.owner_display)) as owner_display
+        listagg(own.first_name, ', ')
+            within group (order by own.first_name),
+        max(own.owner_display)) as owner_display
 from {{ ref('stg_cbs__team_owners') }} sto
-inner join {{ ref('dim_owner') }} do
-    on sto.league_key = do.league_key
-    and sto.owner_id = do.owner_id
+inner join {{ ref('dim_owner') }} own
+    on sto.league_key = own.league_key
+    and sto.owner_id = own.owner_id
 group by 1, 2, 3

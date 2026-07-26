@@ -21,12 +21,16 @@
 {{ config(materialized='view') }}
 
 with slot_map as (
+    -- Named-column VALUES rather than Snowflake's bare `from values` with
+    -- its implicit column1..N: the aliased form says what each position
+    -- means at the point of use, and it is the spelling every engine
+    -- accepts (MLB-134).
     select
-        column1::integer as lineup_slot_id,
-        column2::varchar as lineup_slot,
-        column3::integer as sort_order,
-        column4::integer as position_limit_id
-    from values
+        slot_id::integer   as lineup_slot_id,
+        slot_name::varchar as lineup_slot,
+        slot_sort::integer as sort_order,
+        limit_id::integer  as position_limit_id
+    from (values
         (0,  'C',     10,  2),
         (1,  '1B',    20,  3),
         (2,  '2B',    30,  4),
@@ -46,6 +50,7 @@ with slot_map as (
         (15, 'RP',    150, 11),
         (16, 'BE',    900, null),
         (17, 'IL',    910, null)
+    ) as v(slot_id, slot_name, slot_sort, limit_id)
 ),
 
 lineup_slot_counts as (

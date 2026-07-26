@@ -68,15 +68,21 @@ select
     -- (league_key, season_year, matchup_period) -- "league-wide" means
     -- THIS league's teams, never a cross-league blend. This window is the
     -- reason the model can't live on the incrementally-merged base fact.
-    avg(t.calculated_hitting_pts) over (
+    -- Averaged in exact decimal, then back to float (MLB-128). AVG is a SUM
+    -- over a count, so it inherits float summation's order-dependence: the
+    -- same window returned a slightly different average from one rebuild to
+    -- the next, with no code or data change. Decimal addition is exact and
+    -- therefore order-independent, which removes the question rather than
+    -- freezing an answer.
+    cast(avg(cast(t.calculated_hitting_pts as decimal(18, 6))) over (
         partition by t.league_key, t.season_year, t.matchup_period
-    ) as league_avg_hitting_points,
-    avg(t.calculated_pitching_pts) over (
+    ) as float) as league_avg_hitting_points,
+    cast(avg(cast(t.calculated_pitching_pts as decimal(18, 6))) over (
         partition by t.league_key, t.season_year, t.matchup_period
-    ) as league_avg_pitching_points,
-    avg(t.calculated_points) over (
+    ) as float) as league_avg_pitching_points,
+    cast(avg(cast(t.calculated_points as decimal(18, 6))) over (
         partition by t.league_key, t.season_year, t.matchup_period
-    ) as league_avg_total_points
+    ) as float) as league_avg_total_points
 
 from {{ ref('fct_team_weekly_active_performance') }} t
 left join {{ ref('fct_team_weekly_active_performance') }} opp

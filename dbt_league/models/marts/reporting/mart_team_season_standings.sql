@@ -147,14 +147,16 @@ team_season as (
         -- carry no fielding columns yet.
 
         -- Calculated score lenses, rounded once at season grain from the
-        -- team-week values.
-        round(sum(m.calculated_hitting_pts),  1) as calculated_hitting_pts,
-        round(sum(m.calculated_pitching_pts), 1) as calculated_pitching_pts,
-        round(sum(m.calculated_points),       1) as calculated_points,
+        -- team-week values. Exact-decimal summation (MLB-128) -- this model
+        -- is the confirmed 1.5.1 offender, where two Advanced-Standings
+        -- cells re-rolled with no code change.
+        {{ stable_sum("m.calculated_hitting_pts") }}  as calculated_hitting_pts,
+        {{ stable_sum("m.calculated_pitching_pts") }} as calculated_pitching_pts,
+        {{ stable_sum("m.calculated_points") }}       as calculated_points,
 
         -- Points conceded on the same lens (the opponent's calculated
         -- totals, summed).
-        round(sum(m.opponent_calculated_points), 1) as against_calculated_points
+        {{ stable_sum("m.opponent_calculated_points") }} as against_calculated_points
 
     from matchups m
     left join matchup_scoring_days sd

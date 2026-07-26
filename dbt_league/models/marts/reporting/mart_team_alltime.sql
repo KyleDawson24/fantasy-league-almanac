@@ -64,10 +64,10 @@ rolled as (
         sum(blk) as blk, sum(wp) as wp, sum(hbp_p) as hbp_p, sum(blsv) as blsv,
         sum(nh) as nh, sum(pg) as pg, sum(pk) as pk, sum(sho) as sho,
 
-        -- Score lenses (all-time)
-        round(sum(calculated_points),         1) as calculated_points,
-        round(sum(calculated_hitting_pts),    1) as calculated_hitting_pts,
-        round(sum(calculated_pitching_pts),   1) as calculated_pitching_pts,
+        -- Score lenses (all-time). Exact-decimal summation (MLB-128).
+        {{ stable_sum("calculated_points") }}       as calculated_points,
+        {{ stable_sum("calculated_hitting_pts") }}  as calculated_hitting_pts,
+        {{ stable_sum("calculated_pitching_pts") }} as calculated_pitching_pts,
 
         -- Peak: best single season on the calculated lens, and when.
         round(max(calculated_points), 1)              as best_season_points,

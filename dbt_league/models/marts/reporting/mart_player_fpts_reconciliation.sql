@@ -55,15 +55,15 @@ calc as (
         sum(cg)    as cg,    sum(qs)    as qs,    sum(outs)  as outs,
         sum(irstr) as irstr, sum(k)     as k,     sum(ha)    as ha,
         sum(bbi)   as bbi,   sum(er)    as er,
-        sum(r_pts)     as r_pts,     sum(rbi_pts)   as rbi_pts,
-        sum(bb_pts)    as bb_pts,    sum(sb_pts)    as sb_pts,
-        sum(tb_pts)    as tb_pts,    sum(w_pts)     as w_pts,
-        sum(s_pts)     as s_pts,     sum(hd_pts)    as hd_pts,
-        sum(cg_pts)    as cg_pts,    sum(qs_pts)    as qs_pts,
-        sum(outs_pts)  as outs_pts,  sum(irstr_pts) as irstr_pts,
-        sum(k_pts)     as k_pts,     sum(ha_pts)    as ha_pts,
-        sum(bbi_pts)   as bbi_pts,   sum(er_pts)    as er_pts,
-        sum(calculated_fpts) as calculated_fpts
+        {{ stable_sum("r_pts", none) }}     as r_pts,     {{ stable_sum("rbi_pts", none) }}   as rbi_pts,
+        {{ stable_sum("bb_pts", none) }}    as bb_pts,    {{ stable_sum("sb_pts", none) }}    as sb_pts,
+        {{ stable_sum("tb_pts", none) }}    as tb_pts,    {{ stable_sum("w_pts", none) }}     as w_pts,
+        {{ stable_sum("s_pts", none) }}     as s_pts,     {{ stable_sum("hd_pts", none) }}    as hd_pts,
+        {{ stable_sum("cg_pts", none) }}    as cg_pts,    {{ stable_sum("qs_pts", none) }}    as qs_pts,
+        {{ stable_sum("outs_pts", none) }}  as outs_pts,  {{ stable_sum("irstr_pts", none) }} as irstr_pts,
+        {{ stable_sum("k_pts", none) }}     as k_pts,     {{ stable_sum("ha_pts", none) }}    as ha_pts,
+        {{ stable_sum("bbi_pts", none) }}   as bbi_pts,   {{ stable_sum("er_pts", none) }}    as er_pts,
+        {{ stable_sum("calculated_fpts", none) }} as calculated_fpts
     from {{ ref('int_cbs__player_game_points') }}
     group by league_key, season_year, cbs_player_id, stat_group
 ),

@@ -55,7 +55,7 @@ player_season as (
         season_year,
         player_id,
         max(display_name)      as display_name,
-        sum(calculated_points) as season_points,
+        {{ stable_sum("calculated_points", none) }} as season_points,
         sum(games_played)      as games_played
     from {{ ref('fct_player_season_performance') }}
     group by 1, 2, 3

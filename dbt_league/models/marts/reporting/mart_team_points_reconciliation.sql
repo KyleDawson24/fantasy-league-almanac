@@ -34,16 +34,17 @@ reconstructed as (
         league_key,
         season_year,
         franchise_id,
-        round(sum(calculated_fpts * coalesce(active_weight, 0)), 1)
+        -- Exact-decimal summation throughout (MLB-128).
+        {{ stable_sum("calculated_fpts * coalesce(active_weight, 0)") }}
             as reconstructed_active_fpts,
-        round(sum(calculated_fpts), 1)      as rostered_fpts,
-        round(sum(iff(active_weight is null, calculated_fpts, 0)), 1)
+        {{ stable_sum("calculated_fpts") }} as rostered_fpts,
+        {{ stable_sum("iff(active_weight is null, calculated_fpts, 0)") }}
             as unattributed_fpts,
-        round(sum(iff(provenance = 'captured' or provenance = 'reconstructed_day',
-                      calculated_fpts * coalesce(active_weight, 0), 0)), 1)
+        {{ stable_sum("iff(provenance = 'captured' or provenance = 'reconstructed_day',
+                      calculated_fpts * coalesce(active_weight, 0), 0)") }}
             as confirmed_active_fpts,
-        round(sum(iff(provenance = 'estimated_startshare',
-                      calculated_fpts * coalesce(active_weight, 0), 0)), 1)
+        {{ stable_sum("iff(provenance = 'estimated_startshare',
+                      calculated_fpts * coalesce(active_weight, 0), 0)") }}
             as estimated_active_fpts,
         count(distinct cbs_player_name)     as players_attributed
     from attribution

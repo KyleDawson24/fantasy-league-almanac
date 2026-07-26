@@ -162,10 +162,16 @@ aggregated as (
         -- Rounded at the fact layer (v1.0.1 precedent) so downstream
         -- SUMs across matchup_periods or positions stay stable across
         -- summation orders.
-        round(sum(case when performance_status = 'active'
-                       then position_calculated_pts else 0 end), 1) as active_pts,
-        round(sum(case when performance_status = 'inactive'
-                       then position_calculated_pts else 0 end), 1) as inactive_pts,
+        --
+        -- MLB-128: rounding the RESULT was not enough, and neither was
+        -- materializing this as a table. Measured -- a rebuild with NO code
+        -- change moved 14 of 22,587 rows by 0.1, which flipped rendered
+        -- Records cells by 1. stable_sum() sums in exact decimal, so the
+        -- result no longer depends on the order the engine picked.
+        {{ stable_sum("case when performance_status = 'active'
+                       then position_calculated_pts else 0 end") }} as active_pts,
+        {{ stable_sum("case when performance_status = 'inactive'
+                       then position_calculated_pts else 0 end") }} as inactive_pts,
 
         -- MLB-72 lenses. weighted_active_pts generalizes active_pts across
         -- the union: ESPN days weight 1/0 by slot (identical to active_pts
@@ -174,9 +180,9 @@ aggregated as (
         -- activity unknown -- contribute 0: conservative, and the almanac's
         -- provenance note owns the caveat). rostered_pts is the
         -- weight-independent total (the CBS bench ranking axis).
-        round(sum(position_calculated_pts * coalesce(active_weight, 0)), 1)
+        {{ stable_sum("position_calculated_pts * coalesce(active_weight, 0)") }}
             as weighted_active_pts,
-        round(sum(position_calculated_pts), 1) as rostered_pts,
+        {{ stable_sum("position_calculated_pts") }} as rostered_pts,
 
         -- Eligibility days: count of distinct scoring periods (= days)
         -- the player was eligible at this position during this matchup

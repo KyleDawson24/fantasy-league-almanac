@@ -97,16 +97,16 @@ with team_stats as (
         sum(sho)   as sho,
 
         -- Unrounded score totals, to round ONCE below.
-        sum(total_hitting_stat_pts)  as total_hitting_stat_pts,
-        sum(total_pitching_stat_pts) as total_pitching_stat_pts,
-        sum(total_stat_pts)          as total_stat_pts,
-        sum(negative_points)         as negative_points,
+        {{ stable_sum("total_hitting_stat_pts", none) }}  as total_hitting_stat_pts,
+        {{ stable_sum("total_pitching_stat_pts", none) }} as total_pitching_stat_pts,
+        {{ stable_sum("total_stat_pts", none) }}          as total_stat_pts,
+        {{ stable_sum("negative_points", none) }}         as negative_points,
 
         -- Platform hitting/pitching split (player rollups; the wrapper gives
         -- no team-level breakdown). The authoritative platform TOTAL is the
         -- matchup overlay below.
-        sum(platform_hitting_pts)  as platform_hitting_pts,
-        sum(platform_pitching_pts) as platform_pitching_pts
+        {{ stable_sum("platform_hitting_pts", none) }}  as platform_hitting_pts,
+        {{ stable_sum("platform_pitching_pts", none) }} as platform_pitching_pts
 
     from {{ ref('fct_player_weekly_active_performance') }}
     where not coalesce(is_playoff, false)
@@ -124,8 +124,9 @@ matchup_overlay as (
         sum(case when result = 'W' then 1 else 0 end) as wins,
         sum(case when result = 'L' then 1 else 0 end) as losses,
         sum(case when result = 'T' then 1 else 0 end) as ties,
-        round(sum(platform_points), 1)                as platform_points,
-        round(sum(opponent_points), 1)                as against_platform_points
+        -- Exact-decimal summation (MLB-128).
+        {{ stable_sum("platform_points") }}           as platform_points,
+        {{ stable_sum("opponent_points") }}           as against_platform_points
     from {{ ref('fct_team_weekly_active_performance') }}
     where not coalesce(is_playoff, false)
     group by 1, 2, 3

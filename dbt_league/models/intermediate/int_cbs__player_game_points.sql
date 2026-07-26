@@ -199,28 +199,28 @@ game_wide as (
         sum(case when canonical_key = 'triples'      then stat_value else 0 end) as triples,
 
         -- Per-category point contributions
-        sum(case when canonical_key = 'runs'         then stat_points else 0 end) as r_pts,
-        sum(case when canonical_key = 'rbi'          then stat_points else 0 end) as rbi_pts,
-        sum(case when canonical_key = 'walks'        then stat_points else 0 end) as bb_pts,
-        sum(case when canonical_key = 'stolen_bases' then stat_points else 0 end) as sb_pts,
-        sum(case when canonical_key = 'total_bases'  then stat_points else 0 end) as tb_pts,
-        sum(case when canonical_key = 'wins'                        then stat_points else 0 end) as w_pts,
-        sum(case when canonical_key = 'saves'                       then stat_points else 0 end) as s_pts,
-        sum(case when canonical_key = 'holds'                       then stat_points else 0 end) as hd_pts,
-        sum(case when canonical_key = 'complete_games'              then stat_points else 0 end) as cg_pts,
-        sum(case when canonical_key = 'quality_starts'              then stat_points else 0 end) as qs_pts,
-        sum(case when canonical_key = 'outs_recorded'               then stat_points else 0 end) as outs_pts,
-        sum(case when canonical_key = 'inherited_runners_stranded'  then stat_points else 0 end) as irstr_pts,
-        sum(case when canonical_key = 'strikeouts_pitching'         then stat_points else 0 end) as k_pts,
-        sum(case when canonical_key = 'hits_allowed'                then stat_points else 0 end) as ha_pts,
-        sum(case when canonical_key = 'walks_issued'                then stat_points else 0 end) as bbi_pts,
-        sum(case when canonical_key = 'earned_runs'                 then stat_points else 0 end) as er_pts,
+        {{ stable_sum("case when canonical_key = 'runs'         then stat_points else 0 end", none) }} as r_pts,
+        {{ stable_sum("case when canonical_key = 'rbi'          then stat_points else 0 end", none) }} as rbi_pts,
+        {{ stable_sum("case when canonical_key = 'walks'        then stat_points else 0 end", none) }} as bb_pts,
+        {{ stable_sum("case when canonical_key = 'stolen_bases' then stat_points else 0 end", none) }} as sb_pts,
+        {{ stable_sum("case when canonical_key = 'total_bases'  then stat_points else 0 end", none) }} as tb_pts,
+        {{ stable_sum("case when canonical_key = 'wins'                        then stat_points else 0 end", none) }} as w_pts,
+        {{ stable_sum("case when canonical_key = 'saves'                       then stat_points else 0 end", none) }} as s_pts,
+        {{ stable_sum("case when canonical_key = 'holds'                       then stat_points else 0 end", none) }} as hd_pts,
+        {{ stable_sum("case when canonical_key = 'complete_games'              then stat_points else 0 end", none) }} as cg_pts,
+        {{ stable_sum("case when canonical_key = 'quality_starts'              then stat_points else 0 end", none) }} as qs_pts,
+        {{ stable_sum("case when canonical_key = 'outs_recorded'               then stat_points else 0 end", none) }} as outs_pts,
+        {{ stable_sum("case when canonical_key = 'inherited_runners_stranded'  then stat_points else 0 end", none) }} as irstr_pts,
+        {{ stable_sum("case when canonical_key = 'strikeouts_pitching'         then stat_points else 0 end", none) }} as k_pts,
+        {{ stable_sum("case when canonical_key = 'hits_allowed'                then stat_points else 0 end", none) }} as ha_pts,
+        {{ stable_sum("case when canonical_key = 'walks_issued'                then stat_points else 0 end", none) }} as bbi_pts,
+        {{ stable_sum("case when canonical_key = 'earned_runs'                 then stat_points else 0 end", none) }} as er_pts,
 
         -- Catch-all totals over EVERY priced row (robust to future scored
         -- categories even if the per-stat columns above lag)
-        sum(case when stat_category = 'hitting'  then stat_points else 0 end) as calculated_hitting_pts,
-        sum(case when stat_category = 'pitching' then stat_points else 0 end) as calculated_pitching_pts,
-        sum(stat_points)                                                      as calculated_fpts
+        {{ stable_sum("case when stat_category = 'hitting'  then stat_points else 0 end", none) }} as calculated_hitting_pts,
+        {{ stable_sum("case when stat_category = 'pitching' then stat_points else 0 end", none) }} as calculated_pitching_pts,
+        {{ stable_sum("stat_points", none) }}                                                      as calculated_fpts
     from scored_long
     group by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14
 ),

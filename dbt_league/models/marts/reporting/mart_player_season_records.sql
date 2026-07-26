@@ -68,9 +68,16 @@ ranked as (
         s.cbs_player_name as player_name,
         s.season_year,
         s.stat_value,
+        -- player_id is a final, arbitrary-but-STABLE tie-break (MLB-128).
+        -- Value and recency decide the ranking; this only settles rows equal
+        -- on BOTH, which row_number() would otherwise order however the
+        -- engine happened to scan them -- a different answer on every
+        -- rebuild. That is not merely cosmetic here: the consumer cuts at
+        -- rank <= 10, so a dead heat at the boundary decides who appears in
+        -- the record book at all.
         row_number() over (
             partition by s.league_key, s.stat_name
-            order by s.stat_value desc, s.season_year desc
+            order by s.stat_value desc, s.season_year desc, s.cbs_player_id
         ) as rank
     from {{ ref('int_cbs__player_season_stats') }} s
     inner join candidates c

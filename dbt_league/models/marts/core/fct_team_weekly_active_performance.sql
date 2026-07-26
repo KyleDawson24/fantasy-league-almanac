@@ -85,25 +85,25 @@ with team_rollup as (
         sum(cyc)     as cyc,
 
         -- Hitting point contributions
-        sum(h_pts)       as h_pts,
-        sum(ab_pts)      as ab_pts,
-        sum(b_bb_pts)    as b_bb_pts,
-        sum(b_so_pts)    as b_so_pts,
-        sum(hbp_pts)     as hbp_pts,
-        sum(sf_pts)      as sf_pts,
-        sum(hr_pts)      as hr_pts,
-        sum(r_pts)       as r_pts,
-        sum(rbi_pts)     as rbi_pts,
-        sum(sb_pts)      as sb_pts,
-        sum(cs_pts)      as cs_pts,
-        sum(tb_pts)      as tb_pts,
-        sum(singles_pts) as singles_pts,
-        sum(doubles_pts) as doubles_pts,
-        sum(triples_pts) as triples_pts,
-        sum(xbh_pts)     as xbh_pts,
-        sum(gdp_pts)     as gdp_pts,
-        sum(b_ibb_pts)   as b_ibb_pts,
-        sum(cyc_pts)     as cyc_pts,
+        {{ stable_sum("h_pts", none) }}       as h_pts,
+        {{ stable_sum("ab_pts", none) }}      as ab_pts,
+        {{ stable_sum("b_bb_pts", none) }}    as b_bb_pts,
+        {{ stable_sum("b_so_pts", none) }}    as b_so_pts,
+        {{ stable_sum("hbp_pts", none) }}     as hbp_pts,
+        {{ stable_sum("sf_pts", none) }}      as sf_pts,
+        {{ stable_sum("hr_pts", none) }}      as hr_pts,
+        {{ stable_sum("r_pts", none) }}       as r_pts,
+        {{ stable_sum("rbi_pts", none) }}     as rbi_pts,
+        {{ stable_sum("sb_pts", none) }}      as sb_pts,
+        {{ stable_sum("cs_pts", none) }}      as cs_pts,
+        {{ stable_sum("tb_pts", none) }}      as tb_pts,
+        {{ stable_sum("singles_pts", none) }} as singles_pts,
+        {{ stable_sum("doubles_pts", none) }} as doubles_pts,
+        {{ stable_sum("triples_pts", none) }} as triples_pts,
+        {{ stable_sum("xbh_pts", none) }}     as xbh_pts,
+        {{ stable_sum("gdp_pts", none) }}     as gdp_pts,
+        {{ stable_sum("b_ibb_pts", none) }}   as b_ibb_pts,
+        {{ stable_sum("cyc_pts", none) }}     as cyc_pts,
 
         -- Pitching counting
         sum(w)       as w,
@@ -129,46 +129,49 @@ with team_rollup as (
         sum(sho)     as sho,
 
         -- Pitching point contributions
-        sum(w_pts)    as w_pts,
-        sum(l_pts)    as l_pts,
-        sum(k_pts)    as k_pts,
-        sum(er_pts)   as er_pts,
-        sum(outs_pts) as outs_pts,
-        sum(qs_pts)   as qs_pts,
-        sum(sv_pts)   as sv_pts,
-        sum(hld_pts)  as hld_pts,
-        sum(p_h_pts)  as p_h_pts,
-        sum(p_bb_pts) as p_bb_pts,
-        sum(p_hr_pts) as p_hr_pts,
-        sum(p_r_pts)  as p_r_pts,
-        sum(cg_pts)   as cg_pts,
-        sum(blk_pts)  as blk_pts,
-        sum(wp_pts)   as wp_pts,
-        sum(hbp_p_pts) as hbp_p_pts,
-        sum(blsv_pts) as blsv_pts,
-        sum(nh_pts)   as nh_pts,
-        sum(pg_pts)   as pg_pts,
-        sum(pk_pts)   as pk_pts,
-        sum(sho_pts)  as sho_pts,
+        {{ stable_sum("w_pts", none) }}    as w_pts,
+        {{ stable_sum("l_pts", none) }}    as l_pts,
+        {{ stable_sum("k_pts", none) }}    as k_pts,
+        {{ stable_sum("er_pts", none) }}   as er_pts,
+        {{ stable_sum("outs_pts", none) }} as outs_pts,
+        {{ stable_sum("qs_pts", none) }}   as qs_pts,
+        {{ stable_sum("sv_pts", none) }}   as sv_pts,
+        {{ stable_sum("hld_pts", none) }}  as hld_pts,
+        {{ stable_sum("p_h_pts", none) }}  as p_h_pts,
+        {{ stable_sum("p_bb_pts", none) }} as p_bb_pts,
+        {{ stable_sum("p_hr_pts", none) }} as p_hr_pts,
+        {{ stable_sum("p_r_pts", none) }}  as p_r_pts,
+        {{ stable_sum("cg_pts", none) }}   as cg_pts,
+        {{ stable_sum("blk_pts", none) }}  as blk_pts,
+        {{ stable_sum("wp_pts", none) }}   as wp_pts,
+        {{ stable_sum("hbp_p_pts", none) }} as hbp_p_pts,
+        {{ stable_sum("blsv_pts", none) }} as blsv_pts,
+        {{ stable_sum("nh_pts", none) }}   as nh_pts,
+        {{ stable_sum("pg_pts", none) }}   as pg_pts,
+        {{ stable_sum("pk_pts", none) }}   as pk_pts,
+        {{ stable_sum("sho_pts", none) }}  as sho_pts,
 
         -- Platform scoring splits — still player rollups (wrapper gives no
         -- hitting/pitching breakdown). Sum will not equal team-level
         -- platform_points when slot-mismatched players exist (Phase 4);
         -- that divergence is captured in platform_calculated_delta below.
-        sum(platform_hitting_pts)   as platform_hitting_pts,
-        sum(platform_pitching_pts)  as platform_pitching_pts,
+        {{ stable_sum("platform_hitting_pts", none) }}   as platform_hitting_pts,
+        {{ stable_sum("platform_pitching_pts", none) }}  as platform_pitching_pts,
 
         -- Calculated scoring (rules-normalized derivation, slot-validity-filtered).
         -- Round ONCE at team grain from the UNROUNDED player totals. The prior
         -- SUM(per-player-rounded calculated_*) overshot ESPN's platform total
         -- by the accumulated rounding (~0.1/team): sum-of-rounds != round-of-sum.
-        round(sum(total_hitting_stat_pts),  1) as calculated_hitting_pts,
-        round(sum(total_pitching_stat_pts), 1) as calculated_pitching_pts,
-        round(sum(total_stat_pts),          1) as calculated_points,
+        -- Exact-decimal summation (MLB-128) so the rounded result cannot
+        -- land either side of a boundary depending on the engine's chosen
+        -- summation order.
+        {{ stable_sum("total_hitting_stat_pts") }}  as calculated_hitting_pts,
+        {{ stable_sum("total_pitching_stat_pts") }} as calculated_pitching_pts,
+        {{ stable_sum("total_stat_pts") }}          as calculated_points,
 
         -- Phase 7 Hpre: team-level rollup of gross-negative-production
         -- across active players.
-        sum(negative_points)         as negative_points,
+        {{ stable_sum("negative_points", none) }}         as negative_points,
 
         count(distinct player_id) as active_player_count
     from {{ ref('fct_player_weekly_active_performance') }}

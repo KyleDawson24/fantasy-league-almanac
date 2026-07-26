@@ -168,18 +168,18 @@ day_base as (
         sum(e.sf)    as sf,    sum(e.l)     as l,
         sum(e.hr)    as hr,    sum(e.doubles) as doubles, sum(e.triples) as triples,
 
-        sum(e.r_pts)    as r_pts,    sum(e.rbi_pts) as rbi_pts,
-        sum(e.bb_pts)   as bb_pts,   sum(e.sb_pts)  as sb_pts,
-        sum(e.tb_pts)   as tb_pts,
-        sum(e.w_pts)    as w_pts,    sum(e.s_pts)   as s_pts,
-        sum(e.hd_pts)   as hd_pts,   sum(e.cg_pts)  as cg_pts,
-        sum(e.qs_pts)   as qs_pts,   sum(e.outs_pts) as outs_pts,
-        sum(e.k_pts)    as k_pts,    sum(e.ha_pts)  as ha_pts,
-        sum(e.bbi_pts)  as bbi_pts,  sum(e.er_pts)  as er_pts,
+        {{ stable_sum("e.r_pts", none) }}    as r_pts,    {{ stable_sum("e.rbi_pts", none) }} as rbi_pts,
+        {{ stable_sum("e.bb_pts", none) }}   as bb_pts,   {{ stable_sum("e.sb_pts", none) }}  as sb_pts,
+        {{ stable_sum("e.tb_pts", none) }}   as tb_pts,
+        {{ stable_sum("e.w_pts", none) }}    as w_pts,    {{ stable_sum("e.s_pts", none) }}   as s_pts,
+        {{ stable_sum("e.hd_pts", none) }}   as hd_pts,   {{ stable_sum("e.cg_pts", none) }}  as cg_pts,
+        {{ stable_sum("e.qs_pts", none) }}   as qs_pts,   {{ stable_sum("e.outs_pts", none) }} as outs_pts,
+        {{ stable_sum("e.k_pts", none) }}    as k_pts,    {{ stable_sum("e.ha_pts", none) }}  as ha_pts,
+        {{ stable_sum("e.bbi_pts", none) }}  as bbi_pts,  {{ stable_sum("e.er_pts", none) }}  as er_pts,
 
-        sum(e.calculated_hitting_pts)  as calculated_hitting_pts,
-        sum(e.calculated_pitching_pts) as calculated_pitching_pts,
-        sum(e.calculated_fpts)         as calculated_fpts
+        {{ stable_sum("e.calculated_hitting_pts", none) }}  as calculated_hitting_pts,
+        {{ stable_sum("e.calculated_pitching_pts", none) }} as calculated_pitching_pts,
+        {{ stable_sum("e.calculated_fpts", none) }}         as calculated_fpts
     from attr a
     inner join engine e
         on a.league_key = e.league_key

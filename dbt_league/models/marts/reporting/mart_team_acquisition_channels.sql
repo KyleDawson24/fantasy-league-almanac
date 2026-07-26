@@ -57,9 +57,9 @@ acquired as (
         s.season_year,
         s.team_id,
         s.open_channel as channel,
-        round(sum(case when d.performance_status = 'active'
-                       then d.total_stat_pts else 0 end), 1) as active_pts,
-        round(sum(d.total_stat_pts), 1)                      as rostered_pts
+        {{ stable_sum("case when d.performance_status = 'active'
+                       then d.total_stat_pts else 0 end") }} as active_pts,
+        {{ stable_sum("d.total_stat_pts") }}                 as rostered_pts
     from stints s
     join daily d
         on  d.league_key  = s.league_key
@@ -99,11 +99,11 @@ lost as (
         c.season_year,
         c.team_id,
         c.close_type as channel,
-        round(sum(case when d.performance_status = 'active'
+        {{ stable_sum("case when d.performance_status = 'active'
                         and d.team_id is not null
                         and d.team_id <> c.team_id
-                       then d.total_stat_pts else 0 end), 1) as active_pts,
-        round(sum(d.total_stat_pts), 1)                      as rostered_pts
+                       then d.total_stat_pts else 0 end") }} as active_pts,
+        {{ stable_sum("d.total_stat_pts") }}                 as rostered_pts
     from closed_stints c
     join season_max sm
         on sm.league_key = c.league_key and sm.season_year = c.season_year
@@ -128,21 +128,21 @@ pivoted as (
         season_year,
         team_id,
         -- Acquired, active lens
-        sum(iff(channel = 'KEEPER',      active_pts, 0)) as keeper_active_pts,
-        sum(iff(channel = 'DRAFT',       active_pts, 0)) as draft_active_pts,
-        sum(iff(channel = 'TRADE',       active_pts, 0)) as trade_active_pts,
-        sum(iff(channel = 'FA_ADD',      active_pts, 0)) as fa_add_active_pts,
+        {{ stable_sum("iff(channel = 'KEEPER',      active_pts, 0)", none) }} as keeper_active_pts,
+        {{ stable_sum("iff(channel = 'DRAFT',       active_pts, 0)", none) }} as draft_active_pts,
+        {{ stable_sum("iff(channel = 'TRADE',       active_pts, 0)", none) }} as trade_active_pts,
+        {{ stable_sum("iff(channel = 'FA_ADD',      active_pts, 0)", none) }} as fa_add_active_pts,
         -- Lost, active lens
-        sum(iff(channel = 'DROPPED',     active_pts, 0)) as dropped_active_pts,
-        sum(iff(channel = 'TRADED_AWAY', active_pts, 0)) as traded_away_active_pts,
+        {{ stable_sum("iff(channel = 'DROPPED',     active_pts, 0)", none) }} as dropped_active_pts,
+        {{ stable_sum("iff(channel = 'TRADED_AWAY', active_pts, 0)", none) }} as traded_away_active_pts,
         -- Acquired, rostered lens
-        sum(iff(channel = 'KEEPER',      rostered_pts, 0)) as keeper_rostered_pts,
-        sum(iff(channel = 'DRAFT',       rostered_pts, 0)) as draft_rostered_pts,
-        sum(iff(channel = 'TRADE',       rostered_pts, 0)) as trade_rostered_pts,
-        sum(iff(channel = 'FA_ADD',      rostered_pts, 0)) as fa_add_rostered_pts,
+        {{ stable_sum("iff(channel = 'KEEPER',      rostered_pts, 0)", none) }} as keeper_rostered_pts,
+        {{ stable_sum("iff(channel = 'DRAFT',       rostered_pts, 0)", none) }} as draft_rostered_pts,
+        {{ stable_sum("iff(channel = 'TRADE',       rostered_pts, 0)", none) }} as trade_rostered_pts,
+        {{ stable_sum("iff(channel = 'FA_ADD',      rostered_pts, 0)", none) }} as fa_add_rostered_pts,
         -- Lost, rostered lens
-        sum(iff(channel = 'DROPPED',     rostered_pts, 0)) as dropped_rostered_pts,
-        sum(iff(channel = 'TRADED_AWAY', rostered_pts, 0)) as traded_away_rostered_pts
+        {{ stable_sum("iff(channel = 'DROPPED',     rostered_pts, 0)", none) }} as dropped_rostered_pts,
+        {{ stable_sum("iff(channel = 'TRADED_AWAY', rostered_pts, 0)", none) }} as traded_away_rostered_pts
     from combined
     group by 1, 2, 3
 ),

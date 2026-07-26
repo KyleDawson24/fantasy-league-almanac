@@ -51,8 +51,9 @@ team_slot as (
         max(owner_display)                  as owner_display,
 
         -- Calculated lens (catch-all total across every scored stat),
-        -- rounded once at season grain.
-        round(sum(total_stat_pts), 1) as slot_calculated_points
+        -- rounded once at season grain. Exact-decimal summation (MLB-128)
+        -- so the value does not re-roll between rebuilds.
+        {{ stable_sum("total_stat_pts") }} as slot_calculated_points
     from slot_weeks
     group by 1, 2, 3, 4
 )

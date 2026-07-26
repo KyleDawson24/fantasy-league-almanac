@@ -131,9 +131,9 @@ engine_seasons as (
         sum(p.qs)                      as qs,
         sum(p.irstr)                   as irstr,
         sum(p.nh)                      as nh,
-        sum(p.calculated_fpts)         as calculated_points,
-        sum(p.calculated_hitting_pts)  as calculated_hitting_pts,
-        sum(p.calculated_pitching_pts) as calculated_pitching_pts
+        {{ stable_sum("p.calculated_fpts", none) }}         as calculated_points,
+        {{ stable_sum("p.calculated_hitting_pts", none) }}  as calculated_hitting_pts,
+        {{ stable_sum("p.calculated_pitching_pts", none) }} as calculated_pitching_pts
     from {{ ref('int_cbs__player_game_points') }} p
     cross join archive_floor f
     where p.season_year >= f.first_season

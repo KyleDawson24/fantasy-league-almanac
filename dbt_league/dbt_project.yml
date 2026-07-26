@@ -78,6 +78,10 @@ seeds:
         start_date: date
         end_date: date
         is_abnormal: boolean
+        # Free text naming WHY a week is abnormal, blank on normal weeks.
+        # Typed rather than inferred so the all-blank case doesn't sniff
+        # as something other than text.
+        abnormal_reason: varchar
         is_playoff: boolean
         playoff_round: varchar
     stat_classification:
@@ -113,6 +117,9 @@ seeds:
         qualifier_stat: varchar
         qualifier_min: integer
         notes: varchar
+        # The platform-neutral key this ESPN stat bridges to -- the join
+        # back to canonical_stats and, through it, cbs_stat_map.
+        canonical_key: varchar
     player_nicknames:
       +column_types:
         player_id: integer

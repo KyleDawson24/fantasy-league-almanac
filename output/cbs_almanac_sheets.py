@@ -2409,6 +2409,54 @@ def get_cbs_team_history_data(context, franchises, franchise_map):
     id_list = ", ".join(str(f) for f in fids)
     w = 'COALESCE(active_weight, 0)'
 
+    # Present-day MLB club, for the all-time half's Team column.
+    #
+    # The MAX_BY(pro_team, game_date) below is franchise-scoped (the
+    # grain is team_id), so it resolves to the club a player wore on his
+    # last day WITH THIS FRANCHISE -- and CBS only carries pro_team on
+    # the 2026 capture, never on the reconstructed/estimated eras. So
+    # every player who has since moved to another franchise reads NULL,
+    # whether he retired in 2009 or is starting tonight. That is why the
+    # all-time half was ~95% blank while the current-season half (all
+    # 2026-captured rows) was 100% full.
+    #
+    # The fix reads the club off the MLB spine instead -- universal, not
+    # CBS-roster-bound -- through the crosswalk, and COALESCEs it in so
+    # it only ever FILLS a blank; every populated cell stays byte-
+    # identical. A player with no current-season MLB game gets nothing,
+    # which is exactly the retired/out-of-pool blank Kyle wants kept.
+    #
+    # Abbrev vocabulary: mlb_team_abbrevs is deliberately multi-row per
+    # club (ANA/LAA, OAK/ATH, CHW/CWS, FLA/MIA, TB/TBD, MON/WAS/WSH...),
+    # so it is intersected with the abbrevs CBS itself is using in the
+    # current capture. That picks the modern spelling without a new seed
+    # column and keeps this column in CBS's own vocabulary. The
+    # intersection is 1:1 across all 30 clubs today; MAX() is a
+    # deterministic tiebreak if CBS ever runs two spellings at once.
+    current_club_cte = f"""
+        current_club AS (
+            SELECT
+                TO_VARCHAR(x.cbs_player_id) AS cc_key,
+                ab.abbrev                   AS current_club
+            FROM (
+                SELECT mlbam_id, MAX_BY(team_id, game_date) AS mlb_team_id
+                FROM stg_mlb__player_game
+                WHERE season_year = {season}
+                GROUP BY mlbam_id
+            ) g
+            JOIN stg_cbs__mlbam_crosswalk x ON x.mlbam_id = g.mlbam_id
+            JOIN (
+                SELECT a.team_id, MAX(a.cbs_abbrev) AS abbrev
+                FROM mlb_team_abbrevs a
+                JOIN (
+                    SELECT DISTINCT pro_team
+                    FROM stg_cbs__rosters
+                    WHERE {league_predicate()} AND pro_team IS NOT NULL
+                ) l ON l.pro_team = a.cbs_abbrev
+                GROUP BY a.team_id
+            ) ab ON ab.team_id = g.mlb_team_id
+        )"""
+
     # Shared aggregate columns: the whole-history query below and the
     # by-season query (the Best Individual Seasons block) sum the same
     # fields at different grains. Stats the tab displays as bare integers
@@ -2425,7 +2473,8 @@ def get_cbs_team_history_data(context, franchises, franchise_map):
                 MAX_BY(player_name, game_date)  AS player_name,
                 MAX_BY(display_name, game_date) AS display_name,
                 MAX_BY(position, game_date)     AS position,
-                MAX_BY(pro_team, game_date)     AS pro_team,
+                COALESCE(MAX_BY(pro_team, game_date),
+                         MAX(current_club)) AS pro_team,
                 ROUND(CAST(SUM(CAST(total_stat_pts * {w} AS DECIMAL(18, 6))) AS FLOAT), 6)          AS active_points,
                 ROUND(CAST(SUM(CAST(total_hitting_stat_pts * {w} AS DECIMAL(18, 6))) AS FLOAT), 6)  AS active_hitting_points,
                 ROUND(CAST(SUM(CAST(total_pitching_stat_pts * {w} AS DECIMAL(18, 6))) AS FLOAT), 6) AS active_pitching_points,
@@ -2459,14 +2508,17 @@ def get_cbs_team_history_data(context, franchises, franchise_map):
     # keeps input order, which without an ORDER BY is whatever the warehouse
     # happened to return. That silently swapped the two rows between runs.
     rows = query_snowflake(f"""
-        WITH scoped AS (
-            SELECT 'current_season' AS scope, f.*
+        WITH {current_club_cte},
+        scoped AS (
+            SELECT 'current_season' AS scope, f.*, cc.current_club
             FROM fct_player_daily_performance f
+            LEFT JOIN current_club cc ON cc.cc_key = f.player_key
             WHERE {league_predicate('f')} AND f.game_date IS NOT NULL
               AND f.team_id IN ({id_list}) AND f.season_year = {season}
             UNION ALL
-            SELECT 'all_time' AS scope, f.*
+            SELECT 'all_time' AS scope, f.*, cc.current_club
             FROM fct_player_daily_performance f
+            LEFT JOIN current_club cc ON cc.cc_key = f.player_key
             WHERE {league_predicate('f')} AND f.game_date IS NOT NULL
               AND f.team_id IN ({id_list})
         ),
@@ -2503,12 +2555,14 @@ def get_cbs_team_history_data(context, franchises, franchise_map):
     # Season-grain rows for the Best Individual Seasons block (Kyle
     # 2026-07-17): same aggregates, +season_year in the grain.
     season_rows = query_snowflake(f"""
+        WITH {current_club_cte}
         SELECT
             team_id, player_key, season_year,
             {agg_cols}
-        FROM fct_player_daily_performance
-        WHERE {league_predicate()} AND game_date IS NOT NULL
-          AND team_id IN ({id_list})
+        FROM fct_player_daily_performance f
+        LEFT JOIN current_club cc ON cc.cc_key = f.player_key
+        WHERE {league_predicate('f')} AND f.game_date IS NOT NULL
+          AND f.team_id IN ({id_list})
         GROUP BY team_id, player_key, season_year
         ORDER BY team_id, player_key, season_year
     """)

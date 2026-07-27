@@ -15,6 +15,15 @@ Standing conventions for every session in this repo:
 - Do NOT pip install new dbt adapters into .venv (dbt-core is pinned;
   resolver drift breaks the weekly run). Experiments get their own venv.
 - tests/test_records_report.py is Kyle's untracked WIP -- ignore it.
+- Five owner seeds under dbt_league/seeds/ are `skip-worktree`: the file
+  ON DISK is real league data, the file COMMITTED is the anonymized twin
+  (MLB-95). Reading the working copy and concluding "real names/phones
+  are tracked in git" is a FALSE ALARM and a recurring one -- `git
+  ls-files` lists the path because the path is tracked, not because that
+  content is. Before reporting any leak from these files, confirm with
+  `git show HEAD:<path>`, which is what actually shows the committed
+  bytes. Still report a real finding; just check HEAD first. Full
+  mechanics in archives/anonymization/RESTORE.md (local-only).
 - Linear is written from the Cowork PM thread only. End sessions with a
   report-back block instead of touching the tracker.
 - CHANGELOG [Unreleased] is a curated staging area. Release ceremony =

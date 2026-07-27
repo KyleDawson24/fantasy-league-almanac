@@ -1306,7 +1306,7 @@ def _trades_section_bounds(rows):
 def _trade_record_groups(rows, record_hdr, record_end):
     """Parse the Trade Record data block into its merge / band structure
     straight from the written cells: a non-empty Date Executed cell (col
-    K) starts a trade, a non-empty Sum of Trade Total cell (col I) starts
+    K) starts a trade, a non-empty Total Points Gained cell (col I) starts
     a receiving side. Returns [{'start', 'end', 'sides': [[start, end],
     ...]}] in 0-based row indices (ends exclusive). Rows before the first
     date cell (e.g. the no-trades-yet notice) belong to no group."""

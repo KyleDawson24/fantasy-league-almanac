@@ -66,8 +66,8 @@ TRADES_HEADER = ['Fantasy Team', 'MLB', 'Pos Eligibility', 'Player Name',
 # whole trade. Points here are since-the-trade, for the receiving team.
 TRADE_RECORD_HEADER = ['Receiving Fantasy Team', 'MLB', 'Pos Eligibility',
                        'Player Name', 'Sending Fantasy Team', '',
-                       'Total Points', 'Active Points', 'Sum of Trade Total',
-                       'Sum of Active Total', 'Date Executed']
+                       'Total Points', 'Active Points', 'Total Points Gained',
+                       'Active Points Gained', 'Date Executed']
 
 
 # ESPN tradeBlock statuses -> the UI-facing availability labels. A player

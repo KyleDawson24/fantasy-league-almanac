@@ -3075,7 +3075,8 @@ def build_records_rows(context, catalog, data):
         [f'Active-lineup production only — if a player wasn\'t started, it '
          f'didn\'t happen for the league ({era}). Auto-cataloged from the '
          f'categories this league scores plus tracked counting stats. '
-         f'"Season" = best single season all-time; "All-Time Total" = best '
+         f'"Single Season Record" = best single season all-time; '
+         f'"All-Time Record" = best '
          f'career (players: total; teams: completed-season AVERAGE, active '
          f'franchises, min 1 completed season). Owner shows a team record\'s '
          f'franchise owner and, for player records, the franchises they earned '
@@ -3095,12 +3096,12 @@ def build_records_rows(context, catalog, data):
                                    'backgroundColor': _POWDER}})
 
     def _section(label, note=None):
-        # Scope labels sit OVER their blocks: 'Season' at col B (the first
-        # Holder), 'All-Time Total' at col H (the second Holder). A note
-        # rides beside the scope label at col I -- the same pattern as the
-        # Lineup Slot caveat (Kyle 2026-07-20: I62).
-        rows.append([label, 'Season', '', '', '', '', '',
-                     'All-Time Total', note or '', '', ''])
+        # Scope labels sit OVER their blocks: 'Single Season Record' at col
+        # B (the first Holder), 'All-Time Record' at col H (the second
+        # Holder). A note rides beside the scope label at col I -- the same
+        # pattern as the Lineup Slot caveat (Kyle 2026-07-20: I62).
+        rows.append([label, 'Single Season Record', '', '', '', '', '',
+                     'All-Time Record', note or '', '', ''])
         _band()
         if note:
             formats.append({'range': f'I{len(rows)}',
@@ -3196,7 +3197,7 @@ def build_records_rows(context, catalog, data):
     if any(s.get('season_player') or s.get('career_team') for s in slots):
         # Custom header: the All-Time side is TEAM totals here, and the estimate
         # caveat rides beside it at col I instead of a separate row (Kyle: I77).
-        rows.append(['Lineup Slot Records', 'Season', '', '', '', '', '',
+        rows.append(['Lineup Slot Records', 'Single Season Record', '', '', '', '', '',
                      'All-Time Team Totals',
                      '* Team Totals: pitcher slots span all years; HITTER slots '
                      'are 2026-only — specific hitter positions weren’t '

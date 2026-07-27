@@ -93,9 +93,10 @@ DOUBLE SAFETY LATCH (in this order, both before any write)
         refuses when NO ids resolve at all -- an unloaded .env would
         otherwise make the check vacuously pass, which is the failure mode
         that actually bites.
-    (b) Require "ANON" in the target's title. If absent, rename the
-        (already-verified-safe) copy to prepend the ANON banner and carry
-        on -- the copy has already proven it is not a real sheet.
+    (b) Require a throwaway marker ("ANON" or "DEMO") in the target's
+        title. If absent, rename the (already-verified-safe) copy to
+        prepend the ANON banner and carry on -- the copy has already
+        proven it is not a real sheet.
 
 ACCEPTANCE
     A residual audit re-reads every cell and formula of every tab and
@@ -160,7 +161,11 @@ _LEGACY_SHEET_ENV = ('SHEETS_OUTPUT_ID', 'SHEETS_DEV_ID', 'SHEETS_PROD_ID')
 
 # ASCII double-hyphen, matching the almanac's house dash style.
 ANON_TITLE_PREFIX = 'ANON COPY -- SCREENSHOTS ONLY -- '
-ANON_TITLE_MARKER = 'ANON'
+# Any of these words in the title is proof the sheet is a throwaway and
+# not a real book. "DEMO" earns its place because the screenshot copies
+# are named "... DEMO COPY"; latch (a) is the hard id-based guard, this is
+# the human-readable second line.
+ANON_TITLE_MARKERS = ('ANON', 'DEMO')
 
 # Contact columns exist on the real side of owner_nicknames and were
 # DROPPED from the committed twin, so there is no anonymized counterpart
@@ -664,18 +669,20 @@ def latch_a_not_a_real_sheet(target_id, protected):
 
 
 def latch_b_anon_title(spreadsheet, dry_run):
-    """Require ANON in the title; rename the verified-safe copy if absent."""
+    """Require a throwaway marker (ANON/DEMO) in the title; rename the
+    verified-safe copy to add one if absent."""
     title = spreadsheet.title
-    if ANON_TITLE_MARKER in title.upper():
-        print(f"  latch (b): title already carries "
-              f"{ANON_TITLE_MARKER!r} -- {title!r}")
+    present = next((m for m in ANON_TITLE_MARKERS if m in title.upper()), None)
+    if present:
+        print(f"  latch (b): title already carries {present!r} -- {title!r}")
         return title
     new_title = f'{ANON_TITLE_PREFIX}{title}'
     if dry_run:
         print(f"  latch (b): DRY RUN -- would rename to {new_title!r}")
         return title
     _sheets_call('rename spreadsheet', lambda: spreadsheet.update_title(new_title))
-    print(f"  latch (b): title lacked {ANON_TITLE_MARKER!r}; renamed to {new_title!r}")
+    print(f"  latch (b): title lacked any of {ANON_TITLE_MARKERS}; "
+          f"renamed to {new_title!r}")
     return new_title
 
 

@@ -41,6 +41,14 @@ WHERE THE MAPPING COMES FROM
     produce a sheet that looks anonymized and is not, which is the one
     outcome worth failing loudly to avoid.
 
+    A handful of team names only ever existed in the live platform API
+    (ESPN team names are never in a seed), so their anonymized twins can't
+    be derived from the seeds. Those come from the private scrub map
+    (archives/anonymization/name_map.csv, gitignored) when it is present --
+    the same file check_pii.py reads, and a silent no-op on any clone that
+    lacks it. Seed-derived pairs win on any real-form the two share, so
+    owner names stay identical to what a stranger's clone would render.
+
 REPLACEMENT
     Longest-first, word-boundary, case-preserving, applied to cell VALUES
     and FORMULAS (so HYPERLINK display text is covered) on every tab, plus
@@ -52,6 +60,32 @@ REPLACEMENT
     matters: a two-pass scheme could re-replace an anonymized name if it
     happened to be a real name elsewhere in the league, and would make the
     result depend on ordering.
+
+PLAYER NAMES ARE NEVER TOUCHED
+    These sheets interleave owner identities with real MLB player names,
+    and the two collide: "Matt" is an owner first name AND the first name
+    of Matt Carpenter, Matt Olson, and a dozen others. A naive owner-token
+    replacement rewrites every one of those players (v1 turned "Matt
+    Carpenter" into "CODE Carpenter"). The residual audit never caught it
+    because over-writing a player is not a leftover owner string.
+
+    So every real player name in the target is collected first -- the
+    display text and search query of every baseball-reference HYPERLINK,
+    which is how the almanac renders players -- and any mapping pair whose
+    real form falls on a word boundary inside a player name is DROPPED. An
+    owner token that coincides with a player (a bare first name, mostly) is
+    simply not scrubbed; the owner is still hidden by their full name, the
+    "Last, First" form, and the team name, none of which collide with a
+    single player token. As belt-and-suspenders, a cell carrying a
+    baseball-reference link is never written at all. The count of dropped
+    tokens is printed, never silent -- privacy leans on what remains, so
+    the run says what it declined to touch and why.
+
+    The deliberately-kept team whose name is "14-30-8-24-5-15-13-20"
+    (abbrev MATT) is left intact: its abbrev coincides with an owner's
+    first name, but the abbrev is a kept identity (its seed twin equals
+    itself) and only the owner-first-name rule -- now dropped as a player
+    collision -- ever rewrote it.
 
 DOUBLE SAFETY LATCH (in this order, both before any write)
     (a) Resolve the real dev/prod spreadsheet ids from the league registry
@@ -65,8 +99,10 @@ DOUBLE SAFETY LATCH (in this order, both before any write)
 
 ACCEPTANCE
     A residual audit re-reads every cell and formula of every tab and
-    rescans for every real token, printing per-tab counts. Zero residuals
-    is the pass condition; anything else exits non-zero.
+    rescans for every real token that was actually applied, printing
+    per-tab counts. It also confirms zero baseball-reference player cells
+    were altered. Zero on both is the pass condition; anything else exits
+    non-zero.
 
 Auth: the same cached user token as every other sheets writer
 (output/.sheets_oauth_token.json); no new consent flow, no Drive scope.
@@ -111,6 +147,12 @@ SEED_BY_YEAR = f'{_SEED_DIR}/team_owner_by_year.csv'
 ALL_SEEDS = (
     SEED_FRANCHISES, SEED_TEAM_OWNERS, SEED_ALIAS, SEED_NICKNAMES, SEED_BY_YEAR,
 )
+
+# The private MLB-95 scrub map: real -> fake for strings the seeds don't
+# carry (ESPN team names live only in the live API). Gitignored, maintainer-
+# only; absent on clones, where its contribution is simply empty. Same file
+# tools/check_pii.py reads.
+_PRIVATE_MAP = REPO_ROOT / 'archives' / 'anonymization' / 'name_map.csv'
 
 # Legacy single-league sheet variables, plus whatever the registry's
 # per-league `sinks` name. Both feed latch (a).
@@ -355,12 +397,19 @@ def build_mapping(verbose=True):
         add(r.get('franchise_name'), a.get('franchise_name'), 'franchises.franchise_name')
         add(r.get('abbrev'), a.get('abbrev'), 'franchises.abbrev')
 
+    # Private map fills what the seeds cannot: ESPN team names, which only
+    # ever existed in the live API. Add only real-forms the seeds did not
+    # already cover, so owner names stay identical to the seed twins.
+    seed_reals = {real.lower() for real, _ in pairs}
+    for real_value, anon_value in _load_private_map():
+        if real_value.lower() not in seed_reals:
+            add(real_value, anon_value, 'private_map')
+
     pairs, report['ambiguous'] = _resolve(pairs)
-    _assert_auditable(pairs)
 
     if verbose:
         print(f"  mapping: {len(pairs)} distinct real forms from "
-              f"{sum(report['sources'].values())} seed values")
+              f"{sum(report['sources'].values())} source values")
         for src, n in sorted(report['sources'].items()):
             print(f"      {src:<34} {n}")
         for real_form, chosen, others in report['ambiguous']:
@@ -371,6 +420,28 @@ def build_mapping(verbose=True):
             print(f"  [skipped] {src}: real form shorter than "
                   f"{_MIN_TOKEN_LEN} chars -- unsafe to match, NOT replaced")
     return pairs, report
+
+
+def _load_private_map():
+    """(real, fake) rows from the private scrub map, or [] when absent.
+
+    Mirrors tools/check_pii.py: the map is gitignored and maintainer-only,
+    so on any clone that lacks it this is a silent no-op. Rows missing
+    either side, or with a real form too short to match safely, are
+    skipped. No literal names live in this script -- they come from the
+    file at runtime, exactly like the seed twins.
+    """
+    if not _PRIVATE_MAP.is_file():
+        return []
+    import csv
+    out = []
+    with open(_PRIVATE_MAP, newline='', encoding='utf-8-sig') as f:
+        for row in csv.DictReader(f):
+            real = (row.get('real') or '').strip()
+            fake = (row.get('fake') or '').strip()
+            if real and fake and real != fake and len(real) >= _MIN_TOKEN_LEN:
+                out.append((real, fake))
+    return out
 
 
 def _resolve(pairs):
@@ -418,6 +489,67 @@ def _assert_auditable(pairs):
             f"correct replacement, so zero residuals would be unverifiable. "
             f"Resolve the seed twins before anonymizing a sheet."
         )
+
+
+# --------------------------------------------------------------------------
+# Player-name protection
+# --------------------------------------------------------------------------
+#
+# The one hazard these sheets pose: an owner's name token is also a real
+# MLB player's. Replace it blindly and you rewrite the player. Players are
+# rendered as baseball-reference HYPERLINKs, so the display text and search
+# query of those links are a reliable roster of every player name present.
+# Any mapping pair whose real form lands on a word boundary inside one of
+# those names is dropped -- the owner stays hidden through their non-
+# colliding forms (full name, "Last, First", team name).
+
+_BREF_HOST = 'baseball-reference.com'
+_HYPERLINK_DISPLAY = re.compile(r'HYPERLINK\(\s*"[^"]*"\s*,\s*"([^"]*)"', re.I)
+_BREF_SEARCH = re.compile(r'search=([^"&]+)', re.I)
+
+
+def _is_player_cell(cell):
+    """A cell that renders an MLB player -- a baseball-reference link."""
+    return isinstance(cell, str) and _BREF_HOST in cell.lower()
+
+
+def build_player_oracle(tabs):
+    """The set of real player-name strings present in the target.
+
+    Pulled from every baseball-reference HYPERLINK: the display text (what
+    the reader sees) and the search query (the same name, '+'-joined).
+    Built from the target itself so it adapts to whatever players a given
+    week's render happens to include.
+    """
+    names = set()
+    for grid, _, _ in tabs.values():
+        for row in grid:
+            for cell in row:
+                if not _is_player_cell(cell):
+                    continue
+                for disp in _HYPERLINK_DISPLAY.findall(cell):
+                    names.add(disp.strip())
+                for q in _BREF_SEARCH.findall(cell):
+                    names.add(q.replace('+', ' ').strip())
+    return names
+
+
+def split_player_safe(pairs, player_names):
+    """Partition pairs into (safe, dropped).
+
+    Dropped = the real form occurs, on word boundaries, inside some real
+    player name; replacing it would deface a player. Everything else is
+    safe to apply globally.
+    """
+    blob = '\n'.join(player_names)
+    safe, dropped = [], []
+    for real_value, anon_value in pairs:
+        pattern = rf'(?<![0-9A-Za-z_]){re.escape(real_value)}(?![0-9A-Za-z_])'
+        if re.search(pattern, blob, re.IGNORECASE):
+            dropped.append((real_value, anon_value))
+        else:
+            safe.append((real_value, anon_value))
+    return safe, dropped
 
 
 # --------------------------------------------------------------------------
@@ -668,13 +800,17 @@ def _read_tabs(spreadsheet, titles, chunk=8):
 
 
 def _plan_edits(grid, row0, col0, replacer):
-    """Return (text_edits, formula_edits, n_replacements).
+    """Return (text_edits, formula_edits, n_replacements, n_protected).
 
     Split by kind so each can be written with the right valueInputOption:
     formulas need USER_ENTERED to stay formulas, while literal text is
     written RAW so nothing gets reinterpreted on the way in.
+
+    A baseball-reference player cell is never written, even if a token
+    slips the danger filter -- the last line of defense for player names.
+    n_protected counts cells skipped for this reason.
     """
-    text_edits, formula_edits, total = [], [], 0
+    text_edits, formula_edits, total, protected = [], [], 0, 0
     for r, row in enumerate(grid):
         for c, cell in enumerate(row):
             if not isinstance(cell, str) or not cell:
@@ -682,10 +818,15 @@ def _plan_edits(grid, row0, col0, replacer):
             new, n = replacer.sub(cell)
             if not n:
                 continue
+            if _is_player_cell(cell):
+                # Danger filter should already guarantee n == 0 here; the
+                # guard makes altering a player name structurally impossible.
+                protected += 1
+                continue
             total += n
             a1 = f'{_col_letters(col0 + c)}{row0 + r}'
             (formula_edits if cell.startswith('=') else text_edits).append((a1, new))
-    return text_edits, formula_edits, total
+    return text_edits, formula_edits, total, protected
 
 
 def _write_edits(spreadsheet, title, edits, value_input_option, chunk=400):
@@ -744,16 +885,37 @@ def _rename_tabs(spreadsheet, replacer, dry_run):
     return len(requests)
 
 
-def anonymize(spreadsheet, replacer, dry_run):
-    """Rename tabs, then rewrite every cell value and formula."""
+def anonymize(spreadsheet, all_pairs, dry_run):
+    """Build the player oracle, drop colliding tokens, then rename tabs and
+    rewrite every safe cell value and formula. Returns the (player-safe)
+    replacer so the audit rescans against exactly what was applied."""
+    # The oracle must be built before renaming: renaming rewrites formula
+    # references, but the player display text it reads is unaffected, so an
+    # up-front read is the clean source.
+    titles0 = [ws.title for ws in _sheets_call('list tabs', spreadsheet.worksheets)]
+    player_names = build_player_oracle(_read_tabs(spreadsheet, titles0))
+    safe, dropped = split_player_safe(all_pairs, player_names)
+    _assert_auditable(safe)
+    replacer = Replacer(safe)
+
+    print(f'  player-name oracle: {len(player_names)} names from baseball-'
+          f'reference links')
+    print(f'  mapping forms: kept {len(safe)}, dropped {len(dropped)} that '
+          f'collide with a real player name')
+    if dropped:
+        print(f'    dropped forms left unscrubbed (they occur only inside '
+              f'player names or as the kept MATT abbrev): lengths '
+              f'{sorted(len(r) for r, _ in dropped)}')
+
     _rename_tabs(spreadsheet, replacer, dry_run)
     titles = [ws.title for ws in _sheets_call('list tabs', spreadsheet.worksheets)]
     tabs = _read_tabs(spreadsheet, titles)
 
-    grand_total, touched = 0, 0
+    grand_total, touched, protected_total = 0, 0, 0
     for title in titles:
         grid, row0, col0 = tabs.get(title, ([], 1, 1))
-        text_edits, formula_edits, n = _plan_edits(grid, row0, col0, replacer)
+        text_edits, formula_edits, n, protected = _plan_edits(grid, row0, col0, replacer)
+        protected_total += protected
         cells = len(text_edits) + len(formula_edits)
         if not cells:
             continue
@@ -765,31 +927,45 @@ def anonymize(spreadsheet, replacer, dry_run):
         if not dry_run:
             _write_edits(spreadsheet, title, text_edits, 'RAW')
             _write_edits(spreadsheet, title, formula_edits, 'USER_ENTERED')
-    print(f'  cells: {grand_total} replacements across {touched} tab(s)')
-    return grand_total
+    print(f'  cells: {grand_total} replacements across {touched} tab(s); '
+          f'{protected_total} baseball-reference player cell(s) left untouched')
+    return replacer
 
 
 def audit(spreadsheet, replacer):
-    """Re-read everything and rescan for real tokens. Zero is the bar."""
+    """Re-read everything and rescan against the applied (player-safe) map.
+
+    Returns (owner_residuals, player_hits):
+      * owner_residuals -- applied real tokens still present in titles or
+        non-player cells. Must be zero: the owner is not hidden otherwise.
+      * player_hits -- applied real tokens found INSIDE a baseball-reference
+        player cell. Must be zero too: a nonzero here means a kept token
+        collides with a player the oracle missed (the write guard still
+        spared the cell, but it flags an oracle gap).
+    """
     titles = [ws.title for ws in _sheets_call('list tabs', spreadsheet.worksheets)]
     tabs = _read_tabs(spreadsheet, titles)
-    total = 0
+    owner_residuals = player_hits = 0
 
     title_hits = len(replacer.find(spreadsheet.title))
     print(f'  {"[spreadsheet title]":<38} {title_hits}')
-    total += title_hits
+    owner_residuals += title_hits
 
     for title in titles:
         grid, _, _ = tabs.get(title, ([], 1, 1))
         hits = len(replacer.find(title))
         for row in grid:
             for cell in row:
-                if isinstance(cell, str) and cell:
+                if not isinstance(cell, str) or not cell:
+                    continue
+                if _is_player_cell(cell):
+                    player_hits += len(replacer.find(cell))
+                else:
                     hits += len(replacer.find(cell))
         flag = '' if hits == 0 else '   <-- RESIDUAL'
         print(f'  {title:<38} {hits}{flag}')
-        total += hits
-    return total
+        owner_residuals += hits
+    return owner_residuals, player_hits
 
 
 # --------------------------------------------------------------------------
@@ -805,9 +981,10 @@ def main():
     _load_env()
 
     print('Deriving the mapping from the five seed pairs '
-          '(disk = real, HEAD = anonymized) ...')
+          '(disk = real, HEAD = anonymized)'
+          + (' + the private scrub map' if _PRIVATE_MAP.is_file() else '')
+          + ' ...')
     pairs, _ = build_mapping()
-    replacer = Replacer(pairs)
 
     protected = _protected_sheet_ids()
     print(f'  latch (a): {len(protected)} real sheet id(s) resolved and protected')
@@ -823,26 +1000,31 @@ def main():
         spreadsheet = _sheets_call('open', lambda: gc.open_by_key(target_id))
         latch_b_anon_title(spreadsheet, args.dry_run)
 
-        anonymize(spreadsheet, replacer, args.dry_run)
+        # The player-safe replacer is derived per target from its own player
+        # roster, so a sheet with different players drops the right tokens.
+        replacer = anonymize(spreadsheet, pairs, args.dry_run)
 
         print('  residual audit (every cell + formula + title, per tab):')
-        residuals = audit(spreadsheet, replacer)
-        if residuals:
-            print(f'  AUDIT FAILED: {residuals} residual real token(s) remain.')
-            failures.append((target_id, residuals))
+        owner_residuals, player_hits = audit(spreadsheet, replacer)
+        if owner_residuals or player_hits:
+            print(f'  AUDIT FAILED: {owner_residuals} owner residual(s), '
+                  f'{player_hits} token(s) inside player cells.')
+            failures.append((target_id, owner_residuals, player_hits))
         else:
-            print('  AUDIT PASSED: zero residuals.')
+            print('  AUDIT PASSED: zero owner residuals, zero player cells altered.')
 
     print()
     if args.dry_run:
-        print('DRY RUN -- nothing was written. Residual counts above reflect '
-              'the sheet as it stands, not as it would be.')
+        print('DRY RUN -- nothing was written. Counts above reflect the sheet '
+              'as it stands, not as it would be.')
         return 0
     if failures:
-        for target_id, n in failures:
-            print(f'FAIL {target_id}: {n} residual(s)')
+        for target_id, owner_residuals, player_hits in failures:
+            print(f'FAIL {target_id}: {owner_residuals} owner residual(s), '
+                  f'{player_hits} player-cell hit(s)')
         return 1
-    print(f'All {len(args.target)} target(s) anonymized with zero residuals.')
+    print(f'All {len(args.target)} target(s) anonymized with zero residuals '
+          f'and no player names altered.')
     return 0
 
 

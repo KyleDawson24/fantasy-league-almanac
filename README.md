@@ -1,52 +1,100 @@
-# Fantasy Beat Reporter
+# Fantasy League Almanac
 
-> An ELT pipeline that turns ESPN Fantasy Baseball box-score data into weekly
-> BBCode recaps, all-time records reports, and a multi-tab league almanac
-> in Google Sheets. Built so the league
-> commissioner spends Sunday afternoons posting copy, not pulling stats.
+
+> Two fantasy baseball leagues, a quarter-century of history, one pipeline. It reconstructs seasons nobody recorded, re-prices more than a million individual player-game performances under one rulebook so eras can be compared honestly, and ships the result as a weekly recap and a browsable league almanac.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![dbt](https://img.shields.io/badge/dbt-1.11-orange)](https://www.getdbt.com/)
 [![Snowflake](https://img.shields.io/badge/warehouse-Snowflake-29B5E8)](https://www.snowflake.com/)
 [![Python](https://img.shields.io/badge/python-3.13-blue)](https://www.python.org/)
 
-Real product, real user (me), real weekly cadence. The codebase is also
-a deliberate dbt portfolio piece — see [What this
-demonstrates](#what-this-demonstrates) below.
+Treats your fantasy league like it was a real league. Real product, real user base, real toy for real fantasy baseball nerds, and secondarily a deliberate analytics-engineering portfolio piece. Jump to [What this demonstrates](#what-this-demonstrates) if you are here to evaluate the engineering.
+
+![The Advanced Standings tab: a 2026 rank-by-period chart above a 2001-2026 season-finish matrix](docs/img/cbs-advanced-standings.png)
+
+**What you are looking at:** The matrix under that chart is twenty-six seasons of one league, 2001 through 2026, in a single grid. Stitching it together is the hard part. Franchises get renamed, handed to new owners, and re-issued fresh platform ids, so one continuous team can surface under three names and two identities across the run.
+
+Resolving that lineage is what lets a single row credit the Hardball Hackers with five titles and a 4.7 average finish over a quarter-century, instead of scattering them across three unrelated rows.
+
+The honesty note is the other half. Only 2026 was captured live. For our ESPN league, 2025 data still existed at full fidelity. For CBS, we needed some clever reconstruction.
+
+2004-2020 is estimated from start-share rates and runs 5-13% low, always under rather than over. (Actual sit/start data is not available from that era so is estimated by site-wide numbers. It is a foreseeable selection bias that the league with 25 years of history made, on average, better start/sit decisions than the average random CBS subscriber)
+
+2021-2025 is reconstructed day by day from the transaction log (which for this era _does_ include sit/start transactions).
+
+Every era's provenance ships as a visible disclosure, not a footnote; the Home tab's Stat Sources table and every team page state plainly which years are captured live, reconstructed day-by-day, or estimated, and what share of the record falls into each bucket.
 
 ---
 
-## What it does
+## The Big Picture
 
-Every Sunday at the end of a fantasy matchup period, the commissioner
-runs:
+Every Sunday, one command turns a week of fantasy baseball into a formatted recap: best and worst matchups with their top contributors, the wasted-performance callouts, and any records broken or tied.
 
-```bash
-python extract/extract.py
-cd dbt_league && dbt build
-cd .. && python output/generate_summary.py
-python output/generate_records_report.py
-python output/generate_almanac_sheet.py
-python extract/cbs_capture.py --capture   # second-platform capture, if configured (see SETUP.md)
+That was the original product, built to automate a tedious manual process for my personal league.
+It has since grown into a cross-platform data model that produces customized, browsable "Almanacs" containing entire league histories.
+
+The same transform layer now serves **two leagues on two different platforms with two different formats**: a head-to-head league where teams play each other weekly, and a season-long points league whose history runs back to **2001**.
+
+Neither platform's website will tell you what its own rosters looked like fifteen years ago. So the pipeline rebuilds them: a day-by-day reconstruction from ~56,000 scraped transaction records, anchored on year-end roster snapshots, cross-checked against the league's official published standings, and **graded** -- every era carries its own measured error rate, printed in the almanac rather than hidden.
+
+On top of that sits a record book that had to be built from scratch, showing individual performances and statistical outputs at a grain that is not visible on either platform's website.
+
+---
+
+## The two-league story
+
+The pipeline was built for one league on one platform. Adding a second one that shares almost none of the first one's assumptions is the test that made this into a real model, rather than a pile of league-specific SQL.
+
+|                               | League A                       | League B                                                       |
+| ----------------------------- | ------------------------------- | --------------------------------------------------------------- |
+| Format                        | Head-to-head, weekly matchups  | Season-long points, no matchups                                |
+| History available             | Recent seasons, fully recorded | Back to 2001, mostly *not* recorded                            |
+| Per-day scoring from platform | Yes                            | **None -- season totals only**                                 |
+| Roster history                | Served by the API              | Reconstructed from transactions                                |
+| Position eligibility          | Served by the API              | Derived from real MLB game logs, in congress w league settings |
+
+What made this tractable rather than a fork:
+
+- **One warehouse, one set of models, a `league_key` grain.** Per-league schemas were considered and rejected. Every fact and mart carries the league key; the output layer filters. Adding a league does not add a model.
+- **Platform vocabulary stops at the staging layer.** Stat ids, slot ids and format labels stay native in staging and are translated to a canonical catalog through mapping seeds. Everything downstream speaks one language. The rules are written down in [docs/platform-adapter-contract.md](docs/platform-adapter-contract.md).
+- **Format is a separate axis from platform.** "Points league" and "which website" are independent dimensions, so a feed can be required, optional, or conditional on format rather than on vendor.
+- **The universal layer is real baseball.** Stats come from the public MLB Stats API, not from a fantasy vendor, so the underlying numbers are never in doubt. Only the fantasy state around them (who owned whom, who was in the lineup on a given day) has to be reconstructed.
+
+The payoff is measurable: the second league's almanac renders through the *same* tab builders as the first, in the same shape, from a shared convergence layer.
+
+![ESPN Team Tab, current-season and all-time optimal lineups](docs/img/espn-team-tab-comparison.png)
+
+![CBS Team Tab, same layout, same renderer](docs/img/cbs-team-tab-comparison.png)
+
+*Identical layout, rendered from two different platforms, with points calculated according to each league's own scoring settings and each team's actual history -- the single best evidence for the whole adapter thesis. Same tab builder, same columns, fed a different `league_key`.*
+
+---
+
+## Architecture
+
+Four layers, one warehouse, two platforms:
+
+```
+ESPN + CBS extract  ->  Snowflake RAW (append-only, platform-native shape)
+                    ->  dbt staging (canonicalized to one vocabulary)
+                    ->  dbt intermediate (identity resolution, walk-backs)
+                    ->  dbt marts (core contracts + reporting)
+                    ->  weekly recap · records report · Google Sheets almanac
 ```
 
-The script prints BBCode to stdout and also writes a timestamped file
-to `output/logs/`. The log file is the clean copy — stdout has a
-"Log saved to: ..." status line that you'd want to skip if copying
-into the league's front-page editor.
+Built on dbt + Snowflake + Python: extract scripts land raw JSON, dbt owns everything from staging through marts, and three Python consumers read the marts to produce the recap, the records report, and the almanac. A full lineage/DAG image is coming once the current model-renaming refactor settles; drawing one today would be stale within weeks. The [hosted dbt catalog](https://kyledawson24.github.io/fantasy-league-front-page/) has the real, current lineage and column-level docs if you want that today; it's regenerated manually and regularly, so treat it as approximate rather than live (as we approach final state, I will update this doc accordingly).
 
-The result: a fully-formatted ESPN-BBCode recap of the week — best/worst
-matchup totals with top contributors, a wasted-performances callout, any
-all-time records broken or tied, and the running current-season + all-time
-records. Paste it into the league's front-page editor and ship.
+---
 
-There's also an all-time records report
-(`output/generate_records_report.py`) that can optionally write to a
-Google Sheet for offline analysis, plus the v1.1 almanac writer
-(`output/generate_almanac_sheet.py`) that builds a browsable league
-workbook: Home, Records, Team Weeks, and one active-stats tab per team.
+## What it produces
 
-### Sample output
+**A weekly BBCode recap**: best/worst matchup totals with top contributors, wasted performances, records broken. Written to a timestamped file, ready to paste into ESPN's front page in a format that renders on its stone-age level text editor.
+
+![Week 16 Recap, posted live to the league's ESPN front page](docs/img/espn-recap-posted.png)
+
+*Posted straight to the league's actual ESPN front page; this is Week 16, live, not a mockup. Even the jokey callouts are scripted according to a [purpose built callout-script](output/league_notes.py).*
+
+Alternate Recap, as text:
 
 ```
 [u][b]Week 6 Recap[/b][/u]
@@ -73,194 +121,114 @@ Logan Gilbert: 29.6, Nathan Eovaldi: 25.6, Rico Garcia: 20.7
 [b]Tied Record for Fewest RBIs[/b]: Leno's Manic Mandible at 14 RBI, the 3rd team to do so.
 ```
 
-(That's a real Week 6 recap, lightly trimmed for readability.)
+*(A real Week 6 recap, lightly trimmed for readability.)*
+
+**An all-time records report**, and **a multi-tab league almanac in Google Sheets**: Home, Records, Advanced Standings, Draft Recap, a matchup history, a trade board, and one page per team. How to read it is documented in the [user guide](docs/user-guide/).
+
+A few of its tabs:
+
+![Firefly Lake Vandals Team Tab](docs/img/cbs-team-tab-flv.png)
+
+*Team Tab: arguably the core deliverable of the project; a team's current-season top producers, its all-time optimal lineup, and every player's actual stat line for their specific time on this team, not their career or league-wide numbers. The single view of "who are my team's guys" as though your fantasy league was a real world competition.*
+
+**One thing this makes possible that no standard fantasy site can answer:** Carlos Martinez spent more time on FLV's roster than almost anyone in franchise history, and if he'd never been benched he would have been the franchise's third-biggest pitching contributor of all time. But he scored over 40% of his points from the bench, and ends up missing the "Starting Lineup" entirely. That said, he was used well: his 3.20 ERA while active for FLV beats his career mark of 3.74 by more than half a run.
+
+That comparison -- not his career line, the line for what he actually did *for this team, in the games this team started him* -- only exists because the pipeline creates visibility into active-vs-benched performance for every player, every day, across 25 years.
+
+![All-League Team](docs/img/espn-all-league-team.png)
+
+*All-League Team: the season's best player at every lineup slot, with the fantasy team that rostered them and what the best bench or free-agent alternative would have scored. Automatically assumes the shape and restrictions of the league's roster settings.*
+
+**Answers questions the native site can't:** "What players have actually had the biggest impact on *this league* this season, as opposed to overall production in the MLB?"
+
+![Lineup Slot Records](docs/img/espn-slot-records.png)
+
+*Lineup Slot Records: the current season's best single week at each slot beside the all-time holder. New records automatically highlighted for the period after their occurrence.*
+
+**Answers questions the native site can't:** "What's the best matchup a shortstop has ever had under our new scoring system?"
+
+![Trade Record](docs/img/espn-trade-record.png)
+
+*Trade Record: every completed trade, grouped, with what each side's pieces actually scored after the deal.*
+
+**Answers questions the native site can't:** "How has the multi-player trade I made 4 months ago worked out for me?" or "What's the biggest blockbuster in league history where the most total points changed hands?"
+
+![Points by Lineup Slot](docs/img/cbs-points-by-slot.png)
+
+*Points by Lineup Slot: production by the slot it was deployed in, paced per standard season so shortened and in-flight years compare honestly.*
+
+**Answers questions the native site can't:** "Which owners historically build their teams around certain positions?" or "Which contending teams this season have an obvious hole in their roster, and would they make good trade partners?"
+
+![Best Individual Seasons by Lineup Slot](docs/img/cbs-best-seasons-by-slot.png)
+
+*Best Individual Seasons by Lineup Slot: the top single season at each slot, back to 2001, re-priced under one rulebook so eras sit on the same scale.*
+
+![All-Time Draft Board](docs/img/draft-recap.png)
+
+*All-Time Draft Board: every pick, re-cut to the league's current team shape, colored by value against that round's historical median; the keeper row ranks by production.*
+
+**Answers questions the native site can't:** "What is the draft pick I was just offered in a trade actually worth?" or "How many points does my first rounder need to score before I can call it a successful decision?"
 
 ---
 
-## Architecture
+## What's next
 
-```mermaid
-flowchart LR
-    A[ESPN Fantasy API<br/>espn-api wrapper] -->|JSON| B[Python extractor]
-    B -->|append-only| C[(Snowflake RAW)]
-    C --> D[dbt staging<br/>→ intermediate<br/>→ marts/core<br/>→ marts/reporting]
-    D --> E1[Weekly recap<br/>BBCode]
-    D --> E2[Records report<br/>BBCode + Sheets]
-    D --> E3[League almanac<br/>Google Sheets]
-```
-
-Four layers, three user-facing consumers. The dbt project alone is 27
-models (8 staging, 1 intermediate, 18 marts — split into a `marts/core`
-contract layer of dims + facts and a `marts/reporting` layer of consumer
-marts); the facts split symmetrically into active and inactive
-performance ("active = fantasy reality; inactive = MLB reality"), expose
-roster-settings / roster-history contracts for the almanac, and feed a
-seed-driven leaderboard that ranks both lenses.
-
-Full lineage and column-level docs are in the [hosted dbt catalog](https://kyledawson24.github.io/fantasy-league-front-page/);
-the local source-of-truth is the `dbt_league/` directory.
-
----
-
-## Notable engineering decisions
-
-Each phase of this project was designed and documented in its own
-`Phase X.Y Documentation.md` file (see the repo root). A few decisions
-worth surfacing:
-
-- **Doubleheader silent-overwrite bug fix ([Phase 3.3](Phase%203.3%20Documentation.md)).**
-  The `espn-api` Python wrapper builds a `scoringPeriodId → stats` dict
-  and silently drops one game when ESPN returns multiple splits for the
-  same period. Caught when team totals on doubleheader days were
-  consistently ~3.6 pts low. Root-caused via raw-API inspection, fixed
-  by going to ESPN's kona endpoint for pre-aggregation stats. Raw
-  API capture preserved in `archive/` for replay.
-
-- **Wide convergence facts over separate marts ([Phase 3.1](Phase%203.1%20Documentation.md)).**
-  Counting stats, derived rate stats, and per-stat point contributions
-  all sit on one wide row per `(player, week)`. Saves a join at every
-  consumer; collapses what was a two-mart cross-layer dependency. The
-  decision against splitting "counts" and "rates" is documented as a
-  Kimball-vs-pragmatism tradeoff.
-
-- **Slot-validity filter for two-way players ([Phase 4.0](Phase%204.0%20Documentation.md)).**
-  Ohtani's hitting stats only count when he's slotted as a hitter, not
-  a pitcher — even though ESPN sums both into one player-day total.
-  Solved at the intermediate layer with a `stat_category = lineup_slot_category`
-  filter (toggleable via `var('strict_slot_validity', true)`). Distinguishing
-  "lineup slot" from "position eligibility" is the difference between a
-  pipeline that handles real-world rosters and one that doesn't.
-
-- **Anti-join for point-in-time free-agent status ([Phase 4.0](Phase%204.0%20Documentation.md)).**
-  ESPN's API doesn't return historical roster status. To know who was
-  a free agent on a given day, query kona without status filter and
-  anti-join against the wrapper's rostered lineups for that
-  scoring period. Captures transactions correctly without a transaction
-  log.
-
-- **Seed-driven Jinja UNPIVOT in `mart_stat_leaderboard` ([Phase 7](archive/phase_7_working/)).**
-  The leaderboard's wide-to-long pivot used to live as a hand-maintained
-  UNION block. Now it's a Jinja loop over `stat_classification.csv`. Adding
-  a tracked stat is a CSV row, not a five-file SQL change. The seed
-  similarly drives the Python display layer and consumer-side polarity
-  rules — single source of truth across SQL and Python.
-
----
-
-## What this demonstrates
-
-For an analytics engineering / dbt-focused reader, the project covers:
-
-- **dbt patterns at production-shape:** incremental models with composite
-  unique keys, seed-as-config-with-tests (`stat_classification` is 97 rows
-  with `accepted_values` enforcement), grain-agnostic macros, formally
-  declared exposures, source-freshness contracts, and 173 dbt tests —
-  grain uniqueness on every model plus singular cross-model invariants
-  in `dbt_league/tests/`.
-- **Real Kimball-style modeling:** wide convergence facts at consumer
-  grain, an active/inactive symmetric split, a seed-driven UNPIVOT mart
-  that emits 10-row visibility buffers so consumer-side tie-collapse
-  logic can detect saturation accurately.
-- **Cross-language data contracts:** a single seed CSV drives both the
-  dbt mart's Jinja UNPIVOT loop AND the Python display / polarity /
-  record-surfacing logic via `output/stat_catalog.py`'s `lru_cached`
-  accessors. Add a tracked stat by editing one CSV.
-- **Real-data debugging discipline:** the doubleheader fix above, the
-  stat-ID-31 mislabel archaeology, the `CYC` stat (id 30) reidentification.
-  Each documented with raw evidence and reasoning in the phase docs.
-- **Three consumer surfaces from one transform layer:** ESPN-front-page
-  BBCode, the all-time records report, and a browsable Google Sheets
-  league almanac, with Sheets outputs declared as formal dbt exposures.
-  Adding a fourth (Discord, email, static HTML, etc.) is an interface
-  implementation, not a re-thread.
-- **Iterative documentation:** seven Phase X.Y docs capturing the
-  decision log, a CHANGELOG mapped to semver, a ROADMAP with Now / Next
-  / Later / Decided Against framing. The historical phase docs are
-  archived but preserved — they show the work, not just the result.
-
-The technical depth here is deliberately oriented toward
-analytics-engineering interviews. Each Phase X.Y doc has a "Key
-Technical Decisions" section structured as "options considered →
-chosen → rationale" — usable as talking points without prep.
+v1.x is polish on the current architecture: a player-entity layer (`dim_player` / `fct_player_career`) and more analytics surfaces on data the pipeline already has. v2.0 is structural: Yahoo and Sleeper adapters to prove the platform-agnostic design against a third and fourth platform, and a DuckDB target (see Quick start below) so the project runs without a cloud warehouse. Full detail (including what's been explicitly decided against) is in [ROADMAP.md](ROADMAP.md).
 
 ---
 
 ## Quick start
 
-If you want to read about the design: keep going through this README,
-the phase docs, and the hosted dbt catalog.
+**Just here to look?** The screenshots above and the [hosted dbt catalog](https://kyledawson24.github.io/fantasy-league-front-page/) cover the design; [docs/user-guide/](docs/user-guide/) covers how to read the almanac itself.
 
-If you want to fork and run this against your league: full setup
-instructions in [SETUP.md](SETUP.md). Tested end-to-end against a
-fresh Snowflake free-tier account in under 45 minutes.
+**Want to run it?** Today that means bringing your own Snowflake account -- the free tier is enough, and [SETUP.md](SETUP.md) will get you most of the way there (~30-45 minutes, mostly Snowflake provisioning); a step-by-step setup wizard is planned for August 2026. A clone-and-run demo mode with no warehouse account at all (DuckDB, packaged sample data, one command) is planned for v2.0 and isn't available yet. A portability spike ([docs/duckdb-portability-audit.md](docs/duckdb-portability-audit.md)) sized the transform-layer port at roughly a focused week of engineering, so this is a scoped near-term plan, not a someday-maybe.
+
+---
+
+## What this demonstrates
+
+The current shape of the transform layer: **72 dbt models** (32 views, 37 tables, 3 incremental), **18 seeds**, **542 data tests**, and **4 declared exposures**, building green end to end.
+
+- **Modeling that survived a second implementation.** Wide convergence facts at consumer grain; a symmetric active/inactive split ("active is fantasy reality, inactive is MLB reality") that is what makes wasted-production analysis possible at all; a seed-driven UNPIVOT mart where adding a tracked stat is a CSV row rather than a five-file SQL change.
+- **Reproducibility.** Floating-point sums are not associative, and SQL engines do not promise summation order, so rebuilding with no code change could move a rendered cell by one, and oh boy it often did. Sums now run in exact decimal with pinned tie-breaks, and a byte-diff harness pins a known week so any drift fails loudly.
+- **Reconstruction with published error bars.** The walk-back does not claim to know what it cannot know. Where records are simply unavailable we make that clear and render a zero. The resulting under-count is stated per era instead of being smoothed away (while still allowing manual override tables to populate data manually where a "league historian" might know something that the platform's API no longer stores).
+- **Cross-language data contracts.** One seed CSV drives both the dbt mart's Jinja loop and the Python display, polarity and record-surfacing logic.
+- **Portability assessed, not assumed.** A spike ported the staging layer to DuckDB on real data to size a warehouse-independence effort honestly, including the traps; a 32-bit `FLOAT` that silently narrows values, and an engine default that would have emptied the record book without erroring. Written up in [docs/duckdb-portability-audit.md](docs/duckdb-portability-audit.md).
+- **Real-data debugging discipline.** A doubleheader bug in an upstream wrapper found from team totals running ~3.6 points low; a scoring category whose season feed disagrees with its own per-game data; a record book rebuilt after discovering its source neglected significant portions of the player pool. Each documented with the evidence.
 
 ---
 
 ## Project documentation
 
-- **[SETUP.md](SETUP.md)** — bring-your-own-credentials setup walkthrough
-  (ESPN cookies, Snowflake provisioning, dbt profile, optional Google
-  Sheets sink).
-- **[CHANGELOG.md](CHANGELOG.md)** — version history mapped retroactively
-  from Phase 1 (v0.1.0) through the current v1.x releases. Tells the story of how the
-  pipeline got to its current shape.
-- **[ROADMAP.md](ROADMAP.md)** — what's next: v1.x polish, v2.0
-  structural changes, Later speculation, and what's explicitly Decided
-  Against.
-- **[HANDOFF.md](HANDOFF.md)** — internal handoff doc for the project's
-  current state, design conventions, and tribal knowledge. Less polished
-  than the public docs; useful if you're forking aggressively.
-- **Phase X.Y Documentation.md** files in the repo root — the
-  decision log. Each phase has its own retro covering what shipped,
-  what was considered, and why the call was made.
-- **[Hosted dbt catalog](https://kyledawson24.github.io/fantasy-league-front-page/)**
-  — model lineage and column-level docs. Regenerated manually; rerun
-  `dbt docs generate --static && cp dbt_league/target/static_index.html
-  docs/index.html` to refresh, then commit + push.
+- **[docs/user-guide/](docs/user-guide/)** -- how to read the almanac,
+  written for league members.
+- **[SETUP.md](SETUP.md)** -- bring-your-own-credentials walkthrough.
+- **[docs/known-data-issues.md](docs/known-data-issues.md)** -- the list of gaps, caveats, and open questions.
+- **[docs/platform-adapter-contract.md](docs/platform-adapter-contract.md)** -- the shape a new platform has to land data in.
+- **[CHANGELOG.md](CHANGELOG.md)** · **[ROADMAP.md](ROADMAP.md)** -- version history, and what is Now / Next / Later / Decided Against.
+- **Phase X.Y Documentation.md** in the repo root -- the decision log, each with an "options considered → chosen → rationale" section. These were all pre-release/exploratory; their only real purpose is archival.
+- **[Hosted dbt catalog](https://kyledawson24.github.io/fantasy-league-front-page/)** -- model lineage and column-level docs, regenerated manually (may lag a release or two behind local `main`).
 
 ---
 
 ## Status
 
-- **v1.2.0** — current. Home becomes a navigation-hub dashboard (nav band +
-  points glossary + all-time All-League Team beside the week / season teams
-  with Total-Pts deviation columns) and a net-new Draft Recap tab adds the
-  draft board + draft-value leaderboards (a new ESPN extract through dbt).
-  "Team Weeks" renamed to "Matchup History." See `CHANGELOG.md`.
-- **v1.1.2** — 2026-05-27. Team-tab polish: ppg to two decimals, a W-L-Sv
-  pitcher decision line, and a slot-fill explanation + points glossary +
-  current-scoring callout on every "Best Lineup" tab. See `CHANGELOG.md`.
-- **v1.1.1** — 2026-05-27. Almanac refactor + optimal-team reframe.
-  `output/almanac_sheets.py` split into data/logic/render/write modules
-  behind a facade; reusable analytical SQL moved into dbt contracts
-  (`mart_team_matchup`, `fct_player_season_performance`,
-  `int_player_position_pts`). New `get_optimal_team` primitive reframes
-  the All-League Team and per-team tabs as "the best lineup you could
-  have built," scored on the calculated points lens. See `CHANGELOG.md`.
-- **v1.1.0** — 2026-05-22. Product-facing almanac release: a browsable
-  Google Sheets workbook with Home, Records, Team Weeks, and per-team
-  active-stats tabs, backed by roster-settings extraction and roster
-  history marts. See `CHANGELOG.md`.
-- **v1.0.2** — 2026-05-19. DAG hygiene + dbt-architecture cleanup. New
-  `dim_stat` / `dim_matchup_period` / `fct_player_daily_performance`
-  contract layer; `int_player_weekly_performance` promoted to
-  `fct_player_weekly_slot_performance`; schedule columns denormalized onto
-  weekly facts. No consumer-visible behavior change (byte-identical
-  output).
-- **v1.0.1** — 2026-05-18. Polish release on top of v1.0.0: 8 new
-  `league_notes` callouts, "League This Week" always-on recap line,
-  league-wide benchmarks mart, Hit-for-the-Cycle as a tracked stat,
-  Snowflake key-pair auth support, fact-layer rounding to kill float
-  wobble.
-- **v1.0.0** — first stable release (2026-05-13).
+- **v1.5.1** -- current, 2026-07-25. A correctness pass on the CBS record
+  book: fixed non-deterministic rebuilds, a silent transaction-capture gap
+  (~408 rows dropped across 26 seasons of history), records that were
+  rounded twice, and player identity that gave up whenever a name had two
+  candidates. Patch, not minor -- everything in it corrects an existing
+  surface rather than adding one.
+- **v1.5.0** - 2026-07-21. The multi-league release: a league registry and a `league_key` re-grain of every layer, and the CBS points league (2001-2026) ships end to end through the same tab builders as ESPN. Advanced Standings, Trades, Baseball Reference links, and a reworked Draft Recap land on the ESPN side in the same release.
+- **v1.2.0** - 2026-05-30. Home became a navigation-hub dashboard, and a net-new Draft Recap tab (draft board plus draft-value analysis) landed. (1.3 and 1.4 were internal working labels during an unreleased stretch, skipped deliberately to keep the docs unambiguous.)
+- **v1.0.0 - v1.1.2** -- the original single-league ESPN foundation: the weekly BBCode recap, the all time records report, and the first Google Sheets almanac. Full per-release history in [CHANGELOG.md](CHANGELOG.md).
 - **License**: MIT (see [LICENSE](LICENSE)).
-- **Built with**: dbt 1.11 · Snowflake · Python 3.13 · `espn-api`
-  wrapper · `gspread` for Sheets.
+- **Built with**: dbt 1.11 · Snowflake · Python 3.13 · `espn-api` wrapper · `gspread`.
 
----
+## Contact
+Email: kpdawson.github@gmail.com
+LinkedIn: https://www.linkedin.com/in/kyledawson24/
 
 ## A note on the name
 
-"Fantasy Beat Reporter" is the working personality name. The repository
-is currently `fantasy-league-front-page` for historical reasons; a
-rename is on the table for v1.x. Don't read too much into either.
+"Fantasy League Almanac" is the working personality name; the repository is still `fantasy-league-front-page` for historical reasons. Don't read too much into either, likely to change.

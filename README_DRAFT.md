@@ -1,9 +1,10 @@
 # Fantasy Beat Reporter
 
 > **DRAFT — not live.** This is a proposed rewrite of `README.md` for
-> review. It does not replace anything until Kyle says so. Screenshot
-> slots are marked `[SCREENSHOT: ...]`; the version numbers in Status are
-> marked `[VERIFY]` because I did not re-derive them tonight.
+> review. It does not replace anything until Kyle says so. Screenshots
+> are wired from `docs/img/`; two slots still have no art and remain
+> marked `[SCREENSHOT: ...]`. The version numbers in Status are marked
+> `[VERIFY]` because I did not re-derive them tonight.
 
 > Two fantasy baseball leagues, twenty-five years of history, one
 > pipeline. It reconstructs seasons nobody recorded, re-prices every
@@ -20,9 +21,23 @@ analytics-engineering portfolio piece. Jump to [What this
 demonstrates](#what-this-demonstrates) if you are here to evaluate the
 engineering.
 
-[SCREENSHOT: the almanac Home tab in Google Sheets — navigation band on
-the left, All-League Team boards on the right. This is the money shot;
-it should be the first thing a visitor sees.]
+![The Advanced Standings tab: a 2026 rank-by-period chart above a 2001-2026 season-finish matrix](docs/img/cbs-advanced-standings.png)
+
+**What you are looking at.** The matrix under that chart is twenty-six
+seasons of one league, 2001 through 2026, in a single grid. Stitching it
+together is the hard part. Franchises get renamed, handed to new owners,
+and re-issued fresh platform ids, so one continuous team can surface
+under three names and two identities across the run. Resolving that
+lineage is what lets a single row credit the Hardball Hackers with five
+titles and a 4.7 average finish over a quarter-century, instead of
+scattering them across three unrelated rows.
+
+The honesty note is the other half. Only 2026 was captured live.
+2021-2025 is reconstructed day by day from the transaction log and lands
+within about 2-4% of the league's official published standings;
+2004-2020 is estimated from start-share rates and runs 5-13% low, always
+under rather than over. Every era is graded against the official record,
+and the grade ships in the almanac instead of being smoothed away.
 
 ---
 
@@ -114,9 +129,27 @@ Google Sheets**: Home, Records, Advanced Standings, Draft Recap, a
 matchup history, a trade board, and one page per team. How to read it is
 documented in the [user guide](docs/user-guide/).
 
-[SCREENSHOT: the Records tab, current season and all-time side by side.]
+A few of its tabs:
 
-[SCREENSHOT: the Advanced Standings rank-by-week chart.]
+![All-League Team](docs/img/espn-all-league-team.png)
+
+*All-League Team — the season's best player at every lineup slot, with the fantasy team that rostered them and what the best bench or free-agent alternative would have scored.*
+
+![Lineup Slot Records](docs/img/espn-slot-records.png)
+
+*Lineup Slot Records — the current season's best single week at each slot beside the all-time holder, so a new record is visible the week it happens.*
+
+![Trade Record](docs/img/espn-trade-record.png)
+
+*Trade Record — every completed trade, grouped, with what each side's pieces actually scored after the deal.*
+
+![Points by Lineup Slot](docs/img/cbs-points-by-slot.png)
+
+*Points by Lineup Slot — production by the slot it was deployed in, paced per standard season so shortened and in-flight years compare honestly.*
+
+![Best Individual Seasons by Lineup Slot](docs/img/cbs-best-seasons-by-slot.png)
+
+*Best Individual Seasons by Lineup Slot — the top single season at each slot, back to 2001, re-priced under one rulebook so eras sit on the same scale.*
 
 ---
 

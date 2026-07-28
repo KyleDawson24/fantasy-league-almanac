@@ -92,3 +92,11 @@ tests/fixtures/cbs_almanac/
 tests/fixtures/baseline_summary_current.txt
 tests/fixtures/baseline_records_report.txt
 Trade Intel API Handoff.md
+
+# Screenshot working folder (MLB-100). Raw capture frames land here
+# unvetted -- some carry real owner names straight off the live sheet.
+# Only frames that have been eyeballed and curated get committed, and
+# they go to docs/img/ under a kebab-case name. Both spellings, so a
+# case-sensitive checkout cannot sneak the folder back in.
+Screenshots/
+screenshots/

@@ -83,6 +83,16 @@ select
     -- INITCAP + TRIM normalizes to "Lance Barrett" / "Jonathan Evans", same
     -- as format_owners()'s .title(). preferred_name (when set) wins
     -- verbatim, so nicknames + intentional casing (McAvery) come through.
+    --
+    -- PORTABILITY (MLB-134, hand off to MLB-10): INITCAP is a dialect surface
+    -- and its output is RENDERED data -- owner names on every team page and
+    -- the Home grid. Two exposures on a port: whether the target engine has
+    -- INITCAP at all, and whether it calls the same characters word
+    -- boundaries (apostrophes and hyphens are the classic divergence --
+    -- O'Neal vs O'neal, McDonald vs Mcdonald). This is the title_case()
+    -- macro candidate; the per-adapter dispatch belongs with MLB-10 phase 2,
+    -- NOT here. Named now so that if a golden moves during the port it has a
+    -- documented cause instead of reading as a data bug.
     coalesce(
         n.preferred_name,
         nullif(

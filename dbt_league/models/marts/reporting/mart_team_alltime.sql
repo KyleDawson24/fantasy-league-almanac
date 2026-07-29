@@ -2,8 +2,13 @@
 -- All-time franchise records: one row per (league_key, team_id), rolling
 -- fct_team_season_performance across every season a franchise played. The
 -- accumulation axis of the records surface (MLB-69) -- "the Aching Hippos
--- have the most HR in league history" -- and the team half of the CBS
--- almanac's all-time leaders.
+-- have the most HR in league history".
+--
+-- RESERVED FOR MLB-69: built ahead of its consumer, so it has NO readers
+-- today BY DESIGN. Not dead code -- do not delete on a zero-readers finding
+-- alone (see MLB-134). An earlier version of this header claimed to feed the
+-- CBS almanac's all-time leaders; that was never true and the claim is what
+-- kept drawing deletion proposals.
 --
 -- Franchise = team_id (stable across seasons and renames; the continuity
 -- key). Display name/owner take the LATEST season so a rename surfaces the

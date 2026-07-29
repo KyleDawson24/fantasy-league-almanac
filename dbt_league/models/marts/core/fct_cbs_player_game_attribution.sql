@@ -173,8 +173,16 @@ anchors_adjacent as (
             ar.est_start_share as borrowed_ratio,
             row_number() over (
                 partition by st.league_key, st.ident, st.scope_key, st.season_year
+                -- MLB-134 -- abs() manufactures ties (an anchor two
+                -- seasons back and two seasons forward are always
+                -- equidistant). est_start_share breaks most, and
+                -- because it is ALSO the only column taken from `ar`,
+                -- a remaining tie emits identical rows -- the value is
+                -- already deterministic. season_year pins the row
+                -- choice too, preferring the later anchor.
                 order by abs(ar.season_year - st.season_year) asc,
-                         ar.est_start_share desc
+                         ar.est_start_share desc,
+                         ar.season_year desc
             ) as rn
         from (
             select distinct league_key, season_year, ident, scope_key

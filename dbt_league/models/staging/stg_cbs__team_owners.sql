@@ -26,6 +26,13 @@ select
     owner_id,
     owner_name
 from {{ ref('int_cbs__team_owner_season') }}
+-- MLB-134 -- already total IN VALUE: the partition holds every column
+-- except owner_name, so owner_name is the only varying payload and a tie
+-- implies byte-identical rows. 436 partitions today, none multi-row.
+-- Left as-is deliberately -- an extra key here would be noise. The one
+-- latent hazard is that the sort itself is COLLATION-dependent if two
+-- owner_names ever differ; no non-ASCII names exist today, and the pin
+-- belongs with MLB-10's dialect work, not here.
 qualify row_number() over (
     partition by league_key, season_year, franchise_id, owner_id
     order by owner_name

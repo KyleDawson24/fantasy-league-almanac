@@ -38,7 +38,13 @@ with owners as (
     where owner_id is not null
     qualify row_number() over (
         partition by league_key, owner_id
-        order by season_year desc
+        -- MLB-134 -- stg_team_owners' grain includes team_id, so an
+        -- owner holding two teams in their latest season would be two
+        -- tied rows with independently-sourced name fields, and this
+        -- lands in RENDERED data (owner_display -> every team page and
+        -- the Home grid). No such owner exists today; pinned so the
+        -- first one doesn't silently pick a name.
+        order by season_year desc, team_id
     ) = 1
 
     union all

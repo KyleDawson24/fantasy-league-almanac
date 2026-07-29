@@ -210,7 +210,14 @@ latest_team_labels as (
     where team_id is not null
     qualify row_number() over (
         partition by league_key, season_year, team_id
-        order by matchup_period desc
+        -- MLB-134 -- this reads team labels off a PLAYER-grain fact, so
+        -- every player on the team in the latest period is a tied row
+        -- (30 such groups today). It returns the right answer only
+        -- because the labels are constant across the tie -- see
+        -- tests/assert_label_payload_constant.sql, which now enforces
+        -- what used to be an unwritten invariant. The rest of the
+        -- source grain makes the order total.
+        order by matchup_period desc, player_id, lineup_slot
     ) = 1
 ),
 
@@ -224,7 +231,10 @@ latest_player_labels as (
     from {{ ref('fct_player_weekly_slot_performance') }}
     qualify row_number() over (
         partition by league_key, season_year, player_id
-        order by matchup_period desc
+        -- MLB-134 -- same shape as the team labels above: a player who
+        -- held several slots in the latest period is a tied row (262
+        -- such groups today), payload-constant and asserted.
+        order by matchup_period desc, team_id, lineup_slot
     ) = 1
 )
 

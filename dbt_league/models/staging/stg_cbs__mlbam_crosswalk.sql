@@ -96,4 +96,16 @@ where u.mlbam_id not in (
         select mlbam_id from main_x
         where mlbam_id is not null
     )
-qualify row_number() over (partition by u.mlbam_id order by u.ui_name) = 1
+-- MLB-134 -- cbs_name / mlbam_name / match_method vary independently of
+-- ui_name, so the row choice decides the emitted name. 55 mlbam_ids have
+-- multiple rows today, none of them tied on ui_name, so these extra keys
+-- are a no-op that only fires on an exact-duplicate name.
+--
+-- NOT addressed here (semantics, not determinism): 'alphabetically-first
+-- ui_name wins' is an arbitrary rule silently deciding those 55 players'
+-- names, and it sorts on a column the model never emits. Flagged for
+-- Kyle rather than changed under an engine-only commit.
+qualify row_number() over (
+    partition by u.mlbam_id
+    order by u.ui_name, u.cbs_name, u.mlbam_name
+) = 1

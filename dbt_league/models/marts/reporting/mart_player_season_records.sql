@@ -77,7 +77,7 @@ ranked as (
         -- the record book at all.
         row_number() over (
             partition by s.league_key, s.stat_name
-            order by s.stat_value desc, s.season_year desc, s.cbs_player_id
+            order by s.stat_value desc nulls last, s.season_year desc nulls last, s.cbs_player_id
         ) as rank
     from {{ ref('int_cbs__player_season_stats') }} s
     inner join candidates c

@@ -181,8 +181,8 @@ anchors_adjacent as (
                 -- already deterministic. season_year pins the row
                 -- choice too, preferring the later anchor.
                 order by abs(ar.season_year - st.season_year) asc,
-                         ar.est_start_share desc,
-                         ar.season_year desc
+                         ar.est_start_share desc nulls last,
+                         ar.season_year desc nulls last
             ) as rn
         from (
             select distinct league_key, season_year, ident, scope_key

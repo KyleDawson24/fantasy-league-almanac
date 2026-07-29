@@ -84,7 +84,7 @@ current_names as (
     from {{ ref('stg_cbs__standings') }}
     qualify row_number() over (
         partition by league_key, team_name
-        order by season_year desc, period desc
+        order by season_year desc nulls last, period desc nulls last
     ) = 1
 )
 

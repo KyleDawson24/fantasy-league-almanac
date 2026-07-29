@@ -86,11 +86,11 @@ with_next as (
         e.*,
         lead(e.event_date) over (
             partition by e.league_key, e.season_year, e.franchise_id, e.ident, e.scope_key
-            order by e.event_date, e.row_seq desc, e.entry_seq desc
+            order by e.event_date, e.row_seq desc nulls last, e.entry_seq desc nulls last
         ) as next_event_date,
         row_number() over (
             partition by e.league_key, e.season_year, e.franchise_id, e.ident, e.scope_key
-            order by e.event_date, e.row_seq desc, e.entry_seq desc
+            order by e.event_date, e.row_seq desc nulls last, e.entry_seq desc nulls last
         ) as event_order
     from lineup_events e
 )

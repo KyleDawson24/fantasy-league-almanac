@@ -217,7 +217,7 @@ latest_team_labels as (
         -- tests/assert_label_payload_constant.sql, which now enforces
         -- what used to be an unwritten invariant. The rest of the
         -- source grain makes the order total.
-        order by matchup_period desc, player_id, lineup_slot
+        order by matchup_period desc nulls last, player_id, lineup_slot
     ) = 1
 ),
 
@@ -234,7 +234,7 @@ latest_player_labels as (
         -- MLB-134 -- same shape as the team labels above: a player who
         -- held several slots in the latest period is a tied row (262
         -- such groups today), payload-constant and asserted.
-        order by matchup_period desc, team_id, lineup_slot
+        order by matchup_period desc nulls last, team_id, lineup_slot
     ) = 1
 )
 

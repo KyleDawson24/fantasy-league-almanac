@@ -95,7 +95,7 @@ derived as (
             observed_seasons.*,
             row_number() over (
                 partition by league_key, franchise_id
-                order by season_year desc,
+                order by season_year desc nulls last,
                          last_matchup_period desc nulls last
             ) as recency_rank
         from observed_seasons

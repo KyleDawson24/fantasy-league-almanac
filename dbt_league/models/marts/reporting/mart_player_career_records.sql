@@ -56,7 +56,7 @@ ranked as (
         *,
         row_number() over (
             partition by league_key, stat_name
-            order by stat_value desc, last_season desc, player_id
+            order by stat_value desc nulls last, last_season desc nulls last, player_id
         ) as rank
     from careers
 )

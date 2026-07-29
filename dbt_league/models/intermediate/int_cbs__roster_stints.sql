@@ -149,7 +149,7 @@ last_acquisitions as (
     where event_kind = 'acquisition'
     qualify row_number() over (
         partition by league_key, season_year, name_key
-        order by event_date desc, row_seq asc, entry_seq desc
+        order by event_date desc nulls last, row_seq asc, entry_seq desc nulls last
     ) = 1
 ),
 
@@ -213,7 +213,7 @@ lineup_openings as (
     )
     qualify row_number() over (
         partition by league_key, season_year, name_key
-        order by event_date, row_seq desc, entry_seq asc
+        order by event_date, row_seq desc nulls last, entry_seq asc
     ) = 1 and kind = 'evidence'
 ),
 
@@ -231,14 +231,14 @@ lineup_reopens as (
                 ignore nulls over (
                     partition by e.league_key, e.season_year,
                                  e.franchise_id, e.name_key
-                    order by e.event_date, e.row_seq desc, e.entry_seq asc
+                    order by e.event_date, e.row_seq desc nulls last, e.entry_seq asc
                     rows between unbounded preceding and 1 preceding
                 ) as prev_membership_kind,
             last_value(case when e.kind != 'evidence' then e.exec_ts end)
                 ignore nulls over (
                     partition by e.league_key, e.season_year,
                                  e.franchise_id, e.name_key
-                    order by e.event_date, e.row_seq desc, e.entry_seq asc
+                    order by e.event_date, e.row_seq desc nulls last, e.entry_seq asc
                     rows between unbounded preceding and 1 preceding
                 ) as prev_membership_exec_ts
         from (
@@ -288,7 +288,7 @@ first_events as (
     from moves
     qualify row_number() over (
         partition by league_key, season_year, franchise_id, name_key
-        order by event_date, row_seq desc, entry_seq asc
+        order by event_date, row_seq desc nulls last, entry_seq asc
     ) = 1
 ),
 
@@ -434,7 +434,7 @@ ordered as (
         e.*,
         row_number() over (
             partition by league_key, season_year, franchise_id, name_key
-            order by exec_ts, row_seq desc, entry_seq asc
+            order by exec_ts, row_seq desc nulls last, entry_seq asc
         ) as exec_seq
     from events e
 ),

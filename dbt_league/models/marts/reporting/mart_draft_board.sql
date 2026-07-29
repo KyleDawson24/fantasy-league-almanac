@@ -43,7 +43,7 @@ team_labels as (
     where team_id is not null
     qualify row_number() over (
         partition by league_key, season_year, team_id
-        order by matchup_period desc
+        order by matchup_period desc nulls last
     ) = 1
 ),
 

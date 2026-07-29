@@ -342,7 +342,8 @@ all_time_most as (
         u.*,
         row_number() over (
             partition by u.league_key, entity_grain, performance_status, stat_name
-            order by stat_value desc, season_year desc, matchup_period desc, team_id, player_id
+            order by stat_value desc nulls last, season_year desc nulls last,
+                     matchup_period desc nulls last, team_id, player_id
         ) as rank
     from unpivoted u
 ),
@@ -354,7 +355,8 @@ all_time_fewest as (
         u.*,
         row_number() over (
             partition by u.league_key, entity_grain, performance_status, stat_name
-            order by stat_value asc, season_year desc, matchup_period desc, team_id, player_id
+            order by stat_value asc, season_year desc nulls last,
+                     matchup_period desc nulls last, team_id, player_id
         ) as rank
     from unpivoted u
 ),
@@ -366,7 +368,8 @@ current_season_most as (
         u.*,
         row_number() over (
             partition by u.league_key, entity_grain, performance_status, stat_name
-            order by stat_value desc, season_year desc, matchup_period desc, team_id, player_id
+            order by stat_value desc nulls last, season_year desc nulls last,
+                     matchup_period desc nulls last, team_id, player_id
         ) as rank
     from unpivoted u
     inner join current_year cy
@@ -381,7 +384,8 @@ current_season_fewest as (
         u.*,
         row_number() over (
             partition by u.league_key, entity_grain, performance_status, stat_name
-            order by stat_value asc, season_year desc, matchup_period desc, team_id, player_id
+            order by stat_value asc, season_year desc nulls last,
+                     matchup_period desc nulls last, team_id, player_id
         ) as rank
     from unpivoted u
     inner join current_year cy

@@ -25,7 +25,12 @@ with latest_per_period as (
     from {{ source('raw', 'cbs_standings') }}
     qualify row_number() over (
         partition by league_key, season_year, period
-        order by loaded_at desc
+        -- MLB-134 -- total order. loaded_at is the WAREHOUSING time: a
+        -- backfill stamps many captures with one value, so it is not a total
+        -- order on its own (6 such rows exist today on cbs_config). captured_at
+        -- is the real recency signal and the one this model means. The hash is
+        -- a final backstop that only separates byte-identical payloads.
+        order by loaded_at desc, captured_at desc, hash(payload) desc
     ) = 1
 ),
 

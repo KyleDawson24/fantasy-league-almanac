@@ -51,7 +51,12 @@ latest_snapshot as (
     where c.config_kind = 'scoring_rules'
     qualify row_number() over (
         partition by c.league_key, c.season_year
-        order by c.loaded_at desc
+        -- MLB-134 -- total order. loaded_at is the WAREHOUSING time: a
+        -- backfill stamps many captures with one value, so it is not a total
+        -- order on its own (6 such rows exist today on cbs_config). captured_at
+        -- is the real recency signal and the one this model means. The hash is
+        -- a final backstop that only separates byte-identical payloads.
+        order by c.loaded_at desc, c.captured_at desc, hash(c.payload) desc
     ) = 1
 ),
 

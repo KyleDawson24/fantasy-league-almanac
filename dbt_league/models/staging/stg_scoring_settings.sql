@@ -36,7 +36,13 @@ latest_extraction as (
         and s.season_year = ls.season_year
     qualify row_number() over (
         partition by s.league_key, s.season_year
-        order by s.extracted_at desc
+        -- MLB-134 -- total order. extracted_at alone ties whenever one
+        -- extract stamps two payload versions of the same entity (a re-run
+        -- or a double-capture). RAW carries no load sequence id, so the
+        -- payload hash is the only discriminator available; it can only ever
+        -- choose between byte-identical payloads, which makes the VALUE
+        -- deterministic even though the row choice is arbitrary.
+        order by s.extracted_at desc, hash(s.raw_json) desc
     ) = 1
 ),
 

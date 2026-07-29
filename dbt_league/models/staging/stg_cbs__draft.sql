@@ -34,7 +34,11 @@ with latest_load as (
     -- page only exists after a --force reload. Keep the newest.
     qualify row_number() over (
         partition by league_key, source_path, page_seq
-        order by loaded_at desc
+        -- MLB-134 -- total order. The partition IS this model's declared
+        -- grain, so a tie is the same printed line loaded twice; parsed_at
+        -- separates the parse runs. No VARIANT payload column exists here
+        -- to hash, and zero ties exist today (verified against RAW).
+        order by loaded_at desc, parsed_at desc
     ) = 1
 )
 

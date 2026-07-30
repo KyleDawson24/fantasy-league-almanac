@@ -439,6 +439,12 @@ def _replace_draft_tab(spreadsheet, rows, color_grid=None):
         )
 
     _sheets_call(f'clear {DRAFT_TAB}', worksheet.clear)
+    # clear() keeps merges (the Trades-tab lesson); the board's
+    # super-header merges sit on data-dependent rows, so unmerge before
+    # writing.
+    _sheets_batch_update(spreadsheet, f'unmerge {DRAFT_TAB}', [
+        {'unmergeCells': {'range': {'sheetId': worksheet.id}}},
+    ])
     # RAW so the signed value strings ("+253") keep their '+' -- USER_ENTERED
     # would coerce them to plain numbers and drop the sign.
     _sheets_call(
@@ -1064,6 +1070,14 @@ def _replace_advanced_standings_tab(spreadsheet, rows, stat_specs):
         )
 
     _sheets_call(f'clear {ADVANCED_STANDINGS_TAB}', worksheet.clear)
+    # clear() keeps merges, and a value written into a non-anchor cell
+    # of a stale merge is silently discarded (the Trades-tab lesson).
+    # The acquisition band merges move whenever anything above them
+    # gains or loses a row -- Kyle's dev review caught them eating every
+    # non-anchor header cell ('only the first header of each block').
+    _sheets_batch_update(spreadsheet, f'unmerge {ADVANCED_STANDINGS_TAB}', [
+        {'unmergeCells': {'range': {'sheetId': worksheet.id}}},
+    ])
     _sheets_call(
         f'update {ADVANCED_STANDINGS_TAB}',
         lambda: worksheet.update(rows, 'A1', value_input_option='RAW'),
@@ -1667,6 +1681,11 @@ def _replace_records_tab(spreadsheet, rows):
         )
 
     _sheets_call(f'clear {RECORDS_TAB}', worksheet.clear)
+    # clear() keeps merges (the Trades-tab lesson); the scope-header
+    # merges move with the record catalog, so unmerge before writing.
+    _sheets_batch_update(spreadsheet, f'unmerge {RECORDS_TAB}', [
+        {'unmergeCells': {'range': {'sheetId': worksheet.id}}},
+    ])
     _sheets_call(
         f'update {RECORDS_TAB}',
         lambda: worksheet.update(rows, 'A1', value_input_option='USER_ENTERED'),

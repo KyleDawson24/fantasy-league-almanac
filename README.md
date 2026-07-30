@@ -213,23 +213,27 @@ The current shape of the transform layer: **72 dbt models** (32 views, 37 tables
 
 ## Status
 
-- **v1.5.1** -- current, 2026-07-25. A correctness pass on the CBS record
-  book: fixed non-deterministic rebuilds, a silent transaction-capture gap
-  (~408 rows dropped across 26 seasons of history), records that were
-  rounded twice, and player identity that gave up whenever a name had two
-  candidates. Patch, not minor -- everything in it corrects an existing
-  surface rather than adding one.
+- **v1.6.0** -- current, 2026-07-30. The pre-port anchor release: the Points Glossary settles on the Total-Points lenses, Advanced Standings moves its era and scope text into the section banners, and a re-render hygiene gap that had been quietly layering each render over the last one is closed across every ESPN writer. Underneath, a determinism sweep pins every row-selection tie so no database engine gets to choose a value -- groundwork for the DuckDB port, and the last stable point before it.
+- **v1.5.1** -- 2026-07-25. A correctness pass on the CBS record book: fixed non-deterministic rebuilds, a silent transaction-capture gap (~408 rows dropped across 26 seasons of history), records that were rounded twice, and player identity that gave up whenever a name had two candidates. Patch, not minor -- everything in it corrects an existing surface rather than adding one.
 - **v1.5.0** - 2026-07-21. The multi-league release: a league registry and a `league_key` re-grain of every layer, and the CBS points league (2001-2026) ships end to end through the same tab builders as ESPN. Advanced Standings, Trades, Baseball Reference links, and a reworked Draft Recap land on the ESPN side in the same release.
 - **v1.2.0** - 2026-05-30. Home became a navigation-hub dashboard, and a net-new Draft Recap tab (draft board plus draft-value analysis) landed. (1.3 and 1.4 were internal working labels during an unreleased stretch, skipped deliberately to keep the docs unambiguous.)
 - **v1.0.0 - v1.1.2** -- the original single-league ESPN foundation: the weekly BBCode recap, the all time records report, and the first Google Sheets almanac. Full per-release history in [CHANGELOG.md](CHANGELOG.md).
 - **License**: MIT (see [LICENSE](LICENSE)).
 - **Built with**: dbt 1.11 · Snowflake · Python 3.13 · `espn-api` wrapper · `gspread`.
 
+## A note on the name
+
+"Fantasy League Almanac" is the working personality name; the repository is still `fantasy-league-front-page` for historical reasons. Don't read too much into either, likely to change.
+
 ## Contact
+
 Email: kpdawson.github@gmail.com
 LinkedIn: https://www.linkedin.com/in/kyledawson24/
 Ko-fi: https://ko-fi.com/kpdawson24
 
-## A note on the name
+## Contributing
 
-"Fantasy League Almanac" is the working personality name; the repository is still `fantasy-league-front-page` for historical reasons. Don't read too much into either, likely to change.
+This is a personal portfolio project and I'm not accepting code contributions (pull requests) for now -- it keeps the licensing story simple while the project's future shape settles.
+
+Issues, bug reports, and feedback are very welcome.
+

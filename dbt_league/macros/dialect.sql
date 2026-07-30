@@ -85,7 +85,14 @@ lateral flatten(input => {{ expr }}) {{ alias }}
 {%- endmacro %}
 
 {% macro duckdb__json_get(expr, path) -%}
-{{ expr }}{% for seg in path %}->'{{ seg }}'{% endfor %}
+{#- The wrapping parens are load-bearing, not decoration. DuckDB binds `->`
+    LOOSER than `is not null`, so an unparenthesized `x->'id' is not null`
+    parses as `x->('id' is not null)` and dies with
+    `No function matches json_extract(JSON, BOOLEAN)`. Staging filters on
+    exactly that shape (`where p.value:id is not null`), so the macro
+    parenthesizes once here instead of asking 100-odd call sites to
+    remember. Snowflake's `:` binds tightly and needs no help. -#}
+({{ expr }}{% for seg in path %}->'{{ seg }}'{% endfor %})
 {%- endmacro %}
 
 

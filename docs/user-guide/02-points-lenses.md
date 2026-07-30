@@ -69,30 +69,19 @@ ones. That is not an omission -- bench production never rolled up into
 any platform score, so there is nothing for the platform to have
 awarded.
 
-<!-- OPEN QUESTION FOR KYLE -- do not publish until resolved.
-     "Wasted points" is defined three different ways in three places:
-       1. Home tab Points Glossary (almanac_logic.py:520-524 and the CBS
-          twin at cbs_almanac_sheets.py:2762-2764) says
-          "inactive points + the size of any negative active-game totals".
-       2. The warehouse column WASTED_POINTS
-          (mart_stat_leaderboard.sql:167-168) is ROSTERED_INACTIVE
-          calculated points ONLY -- the negative-active piece is a
-          separate column, negative_points. FA production is excluded.
-       3. The CBS Wasted Hall of Shame (cbs_almanac_sheets.py:3183-3184)
-          says "unrostered + benched", which INCLUDES the FA pool that
-          definition 2 excludes.
-     Also: get_wasted_points_records exists and is exported
-     (almanac_data.py:2239) but is not in the ESPN Records tab's default
-     spec list (almanac_logic.py:1532-1537), so I could not find a Wasted
-     Points block actually rendering on the ESPN Records tab.
-     I have written the section below to the shape all three agree on and
-     left the arithmetic out. Tell me which definition is canonical and I
-     will make the glossary, the column, and the CBS block say it. -->
+**Wasted points** is production a team had access to and did not get, and
+it means one thing everywhere in the workbook: **unrostered + inactive +
+the size of any negative active-game totals**.
 
-**Wasted points** is the umbrella term for production a team had access
-to and did not get. Read the specific definition on whichever surface you
-are looking at, because the surfaces currently scope it differently --
-some count only your own bench, some also count players nobody rostered.
+That third term is there because giving points back is its own kind of
+waste. A starter who goes +100 one day and -100 the next did not have a
+quiet week, and netting him out to zero would hide it.
+
+Which of the three terms carries a value depends on whose waste you are
+reading. A *player's* total can carry all three. A *team's* total carries
+only the last two -- the unrostered term is zero, because a player nobody
+rostered was not any one team's to waste. That is the same definition
+with a term that happens to be zero, not a different rule for teams.
 
 ## The optimal-lineup boards
 

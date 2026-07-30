@@ -4656,6 +4656,20 @@ def _write_tab(spreadsheet, title, rows, formats, value_input_option='RAW',
             ),
         )
     _sheets_call(f'clear {title}', worksheet.clear)
+    # clear() drops values but KEEPS merges, and the API silently
+    # discards any value written into a NON-anchor cell of a merged
+    # range -- so a merge lattice that moved since the last render eats
+    # exactly the cells that land off-anchor (the ESPN Trades tab's
+    # vanishing dates, 2026-07-29). Unmerge BEFORE the values write on
+    # any tab that merges; the style pass re-merges after.
+    if (title not in (HOME_TAB, RECORDS_TAB, STANDINGS_TAB, DRAFT_TAB)
+            or any(spec.get('merge') for spec in formats or ())):
+        _sheets_call(
+            f'unmerge {title}',
+            lambda ws=worksheet: spreadsheet.batch_update(
+                {'requests': [{'unmergeCells':
+                               {'range': {'sheetId': ws.id}}}]}),
+        )
     _sheets_call(
         f'update {title}',
         lambda ws=worksheet, r=rows, vio=value_input_option: ws.update(

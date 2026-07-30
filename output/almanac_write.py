@@ -254,6 +254,13 @@ def _replace_home_tab(spreadsheet, rows):
         )
 
     _sheets_call(f'clear {HOME_TAB}', worksheet.clear)
+    # clear() keeps merges, and a value written into a non-anchor cell
+    # of a stale merge is silently discarded (the Trades-tab lesson).
+    # The Wasted merge moves with the glossary, so unmerge before the
+    # values write.
+    _sheets_batch_update(spreadsheet, f'unmerge {HOME_TAB}', [
+        {'unmergeCells': {'range': {'sheetId': worksheet.id}}},
+    ])
     _sheets_call(
         f'update {HOME_TAB}',
         lambda: worksheet.update(rows, 'A1', value_input_option='USER_ENTERED'),
@@ -317,7 +324,6 @@ def _replace_home_tab(spreadsheet, rows):
                 'startColumnIndex': 1, 'endColumnIndex': 3,
             }
             _sheets_batch_update(spreadsheet, f'wasted merge {HOME_TAB}', [
-                {'unmergeCells': {'range': merge_range}},
                 {'mergeCells': {'range': merge_range,
                                 'mergeType': 'MERGE_ALL'}},
             ])
@@ -1453,6 +1459,17 @@ def _replace_trades_tab(spreadsheet, rows):
         )
 
     _sheets_call(f'clear {TRADES_TAB}', worksheet.clear)
+    # clear() drops values but KEEPS merges, and the API silently
+    # discards any value written into a NON-anchor cell of a merged
+    # range. The trade lattice moves every publish (new trades stack on
+    # top), so writing onto the previous render's merges was eating
+    # whichever dates and sums landed off-anchor -- Kyle's "randomly
+    # missing" Date Executed report (2026-07-29; the earlier
+    # formatting-overwrite explanation was wrong). Unmerge BEFORE the
+    # values write; _apply_trade_record_merges re-merges after.
+    _sheets_batch_update(spreadsheet, f'unmerge {TRADES_TAB}', [
+        {'unmergeCells': {'range': {'sheetId': worksheet.id}}},
+    ])
     _sheets_call(
         f'update {TRADES_TAB}',
         lambda: worksheet.update(rows, 'A1', value_input_option='RAW'),
@@ -1859,6 +1876,14 @@ def _replace_team_tab(spreadsheet, title, rows):
         )
 
     _sheets_call(f'clear {title}', worksheet.clear)
+    # clear() keeps merges, and a value written into a non-anchor cell
+    # of a stale merge is silently discarded (the Trades-tab lesson).
+    # The Best Individual Seasons banner merges move with roster length,
+    # so unmerge before the values write; the merges batch below
+    # re-merges after.
+    _sheets_batch_update(spreadsheet, f'unmerge {title}', [
+        {'unmergeCells': {'range': {'sheetId': worksheet.id}}},
+    ])
     _sheets_call(
         f'update {title}',
         lambda: worksheet.update(rows, 'A1', value_input_option='RAW'),

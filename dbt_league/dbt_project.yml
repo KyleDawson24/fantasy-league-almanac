@@ -184,3 +184,12 @@ seeds:
         first_name: varchar
         last_name: varchar
         preferred_name: varchar
+        # The committed seed ends at preferred_name; a local working copy
+        # may carry contact columns that never ship (MLB-95 -- identity
+        # seeds carry no contact data in git, ever). Typed anyway because
+        # engines that enforce all-or-none column_types per seed file
+        # (dbt-duckdb) must see every loaded column typed, and keys for
+        # absent columns are ignored -- so the four-column public seed
+        # and a six-column local copy both load (MLB-134).
+        email: varchar
+        phone_number: varchar

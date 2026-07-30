@@ -92,7 +92,7 @@ Built on dbt + Snowflake + Python: extract scripts land raw JSON, dbt owns every
 
 ![Week 16 Recap, posted live to the league's ESPN front page](docs/img/espn-recap-posted.png)
 
-*Posted straight to the league's actual ESPN front page; this is Week 16, live, not a mockup. Even the jokey callouts are scripted according to a [purpose built callout-script](output/league_notes.py).*
+*Posted straight to the league's actual ESPN front page; this is Week 16, live, not a mockup. Even the jokey callouts are scripted, by a purpose-built callout script (`output/league_notes.py`). This is personalized league content: the recap is generated per league, and which callouts fire is configurable.*
 
 Alternate Recap, as text:
 

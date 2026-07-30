@@ -1147,11 +1147,15 @@ def _replace_advanced_standings_tab(spreadsheet, rows, stat_specs):
                      if r and len(r) <= 45), default=20)
             band_specs.append((i, w))
             # Era/scope captions ride the banner row (MLB-142) at column D
-            # plus, on the two-half slot grid, the divider cell. Explicit
-            # columns, not "any populated cell": the Rank by Week banner
-            # row also carries the side finishes table's header at V+.
-            scope_cols = [3]
-            if title.startswith('Points by Lineup Slot'):
+            # (E on the indented affinity block) plus, on the two-half
+            # tables, the divider cell. Explicit columns, not "any
+            # populated cell": the Rank by Week banner row also carries
+            # the side finishes table's header at V+.
+            two_half = title.startswith(('Points by Lineup Slot',
+                                         'Production by Acquisition Channel',
+                                         'Roster Affinity by MLB Team'))
+            scope_cols = [4 if title.startswith('Roster Affinity') else 3]
+            if two_half:
                 scope_cols.append(ESPN_DIVIDER_COL0 + 1)
             scope_cells.extend(
                 (i + 1, c) for c in scope_cols if len(row) > c and row[c])

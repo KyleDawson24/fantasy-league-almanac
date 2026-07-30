@@ -358,9 +358,12 @@ class TestAcquisitionBlocks:
         rows, _ = _build(monkeypatch, acquisition_rows=season,
                          alltime_acquisition_rows=hist)
 
-        sub = next(r for r in rows
-                   if len(r) > 13 and r[1] == '2026 to date')
-        assert sub[13] == 'All-Time (2001-2026)'
+        # MLB-142 round 2: the era scopes ride the navy banner once for
+        # both lens tables; the per-table era rows are gone.
+        banner = next(r for r in rows
+                      if r and r[0] == 'PRODUCTION BY ACQUISITION CHANNEL')
+        assert banner[2] == 'Current Season'
+        assert banner[13] == 'All-Time (2001-2026)'
         hdr_idx = rows.index(['Team', *self._HALF, '', *self._HALF])
         alpha = rows[hdr_idx + 1]
         assert alpha[0] == 'Alpha'

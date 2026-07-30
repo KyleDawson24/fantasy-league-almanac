@@ -3366,14 +3366,6 @@ def build_standings_rows(context, arc, finishes, active_franchises,
         formats.append({'range': f'A{len(rows)}:{width}{len(rows)}',
                         'format': {'textFormat': {'italic': True, 'fontSize': 10}}})
 
-    def _sub_labels(width_cols, left_label, right_start, right_label):
-        cells = [''] * width_cols
-        cells[1] = left_label
-        cells[right_start] = right_label
-        rows.append(cells)
-        formats.append({'range': f'A{len(rows)}:{_col(width_cols)}{len(rows)}',
-                        'format': {'textFormat': {'bold': True}}})
-
     latest = [r for r in arc if r['is_latest_period']]
 
     # Roll up by CANONICAL franchise (MLB-64): a club that left and returned
@@ -3806,7 +3798,14 @@ def build_standings_rows(context, arc, finishes, active_franchises,
         n_half = len(half)                      # 11
         acq_width = 2 + 2 * n_half              # Team + halves + buffer
         acq_last_col = _col(acq_width)
-        _section('PRODUCTION BY ACQUISITION CHANNEL', width=acq_last_col)
+        # Era scopes ride the banner once for both lens tables below --
+        # the halves sit at the same columns in each. The left scope sits
+        # at column C: the title overflows past column B's width.
+        _section('PRODUCTION BY ACQUISITION CHANNEL',
+                 scopes=[(2, 'Current Season'),
+                         (2 + n_half,
+                          f'All-Time ({context["first_season"]}-{season})')],
+                 width=acq_last_col)
         _note("Points each franchise's roster produced, split by how each "
               "player arrived (Opening = on the roster at first pitch -- "
               "CBS never logged drafts, so draft and keeper both live "
@@ -3838,8 +3837,6 @@ def build_standings_rows(context, arc, finishes, active_franchises,
             rows.append([label])
             formats.append({'range': f'A{len(rows)}:{acq_last_col}{len(rows)}',
                             'format': {'textFormat': {'bold': True}}})
-            _sub_labels(acq_width, f'{season} to date', 2 + n_half,
-                        f'All-Time ({context["first_season"]}-{season})')
             bands = [''] * acq_width
             for base in (1, 2 + n_half):
                 bands[base] = 'Points Acquired Via'
@@ -3922,7 +3919,9 @@ def build_standings_rows(context, arc, finishes, active_franchises,
             return round(games / total, 3) if games and total else ''
 
         rows.append([])
-        _section('MLB Affinity Chart', width=aff_last_col)
+        _section('MLB Affinity Chart',
+                 scopes=[(1, 'Current Season'), (2 + n_t, 'All-Time')],
+                 width=aff_last_col)
         _note("Share of each franchise's active-lineup involvement -- "
               "defined as plate appearances + batters faced -- with each "
               "MLB club (pure GP would underweight pitchers). 2004-2020 "
@@ -3930,7 +3929,6 @@ def build_standings_rows(context, arc, finishes, active_franchises,
               "the league's own lineup logs (2026 captured live). Bold "
               "indicates highest value for given MLB team.",
               width=aff_last_col)
-        _sub_labels(aff_width, f'{season} to date', 2 + n_t, 'All-time')
         _header(['MLB Team', *abbrevs, '', *abbrevs], width=aff_last_col)
         aff_first = len(rows) + 1
 

@@ -1241,7 +1241,11 @@ class TestAdvancedStandingsRows:
             standings, [], _STANDINGS_SPECS, 2026, acquisition_rows=acq,
         )
 
-        assert ['Production by Acquisition Channel'] in rows
+        # MLB-142 round 2: era scopes ride the banner once for both lenses.
+        acq_banner = next(r for r in rows
+                          if r and r[0] == 'Production by Acquisition Channel')
+        assert acq_banner[3] == 'Current Season'
+        assert acq_banner[21] == 'All-Time (2026-)'
         lens_labels = [r[0] for r in rows if r and str(r[0]).startswith(
             ('Active Lens', 'Rostered Lens'))]
         assert len(lens_labels) == 2
@@ -1257,7 +1261,8 @@ class TestAdvancedStandingsRows:
         rows = almanac_sheets.build_advanced_standings_tab_rows(
             [_standings_team()], [], _STANDINGS_SPECS, 2026,
         )
-        assert ['Production by Acquisition Channel'] not in rows
+        assert not any(r and r[0] == 'Production by Acquisition Channel'
+                       for r in rows)
         titles = [r for r in rows
                   if r and str(r[0]).startswith('Points by Lineup Slot')]
         assert titles == [['Points by Lineup Slot', '', '', 'Season Totals']]
@@ -1325,8 +1330,12 @@ class TestAdvancedStandingsRows:
         aff_pad = [''] * 15                 # E + 2 teams -> pad to V
         hdr = rows.index(['', '', 'MLB Team', '', 'AAA', 'BBB', *aff_pad,
                           'AAA', 'BBB'])
-        assert rows[hdr - 1][2] == '2026 to date'
-        assert rows[hdr - 1][21] == 'All-Time'
+        # MLB-142 round 2: the era scopes ride the banner row (two above
+        # the header, past the explainer); the separate era row is gone.
+        banner = rows[hdr - 2]
+        assert banner[0] == 'Roster Affinity by MLB Team'
+        assert banner[4] == 'Current Season'
+        assert banner[21] == 'All-Time'
         # The spine shows full club names (static abbrev map).
         atl = next(r for r in rows[hdr + 1:]
                    if len(r) > 2 and r[2] == 'Atlanta Braves')

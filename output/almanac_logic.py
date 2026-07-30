@@ -1335,7 +1335,13 @@ def build_advanced_standings_tab_rows(standings_rows, slot_rows, stat_specs,
     # acquisition channel" deliverable), ties broken by abbrev for determinism.
     if acquisition_rows:
         rows.append([])
-        rows.append(['Production by Acquisition Channel'])
+        # Era scopes ride the banner once for both lens tables below --
+        # the halves sit at the same columns in each (MLB-142 round 2).
+        acq_banner = [''] * (ESPN_DIVIDER_COL0 + 1)
+        acq_banner[0] = 'Production by Acquisition Channel'
+        acq_banner[3] = 'Current Season'
+        acq_banner.append('All-Time (2026-)')
+        rows.append(acq_banner)
         rows.append([
             "Points each team's roster produced, split by how each player was "
             "acquired, against the points departed players went on to produce "
@@ -1360,10 +1366,6 @@ def build_advanced_standings_tab_rows(standings_rows, slot_rows, stat_specs,
             )
             rows.append([])
             rows.append([label])
-            sub_labels = [''] * len(ACQUISITION_HEADER)
-            sub_labels[3] = f'{season_year} to date'
-            sub_labels[ESPN_DIVIDER_COL0 + 1] = 'All-Time (2026-)'
-            rows.append(sub_labels)
             rows.append(list(ACQUISITION_BAND_ROW))
             rows.append(list(ACQUISITION_HEADER))
             acq_pad = [''] * (ESPN_DIVIDER_COL0 + 1 - 15)
@@ -1423,17 +1425,20 @@ def build_advanced_standings_tab_rows(standings_rows, slot_rows, stat_specs,
         season0 = spine0 + 2
         aff_pad = [''] * max(0, ESPN_DIVIDER_COL0 + 1 - (season0 + n_t))
         rows.append([])
-        rows.append(['Roster Affinity by MLB Team'])
+        # Era scopes ride the banner (MLB-142 round 2): the left one at
+        # the season half's first data column (E) -- the title overflows
+        # A through D, so a scope at the old spine column would clip it.
+        aff_banner = [''] * (ESPN_DIVIDER_COL0 + 1)
+        aff_banner[0] = 'Roster Affinity by MLB Team'
+        aff_banner[season0] = 'Current Season'
+        aff_banner.append('All-Time')
+        rows.append(aff_banner)
         rows.append([
             "Share of each team's active-lineup involvement -- defined as "
             "plate appearances + batters faced -- with each MLB club "
             "(pure GP would underweight pitchers). Bold indicates highest "
             "value for given MLB team."
         ])
-        sub_labels = [''] * (ESPN_DIVIDER_COL0 + 1)
-        sub_labels[spine0] = f'{season_year} to date'
-        sub_labels.append('All-Time')
-        rows.append(sub_labels)
         rows.append(['', '', 'MLB Team', '', *abbrevs, *aff_pad, *abbrevs])
         for club in club_list:
             rows.append([

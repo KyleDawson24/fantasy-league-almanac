@@ -3834,9 +3834,11 @@ def build_standings_rows(context, arc, finishes, active_franchises,
             # Kyle's round-7 shape: ONE table per lens, season half left /
             # all-time half right on the ACTIVE-franchise spine (formers
             # filtered by construction), group bands over each half.
-            rows.append([label])
-            formats.append({'range': f'A{len(rows)}:{acq_last_col}{len(rows)}',
-                            'format': {'textFormat': {'bold': True}}})
+            # House explainer caption -- size 10 italic, NOT bold
+            # (MLB-161). This row was bolded like a header; it reads as
+            # one, but it is a caption, so it goes through _note like
+            # every other explainer on the book.
+            _note(label, width=acq_last_col)
             bands = [''] * acq_width
             for base in (1, 2 + n_half):
                 bands[base] = 'Points Acquired Via'

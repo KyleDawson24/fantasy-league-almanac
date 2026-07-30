@@ -1259,6 +1259,19 @@ def _replace_advanced_standings_tab(spreadsheet, rows, stat_specs):
                 'format': {'numberFormat': {'type': 'NUMBER',
                                             'pattern': '0'}},
             })
+        # The per-lens explainer sits two rows above each acquisition
+        # header (label, band, header) and takes the house explainer
+        # caption -- size 10 italic, NOT bold (MLB-161). Anchored off the
+        # header bounds rather than the text, so a reworded lens label
+        # keeps its styling. bold:False is explicit: this is a partial
+        # textFormat merge, so an inherited bold would otherwise survive.
+        for hdr, _end in _acquisition_table_bounds(rows):
+            if hdr >= 2:
+                formats.append({
+                    'range': f'A{hdr - 1}:{last_col}{hdr - 1}',
+                    'format': {'textFormat': {'bold': False, 'italic': True,
+                                              'fontSize': 10}},
+                })
         # The acquisition group-band rows bold + center over their merges;
         # every indented sub-label row ('<season> to date' / 'All-Time'
         # ...) bolds full-width.

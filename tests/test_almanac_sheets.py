@@ -1165,7 +1165,9 @@ class TestAdvancedStandingsRows:
         # Subtitle reads the DERIVED standard matchup length (8 here), not
         # a hardcoded 7.
         assert 'averages per 8 days of gameplay' in rows[1][0]
-        assert rows[3] == ['Detailed Standings (Weekly Averages)']
+        # (β) MLB-142: scope rides the banner row as an italic caption.
+        assert rows[3] == ['Detailed Standings', '', '',
+                           'Weekly Averages, Current Season']
         assert rows[4][:4] == ['Rank', 'Team', 'Owner', 'W-L']
         assert rows[5][:2] == [1, 'AAA']
         assert rows[6][:2] == [2, 'BBB']
@@ -1175,7 +1177,7 @@ class TestAdvancedStandingsRows:
         # despite input order); a team missing a slot renders blank. BE/IL
         # never arrive here -- the data layer filters to active slots.
         # (Single blank between sections since the round-11 parity pass.)
-        assert rows[8] == ['Points by Lineup Slot (Season Totals)']
+        assert rows[8] == ['Points by Lineup Slot', '', '', 'Season Totals']
         assert rows[9] == ['', 'Team', 'Owner', 'C', 'SP']
         assert rows[10] == ['', 'AAA', 'Owner 1', 5.5, 9.9]
         assert rows[11] == ['', 'BBB', 'Owner 2', 4.4, '']
@@ -1256,9 +1258,9 @@ class TestAdvancedStandingsRows:
             [_standings_team()], [], _STANDINGS_SPECS, 2026,
         )
         assert ['Production by Acquisition Channel'] not in rows
-        titles = [r[0] for r in rows
+        titles = [r for r in rows
                   if r and str(r[0]).startswith('Points by Lineup Slot')]
-        assert titles == ['Points by Lineup Slot (Season Totals)']
+        assert titles == [['Points by Lineup Slot', '', '', 'Season Totals']]
         assert not any(r and r[0] == 'Roster Affinity by MLB Team'
                        for r in rows)
 
@@ -1286,9 +1288,12 @@ class TestAdvancedStandingsRows:
         assert titles == ['Points by Lineup Slot']
         pad = [''] * 16                     # 3 id cols + 2 slots -> V
         hdr = rows.index(['', 'Team', 'Owner', 'C', 'SP', *pad, 'C', 'SP'])
-        sub = rows[hdr - 1]
-        assert sub[3] == '2026 to date -- Averages per Matchup'
-        assert sub[21] == 'All-Time -- Averages per Matchup'
+        # (β) MLB-142: the era scopes ride the banner row itself; the
+        # separate era-header row is gone and the grid sits one row up.
+        banner = rows[hdr - 1]
+        assert banner[0] == 'Points by Lineup Slot'
+        assert banner[3] == 'Weekly Averages, Current Season'
+        assert banner[21] == 'Weekly Averages, All-Time'
         # Season totals now divide by the team's matchups played (2 in
         # the fixture): 5.5 -> 2.8.
         assert rows[hdr + 1] == ['', 'AAA', 'Owner 1',
@@ -1350,7 +1355,7 @@ class TestAdvancedStandingsRows:
             _STANDINGS_SPECS, 2026, rank_arc_rows=arc)
 
         # The chart section leads (title, subtitle, blank, then chart).
-        assert rows[3] == ['2026 Rank by Week']
+        assert rows[3] == ['Rank by Week', '', '', 'Current Season']
         chk_idx = next(i for i, r in enumerate(rows)
                        if r and r[0] == '(check to plot)')
         # Kyle's toggle scheme: individuals OFF, one ALL master ON.
@@ -1385,7 +1390,8 @@ class TestAdvancedStandingsRows:
         # Without rank rows the tab keeps its classic layout.
         plain = almanac_sheets.build_advanced_standings_tab_rows(
             [_standings_team()], [], _STANDINGS_SPECS, 2026)
-        assert plain[3] == ['Detailed Standings (Weekly Averages)']
+        assert plain[3] == ['Detailed Standings', '', '',
+                            'Weekly Averages, Current Season']
         assert almanac_write._rank_chart_bounds(plain) is None
 
     def test_finishes_table_beside_the_chart(self):

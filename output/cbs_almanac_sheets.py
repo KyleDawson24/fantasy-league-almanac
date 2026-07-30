@@ -3337,11 +3337,27 @@ def build_standings_rows(context, arc, finishes, active_franchises,
                                        'backgroundColor': _PALE_BLUE}},
     ]
 
-    def _section(label, width='AA'):
-        rows.append([label])
+    def _section(label, scopes=None, width='AA'):
+        # scopes: [(col0, text)] era/scope captions riding the banner row
+        # (MLB-142) -- the records tab's note-beside-the-label idiom, but
+        # positioned per block. The caption format is textFormat-only and
+        # WHITE: it must survive the unified-navy-width pass (which
+        # rewrites every backgroundColor=_NAVY range) and stay legible on
+        # the navy band, unlike the records tab's powder-blue one.
+        cells = [label]
+        for col0, text in scopes or ():
+            cells.extend([''] * (col0 + 1 - len(cells)))
+            cells[col0] = text
+        rows.append(cells)
         formats.append({'range': f'A{len(rows)}:{width}{len(rows)}',
                         'format': {'textFormat': {'bold': True, 'foregroundColor': _WHITE},
                                    'backgroundColor': _NAVY}})
+        for col0, _text in scopes or ():
+            formats.append({'range': f'{_col(col0 + 1)}{len(rows)}',
+                            'format': {'textFormat': {'bold': False,
+                                                      'italic': True,
+                                                      'fontSize': 10,
+                                                      'foregroundColor': _WHITE}}})
 
     def _header(cells, width='AA'):
         rows.append(cells)
@@ -3351,7 +3367,7 @@ def build_standings_rows(context, arc, finishes, active_franchises,
     def _note(text, width='AA'):
         rows.append([text])
         formats.append({'range': f'A{len(rows)}:{width}{len(rows)}',
-                        'format': {'textFormat': {'italic': True, 'fontSize': 9}}})
+                        'format': {'textFormat': {'italic': True, 'fontSize': 10}}})
 
     def _sub_labels(width_cols, left_label, right_start, right_label):
         cells = [''] * width_cols
@@ -3413,7 +3429,7 @@ def build_standings_rows(context, arc, finishes, active_franchises,
 
     # ---- the season arc: the chart IS the section (Kyle round 7 -- the
     # rank matrix went away entirely; its data lives in the hidden helper).
-    _section(f'{season} RANK BY PERIOD')
+    _section('RANK BY PERIOD', scopes=[(1, 'Current Season')])
     periods = sorted({int(r['period']) for r in arc})
     rank_by = {}
     for r in arc:
@@ -3529,7 +3545,8 @@ def build_standings_rows(context, arc, finishes, active_franchises,
     year_labels = [str(y) for y in seasons] + [str(season)]
     finish_header = ['Franchise', 'Titles', 'Div', 'Avg'] + year_labels
     last_finish_col = _col(4 + len(year_labels))
-    _section(f'SEASON FINISHES {seasons[0]}–{season}', width=last_finish_col)
+    _section('SEASON FINISHES', scopes=[(1, f'{seasons[0]}–{season}')],
+             width=last_finish_col)
     _note('🏆 = Season Champion. Bright Green Border = Division Champion. '
           'Uses most current Team Names; franchises stitched across '
           'renames + re-ids.', width=last_finish_col)
@@ -3660,7 +3677,13 @@ def build_standings_rows(context, arc, finishes, active_franchises,
 
         capture_eq = _season_equivalents(capture_seasons)
 
-        _section('POINTS BY LINEUP SLOT', width=grid_last_col)
+        # Era scopes ride the banner at each half's first column
+        # (MLB-142); the separate era-header row is gone, so the grid
+        # sits one row up.
+        _section('POINTS BY LINEUP SLOT',
+                 scopes=[(1, 'Totals by Deployed Slot, Current Season'),
+                         (2 + n_l, 'Pace per Standard Season, All-Time')],
+                 width=grid_last_col)
         _note('All-time cells are paces per standard season '
               f'(= {n_std} gameplay days); short seasons (2020) and the '
               'season in flight weigh exactly the days they played. The P '
@@ -3668,10 +3691,6 @@ def build_standings_rows(context, arc, finishes, active_franchises,
               'in every era -- while hitter slots exist only where daily '
               'lineups are captured (2001-25 logged "active", not the '
               'slot), matching the Records page.', width=grid_last_col)
-        _sub_labels(grid_width,
-                    f'{season} to date -- totals by deployed slot',
-                    2 + n_l,
-                    'All-time -- pace per standard season')
         _header(['Team', *season_slots, '', *season_slots],
                 width=grid_last_col)
         grid_first = len(rows) + 1
@@ -3721,7 +3740,9 @@ def build_standings_rows(context, arc, finishes, active_franchises,
                       + [s for s, _ in pit_cols] + ['Pit Pts', '', 'Total'])
         det_width = len(det_header)
         det_last_col = _col(det_width)
-        _section('ALL-TIME DETAILED STANDINGS', width=det_last_col)
+        _section('DETAILED STANDINGS',
+                 scopes=[(1, 'Pace per Standard Season, All-Time')],
+                 width=det_last_col)
         _note('Active-lens production paced per standard season (the '
               f'{n_std}-gameplay-day clock above); IP = innings pitched. '
               'Ordered by total pace.', width=det_last_col)

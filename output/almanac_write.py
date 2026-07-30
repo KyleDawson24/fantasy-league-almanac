@@ -62,6 +62,7 @@ from almanac_logic import (
 from almanac_render import (
     ADVANCED_STANDINGS_TAB,
     DRAFT_TAB,
+    ESPN_DIVIDER_COL0,
     HOME_TAB,
     RECORDS_TAB,
     TRADE_AVAILABILITY_LABELS,
@@ -1117,39 +1118,62 @@ def _replace_advanced_standings_tab(spreadsheet, rows, stat_specs):
                                                'blue': 1}},
             'backgroundColor': {'red': 0.12, 'green': 0.20, 'blue': 0.30},
         }
-        section_titles = {'Detailed Standings (Weekly Averages)',
-                          'Detailed Standings (Weekly Averages, All-Time)',
-                          'Points by Lineup Slot',
-                          'Points by Lineup Slot (Season Totals)',
-                          'Production by Acquisition Channel',
-                          'Roster Affinity by MLB Team'}
+        # Prefix-matched (MLB-142): an exact-string set silently stops
+        # banding when a title is reworded -- no error, and banner
+        # formatting never reaches the goldens, so nothing else catches it.
+        section_title_prefixes = ('Detailed Standings',
+                                  'Points by Lineup Slot',
+                                  'Production by Acquisition Channel',
+                                  'Roster Affinity by MLB Team',
+                                  'Rank by Week')
         # Two passes so every navy band runs as far as the WIDEST one
         # (Kyle round 12: unified band width).
         band_specs = []
+        scope_cells = []
         for i, row in enumerate(rows):
             title = row[0] if row else None
-            if not (title in section_titles
-                    or (isinstance(title, str)
-                        and title.endswith('Rank by Week'))):
+            if not (isinstance(title, str)
+                    and title.startswith(section_title_prefixes)):
                 continue
             # Band width = the widest nearby row that isn't the hidden
             # helper block (helper rows park past column 45).
             w = max((len(r) for r in rows[i:i + 6]
                      if r and len(r) <= 45), default=20)
             band_specs.append((i, w))
+            # Era/scope captions ride the banner row (MLB-142) at column D
+            # plus, on the two-half slot grid, the divider cell. Explicit
+            # columns, not "any populated cell": the Rank by Week banner
+            # row also carries the side finishes table's header at V+.
+            scope_cols = [3]
+            if title.startswith('Points by Lineup Slot'):
+                scope_cols.append(ESPN_DIVIDER_COL0 + 1)
+            scope_cells.extend(
+                (i + 1, c) for c in scope_cols if len(row) > c and row[c])
             if title in ('Production by Acquisition Channel',
                          'Roster Affinity by MLB Team'):
-                # The explainer row directly underneath, CBS-note style.
+                # The explainer-style caption directly underneath
+                # (MLB-142: size 10, like the team tabs' provenance notes).
                 formats.append({
                     'range': f'A{i + 2}:{last_col}{i + 2}',
                     'format': {'textFormat': {'italic': True,
-                                              'fontSize': 9}},
+                                              'fontSize': 10}},
                 })
         if band_specs:
             band_col = _a1_col(max(w for _, w in band_specs))
             for i, _w in band_specs:
                 formats.append({'range': f'A{i + 1}:{band_col}{i + 1}',
                                 'format': dict(navy_fmt)})
+            # Scope captions render italic, not bold, still white on the
+            # navy band. textFormat-only and appended after the band fill,
+            # so the caption cell keeps the band's background.
+            for r1, c in scope_cells:
+                formats.append({
+                    'range': f'{_a1_col(c + 1)}{r1}',
+                    'format': {'textFormat': {
+                        'bold': False, 'italic': True, 'fontSize': 10,
+                        'foregroundColor': {'red': 1, 'green': 1,
+                                            'blue': 1}}},
+                })
         header_indices = [h for h, _ in a_tables]
         header_indices += [h for h, _ in slot_grids]
         header_indices += [h for h, _ in _acquisition_table_bounds(rows)]

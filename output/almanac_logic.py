@@ -1117,7 +1117,9 @@ def build_advanced_standings_tab_rows(standings_rows, slot_rows, stat_specs,
         n_teams = len(chart_teams)
         flip = n_teams + 1
         title_idx = len(rows)               # anchor for the side table
-        rows.append([f'{season_year} Rank by Week'])
+        # Era scope rides the banner as italic text (MLB-142); the year
+        # itself stays on the A1 tab title.
+        rows.append(['Rank by Week', '', '', 'Current Season'])
         rows.append(['Chart teams:',
                      *(ab for _, ab in chart_teams), 'ALL'])
         rows.append(['(check to plot)', *[False] * n_teams, True])
@@ -1229,7 +1231,8 @@ def build_advanced_standings_tab_rows(standings_rows, slot_rows, stat_specs,
 
         rows.append([])
 
-    rows.append(['Detailed Standings (Weekly Averages)'])
+    rows.append(['Detailed Standings', '', '',
+                 'Weekly Averages, Current Season'])
     rows.append(standings_header(hitting_specs, pitching_specs))
     for rank, team in enumerate(standings_rows, start=1):
         rows.append(
@@ -1241,7 +1244,8 @@ def build_advanced_standings_tab_rows(standings_rows, slot_rows, stat_specs,
     # denominators; stacked beneath (too wide for the L/R split).
     if standings_rows_alltime:
         rows.append([])
-        rows.append(['Detailed Standings (Weekly Averages, All-Time)'])
+        rows.append(['Detailed Standings', '', '',
+                     'Weekly Averages, All-Time'])
         rows.append(standings_header(hitting_specs, pitching_specs))
         for rank, team in enumerate(standings_rows_alltime, start=1):
             rows.append(
@@ -1249,7 +1253,7 @@ def build_advanced_standings_tab_rows(standings_rows, slot_rows, stat_specs,
                                      pitching_specs)
             )
 
-    def _append_slot_grid(title, grid_rows):
+    def _append_slot_grid(title, grid_rows, scope=None):
         # Slot columns in dim_roster_slot_counts.sort_order, carried on
         # every slot row -- no hardcoded slot list. Indented one cell with
         # Owner added so the grid's Team / Owner columns sit directly
@@ -1266,7 +1270,7 @@ def build_advanced_standings_tab_rows(standings_rows, slot_rows, stat_specs,
             by_team[r['team_id']][r['lineup_slot']] = r['slot_pts']
 
         rows.append([])
-        rows.append([title])
+        rows.append([title, '', '', scope] if scope else [title])
         rows.append(['', 'Team', 'Owner', *slot_cols])
         for team in standings_rows:
             team_slots = by_team.get(team['team_id'], {})
@@ -1298,11 +1302,14 @@ def build_advanced_standings_tab_rows(standings_rows, slot_rows, stat_specs,
         pad = [''] * max(0, ESPN_DIVIDER_COL0 + 1 - (3 + len(slot_cols)))
 
         rows.append([])
-        rows.append(['Points by Lineup Slot'])
-        sub_labels = [''] * (ESPN_DIVIDER_COL0 + 1)
-        sub_labels[3] = f'{season_year} to date -- Averages per Matchup'
-        sub_labels.append('All-Time -- Averages per Matchup')
-        rows.append(sub_labels)
+        # Era scopes ride the banner row as italic text at each half's
+        # label column (MLB-142); the separate era-header row is gone, so
+        # the grid sits one row up.
+        pbls_banner = [''] * (ESPN_DIVIDER_COL0 + 1)
+        pbls_banner[0] = 'Points by Lineup Slot'
+        pbls_banner[3] = 'Weekly Averages, Current Season'
+        pbls_banner.append('Weekly Averages, All-Time')
+        rows.append(pbls_banner)
         rows.append(['', 'Team', 'Owner', *slot_cols, *pad, *slot_cols])
 
         def _per_matchup(value, matchups):
@@ -1324,7 +1331,8 @@ def build_advanced_standings_tab_rows(standings_rows, slot_rows, stat_specs,
                 *[alltime_slots.get(slot, '') for slot in slot_cols],
             ])
     else:
-        _append_slot_grid('Points by Lineup Slot (Season Totals)', slot_rows)
+        _append_slot_grid('Points by Lineup Slot', slot_rows,
+                          scope='Season Totals')
 
     # Acquisition-channel blocks (MLB-17): production by how each player was
     # acquired, and the production forfeited when they left, under two lenses.

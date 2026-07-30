@@ -1,0 +1,54 @@
+# Repo-local dbt profile for the DuckDB target (MLB-10).
+#
+# WHY IT LIVES IN A SUBDIRECTORY: dbt auto-discovers a `profiles.yml`
+# sitting in the project root (dbt_league/) and would silently shadow
+# ~/.dbt/profiles.yml for every invocation, including the Snowflake ones
+# the weekly run depends on. Nesting it one level down means dbt never
+# finds it by accident -- it is reachable only via an explicit
+# `--profiles-dir dbt_league/profiles`, which is what tools/duckdb_run.sh
+# passes. The Snowflake `dev`/`demo` targets stay exactly where they are,
+# in ~/.dbt/profiles.yml, untouched by the port.
+#
+# WHY THE FILE IS NAMED ESPN_FANTASY.duckdb: `sources.yml` pins
+# `database: ESPN_FANTASY` / `schema: RAW`, and DuckDB takes its catalog
+# name from the database file's stem. Naming the file to match means
+# source() resolves to the same fully-qualified name on both engines and
+# not one line of model YAML moves for the port. Same reasoning for
+# `schema: ANALYTICS` below -- models land at ESPN_FANTASY.ANALYTICS.<x>
+# on DuckDB exactly as they do on Snowflake, which is what lets the
+# output layer swap connections in phase 5 without rewriting its SQL.
+#
+# Paths are relative to the CWD, and the house rule is that everything
+# runs from the repo root (CLAUDE.md, single-checkout world). Override
+# with DBT_DUCKDB_PATH to point at a different league's database.
+
+dbt_league:
+  target: duckdb
+  outputs:
+    duckdb:
+      type: duckdb
+      path: "{{ env_var('DBT_DUCKDB_PATH', 'data/duckdb/ESPN_FANTASY.duckdb') }}"
+      database: ESPN_FANTASY
+      schema: ANALYTICS
+      threads: 4
+      extensions:
+        - json
+
+      # Safety knobs, set FIRST rather than as a reaction to trouble.
+      # The MLB-9 spike's OOM retries ballooned the Windows pagefile ~26 GB
+      # and took C: from ~16 GB free to 1.7 GB; the audit's operational
+      # finding #3 is explicit that a consumer-hardware dev loop pins the
+      # memory limit and caps the spill directory up front. The cap is
+      # deliberately modest -- the full 244-node chain built green at 6 GB
+      # with an observed ~1.7 GB spill peak, so this is headroom, not a
+      # squeeze. DBT_DUCKDB_MEMORY_LIMIT lets the 8 GB-laptop diligence
+      # pass (MLB-109's "runs on a stranger's machine" claim) re-run the
+      # same build under tighter settings without editing this file.
+      settings:
+        memory_limit: "{{ env_var('DBT_DUCKDB_MEMORY_LIMIT', '6GB') }}"
+        max_temp_directory_size: "{{ env_var('DBT_DUCKDB_TEMP_LIMIT', '6GB') }}"
+        temp_directory: "{{ env_var('DBT_DUCKDB_TEMP_DIR', 'data/duckdb/tmp') }}"
+        # The reshape layer is wide and materializes as tables; row order
+        # is never load-bearing (every model that cares carries an explicit
+        # ORDER BY), so letting DuckDB parallelize freely is free speed.
+        preserve_insertion_order: false

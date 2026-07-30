@@ -2032,6 +2032,14 @@ def get_almanac_records(scope):
     )
     collapsed.extend(get_rate_records(scope))
     collapsed.extend(get_lineup_slot_records(scope))
+    # MLB-135: wasted lives at performance_status='inactive', so the main
+    # query above (which filters to 'active') can never return it -- that is
+    # why the export existed but nothing rendered. Fetched separately, like
+    # rate and lineup-slot records. Safe to extend BEFORE the contributor
+    # pass: WASTED_POINTS is in records_data._NO_PLAYER_BREAKDOWN_STATS, so
+    # the bulk fetch returns [] for it rather than interpolating the stat
+    # name as a fct column that does not exist.
+    collapsed.extend(get_wasted_points_records(scope))
     # Lazy import to dodge module-load circular (data <-> logic).
     # _attach_almanac_contributors lives in almanac_logic.py post-split;
     # retargeted away from the almanac_sheets facade in v1.1.1.

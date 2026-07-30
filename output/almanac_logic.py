@@ -220,6 +220,24 @@ SCORE_RECORD_SPECS = [
         'stat_name': 'CALCULATED_PITCHING_PTS',
         'direction': 'fewest',
     },
+    # MLB-135: the Wasted line. get_wasted_points_records has been exported
+    # since the mart gained the column but was never named in a spec, so no
+    # block rendered -- the tab under-reported by omission while the Home
+    # glossary defined the term. Team grain / 'most' only, matching what that
+    # fetch returns. Sits in Score Records beside the Worst-* futility lines
+    # rather than in its own section: it is a points record, and one data row
+    # does not earn a section header of its own.
+    {
+        'section': 'Score Records',
+        'spacer': True,
+    },
+    {
+        'section': 'Score Records',
+        'label': 'Most Wasted Points',
+        'grain': 'team',
+        'stat_name': 'WASTED_POINTS',
+        'direction': 'most',
+    },
 ]
 
 

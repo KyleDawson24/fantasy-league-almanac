@@ -2823,14 +2823,8 @@ _CBS_GLOSSARY = [
                           'never served a free-agent feed, so this is '
                           'derived as the remainder rather than counted '
                           'directly.'),
-    # The closing sentence flags MLB-135's under-count while its value
-    # alignment is parked; delete it when 135 lands.
     ('Wasted Points', 'Unrostered + inactive points, plus the size of any '
-                      'negative active-game totals -- points nobody '
-                      'rostered, points left on the bench, and points '
-                      'actively lost. Wasted totals shown elsewhere in this '
-                      'book still count only part of that; they are being '
-                      'brought in line.'),
+                      'negative active-game totals.'),
 ]
 
 # The league's 11 reserve slots -- the bench depth the All-League boards
@@ -3002,11 +2996,11 @@ def build_home_rows(context, nav_targets=None):
     # would merge the wrong cells without any golden noticing.
     for i, row in enumerate(rows, 1):
         if row and row[0] == 'Wasted Points':
-            formats.append({'range': f'B{i}:C{i + 1}',
+            formats.append({'range': f'B{i}:D{i + 1}',
                             'format': {'verticalAlignment': 'TOP',
                                        'horizontalAlignment': 'LEFT',
                                        'wrapStrategy': 'WRAP'}})
-            formats.append({'range': f'B{i}:C{i + 1}', 'merge': True})
+            formats.append({'range': f'B{i}:D{i + 1}', 'merge': True})
             break
     # Left-band section labels (col A scan).
     for i, row in enumerate(rows, 1):

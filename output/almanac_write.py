@@ -311,7 +311,7 @@ def _replace_home_tab(spreadsheet, rows):
                             if row and row[0] == 'Wasted Points'), None)
         if wasted_row0 is not None:
             formats.append({
-                'range': f'B{wasted_row0 + 1}:C{wasted_row0 + 2}',
+                'range': f'B{wasted_row0 + 1}:D{wasted_row0 + 2}',
                 'format': {'verticalAlignment': 'TOP',
                            'horizontalAlignment': 'LEFT',
                            'wrapStrategy': 'WRAP'},
@@ -321,7 +321,7 @@ def _replace_home_tab(spreadsheet, rows):
             merge_range = {
                 'sheetId': worksheet.id,
                 'startRowIndex': wasted_row0, 'endRowIndex': wasted_row0 + 2,
-                'startColumnIndex': 1, 'endColumnIndex': 3,
+                'startColumnIndex': 1, 'endColumnIndex': 4,
             }
             _sheets_batch_update(spreadsheet, f'wasted merge {HOME_TAB}', [
                 {'mergeCells': {'range': merge_range,

@@ -523,16 +523,8 @@ _HOME_GLOSSARY = [
     ('Inactive Points', "Produced while on a Fantasy Team's Bench or IL "
                         'slot.'),
     ('Unrostered Points', "Produced while on no Fantasy Team's roster."),
-    (
-        # The closing sentence flags MLB-135's under-count while its value
-        # alignment is parked; delete it when 135 lands.
-        'Wasted Points',
-        'Unrostered + inactive points, plus the size of any negative '
-        'active-game totals -- points nobody rostered, points left on the '
-        'bench, and points actively lost. Wasted totals shown elsewhere in '
-        'this book still count only part of that; they are being brought '
-        'in line.',
-    ),
+    ('Wasted Points', 'Unrostered + inactive points, plus the size of any '
+                      'negative active-game totals.'),
 ]
 
 

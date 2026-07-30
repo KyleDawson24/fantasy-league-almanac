@@ -129,7 +129,7 @@ with daily_eligible as (
         d.performance_status,
         d.active_weight
     from {{ ref('fct_player_daily_performance') }} d,
-    lateral flatten(input => d.eligible_slots) slot
+    {{ flatten_array('d.eligible_slots', 'slot') }}
     where slot.value::string not in ('BE', 'IL')
 ),
 

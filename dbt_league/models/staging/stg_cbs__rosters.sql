@@ -48,6 +48,6 @@ select
     p.value:eligible_positions_display::string      as eligible_positions,
     p.value:pro_team::string                        as pro_team
 from latest_per_date r,
-    lateral flatten(input => r.payload:body:rosters:teams) t,
-    lateral flatten(input => t.value:players) p
+    {{ flatten_array('r.payload:body:rosters:teams', 't') }},
+    {{ flatten_array('t.value:players', 'p') }}
 where p.value:id is not null

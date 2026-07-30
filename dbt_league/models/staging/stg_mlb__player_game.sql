@@ -62,7 +62,7 @@ stat_rows as (
         -- against any stray non-numeric value becoming a silent error.
         try_to_double(kv.value::string)     as stat_value
     from gamelogs g,
-        lateral flatten(input => g.game:stat) kv
+        {{ flatten_object('g.game:stat', 'kv') }}
 )
 
 select

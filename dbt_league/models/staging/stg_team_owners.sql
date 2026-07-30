@@ -42,4 +42,4 @@ select
     t.value:first_name::string  as first_name,
     t.value:last_name::string   as last_name
 from latest_extraction le,
-    lateral flatten(input => le.raw_json) t
+    {{ flatten_array('le.raw_json', 't') }}

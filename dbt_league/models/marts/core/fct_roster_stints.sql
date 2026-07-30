@@ -191,7 +191,7 @@ draft as (
         season_year,
         player_id,
         team_id,
-        boolor_agg(keeper) as keeper
+        {{ boolor_agg('keeper') }} as keeper
     from {{ ref('stg_draft') }}
     group by 1, 2, 3, 4
 )

@@ -39,7 +39,7 @@ flattened as (
         b.key::string   as stat_name,
         b.value::double  as stat_value
     from players,
-        lateral flatten(input => breakdown) b
+        {{ flatten_object('breakdown', 'b') }}
     where breakdown is not null
       and b.key::string not in ('K/9', 'K/BB', 'CYC')
 )

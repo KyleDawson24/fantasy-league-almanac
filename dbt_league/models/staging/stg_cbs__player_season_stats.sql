@@ -52,7 +52,7 @@ players as (
         case when u.universe_code = 'P' then 'pitching' else 'hitting' end as universe,
         p.value as player
     from universes u,
-        lateral flatten(input => u.payload:body:league_stats:players) p
+        {{ flatten_array('u.payload:body:league_stats:players', 'p') }}
     where p.value:id is not null
 ),
 
@@ -69,7 +69,7 @@ stat_values as (
         -- crosswalk stats anyway.
         try_to_double(replace(kv.value::string, ',', '')) as stat_value
     from players pl,
-        lateral flatten(input => pl.player) kv
+        {{ flatten_object('pl.player', 'kv') }}
 )
 
 select

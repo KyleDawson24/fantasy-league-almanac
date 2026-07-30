@@ -68,7 +68,7 @@ categories as (
         f.value:group::string        as rules_group,
         f.value:points::double        as feed_points
     from latest_snapshot s,
-        lateral flatten(input => s.payload:body:scoring_rules:categories) f
+        {{ flatten_array('s.payload:body:scoring_rules:categories', 'f') }}
 )
 
 select

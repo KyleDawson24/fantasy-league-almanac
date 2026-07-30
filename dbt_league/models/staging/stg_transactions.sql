@@ -57,8 +57,8 @@ legs as (
         nullif(nullif(msg.value:"to"::integer, 0), -1)    as raw_to_team_id,
         nullif(nullif(msg.value:"for"::integer, 0), -1)   as raw_for_team_id
     from latest_extraction le,
-        lateral flatten(input => le.raw_json) topic,
-        lateral flatten(input => topic.value:messages) msg
+        {{ flatten_array('le.raw_json', 'topic') }},
+        {{ flatten_array('topic.value:messages', 'msg') }}
     where msg.value:messageTypeId::integer in (178, 179, 224, 239, 244)
 )
 

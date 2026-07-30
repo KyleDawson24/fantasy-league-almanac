@@ -61,7 +61,7 @@ flattened as (
             else f.value:points::double
         end                     as points_per_unit
     from latest_extraction e,
-        lateral flatten(input => e.raw_json) f
+        {{ flatten_array('e.raw_json', 'f') }}
 )
 
 select

@@ -150,7 +150,7 @@ day_base as (
         max(a.team_name)                   as captured_team_name,
         max(a.provenance)                  as provenance,
         max(a.active_weight)               as active_weight,
-        boolor_agg(coalesce(a.is_active, false)) as is_active_known_true,
+        {{ boolor_agg('coalesce(a.is_active, false)') }} as is_active_known_true,
         max(iff(a.is_active is null, 1, 0))      as is_active_unknown,
         count(distinct e.game_pk)          as games_played,
 

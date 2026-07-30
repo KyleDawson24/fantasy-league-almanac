@@ -571,7 +571,7 @@ flags as (
         -- Anchored but the log's last word was a departure: the log
         -- missed a re-acquisition. (Their season_end stint is absent --
         -- surfaced as a flag, not silently invented.)
-        boolor_agg(close_type = 'season_end') as ends_on_roster
+        {{ boolor_agg("close_type = 'season_end'") }} as ends_on_roster
     from stints
     group by 1, 2, 3, 4
 )

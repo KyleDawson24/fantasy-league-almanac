@@ -90,20 +90,20 @@ select
     -- as format_owners()'s .title(). preferred_name (when set) wins
     -- verbatim, so nicknames + intentional casing (McAvery) come through.
     --
-    -- PORTABILITY (MLB-134, hand off to MLB-10): INITCAP is a dialect surface
-    -- and its output is RENDERED data -- owner names on every team page and
-    -- the Home grid. Two exposures on a port: whether the target engine has
-    -- INITCAP at all, and whether it calls the same characters word
-    -- boundaries (apostrophes and hyphens are the classic divergence --
-    -- O'Neal vs O'neal, McDonald vs Mcdonald). This is the title_case()
-    -- macro candidate; the per-adapter dispatch belongs with MLB-10 phase 2,
-    -- NOT here. Named now so that if a golden moves during the port it has a
-    -- documented cause instead of reading as a data bug.
+    -- PORTABILITY (MLB-134, resolved by MLB-10 phase 2): INITCAP is a dialect
+    -- surface and its output is RENDERED data -- owner names on every team
+    -- page and the Home grid. Both exposures the pre-port review named are
+    -- now closed. DuckDB has no INITCAP at all, so title_case() dispatches to
+    -- a character-wise shim rather than a rename; and the word-boundary
+    -- question (apostrophes and hyphens -- O'Neal vs O'neal, McDonald vs
+    -- Mcdonald) was settled by A/B rather than by argument: the shim was run
+    -- against Snowflake's native INITCAP over all 98 non-empty owner name
+    -- parts in the seed, 0 mismatches. No golden can move here.
     coalesce(
         n.preferred_name,
         nullif(
-            initcap(trim(coalesce(o.first_name, n.first_name)))
-                || ' ' || initcap(trim(coalesce(o.last_name, n.last_name))),
+            {{ title_case('trim(coalesce(o.first_name, n.first_name))') }}
+                || ' ' || {{ title_case('trim(coalesce(o.last_name, n.last_name))') }},
             ''),
         -- CBS historical owners have no nickname row and no last_name, so the
         -- concat above is NULL -- fall back to their roster-page display.

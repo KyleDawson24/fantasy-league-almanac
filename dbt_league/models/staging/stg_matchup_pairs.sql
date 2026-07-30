@@ -18,9 +18,7 @@ select distinct
     m.value:home_team_id::integer as home_team_id,
     m.value:away_team_id::integer as away_team_id
 from {{ source('raw', 'box_scores') }},
-    lateral flatten(
-        input => coalesce(raw_json:matchups, raw_json)
-    ) m
+    {{ flatten_array('coalesce(raw_json:matchups, raw_json)', 'm') }}
 qualify row_number() over (
     partition by league_key,
         season_year,

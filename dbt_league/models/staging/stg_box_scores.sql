@@ -53,9 +53,7 @@ matchups as (
         matchup_period,
         m.value as matchup
     from raw,
-        lateral flatten(
-            input => coalesce(raw_json:matchups, raw_json)
-        ) m
+        {{ flatten_array('coalesce(raw_json:matchups, raw_json)', 'm') }}
 ),
 
 home_players as (
@@ -79,10 +77,10 @@ home_players as (
         p.value:eligibleSlots              as eligible_slots,
         coalesce(
             p.value:games_played::integer,
-            iff(array_size(object_keys(p.value:breakdown)) > 0, 1, 0)
+            iff({{ json_keys_count('p.value:breakdown') }} > 0, 1, 0)
         )                                  as games_played
     from matchups,
-        lateral flatten(input => matchup:home_lineup) p
+        {{ flatten_array('matchup:home_lineup', 'p') }}
 ),
 
 away_players as (
@@ -106,10 +104,10 @@ away_players as (
         p.value:eligibleSlots              as eligible_slots,
         coalesce(
             p.value:games_played::integer,
-            iff(array_size(object_keys(p.value:breakdown)) > 0, 1, 0)
+            iff({{ json_keys_count('p.value:breakdown') }} > 0, 1, 0)
         )                                  as games_played
     from matchups,
-        lateral flatten(input => matchup:away_lineup) p
+        {{ flatten_array('matchup:away_lineup', 'p') }}
 ),
 
 -- Phase 4 free agents: top-level array on the raw JSON dict, parallel to
@@ -136,10 +134,10 @@ free_agents as (
         f.value:eligibleSlots              as eligible_slots,
         coalesce(
             f.value:games_played::integer,
-            iff(array_size(object_keys(f.value:breakdown)) > 0, 1, 0)
+            iff({{ json_keys_count('f.value:breakdown') }} > 0, 1, 0)
         )                                  as games_played
     from raw,
-        lateral flatten(input => raw_json:free_agents) f
+        {{ flatten_array('raw_json:free_agents', 'f') }}
 ),
 
 all_players as (

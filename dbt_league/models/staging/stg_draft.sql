@@ -44,4 +44,4 @@ select
     p.value:team_id::integer      as team_id,
     p.value:keeper::boolean       as keeper
 from latest_extraction le,
-    lateral flatten(input => le.raw_json) p
+    {{ flatten_array('le.raw_json', 'p') }}

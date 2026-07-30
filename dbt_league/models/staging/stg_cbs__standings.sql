@@ -47,8 +47,8 @@ teams as (
         -- before casting so a "5,519" never lands as NULL.
         replace(t.value:Total:points::string, ',', '')::double as points
     from latest_per_period s,
-        lateral flatten(input => s.payload:body:overall_standings:divisions) d,
-        lateral flatten(input => d.value:teams) t
+        {{ flatten_array('s.payload:body:overall_standings:divisions', 'd') }},
+        {{ flatten_array('d.value:teams', 't') }}
 )
 
 select

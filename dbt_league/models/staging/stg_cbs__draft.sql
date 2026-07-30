@@ -94,5 +94,5 @@ select
 
     parsed_at::varchar            as parsed_at,
     source_path::varchar          as source_path,
-    loaded_at::timestamp_ntz      as loaded_at
+    loaded_at::{{ type_timestamp_ntz() }}      as loaded_at
 from latest_load

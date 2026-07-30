@@ -52,7 +52,7 @@ legs as (
         {{ json_text('topic.value', 'id') }}::string                            as transaction_id,
         {{ json_text('msg.value', 'messageTypeId') }}::integer                  as source_message_type_id,
         {{ json_text('msg.value', 'targetId') }}::integer                       as player_id,
-        to_timestamp_ntz({{ json_text('msg.value', 'date') }}::number / 1000)   as event_ts,
+        {{ epoch_ms_to_timestamp(json_text('msg.value', 'date')) }}   as event_ts,
         nullif(nullif({{ json_text('msg.value', 'from') }}::integer, 0), -1)  as raw_from_team_id,
         nullif(nullif({{ json_text('msg.value', 'to') }}::integer, 0), -1)    as raw_to_team_id,
         nullif(nullif({{ json_text('msg.value', 'for') }}::integer, 0), -1)   as raw_for_team_id

@@ -68,9 +68,105 @@ lateral flatten(input => {{ expr }}) {{ alias }}
 
     Verified: NULL input and '{}' both yield zero rows, and keys
     containing '/' survive intact -- the 'K/9' case that rules out any
-    JSONPath-based extraction. -#}
+    JSONPath-based extraction.
+
+    The value type is map(varchar, VARCHAR), not map(varchar, json), and
+    that is load-bearing. Snowflake's flatten hands back a VARIANT whose
+    `::string` unwraps to bare text; DuckDB's `cast(json as varchar)`
+    SERIALIZES instead, so a JSON string keeps its quotes and every text
+    cast at a call site silently diverges. Casting the map's values to
+    varchar up front reproduces Snowflake's unwrap exactly -- verified
+    across all five JSON value shapes:
+
+      1 -> '1'   "2.5" -> '2.5'   null -> NULL
+      {"x":1} -> '{"x":1}'        [1,2] -> '[1,2]'
+
+    i.e. scalars unwrap, containers serialize, which is VARIANT::string's
+    behaviour term for term. Numeric casts (`.value::double`,
+    `.value::integer`) are unaffected -- they parse the text the same way
+    they parsed the JSON. This is why object-flatten call sites need no
+    json_unwrap_text; the ARRAY flatten below still does, because its
+    elements must stay JSON for further path steps. -#}
 (select unnest(map_keys(m)) as key, unnest(map_values(m)) as value
-     from (select cast({{ expr }} as map(varchar, json)) as m)) as {{ alias }}
+     from (select cast({{ expr }} as map(varchar, varchar)) as m)) as {{ alias }}
+{%- endmacro %}
+
+
+{% macro streamed_object_join(expr, alias) -%}
+{#- The same flatten as flatten_object, for the one place where the output
+    is too large to materialize. Read the three streamed_object_* macros
+    as a set: _join goes in the FROM clause, _key and _value in the SELECT
+    list, all three naming the same (expr, alias).
+
+    WHY IT EXISTS (measured on stg_mlb__player_game, 1.8M gamelogs x 42.2
+    stat keys = 76.3M rows). DuckDB CANNOT materialize a correlated
+    flatten of that size in ANY lateral spelling. All three failed at the
+    6 GB cap, and not marginally -- raising the spill cap to 40 GB still
+    failed, at 104s:
+
+      correlated subquery (flatten_object's shape)     FAIL
+      unnest(map_entries(...)) as kv(entry)            FAIL
+      ... with map values cast to varchar              FAIL
+
+    while the SAME 76.3M rows written from parallel unnests in the SELECT
+    list succeed in 15.2s. It is the lateral correlation that cannot
+    stream, not the row count and not the value type: DuckDB writes a
+    synthetic 42M x 16 table under the same cap in 33.5s.
+
+    So the two engines need different query SHAPES here, not different
+    spellings, and the shape is what these macros dispatch. Snowflake
+    keeps its lateral (the _join emits it, _key/_value emit `alias.key` /
+    `alias.value`) and its compiled text does not move; DuckDB puts the
+    unnests in the SELECT list and emits nothing in the FROM clause.
+
+    Parallel unnests in one SELECT list are zipped positionally, and
+    map_keys/map_values share an order for the same map -- the same
+    assumption flatten_object already makes inside its subquery. Proven
+    rather than assumed by the cell-level A/B against Snowflake.
+
+    Cost of the shape: the flattened alias cannot be referenced in that
+    SELECT's own WHERE clause on DuckDB, so a call site that filters on
+    the key needs an outer query. flatten_object stays the default for
+    everything that fits -- reach for this only when a flatten measurably
+    will not materialize. -#}
+    {{ return(adapter.dispatch('streamed_object_join', 'dbt_league')(expr, alias)) }}
+{%- endmacro %}
+
+{% macro default__streamed_object_join(expr, alias) -%}
+,
+        lateral flatten(input => {{ expr }}) {{ alias }}
+{%- endmacro %}
+
+{% macro duckdb__streamed_object_join(expr, alias) -%}
+{%- endmacro %}
+
+
+{% macro streamed_object_key(expr, alias) -%}
+    {{ return(adapter.dispatch('streamed_object_key', 'dbt_league')(expr, alias)) }}
+{%- endmacro %}
+
+{% macro default__streamed_object_key(expr, alias) -%}
+{{ alias }}.key
+{%- endmacro %}
+
+{% macro duckdb__streamed_object_key(expr, alias) -%}
+unnest(map_keys(cast({{ expr }} as map(varchar, varchar))))
+{%- endmacro %}
+
+
+{% macro streamed_object_value(expr, alias) -%}
+    {{ return(adapter.dispatch('streamed_object_value', 'dbt_league')(expr, alias)) }}
+{%- endmacro %}
+
+{#- Returns TEXT on both engines, matching flatten_object's varchar values:
+    Snowflake unwraps the VARIANT with ::string, DuckDB's map is already
+    map(varchar, varchar) so the unnest is text already. -#}
+{% macro default__streamed_object_value(expr, alias) -%}
+{{ alias }}.value::string
+{%- endmacro %}
+
+{% macro duckdb__streamed_object_value(expr, alias) -%}
+unnest(map_values(cast({{ expr }} as map(varchar, varchar))))
 {%- endmacro %}
 
 
@@ -114,6 +210,40 @@ lateral flatten(input => {{ expr }}) {{ alias }}
 
 {% macro duckdb__json_text(expr, path) -%}
 ({{ expr }}{% for seg in path[:-1] %}->'{{ seg }}'{% endfor %}->>'{{ path[-1] }}')
+{%- endmacro %}
+
+
+{% macro json_unwrap_text(expr) -%}
+{#- The text of a value that has ALREADY been extracted -- the element a
+    flatten handed back, not a path step. Snowflake's VARIANT::string
+    unwraps a JSON string to its bare text; DuckDB's `cast(json as
+    varchar)` SERIALIZES it instead and keeps the quotes.
+
+    That difference is silent and it changes values, which is why this
+    macro exists. Measured on the real payloads:
+
+      CBS  season stats  BFP  = "0"      -> '"0"'   -> try_to_double NULL
+      MLB  gamelogs      avg  = ".294"   -> '".294"'-> try_to_double NULL
+      ESPN eligible_slots     = [21,"1B","BE",...]  -> '"BE"' != 'BE'
+
+    The last one is the nastiest: `not in ('BE','IL')` stops filtering and
+    `in ('SP','RP','P')` stops matching, so bench rows leak into the
+    position lens and every pitcher is priced as a hitter -- with no error
+    anywhere. Numeric casts off JSON are NOT affected (`cast('"5"'::json
+    as double)` = 5.0, verified), so only the text casts route through here.
+
+    `->>` returns SQL NULL for JSON null and serializes objects/arrays,
+    both matching VARIANT::string. Parenthesized for the same
+    binding reason as json_get. -#}
+    {{ return(adapter.dispatch('json_unwrap_text', 'dbt_league')(expr)) }}
+{%- endmacro %}
+
+{% macro default__json_unwrap_text(expr) -%}
+{{ expr }}::string
+{%- endmacro %}
+
+{% macro duckdb__json_unwrap_text(expr) -%}
+({{ expr }}->>'$')
 {%- endmacro %}
 
 
@@ -181,7 +311,72 @@ cast({{ expr }} as varchar)
 {%- endmacro %}
 
 
+-- Types and time --------------------------------------------------------
+
+{% macro type_timestamp_ntz() -%}
+{#- The wall-clock timestamp type. DuckDB has no `timestamp_ntz` spelling
+    at all (`Catalog Error: Type with name timestamp_ntz does not exist`)
+    -- its plain `timestamp` IS the no-timezone type, so this is a rename
+    of the NAME, not a change of type. Emitted as a bare type name so the
+    `x::type` shape at the call sites does not move. -#}
+    {{ return(adapter.dispatch('type_timestamp_ntz', 'dbt_league')()) }}
+{%- endmacro %}
+
+{% macro default__type_timestamp_ntz() -%}
+timestamp_ntz
+{%- endmacro %}
+
+{% macro duckdb__type_timestamp_ntz() -%}
+timestamp
+{%- endmacro %}
+
+
+{% macro epoch_ms_to_timestamp(ms_expr) -%}
+{#- Epoch MILLISECONDS -> wall-clock timestamp. The macro takes the raw ms
+    value and each engine spells its own conversion, rather than the call
+    site pre-dividing: Snowflake's TO_TIMESTAMP_NTZ picks its unit from
+    the magnitude of the number it is handed, which is a heuristic worth
+    keeping on exactly the shape it was verified against, and DuckDB's
+    `epoch_ms` wants the undivided value anyway. Dividing at the call site
+    would force DuckDB to multiply back and round.
+
+    Snowflake output text is unchanged from the pre-port call site,
+    division and all. -#}
+    {{ return(adapter.dispatch('epoch_ms_to_timestamp', 'dbt_league')(ms_expr)) }}
+{%- endmacro %}
+
+{% macro default__epoch_ms_to_timestamp(ms_expr) -%}
+to_timestamp_ntz({{ ms_expr }}::number / 1000)
+{%- endmacro %}
+
+{% macro duckdb__epoch_ms_to_timestamp(ms_expr) -%}
+epoch_ms({{ ms_expr }}::bigint)
+{%- endmacro %}
+
+
 -- Scalar-function gaps --------------------------------------------------
+
+{% macro try_to_double(expr) -%}
+{#- "parse this text as a float, NULL if it isn't one". Snowflake
+    TRY_TO_DOUBLE; DuckDB has no TRY_TO_* family but TRY_CAST is exactly
+    the same idea. Both call sites feed it text that is expected to be
+    numeric but is not guaranteed to be (CBS 'PPos' is 'SS', MLB's
+    atBatsPerHomeRun is '-.--'), so the NULL-not-error behaviour is the
+    whole point.
+
+    Equivalence is not assumed from the name -- it is A/B'd against
+    Snowflake over the real stat values in both models. -#}
+    {{ return(adapter.dispatch('try_to_double', 'dbt_league')(expr)) }}
+{%- endmacro %}
+
+{% macro default__try_to_double(expr) -%}
+try_to_double({{ expr }})
+{%- endmacro %}
+
+{% macro duckdb__try_to_double(expr) -%}
+try_cast({{ expr }} as double)
+{%- endmacro %}
+
 
 {% macro boolor_agg(expr) -%}
 {#- "did any row in this group say true", NULL-tolerant. Snowflake spells

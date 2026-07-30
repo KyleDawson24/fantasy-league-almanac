@@ -57,12 +57,15 @@ stat_rows as (
         {{ json_text('g.game', 'opponent', 'name') }}::string        as opponent_team_name,
         {{ json_text('g.game', 'isHome') }}::boolean              as is_home,
         {{ json_text('g.game', 'isWin') }}::boolean               as is_win,
-        kv.key                              as statsapi_key,
+        {{ streamed_object_key(json_get('g.game', 'stat'), 'kv') }}                              as statsapi_key,
         -- Mapped keys are all integer-typed in the feed; the cast guards
         -- against any stray non-numeric value becoming a silent error.
-        try_to_double(kv.value::string)     as stat_value
-    from gamelogs g,
-        {{ flatten_object(json_get('g.game', 'stat'), 'kv') }}
+        {{ try_to_double(streamed_object_value(json_get('g.game', 'stat'), 'kv')) }}     as stat_value
+    -- streamed_object_* rather than flatten_object because this flatten is
+    -- 76.3M rows: no correlated spelling of it materializes on DuckDB even
+    -- with a 40 GB spill cap, and the SELECT-list unnests do it in 15s.
+    -- The macro header carries the measurements.
+    from gamelogs g{{ streamed_object_join(json_get('g.game', 'stat'), 'kv') }}
 )
 
 select

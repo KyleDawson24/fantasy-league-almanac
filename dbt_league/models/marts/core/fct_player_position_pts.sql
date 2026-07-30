@@ -82,7 +82,7 @@ with daily_eligible as (
         d.player_name,
         d.display_name,
         d.pro_team,
-        slot.value::string as position,
+        {{ json_unwrap_text('slot.value') }} as position,
 
         -- Position-category-appropriate calculated points. For pitching
         -- positions (SP / RP / P), use total_pitching_stat_pts; for
@@ -121,7 +121,7 @@ with daily_eligible as (
         -- slot two-way players, the fix is to feed this CASE from
         -- UNFILTERED per-category points -- the same knob as the
         -- strict_slot_validity var on int_player_daily.)
-        case when slot.value::string in ('SP', 'RP', 'P')
+        case when {{ json_unwrap_text('slot.value') }} in ('SP', 'RP', 'P')
              then d.total_pitching_stat_pts
              else d.total_hitting_stat_pts
         end as position_calculated_pts,
@@ -130,7 +130,7 @@ with daily_eligible as (
         d.active_weight
     from {{ ref('fct_player_daily_performance') }} d,
     {{ flatten_array('d.eligible_slots', 'slot') }}
-    where slot.value::string not in ('BE', 'IL')
+    where {{ json_unwrap_text('slot.value') }} not in ('BE', 'IL')
 ),
 
 aggregated as (

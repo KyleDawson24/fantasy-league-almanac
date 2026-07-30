@@ -67,7 +67,7 @@ stat_values as (
         -- Strip thousands separators; non-numeric values (e.g. PPos 'SP')
         -- become NULL and drop below -- but those keys aren't 'mapped'
         -- crosswalk stats anyway.
-        try_to_double(replace(kv.value::string, ',', '')) as stat_value
+        {{ try_to_double("replace(kv.value::string, ',', '')") }} as stat_value
     from players pl,
         {{ flatten_object('pl.player', 'kv') }}
 )

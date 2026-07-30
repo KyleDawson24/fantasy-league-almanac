@@ -17,6 +17,8 @@ import math
 import os
 import statistics
 from collections import defaultdict
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import almanac_data
 import almanac_render
@@ -514,15 +516,38 @@ _HOME_SCORING_CALLOUT = (
 )
 
 _HOME_GLOSSARY = [
-    ('Total Points', 'All points a player produced -- active + inactive.'),
-    ('Active Points', 'Produced while in an active lineup slot (not bench or IL).'),
-    ('Inactive Points', 'Produced while on a bench or IL slot.'),
+    ('Total Points', 'All points a player produced -- active + inactive + '
+                     'unrostered.'),
+    ('Active Points', "Produced while in a Fantasy Team's active lineup "
+                      'slot.'),
+    ('Inactive Points', "Produced while on a Fantasy Team's Bench or IL "
+                        'slot.'),
+    ('Unrostered Points', "Produced while on no Fantasy Team's roster."),
     (
+        # The closing sentence flags MLB-135's under-count while its value
+        # alignment is parked; delete it when 135 lands.
         'Wasted Points',
-        'Inactive points + the size of any negative active-game totals '
-        '(points left on the bench, plus points actively lost).',
+        'Unrostered + inactive points, plus the size of any negative '
+        'active-game totals -- points nobody rostered, points left on the '
+        'bench, and points actively lost. Wasted totals shown elsewhere in '
+        'this book still count only part of that; they are being brought '
+        'in line.',
     ),
 ]
+
+
+def updated_stamp():
+    """The Home tab's A3 'Updated ...' line: render time, ET, 24-hour
+    (MLB-141). Render-time state would poison the byte-diff corpora the
+    same way the commissioner note files did, so the golden harnesses
+    blank it via SUPPRESS_UPDATED_STAMP=1 -- its own switch rather than a
+    second job for SUPPRESS_LEAGUE_NOTES, so suppressing notes can never
+    silently blank the stamp. Live renders always stamp; dev/prod parity
+    holds because neither sets the var."""
+    if os.environ.get('SUPPRESS_UPDATED_STAMP') == '1':
+        return ''
+    now = datetime.now(ZoneInfo('America/New_York'))
+    return f'Updated {now:%b} {now.day}, {now.year} {now:%H:%M}'
 
 
 def build_home_tab_rows(weekly_rows, season_rows, weekly_all_rows,
@@ -550,7 +575,7 @@ def build_home_tab_rows(weekly_rows, season_rows, weekly_all_rows,
     banner = [
         ['Fantasy Beat Reporter Almanac'],
         [_HOME_SCORING_CALLOUT],
-        [],
+        [updated_stamp()],
     ]
     right_rows, season_label_idx = _home_right_rows(
         weekly_rows, weekly_all_rows, season_rows, season_all_rows,

@@ -277,6 +277,10 @@ def _replace_home_tab(spreadsheet, rows):
                     'backgroundColor': {'red': 0.90, 'green': 0.94, 'blue': 0.98},
                 },
             },
+            {  # the A3 'Updated ...' stamp (MLB-141)
+                'range': 'A3',
+                'format': {'textFormat': {'italic': True, 'fontSize': 10}},
+            },
             # Points number formats. Left all-time Points (C) is whole --
             # 1-decimal is overkill at the all-time scale; right Points (K)
             # and deviation total pts (O) stay one decimal. Number format
@@ -291,7 +295,31 @@ def _replace_home_tab(spreadsheet, rows):
             {'range': 'O:O', 'format': {'numberFormat': {'type': 'NUMBER', 'pattern': '0.0'}}},
         ]
         formats.extend(_home_label_formats(rows, last_col))
+        # The 2x2 beside 'Wasted Points' gives the longest definition room
+        # to wrap (MLB-141). Anchored by scanning for the term: glossary
+        # edits move the row, and a stale coordinate would merge the wrong
+        # cells without any golden noticing.
+        wasted_row0 = next((i for i, row in enumerate(rows)
+                            if row and row[0] == 'Wasted Points'), None)
+        if wasted_row0 is not None:
+            formats.append({
+                'range': f'B{wasted_row0 + 1}:C{wasted_row0 + 2}',
+                'format': {'verticalAlignment': 'TOP',
+                           'horizontalAlignment': 'LEFT',
+                           'wrapStrategy': 'WRAP'},
+            })
         _batch_format(worksheet, formats)
+        if wasted_row0 is not None:
+            merge_range = {
+                'sheetId': worksheet.id,
+                'startRowIndex': wasted_row0, 'endRowIndex': wasted_row0 + 2,
+                'startColumnIndex': 1, 'endColumnIndex': 3,
+            }
+            _sheets_batch_update(spreadsheet, f'wasted merge {HOME_TAB}', [
+                {'unmergeCells': {'range': merge_range}},
+                {'mergeCells': {'range': merge_range,
+                                'mergeType': 'MERGE_ALL'}},
+            ])
     except Exception as exc:
         print(f"[almanac] formatting skipped: {exc}")
 
@@ -302,7 +330,7 @@ def _apply_home_tab_dimensions(spreadsheet, worksheet):
     default. Indices are 0-based: A=0 ... O=14."""
     sheet_id = worksheet.id
     widths = [
-        (0, 100), (1, 125), (2, 100), (3, 50), (4, 100), (5, 40), (6, 40),
+        (0, 125), (1, 125), (2, 100), (3, 50), (4, 100), (5, 40), (6, 40),
         (7, 150), (8, 100), (9, 125), (10, 50), (13, 150), (14, 50),
     ]
     requests = [

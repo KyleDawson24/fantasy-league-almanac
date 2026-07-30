@@ -60,6 +60,11 @@ def _run_almanac_preview(preview_dir: Path) -> None:
         capture_output=True,
         text=True,
         encoding="utf-8",
+        # The Home tab's A3 "Updated ..." stamp is render-time state, so
+        # the corpus is only stable when it renders blank (MLB-141) --
+        # the same doctrine as SUPPRESS_LEAGUE_NOTES in test_golden_output,
+        # on its own switch so the two suppressions can't entangle.
+        env=dict(os.environ, SUPPRESS_UPDATED_STAMP="1"),
     )
     assert proc.returncode == 0, (
         f"generate_almanac_sheet.py failed (exit {proc.returncode}):\n"

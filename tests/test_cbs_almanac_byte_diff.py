@@ -81,6 +81,11 @@ def _render(out_dir: Path, monkeypatch) -> None:
 
     monkeypatch.setattr(cbs_almanac_sheets, "_month_window",
                         lambda: MONTH_WINDOW)
+    # The Home tab's A3 "Updated ..." stamp is render-time state, so the
+    # corpus is only stable when it renders blank (MLB-141). This render
+    # is in-process, so the switch is monkeypatched into the environment
+    # rather than passed as a subprocess env like the ESPN harness does.
+    monkeypatch.setenv("SUPPRESS_UPDATED_STAMP", "1")
 
     tabs, _, _ = cbs_almanac_sheets.build_all_tabs()
     preview_tabs = [(title, rows) for title, rows, _ in tabs]

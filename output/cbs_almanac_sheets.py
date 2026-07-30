@@ -73,6 +73,7 @@ from almanac_logic import (
     build_team_history_tabs,
     get_optimal_team_selections,
     season_pace_factors,
+    updated_stamp,
 )
 # The ESPN draft board's red->white->green cell math, reused verbatim so
 # the two books' boards read identically (private import, same doctrine
@@ -2804,18 +2805,32 @@ def _provenance_era_lines(mix_rows):
 # attribution has no FA lens, so "(incl. bench & FA)" would overclaim.
 _CBS_DEVIATION_LABEL = HOME_DEVIATION_LABEL.replace(' & FA', '')
 
+# Mirrors ESPN's _HOME_GLOSSARY lens set (MLB-141 ruling (i): both books
+# say the same thing about the same words), keeping Calculated Points --
+# it does platform-verification work ESPN's glossary has no need for.
 _CBS_GLOSSARY = [
     ('Calculated Points', 'Universal MLB stats priced by the league\'s '
                           'current scoring rules -- verified against CBS\'s '
                           'own awarded totals.'),
-    ('Active Points', 'Produced while in the starting lineup (weighted by '
-                      'start-share estimates where 2004–2020 daily '
-                      'lineups aren\'t recoverable).'),
-    ('Rostered Points', 'Everything produced while on the roster, started '
-                        'or benched.'),
-    ('Wasted Points', 'Inactive points + the size of any negative active-game '
-                      'totals (points left on the bench, plus points actively '
-                      'lost).'),
+    ('Total Points', 'All points a player produced -- active + inactive + '
+                     'unrostered.'),
+    ('Active Points', "Produced while in a Fantasy Team's starting lineup "
+                      '(weighted by start-share estimates where 2004–2020 '
+                      'daily lineups aren\'t recoverable).'),
+    ('Inactive Points', "Produced while on a Fantasy Team's bench or "
+                        'reserve.'),
+    ('Unrostered Points', "Produced while on no Fantasy Team's roster. CBS "
+                          'never served a free-agent feed, so this is '
+                          'derived as the remainder rather than counted '
+                          'directly.'),
+    # The closing sentence flags MLB-135's under-count while its value
+    # alignment is parked; delete it when 135 lands.
+    ('Wasted Points', 'Unrostered + inactive points, plus the size of any '
+                      'negative active-game totals -- points nobody '
+                      'rostered, points left on the bench, and points '
+                      'actively lost. Wasted totals shown elsewhere in this '
+                      'book still count only part of that; they are being '
+                      'brought in line.'),
 ]
 
 # The league's 11 reserve slots -- the bench depth the All-League boards
@@ -2954,7 +2969,7 @@ def build_home_rows(context, nav_targets=None):
     rows = [
         [f'{league_name} Almanac'],
         [_HOME_SCORING_CALLOUT],
-        [],
+        [updated_stamp()],
         *_merge_home_bands(left, right, 4, right_width),
     ]
 
@@ -2974,7 +2989,22 @@ def build_home_rows(context, nav_targets=None):
         # Points (K) and the deviation total (O) round to whole numbers.
         {'range': 'K:K', 'format': {'numberFormat': {'type': 'NUMBER', 'pattern': '0'}}},
         {'range': 'O:O', 'format': {'numberFormat': {'type': 'NUMBER', 'pattern': '0'}}},
+        # The A3 'Updated ...' stamp (MLB-141).
+        {'range': 'A3', 'format': {'textFormat': {'italic': True,
+                                                  'fontSize': 10}}},
     ]
+    # The 2x2 beside 'Wasted Points' gives the longest definition room to
+    # wrap -- ESPN's Home merge mirrored (MLB-141). Anchored by scanning
+    # for the term: glossary edits move the row, and a stale coordinate
+    # would merge the wrong cells without any golden noticing.
+    for i, row in enumerate(rows, 1):
+        if row and row[0] == 'Wasted Points':
+            formats.append({'range': f'B{i}:C{i + 1}',
+                            'format': {'verticalAlignment': 'TOP',
+                                       'horizontalAlignment': 'LEFT',
+                                       'wrapStrategy': 'WRAP'}})
+            formats.append({'range': f'B{i}:C{i + 1}', 'merge': True})
+            break
     # Left-band section labels (col A scan).
     for i, row in enumerate(rows, 1):
         if row and row[0] in _left_labels:
@@ -4753,7 +4783,7 @@ def write_cbs_almanac(sheet_id):
 # Mirrors almanac_write._apply_home_tab_dimensions (the ESPN Home): A-D
 # left band, E spacer, F-O right band; Slash/Stat Line (L/M) keep the
 # default width there and here.
-_HOME_WIDTHS = [(0, 1, 100), (1, 2, 125), (2, 3, 100), (3, 4, 50),
+_HOME_WIDTHS = [(0, 1, 125), (1, 2, 125), (2, 3, 100), (3, 4, 50),
                 (4, 5, 100), (5, 6, 40), (6, 7, 40), (7, 8, 150),
                 (8, 9, 100), (9, 10, 125), (10, 11, 50),
                 (11, 12, 125), (12, 13, 250),   # L Slash / M Stat Line (Kyle)

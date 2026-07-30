@@ -29,31 +29,46 @@
 -- compatibility filter (a hitter's hitting stats only count when they're in
 -- a hitting slot, etc.) -- toggleable via the strict_slot_validity dbt var.
 
-with raw as (
-    select
-        league_key,
-        season_year,
-        scoring_period,
-        matchup_period,
-        raw_json
-    from {{ source('raw', 'box_scores') }}
-),
-
+-- MEMORY SHAPE (MLB-10): each branch projects the sub-document it needs
+-- BEFORE flattening, instead of carrying the whole raw_json into the
+-- flatten. This is a pure projection change -- same values, same rows --
+-- and on Snowflake it is invisible, because LATERAL FLATTEN streams and
+-- the optimizer prunes the unread column either way.
+--
+-- On DuckDB it is the difference between building and not building.
+-- `cast(x as json[])` MATERIALIZES the whole array where FLATTEN streams
+-- it, and when the fat parent rides along it is retained per extracted
+-- element: the free-agent flatten over the 236 KB average payload
+-- exhausted 5.5 GB of a 6 GB cap on 319 rows, while the same flatten over
+-- the projected sub-document finishes in 2.2s. Measured, not guessed --
+-- 200 rows passed and 119 rows passed, but the two together did not,
+-- which is what ruled out bad data and pointed at parent retention.
+--
+-- The 6 GB cap is deliberately NOT the thing that moves here: it is the
+-- "runs on a stranger's laptop" promise (MLB-109/127), so raising it to
+-- go green would delete the acceptance criterion rather than meet it.
+-- This narrow-before-flatten shape is the house pattern for the same
+-- class elsewhere.
+--
 -- Phase 4 raw shape: {"matchups": [...], "free_agents": [...]}.
--- Pre-Phase-4 raw shape: bare array of matchup dicts. The lateral flatten
--- on raw_json:matchups returns zero rows for the array shape (because
--- raw_json:matchups is NULL on a JSON array), and the COALESCE-to-array
--- handles the legacy shape. Both shapes can coexist post-Phase-4 backfill
--- but in practice we --full-refresh, so this is defense-in-depth.
-matchups as (
+-- Pre-Phase-4 raw shape: bare array of matchup dicts. raw_json:matchups
+-- is NULL on the array shape, so the COALESCE falls through to raw_json
+-- itself and the legacy rows still flatten. Both arms stay ARRAYS, which
+-- DuckDB requires -- a JSON object there raises rather than yielding zero
+-- rows. Both shapes can coexist post-Phase-4 backfill but in practice we
+-- --full-refresh, so this is defense-in-depth.
+with free_agent_source as (
+    -- The sub-document is projected BEFORE the flatten so the 236 KB
+    -- parent payload does not ride into it -- see the memory note in
+    -- stg_box_scores__matchups for why that matters on DuckDB. On its own
+    -- this took the free-agent branch from OOM to 2.2s.
     select
         league_key,
         season_year,
         scoring_period,
         matchup_period,
-        m.value as matchup
-    from raw,
-        {{ flatten_array('coalesce(' ~ json_get('raw_json', 'matchups') ~ ', raw_json)', 'm') }}
+        {{ json_get('raw_json', 'free_agents') }} as free_agents_json
+    from {{ source('raw', 'box_scores') }}
 ),
 
 home_players as (
@@ -62,10 +77,10 @@ home_players as (
         season_year,
         scoring_period,
         matchup_period,
-        {{ json_text('matchup', 'home_owner') }}::string         as owner_name,
-        {{ json_text('matchup', 'home_team') }}::string          as team_name,
-        {{ json_text('matchup', 'home_team_id') }}::integer      as team_id,
-        {{ json_text('matchup', 'home_team_abbrev') }}::string   as team_abbrev,
+        home_owner                         as owner_name,
+        home_team                          as team_name,
+        home_team_id                       as team_id,
+        home_team_abbrev                   as team_abbrev,
         'home'                             as home_away,
         {{ json_text('p.value', 'name') }}::string               as player_name,
         {{ json_text('p.value', 'playerId') }}::integer          as player_id,
@@ -79,8 +94,8 @@ home_players as (
             {{ json_text('p.value', 'games_played') }}::integer,
             {{ iff(json_keys_count(json_get('p.value', 'breakdown')) ~ ' > 0', '1', '0') }}
         )                                  as games_played
-    from matchups,
-        {{ flatten_array(json_get('matchup', 'home_lineup'), 'p') }}
+    from {{ ref('stg_box_scores__matchups') }},
+        {{ flatten_array('home_lineup', 'p') }}
 ),
 
 away_players as (
@@ -89,10 +104,10 @@ away_players as (
         season_year,
         scoring_period,
         matchup_period,
-        {{ json_text('matchup', 'away_owner') }}::string         as owner_name,
-        {{ json_text('matchup', 'away_team') }}::string          as team_name,
-        {{ json_text('matchup', 'away_team_id') }}::integer      as team_id,
-        {{ json_text('matchup', 'away_team_abbrev') }}::string   as team_abbrev,
+        away_owner                         as owner_name,
+        away_team                          as team_name,
+        away_team_id                       as team_id,
+        away_team_abbrev                   as team_abbrev,
         'away'                             as home_away,
         {{ json_text('p.value', 'name') }}::string               as player_name,
         {{ json_text('p.value', 'playerId') }}::integer          as player_id,
@@ -106,8 +121,8 @@ away_players as (
             {{ json_text('p.value', 'games_played') }}::integer,
             {{ iff(json_keys_count(json_get('p.value', 'breakdown')) ~ ' > 0', '1', '0') }}
         )                                  as games_played
-    from matchups,
-        {{ flatten_array(json_get('matchup', 'away_lineup'), 'p') }}
+    from {{ ref('stg_box_scores__matchups') }},
+        {{ flatten_array('away_lineup', 'p') }}
 ),
 
 -- Phase 4 free agents: top-level array on the raw JSON dict, parallel to
@@ -136,8 +151,8 @@ free_agents as (
             {{ json_text('f.value', 'games_played') }}::integer,
             {{ iff(json_keys_count(json_get('f.value', 'breakdown')) ~ ' > 0', '1', '0') }}
         )                                  as games_played
-    from raw,
-        {{ flatten_array(json_get('raw_json', 'free_agents'), 'f') }}
+    from free_agent_source,
+        {{ flatten_array('free_agents_json', 'f') }}
 ),
 
 all_players as (

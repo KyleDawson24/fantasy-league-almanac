@@ -2178,6 +2178,17 @@ def _apply_team_tab_dimensions(spreadsheet, worksheet, matrix_width=TEAM_ROSTER_
     # were truncating, and there's nothing to its right (Kyle 2026-07-17).
     if matrix_width > TEAM_ROSTER_MATRIX_WIDTH:
         requests.append(_column_width_request(sheet_id, 31, 32, 325))
+    # Every row 21px (MLB-143): the values write auto-grows rows under
+    # wrapped cells (4-5 in the latest render); pin them back. No
+    # endIndex, so the range runs to the end of the grid.
+    requests.append({
+        'updateDimensionProperties': {
+            'range': {'sheetId': sheet_id, 'dimension': 'ROWS',
+                      'startIndex': 0},
+            'properties': {'pixelSize': 21},
+            'fields': 'pixelSize',
+        },
+    })
     _sheets_batch_update(spreadsheet, f'format dimensions {worksheet.title}', requests)
 
 

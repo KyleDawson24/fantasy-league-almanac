@@ -5007,6 +5007,17 @@ def _tab_style_requests(sheet_gid, title, formats):
                 'fields': 'pixelSize',
             },
         } for start, end in ((2, 3), (18, 19)))
+        # Every row 21px (MLB-143), matching the ESPN writer's pin: the
+        # values write auto-grows rows under wrapped cells. No endIndex,
+        # so the range runs to the end of the grid.
+        requests.append({
+            'updateDimensionProperties': {
+                'range': {'sheetId': sheet_gid, 'dimension': 'ROWS',
+                          'startIndex': 0},
+                'properties': {'pixelSize': 21},
+                'fields': 'pixelSize',
+            },
+        })
         # Header merges (Roster Days pairs, the Points banners, the CBS
         # Lineup Data lines), shared with the ESPN writer, then the
         # builder's dynamic merges (Best Individual Seasons banners).

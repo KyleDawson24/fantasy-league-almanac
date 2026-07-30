@@ -240,6 +240,24 @@ _HOME_LEFT_SECTION_LABELS = {
 }
 
 
+def _reset_sheet_formats(spreadsheet, worksheet):
+    """Full-sheet format reset before a writer paints (the CBS writer's
+    doctrine): worksheet.clear() drops values but NOT cell formatting, so
+    without this every re-render layers formats over the previous one's
+    -- and any layout shift leaves stale navy bands / bolds / italics on
+    rows that now hold different content (Kyle 2026-07-29, the affinity
+    and acquisition blocks after the era-row deletions). Dimension sizes,
+    frozen panes, data validation, and conditional-format rules live
+    outside userEnteredFormat and are unaffected."""
+    _sheets_batch_update(spreadsheet, f'format reset {worksheet.title}', [{
+        'repeatCell': {
+            'range': {'sheetId': worksheet.id},
+            'cell': {},
+            'fields': 'userEnteredFormat',
+        },
+    }])
+
+
 def _replace_home_tab(spreadsheet, rows):
     """Clear/create Home and write the two-band almanac front page (#23)."""
     width = max((len(row) for row in rows), default=20)
@@ -270,6 +288,7 @@ def _replace_home_tab(spreadsheet, rows):
     # the live Sheet gets a hand pass (merges, widths, color). Byte-diff
     # doesn't cover formatting, so keep this defensive.
     try:
+        _reset_sheet_formats(spreadsheet, worksheet)
         last_col = _a1_col(width)
         _sheets_call(f'freeze {HOME_TAB}', lambda: worksheet.freeze(rows=3))
         _apply_home_tab_dimensions(spreadsheet, worksheet)
@@ -454,6 +473,7 @@ def _replace_draft_tab(spreadsheet, rows, color_grid=None):
     _reapply_formula_cells(worksheet, rows)
 
     try:
+        _reset_sheet_formats(spreadsheet, worksheet)
         last_col = _a1_col(width)
         _apply_draft_tab_dimensions(spreadsheet, worksheet, width)
         formats = [
@@ -1087,6 +1107,7 @@ def _replace_advanced_standings_tab(spreadsheet, rows, stat_specs):
     _reapply_formula_cells(worksheet, rows)
 
     try:
+        _reset_sheet_formats(spreadsheet, worksheet)
         sheet_id = worksheet.id
         last_col = _a1_col(width)
         a_tables = _standings_table_bounds(rows)
@@ -1495,6 +1516,7 @@ def _replace_trades_tab(spreadsheet, rows):
     _reapply_formula_cells(worksheet, rows)
 
     try:
+        _reset_sheet_formats(spreadsheet, worksheet)
         sheet_id = worksheet.id
         last_col = _a1_col(width)
         block_hdr, block_end, record_hdr, record_end = (
@@ -1609,6 +1631,7 @@ def _replace_team_weeks_tab(spreadsheet, rows, stat_specs, source_rows=None, rec
     )
 
     try:
+        _reset_sheet_formats(spreadsheet, worksheet)
         _sheets_call(f'freeze {TEAM_WEEKS_TAB}', lambda: worksheet.freeze(rows=1))
         _apply_team_weeks_tab_dimensions(spreadsheet, worksheet, rows, stat_specs)
         _apply_team_weeks_conditional_formats(
@@ -1692,6 +1715,7 @@ def _replace_records_tab(spreadsheet, rows):
     )
 
     try:
+        _reset_sheet_formats(spreadsheet, worksheet)
         _sheets_call(f'freeze {RECORDS_TAB}', lambda: worksheet.freeze(rows=3))
         _apply_records_tab_dimensions(spreadsheet, worksheet)
         _merge_records_scope_headers(spreadsheet, worksheet, rows)
@@ -1914,6 +1938,7 @@ def _replace_team_tab(spreadsheet, title, rows):
     _reapply_formula_cells(worksheet, rows)
 
     try:
+        _reset_sheet_formats(spreadsheet, worksheet)
         _sheets_call(f'freeze {title}', lambda: worksheet.freeze(rows=5))
         _apply_team_tab_dimensions(spreadsheet, worksheet, width)
         # The entire format spec is shared with the CBS writer via

@@ -228,6 +228,7 @@ The current shape of the transform layer: **72 dbt models** (32 views, 37 tables
 ## Contact
 Email: kpdawson.github@gmail.com
 LinkedIn: https://www.linkedin.com/in/kyledawson24/
+Ko-fi: https://ko-fi.com/kpdawson24
 
 ## A note on the name
 

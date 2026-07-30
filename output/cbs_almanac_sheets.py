@@ -1744,7 +1744,8 @@ def get_cbs_records_data():
     data['_slots'] = slots
 
     # ---- Wasted Hall of Shame (Kyle 2026-07-14): top 25 players by career
-    # WASTED points -- unrostered (on the wire) OR benched (rostered, sat).
+    # WASTED points -- unrostered (on the wire) OR benched (rostered, sat),
+    # plus negative-active (MLB-135: points a starter gave back).
     # Built from the DAILY fact (the HoF's substrate): active = pts x weight,
     # benched = pts x (1 - weight) -- the estimator's complement covers
     # 2004-2020, so benched there is an estimate like active is. NOT from
@@ -1759,7 +1760,17 @@ def get_cbs_records_data():
         SELECT player_key, team_id, MAX(display_name) AS display_name,
                ROUND(CAST(SUM(CAST(total_stat_pts * COALESCE(active_weight, 0) AS DECIMAL(18, 6))) AS FLOAT), 6) AS act,
                ROUND(CAST(SUM(CAST(total_stat_pts * (1 - COALESCE(active_weight, 0)) AS DECIMAL(18, 6))) AS FLOAT), 6)
-                   AS benched
+                   AS benched,
+               -- MLB-135: the third term of the canonical definition. Weighted
+               -- by active_weight for the same reason act/benched are: in the
+               -- estimated era we do not know which days a player started, and
+               -- crediting 100% of an estimated day's negatives as ACTIVE while
+               -- crediting only active_weight of its positives would inflate
+               -- 2004-2020 shame against the known era. The (1 - weight) share
+               -- is bench-incurred and is already inside `benched`, which is a
+               -- NET total -- so this adds the active share exactly once.
+               ROUND(CAST(SUM(CAST(negative_points * COALESCE(active_weight, 0) AS DECIMAL(18, 6))) AS FLOAT), 6)
+                   AS neg_active
         FROM fct_player_daily_performance
         WHERE {league_predicate()} AND game_date IS NOT NULL
         GROUP BY player_key, team_id
@@ -1783,9 +1794,10 @@ def get_cbs_records_data():
     for r in hos_rows:
         ab = _abbrev_of.get(_fid(r.get('team_id')))
         e = hos.setdefault(r['player_key'], {'name': r.get('display_name'),
-                           'act': 0.0, 'inact': 0.0, 'bench_by': {}})
+                           'act': 0.0, 'inact': 0.0, 'neg': 0.0, 'bench_by': {}})
         e['act'] += _rec_fnum(r.get('act'))
         e['inact'] += _rec_fnum(r.get('benched'))
+        e['neg'] += _rec_fnum(r.get('neg_active'))
         if ab and ab != '####':
             e['bench_by'][ab] = e['bench_by'].get(ab, 0.0) + _rec_fnum(r.get('benched'))
     hos_list = []
@@ -1796,7 +1808,12 @@ def get_cbs_records_data():
         # Back to TRUE wasted (Kyle 2026-07-15): unrostered (on the wire) OR
         # benched. Ranking by benched alone just surfaced start-limited SPs;
         # wasted is the honest futility measure.
-        wasted = unrostered + benched
+        # MLB-135: + negative-active, completing the canonical three-term
+        # definition this book's own glossary has always promised ("plus the
+        # size of any negative active-game totals"). Points a starter GAVE
+        # BACK are waste in the same sense: +100 then -100 must not read as 0.
+        neg_active = e['neg']
+        wasted = unrostered + benched + neg_active
         if wasted <= 0:
             continue
         shame = ''
@@ -1804,13 +1821,20 @@ def get_cbs_records_data():
             shame_ab, shame_pts = max(e['bench_by'].items(), key=lambda kv: kv[1])
             if shame_pts > 0:
                 shame = f"{shame_ab} ({int(round(shame_pts)):,})"
-        pct = (wasted / total * 100) if total else 0.0
+        # MLB-135: the percentage stays keyed to UNUSED production
+        # (unrostered + benched), not to `wasted`. Negative-active is
+        # production destroyed rather than production left unused, and
+        # folding it in would print ">100% of career unused" for players
+        # who gave back more than they ever banked -- a true number under a
+        # false label. The negative term is shown as its own term instead.
+        pct = ((unrostered + benched) / total * 100) if total else 0.0
         nm = pname.get(pk, (None, None))
         hos_list.append({
             'display_name': nm[0] or e['name'], 'player_name': nm[1],
             'is_pitcher': pk in disc_pit, 'shame': shame, 'wasted': wasted,
             'details': (f"{int(round(unrostered)):,} unrostered · "
                         f"{int(round(benched)):,} benched · "
+                        f"{int(round(neg_active)):,} negative · "
                         f"{int(round(e['act'])):,} active · "
                         f"{pct:.0f}% of career unused")})
     hos_list.sort(key=lambda e: -e['wasted'])
@@ -3249,7 +3273,8 @@ def build_records_rows(context, catalog, data):
     # ---- Franchise Hall of Fame (A-F) | buffer G | Wasted Hall of Shame,
     # split Pitchers (H-K) + Hitters (L-O), side by side (Kyle 2026-07-15). HoF
     # = career active pts with one franchise; HoS = career WASTED (unrostered +
-    # benched), by discipline, each 25 deep. Breakdowns at K & O.
+    # benched + negative-active, MLB-135), by discipline, each 25 deep.
+    # Breakdowns at K & O.
     hof = data.get('_hof') or []
     hos = data.get('_hos') or {}
     hos_pit = hos.get('pitchers') or []
@@ -3263,7 +3288,7 @@ def build_records_rows(context, catalog, data):
         rows.append(['Franchise Hall of Fame — top 25 careers with one franchise',
                      '', '', '', '', '', '',
                      'Wasted Hall of Shame — top 25 by career wasted points '
-                     '(unrostered + benched)'])
+                     '(unrostered + benched + negative)'])
         _wide_band()
         rows.append(['Rank', 'Player', 'Franchise', 'Active Points',
                      'Years of Service',

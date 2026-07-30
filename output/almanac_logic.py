@@ -572,10 +572,13 @@ def build_home_tab_rows(weekly_rows, season_rows, weekly_all_rows,
     preview -> plain tab-name text. Draft Recap is always plain (its tab
     isn't built yet).
     """
+    stamp = updated_stamp()
     banner = [
         ['Fantasy Beat Reporter Almanac'],
         [_HOME_SCORING_CALLOUT],
-        [updated_stamp()],
+        # A bare [] when suppressed, so the golden corpus stays
+        # byte-identical to the pre-stamp shape ([''] serializes as "").
+        [stamp] if stamp else [],
     ]
     right_rows, season_label_idx = _home_right_rows(
         weekly_rows, weekly_all_rows, season_rows, season_all_rows,

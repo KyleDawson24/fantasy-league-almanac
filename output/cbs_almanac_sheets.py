@@ -2966,10 +2966,13 @@ def build_home_rows(context, nav_targets=None):
     for src in _sources:
         left.append([src['dates'], src['desc'], '', f"{src['pct']}%"])
 
+    stamp = updated_stamp()
     rows = [
         [f'{league_name} Almanac'],
         [_HOME_SCORING_CALLOUT],
-        [updated_stamp()],
+        # A bare [] when suppressed, so the golden corpus stays
+        # byte-identical to the pre-stamp shape ([''] serializes as "").
+        [stamp] if stamp else [],
         *_merge_home_bands(left, right, 4, right_width),
     ]
 

@@ -371,8 +371,8 @@ python extract/extract.py            # Extract recent matchup periods
 cd dbt_league
 dbt deps                              # Install dbt_utils package (first
                                       # run only; idempotent)
-dbt seed                              # Load the four seed CSVs
-dbt build                             # Build models + run all tests
+dbt seed                              # Load the 18 seed CSVs
+dbt build                             # Build 72 models + run 543 tests
 
 cd ..
 python output/generate_summary.py     # Weekly recap BBCode
@@ -402,32 +402,73 @@ See section 10 for common gotchas.
 
 ## 8. Verify the test suite
 
-Once the pipeline runs end-to-end, validate the test surface:
+### The three tiers
+
+Every command in this repo falls into one of three tiers. The tier tells
+you what it needs and what it touches — worth knowing before you run
+something that rebuilds your warehouse.
+
+| Tier | Needs | Touches | Commands |
+|---|---|---|---|
+| **1 — offline** | nothing but the clone | nothing | `pytest tests/`, `dbt deps`, `dbt parse`, `dbt compile` |
+| **2 — live, read-only** | Snowflake creds | reads only | `dbt debug`, `dbt source freshness`, `dbt docs generate`, `dbt ls`, `pytest tests/ -m warehouse`, output scripts with `--no-sheets` |
+| **3 — mutation & regeneration** | creds + intent | **writes** | `dbt seed`, `dbt build`, `--full-refresh` variants, `python extract/*.py`, `REGENERATE_BASELINES=1 pytest`, output scripts *without* `--no-sheets` |
+
+Tier 1 is what CI runs (see `.github/workflows/ci.yml`) and what a
+reviewer can run on a fresh clone with no account. Tier 3 is ceremony:
+nothing in it should be a reflex.
+
+### Tier 1: the pure suite
 
 ```bash
-# Pure pytest (no warehouse round-trips; fast)
 pytest tests/
+```
 
-# Warehouse tests (golden BBCode regression + seed integrity;
-# subprocess-runs the output scripts against your warehouse)
+Expected on a fresh clone: **250 passed, 17 deselected**. The
+warehouse-marked tests are deselected by default via `pytest.ini`; no
+credentials are involved and nothing is written.
+
+### Tier 2: the warehouse suite
+
+```bash
 pytest tests/ -m warehouse
 ```
 
-Expected on a fresh setup:
+This collects **17 tests**. It reads your warehouse and subprocess-runs
+the output scripts, but does not write to the warehouse.
 
-- `pytest tests/`: 112 passed, 15 deselected (the warehouse-marked tests
-  are excluded by default).
-- `pytest tests/ -m warehouse`: 15 passed. The two BBCode regression
-  tests will compare against `tests/fixtures/baseline_*.txt` which were
-  generated against the maintainer's league data — these will fail
-  against your league. Regenerate baselines with:
+**How many of the 17 actually run depends on corpora you do not have.**
+See below.
 
-  ```bash
-  REGENERATE_BASELINES=1 pytest tests/ -m warehouse
-  ```
+### Which tests need what
 
-  After regenerating, future runs lock to your league's expected
-  output, catching regressions on rebuilds.
+Some regression corpora are **private and will never be in this repo**.
+They are rendered from the maintainer's real league, owner names
+throughout, so they live locally and on a private remote only:
+
+| Corpus (gitignored) | Guards | Without it |
+|---|---|---|
+| `tests/fixtures/baseline_summary_current.txt`<br>`tests/fixtures/baseline_records_report.txt` | recap + records BBCode byte-diff | `test_golden_output.py` **skips** |
+| `tests/fixtures/almanac_v1_1_0/` | ESPN almanac TSV byte-diff | `test_almanac_byte_diff.py` **skips** |
+| `tests/fixtures/cbs_almanac/` | CBS almanac TSV byte-diff | `test_cbs_almanac_byte_diff.py` **skips** |
+
+These **skip, they do not fail** — a fresh clone gets a green run with
+skips, not red X's. That is deliberate: a stranger's clone should never
+show failures for data they were never given.
+
+### Pinning goldens to *your* league (tier 3)
+
+The byte-diff harness is genuinely useful once it is anchored to your own
+data. To generate your own baselines after a successful end-to-end run:
+
+```bash
+REGENERATE_BASELINES=1 pytest tests/ -m warehouse
+```
+
+This **writes fixture files** — hence tier 3. After regenerating, future
+runs lock to your league's expected output and catch regressions on
+rebuilds. Re-anchor deliberately and review the diff; a golden that moves
+without a reviewed cause is the bug the harness exists to catch.
 
 ---
 
@@ -504,9 +545,10 @@ dbt seed --full-refresh
 dbt's incremental seed loader can skip on schema mismatches; full
 refresh forces a clean recreate.
 
-**`pytest tests/ -m warehouse` fails on the golden BBCode tests.** The
-pinned baselines were generated against the maintainer's league. After
-your first successful end-to-end run, regenerate:
+**`pytest tests/ -m warehouse` reports a pile of skips.** Expected, not a
+problem. The byte-diff corpora are private (section 8, "Which tests need
+what") so the tests that need them skip in your clone. To anchor them to
+your own league after a successful end-to-end run:
 
 ```bash
 REGENERATE_BASELINES=1 pytest tests/ -m warehouse

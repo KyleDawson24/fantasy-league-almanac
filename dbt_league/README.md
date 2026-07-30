@@ -1,11 +1,13 @@
 # dbt_league — the transform layer
 
-dbt + Snowflake project that models raw ESPN Fantasy Baseball extracts into
-a small star schema and four consumer surfaces (weekly BBCode recap,
-all-time records report, legacy records sheet, Google Sheets league
-almanac). The product story, sample output, and engineering-decision log
-live in the [repo root README](../README.md); this file documents the dbt
-project itself: the layers, the conventions, and how to run and test it.
+dbt + Snowflake project that models raw fantasy-baseball extracts — ESPN
+first, and since the multi-league re-grain a second CBS league archived
+alongside it — into a star schema and its consumer surfaces (weekly
+BBCode recap, all-time records report, legacy records sheet, Google
+Sheets league almanacs for both books). The product story, sample
+output, and engineering-decision log live in the
+[repo root README](../README.md); this file documents the dbt project
+itself: the layers, the conventions, and how to run and test it.
 
 Browse the compiled catalog (lineage + column-level docs) at the
 [hosted dbt docs site](https://kyledawson24.github.io/fantasy-league-front-page/).
@@ -13,34 +15,53 @@ Browse the compiled catalog (lineage + column-level docs) at the
 ## The DAG, top to bottom
 
 ```
-RAW.* sources (5)          seeds (4)
+RAW.* sources (22)         seeds (18)
    │                          │
    ▼                          │
-staging/        stg_*    1:1 reshapes of RAW; no business logic
+staging/    (22) stg_*   1:1 reshapes of RAW; no business logic
    │                          │
    ▼                          │
-intermediate/   int_*    business logic that isn't yet a contract:
+intermediate/ (15) int_* business logic that isn't yet a contract:
    │                     the slot-validity filter + daily wide rollup
    ▼                          │
-marts/core/     dim_*    the star-schema contract layer: 5 dims
-   │            fct_*    + 8 facts (daily / weekly / season grains,
+marts/core/ (19) dim_*   the star-schema contract layer: 8 dims
+   │            fct_*    + 11 facts (daily / weekly / season grains,
    │                     active / inactive lenses, position points)
    ▼
-marts/reporting/ mart_*  consumer-facing report shapes: leaderboard,
-   │                     benchmarks, matchup view, roster snapshot,
-   ▼                     draft board
+marts/reporting/ (16) mart_*  consumer-facing report shapes:
+   │                     leaderboard, benchmarks, matchup view,
+   ▼                     roster snapshot, draft board, records
 exposures (4)            the Python output scripts, declared in
                          models/exposures.yml
 ```
+
+72 models in all. Counts here are regenerated at each release cut from
+the parsed manifest (see [RELEASING.md](../RELEASING.md)); if you are
+reading them mid-cycle, `dbt parse` and the manifest are the truth.
 
 Layer conventions:
 
 | Layer | Prefix | Default materialization | What belongs here |
 |---|---|---|---|
-| `staging/` | `stg_` | view | One model per raw-table *grain* (a multi-grain source like box_scores feeds several single-grain reshapes). Pure reshape: flatten VARIANT, type, rename. The only layer that reads `source()`. |
-| `intermediate/` | `int_` | view | Business logic that isn't yet a consumer contract: the slot-validity filter and the wide daily point rollup. |
-| `marts/core/` | `dim_` / `fct_` | table (facts override to incremental/view per model) | The contract layer. Grain-documented dimensions and facts that reporting marts and the Python output layer rely on. |
-| `marts/reporting/` | `mart_` | table (most override to view) | Report-shaped derivations over core: rankings, league aggregates, matchup context, snapshot joins. |
+| `staging/` | `stg_` | **table** (8 of 22 pin `view` themselves) | One model per raw-table *grain* (a multi-grain source like box_scores feeds several single-grain reshapes). Pure reshape: flatten VARIANT, type, rename. The only layer that reads `source()`. |
+| `intermediate/` | `int_` | **table** (all 15 pin their own; 10 are views) | Business logic that isn't yet a consumer contract: the slot-validity filter and the wide daily point rollup. |
+| `marts/core/` | `dim_` / `fct_` | table (3 weekly facts override to incremental; 8 thin dims/facts to view) | The contract layer. Grain-documented dimensions and facts that reporting marts and the Python output layer rely on. |
+| `marts/reporting/` | `mart_` | table (6 of 16 override to view) | Report-shaped derivations over core: rankings, league aggregates, matchup context, snapshot joins. |
+
+The staging/intermediate `table` defaults are deliberate and recent
+(MLB-134): a view over fat JSON re-runs the whole reshape for every
+consumer *and* every schema test that reads it. Snowflake absorbed that
+cost quietly; the MLB-9 spike put a number on it on a laptop-class
+engine — 25-80s per test as views, 0.04-0.05s as tables. The reasoning
+lives in `dbt_project.yml` next to the config.
+
+> **Naming caveat.** Directory and prefix names here describe the
+> *intended* topological order, and there are known edges that violate
+> it — staging models that read dims, intermediates that read core.
+> They are catalogued with file:line evidence in
+> [docs/dag-boundaries-DRAFT.md](../docs/dag-boundaries-DRAFT.md)
+> (MLB-158 Phase A). Until that redraw lands, do not infer a model's
+> dependencies from its prefix; read its `ref()`s.
 
 One deliberate exception to "consumers read core," declared on the
 `league_almanac` exposure rather than hidden: `stg_scoring_settings`
@@ -117,7 +138,7 @@ partitions fall out of the split rather than being computed ad hoc.
 
 ## Seed-driven stat catalog
 
-`seeds/stat_classification.csv` (97 rows) is the single source of truth
+`seeds/stat_classification.csv` (99 rows) is the single source of truth
 for every stat: identity, category, display labels, record-surfacing
 rules, polarity, rate-stat qualifier thresholds. It drives, from one file:
 
@@ -146,36 +167,71 @@ round every displayed value at source.
 
 ## Testing
 
-173 dbt data tests plus source-freshness contracts:
+543 dbt data tests (532 generic + 11 singular) plus source-freshness
+contracts:
 
-- **Generic tests** — every model carries a `dbt_utils.unique_combination_of_columns`
-  grain test; keys and partitions carry `not_null` / `accepted_values`;
-  staging FKs into the seed catalog carry `relationships`.
-- **Singular tests** (`tests/`) — cross-model invariants that used to be
-  run-when-you-remember analyses, now enforced on every build: the
-  season-fact-vs-weekly-rollup fidelity check (grain completeness both
-  directions + points within the documented rounding envelope), the
-  performance_status full-partition check, and the eligibility-explosion
-  guards (BE/IL leak = error; Trout/Soto/FA data canaries = warn).
+- **Generic tests** (532) — every model carries a
+  `dbt_utils.unique_combination_of_columns` grain test; keys and
+  partitions carry `not_null` / `accepted_values`; staging FKs into the
+  seed catalog carry `relationships`.
+- **Singular tests** (11, in `dbt_league/tests/`) — cross-model
+  invariants that used to be run-when-you-remember analyses, now
+  enforced on every build: the season-fact-vs-weekly-rollup fidelity
+  check (grain completeness both directions + points within the
+  documented rounding envelope), the performance_status full-partition
+  check, the eligibility-explosion guards (BE/IL leak = error;
+  Trout/Soto/FA data canaries = warn), the CBS attribution/fanout and
+  scoring-feed checks, and the franchise/team display-resolution
+  anchors.
 - **Source freshness** — seasonal thresholds on the four settings-style
   raw tables (see `models/staging/sources.yml` for why `box_scores` has
   none yet).
-- **Byte-diff goldens** (outside dbt, `../tests/`) — the almanac TSV
-  fixture, recap BBCode, and records-report BBCode are regression-pinned;
-  `pytest -m warehouse` from the repo root regenerates and diffs them.
+- **Byte-diff goldens** (outside dbt, `../tests/`) — the ESPN and CBS
+  almanac TSV fixtures, recap BBCode, and records-report BBCode are
+  regression-pinned; `pytest -m warehouse` from the repo root diffs them
+  against your warehouse. **These corpora are private** (they render
+  real owner names, so they live on the maintainer's machine and the
+  private dev remote only). In a fresh public clone the tests that need
+  them *skip* rather than fail — see "Which tests need what" in
+  [SETUP.md](../SETUP.md).
 
 ## Running it
 
-From the repo root (profile `dbt_league`, target schema `ANALYTICS`):
+Profile `dbt_league`, target schema `ANALYTICS`. Commands are grouped by
+what they actually need and what they actually touch — the same three
+tiers [SETUP.md](../SETUP.md) uses.
+
+**Tier 1 — offline.** Works in any clone, no credentials, touches
+nothing:
 
 ```bash
 cd dbt_league
-dbt deps                # first time only
-dbt seed                # load the four seed CSVs
-dbt build               # models + tests, incremental weekly
-dbt build --full-refresh   # after backfills or seed schema changes
+dbt deps                # install dbt_utils; first time only
+dbt parse               # validates refs, schema YAML, Jinja, doc() resolution
+dbt compile             # renders SQL to target/ without executing it
+```
+
+`dbt parse` is what CI runs, and it catches most classes of "I broke the
+dbt project" without opening a connection.
+
+**Tier 2 — live, read-only.** Needs Snowflake credentials; reads the
+warehouse but writes nothing to it:
+
+```bash
+dbt debug               # connection check — expect "All checks passed!"
 dbt source freshness    # settings-snapshot staleness check
 dbt docs generate       # compiled catalog; --static for the hosted site
+dbt ls                  # resolve node selection without running it
+```
+
+**Tier 3 — mutation.** Writes to the warehouse. Deliberate ceremony, not
+a dev-loop reflex:
+
+```bash
+dbt seed                # load the 18 seed CSVs
+dbt build               # models + tests, incremental weekly
+dbt build --full-refresh   # after backfills or seed schema changes
+dbt seed --full-refresh    # after a seed's columns change
 ```
 
 The weekly cadence is: extract (`python extract/extract.py`) → `dbt build`
@@ -184,9 +240,17 @@ operational runbook.
 
 ## Exposures
 
-`models/exposures.yml` formally declares the four downstream consumers
-(weekly recap, records report, legacy records sheet, league almanac) with
-their complete upstream dependency lists, so the docs-site lineage runs
-source → staging → core → reporting → deliverable with no dead ends. If a
-script gains or drops a warehouse read, the exposure entry changes in the
-same commit.
+`models/exposures.yml` declares four downstream consumers (weekly recap,
+records report, legacy records sheet, league almanac) with their upstream
+dependency lists, so the docs-site lineage runs source → staging → core →
+reporting → deliverable. If a script gains or drops a warehouse read, the
+exposure entry changes in the same commit.
+
+> **Known gap, not yet fixed.** The declared set is incomplete:
+> `output/generate_season_report.py` is a production consumer with no
+> exposure entry, and the `league_almanac` exposure predates the CBS
+> book, so it does not enumerate the CBS-side reads. The declarations are
+> hand-maintained and nothing currently tests them against the code —
+> that contract test is deliberately deferred until the graph stops
+> moving (MLB-158 Phase C). Treat the lineage site as indicative, not
+> authoritative, until then.

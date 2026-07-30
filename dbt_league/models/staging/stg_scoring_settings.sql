@@ -54,11 +54,11 @@ flattened as (
     select
         e.league_key,
         e.season_year           as settings_season,
-        f.value:statId::integer as espn_stat_id,
+        {{ json_text('f.value', 'statId') }}::integer as espn_stat_id,
         case
-            when f.value:isReverseItem::boolean
-                then -1.0 * f.value:points::double
-            else f.value:points::double
+            when {{ json_text('f.value', 'isReverseItem') }}::boolean
+                then -1.0 * {{ json_text('f.value', 'points') }}::double
+            else {{ json_text('f.value', 'points') }}::double
         end                     as points_per_unit
     from latest_extraction e,
         {{ flatten_array('e.raw_json', 'f') }}

@@ -39,7 +39,7 @@ select
     f.key::integer      as espn_id,
     f.value::integer    as setting_value
 from latest_extraction e,
-    {{ flatten_object('e.raw_json:lineupSlotCounts', 'f') }}
+    {{ flatten_object(json_get('e.raw_json', 'lineupSlotCounts'), 'f') }}
 
 union all
 
@@ -50,4 +50,4 @@ select
     f.key::integer,
     f.value::integer
 from latest_extraction e,
-    {{ flatten_object('e.raw_json:positionLimits', 'f') }}
+    {{ flatten_object(json_get('e.raw_json', 'positionLimits'), 'f') }}

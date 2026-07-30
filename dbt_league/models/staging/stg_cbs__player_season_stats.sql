@@ -31,11 +31,11 @@ with universes as (
     select
         league_key,
         season_year,
-        coalesce(params:position::string, 'H') as universe_code,
+        coalesce({{ json_text('params', 'position') }}::string, 'H') as universe_code,
         payload
     from {{ source('raw', 'cbs_season_stats') }}
     qualify row_number() over (
-        partition by league_key, season_year, coalesce(params:position::string, 'H')
+        partition by league_key, season_year, coalesce({{ json_text('params', 'position') }}::string, 'H')
         -- MLB-134 -- total order. loaded_at is the WAREHOUSING time: a
         -- backfill stamps many captures with one value, so it is not a total
         -- order on its own (6 such rows exist today on cbs_config). captured_at
@@ -52,8 +52,8 @@ players as (
         case when u.universe_code = 'P' then 'pitching' else 'hitting' end as universe,
         p.value as player
     from universes u,
-        {{ flatten_array('u.payload:body:league_stats:players', 'p') }}
-    where p.value:id is not null
+        {{ flatten_array(json_get('u.payload', 'body', 'league_stats', 'players'), 'p') }}
+    where {{ json_get('p.value', 'id') }} is not null
 ),
 
 stat_values as (
@@ -61,8 +61,8 @@ stat_values as (
         pl.league_key,
         pl.season_year,
         pl.universe,
-        pl.player:id::string   as player_id,
-        pl.player:name::string as player_name,
+        {{ json_text('pl.player', 'id') }}::string   as player_id,
+        {{ json_text('pl.player', 'name') }}::string as player_name,
         kv.key                 as cbs_key,
         -- Strip thousands separators; non-numeric values (e.g. PPos 'SP')
         -- become NULL and drop below -- but those keys aren't 'mapped'

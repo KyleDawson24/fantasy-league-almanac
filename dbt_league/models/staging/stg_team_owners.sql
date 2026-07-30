@@ -37,9 +37,9 @@ with latest_extraction as (
 select
     le.league_key,
     le.season_year,
-    t.value:team_id::integer    as team_id,
-    t.value:owner_id::string    as owner_id,
-    t.value:first_name::string  as first_name,
-    t.value:last_name::string   as last_name
+    {{ json_text('t.value', 'team_id') }}::integer    as team_id,
+    {{ json_text('t.value', 'owner_id') }}::string    as owner_id,
+    {{ json_text('t.value', 'first_name') }}::string  as first_name,
+    {{ json_text('t.value', 'last_name') }}::string   as last_name
 from latest_extraction le,
     {{ flatten_array('le.raw_json', 't') }}

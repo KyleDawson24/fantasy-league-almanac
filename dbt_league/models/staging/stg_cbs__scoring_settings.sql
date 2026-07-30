@@ -64,11 +64,11 @@ categories as (
     select
         s.league_key,
         s.season_year                as settings_season,
-        f.value:name::string         as cbs_key,
-        f.value:group::string        as rules_group,
-        f.value:points::double        as feed_points
+        {{ json_text('f.value', 'name') }}::string         as cbs_key,
+        {{ json_text('f.value', 'group') }}::string        as rules_group,
+        {{ json_text('f.value', 'points') }}::double        as feed_points
     from latest_snapshot s,
-        {{ flatten_array('s.payload:body:scoring_rules:categories', 'f') }}
+        {{ flatten_array(json_get('s.payload', 'body', 'scoring_rules', 'categories'), 'f') }}
 )
 
 select

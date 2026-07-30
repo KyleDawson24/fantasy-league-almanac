@@ -49,20 +49,20 @@ stat_rows as (
         g.stat_group,
         g.game_date,
         g.game_index,
-        g.game:game:gamePk::integer         as game_pk,
-        g.game:game:gameNumber::integer     as game_number,
-        g.game:team:id::integer             as team_id,
-        g.game:team:name::string            as team_name,
-        g.game:opponent:id::integer         as opponent_team_id,
-        g.game:opponent:name::string        as opponent_team_name,
-        g.game:isHome::boolean              as is_home,
-        g.game:isWin::boolean               as is_win,
+        {{ json_text('g.game', 'game', 'gamePk') }}::integer         as game_pk,
+        {{ json_text('g.game', 'game', 'gameNumber') }}::integer     as game_number,
+        {{ json_text('g.game', 'team', 'id') }}::integer             as team_id,
+        {{ json_text('g.game', 'team', 'name') }}::string            as team_name,
+        {{ json_text('g.game', 'opponent', 'id') }}::integer         as opponent_team_id,
+        {{ json_text('g.game', 'opponent', 'name') }}::string        as opponent_team_name,
+        {{ json_text('g.game', 'isHome') }}::boolean              as is_home,
+        {{ json_text('g.game', 'isWin') }}::boolean               as is_win,
         kv.key                              as statsapi_key,
         -- Mapped keys are all integer-typed in the feed; the cast guards
         -- against any stray non-numeric value becoming a silent error.
         try_to_double(kv.value::string)     as stat_value
     from gamelogs g,
-        {{ flatten_object('g.game:stat', 'kv') }}
+        {{ flatten_object(json_get('g.game', 'stat'), 'kv') }}
 )
 
 select

@@ -39,16 +39,16 @@ teams as (
         s.league_key,
         s.season_year,
         s.period,
-        d.value:name::string                              as division_name,
-        t.value:id::string                                as team_id,
-        t.value:name::string                              as team_name,
-        t.value:Total:rank::integer                       as standings_rank,
+        {{ json_text('d.value', 'name') }}::string                              as division_name,
+        {{ json_text('t.value', 'id') }}::string                                as team_id,
+        {{ json_text('t.value', 'name') }}::string                              as team_name,
+        {{ json_text('t.value', 'Total', 'rank') }}::integer                       as standings_rank,
         -- Season points can carry thousands separators in the feed; strip
         -- before casting so a "5,519" never lands as NULL.
-        replace(t.value:Total:points::string, ',', '')::double as points
+        replace({{ json_text('t.value', 'Total', 'points') }}::string, ',', '')::double as points
     from latest_per_period s,
-        {{ flatten_array('s.payload:body:overall_standings:divisions', 'd') }},
-        {{ flatten_array('d.value:teams', 't') }}
+        {{ flatten_array(json_get('s.payload', 'body', 'overall_standings', 'divisions'), 'd') }},
+        {{ flatten_array(json_get('d.value', 'teams'), 't') }}
 )
 
 select

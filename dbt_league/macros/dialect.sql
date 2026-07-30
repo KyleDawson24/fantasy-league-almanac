@@ -138,6 +138,49 @@ len(json_keys({{ expr }}))
 {%- endmacro %}
 
 
+-- Mechanical renames ----------------------------------------------------
+
+{% macro iff(condition, if_true, if_false) -%}
+{#- Snowflake IFF, DuckDB IF -- identical three-argument semantics
+    including NULL handling, so this really is just a rename.
+
+    House rule 2 says to write the portable intersection (`case when`)
+    when it is equal-cost. It is NOT equal-cost here: rewriting 71 call
+    sites into CASE would change the compiled Snowflake SQL at every one
+    of them, which throws away the byte-identity gate that is proving the
+    goldens cannot move. A dispatch macro keeps the Snowflake output
+    character-identical and still gets the port its spelling. If the
+    CASE rewrite is wanted later it is a golden-neutral pass of its own,
+    which is exactly the shape MLB-158-B is already reserved for. -#}
+    {{ return(adapter.dispatch('iff', 'dbt_league')(condition, if_true, if_false)) }}
+{%- endmacro %}
+
+{% macro default__iff(condition, if_true, if_false) -%}
+iff({{ condition }}, {{ if_true }}, {{ if_false }})
+{%- endmacro %}
+
+{% macro duckdb__iff(condition, if_true, if_false) -%}
+if({{ condition }}, {{ if_true }}, {{ if_false }})
+{%- endmacro %}
+
+
+{% macro to_varchar(expr) -%}
+{#- Snowflake TO_VARCHAR(x) with no format argument is a plain cast, and
+    that is how all 6 call sites use it. Spelled `varchar` rather than
+    `string` on both sides so the two engines agree on the type name as
+    well as the value. -#}
+    {{ return(adapter.dispatch('to_varchar', 'dbt_league')(expr)) }}
+{%- endmacro %}
+
+{% macro default__to_varchar(expr) -%}
+to_varchar({{ expr }})
+{%- endmacro %}
+
+{% macro duckdb__to_varchar(expr) -%}
+cast({{ expr }} as varchar)
+{%- endmacro %}
+
+
 -- Scalar-function gaps --------------------------------------------------
 
 {% macro boolor_agg(expr) -%}

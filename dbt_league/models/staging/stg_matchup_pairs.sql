@@ -15,15 +15,15 @@ select distinct
     league_key,
     season_year,
     matchup_period,
-    m.value:home_team_id::integer as home_team_id,
-    m.value:away_team_id::integer as away_team_id
+    {{ json_text('m.value', 'home_team_id') }}::integer as home_team_id,
+    {{ json_text('m.value', 'away_team_id') }}::integer as away_team_id
 from {{ source('raw', 'box_scores') }},
-    {{ flatten_array('coalesce(raw_json:matchups, raw_json)', 'm') }}
+    {{ flatten_array('coalesce(' ~ json_get('raw_json', 'matchups') ~ ', raw_json)', 'm') }}
 qualify row_number() over (
     partition by league_key,
         season_year,
         matchup_period,
-        m.value:home_team_id::integer,
-        m.value:away_team_id::integer
+        {{ json_text('m.value', 'home_team_id') }}::integer,
+        {{ json_text('m.value', 'away_team_id') }}::integer
     order by scoring_period
 ) = 1

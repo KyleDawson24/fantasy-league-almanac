@@ -33,7 +33,7 @@ last_sp_matchups as (
         b.league_key,
         b.season_year,
         b.matchup_period,
-        coalesce(b.raw_json:matchups, b.raw_json) as matchups_json
+        coalesce({{ json_get('b.raw_json', 'matchups') }}, b.raw_json) as matchups_json
     from {{ source('raw', 'box_scores') }} b
     inner join last_sp_per_matchup ls
         on b.league_key = ls.league_key
@@ -44,14 +44,14 @@ last_sp_matchups as (
 
 select
     league_key, season_year, matchup_period,
-    m.value:home_team_id::integer as team_id,
-    m.value:home_score::double     as platform_points
+    {{ json_text('m.value', 'home_team_id') }}::integer as team_id,
+    {{ json_text('m.value', 'home_score') }}::double     as platform_points
 from last_sp_matchups,
     {{ flatten_array('matchups_json', 'm') }}
 union all
 select
     league_key, season_year, matchup_period,
-    m.value:away_team_id::integer,
-    m.value:away_score::double
+    {{ json_text('m.value', 'away_team_id') }}::integer,
+    {{ json_text('m.value', 'away_score') }}::double
 from last_sp_matchups,
     {{ flatten_array('matchups_json', 'm') }}

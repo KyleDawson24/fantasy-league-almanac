@@ -53,7 +53,7 @@ matchups as (
         matchup_period,
         m.value as matchup
     from raw,
-        {{ flatten_array('coalesce(raw_json:matchups, raw_json)', 'm') }}
+        {{ flatten_array('coalesce(' ~ json_get('raw_json', 'matchups') ~ ', raw_json)', 'm') }}
 ),
 
 home_players as (
@@ -62,25 +62,25 @@ home_players as (
         season_year,
         scoring_period,
         matchup_period,
-        matchup:home_owner::string         as owner_name,
-        matchup:home_team::string          as team_name,
-        matchup:home_team_id::integer      as team_id,
-        matchup:home_team_abbrev::string   as team_abbrev,
+        {{ json_text('matchup', 'home_owner') }}::string         as owner_name,
+        {{ json_text('matchup', 'home_team') }}::string          as team_name,
+        {{ json_text('matchup', 'home_team_id') }}::integer      as team_id,
+        {{ json_text('matchup', 'home_team_abbrev') }}::string   as team_abbrev,
         'home'                             as home_away,
-        p.value:name::string               as player_name,
-        p.value:playerId::integer          as player_id,
-        p.value:position::string           as position,
-        p.value:lineupSlot::string         as lineup_slot,
-        p.value:proTeam::string            as pro_team,
-        p.value:points::double              as points,
-        p.value:breakdown                  as breakdown,
-        p.value:eligibleSlots              as eligible_slots,
+        {{ json_text('p.value', 'name') }}::string               as player_name,
+        {{ json_text('p.value', 'playerId') }}::integer          as player_id,
+        {{ json_text('p.value', 'position') }}::string           as position,
+        {{ json_text('p.value', 'lineupSlot') }}::string         as lineup_slot,
+        {{ json_text('p.value', 'proTeam') }}::string            as pro_team,
+        {{ json_text('p.value', 'points') }}::double              as points,
+        {{ json_get('p.value', 'breakdown') }}                  as breakdown,
+        {{ json_get('p.value', 'eligibleSlots') }}              as eligible_slots,
         coalesce(
-            p.value:games_played::integer,
-            iff({{ json_keys_count('p.value:breakdown') }} > 0, 1, 0)
+            {{ json_text('p.value', 'games_played') }}::integer,
+            iff({{ json_keys_count(json_get('p.value', 'breakdown')) }} > 0, 1, 0)
         )                                  as games_played
     from matchups,
-        {{ flatten_array('matchup:home_lineup', 'p') }}
+        {{ flatten_array(json_get('matchup', 'home_lineup'), 'p') }}
 ),
 
 away_players as (
@@ -89,25 +89,25 @@ away_players as (
         season_year,
         scoring_period,
         matchup_period,
-        matchup:away_owner::string         as owner_name,
-        matchup:away_team::string          as team_name,
-        matchup:away_team_id::integer      as team_id,
-        matchup:away_team_abbrev::string   as team_abbrev,
+        {{ json_text('matchup', 'away_owner') }}::string         as owner_name,
+        {{ json_text('matchup', 'away_team') }}::string          as team_name,
+        {{ json_text('matchup', 'away_team_id') }}::integer      as team_id,
+        {{ json_text('matchup', 'away_team_abbrev') }}::string   as team_abbrev,
         'away'                             as home_away,
-        p.value:name::string               as player_name,
-        p.value:playerId::integer          as player_id,
-        p.value:position::string           as position,
-        p.value:lineupSlot::string         as lineup_slot,
-        p.value:proTeam::string            as pro_team,
-        p.value:points::double              as points,
-        p.value:breakdown                  as breakdown,
-        p.value:eligibleSlots              as eligible_slots,
+        {{ json_text('p.value', 'name') }}::string               as player_name,
+        {{ json_text('p.value', 'playerId') }}::integer          as player_id,
+        {{ json_text('p.value', 'position') }}::string           as position,
+        {{ json_text('p.value', 'lineupSlot') }}::string         as lineup_slot,
+        {{ json_text('p.value', 'proTeam') }}::string            as pro_team,
+        {{ json_text('p.value', 'points') }}::double              as points,
+        {{ json_get('p.value', 'breakdown') }}                  as breakdown,
+        {{ json_get('p.value', 'eligibleSlots') }}              as eligible_slots,
         coalesce(
-            p.value:games_played::integer,
-            iff({{ json_keys_count('p.value:breakdown') }} > 0, 1, 0)
+            {{ json_text('p.value', 'games_played') }}::integer,
+            iff({{ json_keys_count(json_get('p.value', 'breakdown')) }} > 0, 1, 0)
         )                                  as games_played
     from matchups,
-        {{ flatten_array('matchup:away_lineup', 'p') }}
+        {{ flatten_array(json_get('matchup', 'away_lineup'), 'p') }}
 ),
 
 -- Phase 4 free agents: top-level array on the raw JSON dict, parallel to
@@ -124,20 +124,20 @@ free_agents as (
         cast(null as integer)              as team_id,
         cast(null as string)               as team_abbrev,
         cast(null as string)               as home_away,
-        f.value:name::string               as player_name,
-        f.value:playerId::integer          as player_id,
-        f.value:position::string           as position,
-        f.value:lineupSlot::string         as lineup_slot,
-        f.value:proTeam::string            as pro_team,
-        f.value:points::double              as points,
-        f.value:breakdown                  as breakdown,
-        f.value:eligibleSlots              as eligible_slots,
+        {{ json_text('f.value', 'name') }}::string               as player_name,
+        {{ json_text('f.value', 'playerId') }}::integer          as player_id,
+        {{ json_text('f.value', 'position') }}::string           as position,
+        {{ json_text('f.value', 'lineupSlot') }}::string         as lineup_slot,
+        {{ json_text('f.value', 'proTeam') }}::string            as pro_team,
+        {{ json_text('f.value', 'points') }}::double              as points,
+        {{ json_get('f.value', 'breakdown') }}                  as breakdown,
+        {{ json_get('f.value', 'eligibleSlots') }}              as eligible_slots,
         coalesce(
-            f.value:games_played::integer,
-            iff({{ json_keys_count('f.value:breakdown') }} > 0, 1, 0)
+            {{ json_text('f.value', 'games_played') }}::integer,
+            iff({{ json_keys_count(json_get('f.value', 'breakdown')) }} > 0, 1, 0)
         )                                  as games_played
     from raw,
-        {{ flatten_array('raw_json:free_agents', 'f') }}
+        {{ flatten_array(json_get('raw_json', 'free_agents'), 'f') }}
 ),
 
 all_players as (

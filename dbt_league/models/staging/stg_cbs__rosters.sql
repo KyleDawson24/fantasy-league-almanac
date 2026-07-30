@@ -37,17 +37,17 @@ select
     r.league_key,
     r.season_year,
     r.roster_date,
-    t.value:id::string                              as team_id,
-    t.value:name::string                            as team_name,
-    t.value:abbr::string                            as team_abbr,
-    t.value:division::string                        as division_name,
-    p.value:id::string                              as player_id,
-    p.value:fullname::string                        as player_name,
-    p.value:roster_pos::string                      as roster_pos,
-    p.value:roster_status::string                   as roster_status,
-    p.value:eligible_positions_display::string      as eligible_positions,
-    p.value:pro_team::string                        as pro_team
+    {{ json_text('t.value', 'id') }}::string                              as team_id,
+    {{ json_text('t.value', 'name') }}::string                            as team_name,
+    {{ json_text('t.value', 'abbr') }}::string                            as team_abbr,
+    {{ json_text('t.value', 'division') }}::string                        as division_name,
+    {{ json_text('p.value', 'id') }}::string                              as player_id,
+    {{ json_text('p.value', 'fullname') }}::string                        as player_name,
+    {{ json_text('p.value', 'roster_pos') }}::string                      as roster_pos,
+    {{ json_text('p.value', 'roster_status') }}::string                   as roster_status,
+    {{ json_text('p.value', 'eligible_positions_display') }}::string      as eligible_positions,
+    {{ json_text('p.value', 'pro_team') }}::string                        as pro_team
 from latest_per_date r,
-    {{ flatten_array('r.payload:body:rosters:teams', 't') }},
-    {{ flatten_array('t.value:players', 'p') }}
-where p.value:id is not null
+    {{ flatten_array(json_get('r.payload', 'body', 'rosters', 'teams'), 't') }},
+    {{ flatten_array(json_get('t.value', 'players'), 'p') }}
+where {{ json_get('p.value', 'id') }} is not null

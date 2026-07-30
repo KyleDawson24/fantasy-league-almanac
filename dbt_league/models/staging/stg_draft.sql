@@ -36,12 +36,12 @@ with latest_extraction as (
 select
     le.league_key,
     le.season_year,
-    p.value:overall_pick::integer as overall_pick,
-    p.value:round_num::integer    as round_num,
-    p.value:round_pick::integer   as round_pick,
-    p.value:player_id::integer    as player_id,
-    p.value:player_name::string   as player_name,
-    p.value:team_id::integer      as team_id,
-    p.value:keeper::boolean       as keeper
+    {{ json_text('p.value', 'overall_pick') }}::integer as overall_pick,
+    {{ json_text('p.value', 'round_num') }}::integer    as round_num,
+    {{ json_text('p.value', 'round_pick') }}::integer   as round_pick,
+    {{ json_text('p.value', 'player_id') }}::integer    as player_id,
+    {{ json_text('p.value', 'player_name') }}::string   as player_name,
+    {{ json_text('p.value', 'team_id') }}::integer      as team_id,
+    {{ json_text('p.value', 'keeper') }}::boolean       as keeper
 from latest_extraction le,
     {{ flatten_array('le.raw_json', 'p') }}

@@ -49,17 +49,17 @@ legs as (
     select
         le.league_key,
         le.season_year,
-        topic.value:id::string                            as transaction_id,
-        msg.value:messageTypeId::integer                  as source_message_type_id,
-        msg.value:targetId::integer                       as player_id,
-        to_timestamp_ntz(msg.value:date::number / 1000)   as event_ts,
-        nullif(nullif(msg.value:"from"::integer, 0), -1)  as raw_from_team_id,
-        nullif(nullif(msg.value:"to"::integer, 0), -1)    as raw_to_team_id,
-        nullif(nullif(msg.value:"for"::integer, 0), -1)   as raw_for_team_id
+        {{ json_text('topic.value', 'id') }}::string                            as transaction_id,
+        {{ json_text('msg.value', 'messageTypeId') }}::integer                  as source_message_type_id,
+        {{ json_text('msg.value', 'targetId') }}::integer                       as player_id,
+        to_timestamp_ntz({{ json_text('msg.value', 'date') }}::number / 1000)   as event_ts,
+        nullif(nullif({{ json_text('msg.value', 'from') }}::integer, 0), -1)  as raw_from_team_id,
+        nullif(nullif({{ json_text('msg.value', 'to') }}::integer, 0), -1)    as raw_to_team_id,
+        nullif(nullif({{ json_text('msg.value', 'for') }}::integer, 0), -1)   as raw_for_team_id
     from latest_extraction le,
         {{ flatten_array('le.raw_json', 'topic') }},
-        {{ flatten_array('topic.value:messages', 'msg') }}
-    where msg.value:messageTypeId::integer in (178, 179, 224, 239, 244)
+        {{ flatten_array(json_get('topic.value', 'messages'), 'msg') }}
+    where {{ json_text('msg.value', 'messageTypeId') }}::integer in (178, 179, 224, 239, 244)
 )
 
 select

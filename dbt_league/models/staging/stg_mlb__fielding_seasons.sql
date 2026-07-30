@@ -24,8 +24,8 @@ select
         when position in ('P', 'SP', 'RP')        then 'P'
         when position in ('C', '1B', '2B', '3B', 'SS', 'DH') then position
     end                               as cbs_position,
-    stat:games::integer               as games,
-    stat:gamesStarted::integer        as games_started,
-    team:name::string                 as team_name
+    {{ json_text('stat', 'games') }}::integer               as games,
+    {{ json_text('stat', 'gamesStarted') }}::integer        as games_started,
+    {{ json_text('team', 'name') }}::string                 as team_name
 from {{ source('raw', 'mlb_fielding') }}
 where season_year is not null

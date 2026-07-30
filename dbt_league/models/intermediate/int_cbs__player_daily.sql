@@ -98,7 +98,7 @@ display_position as (
         cbs_player_id,
         season_year,
         min_by(cbs_position,
-               iff(eligibility_source = 'primary', 0, 100) + pos_rank) as position
+               {{ iff("eligibility_source = 'primary'", '0', '100') }} + pos_rank) as position
     from scoped_windows
     group by 1, 2, 3
 ),
@@ -151,7 +151,7 @@ day_base as (
         max(a.provenance)                  as provenance,
         max(a.active_weight)               as active_weight,
         {{ boolor_agg('coalesce(a.is_active, false)') }} as is_active_known_true,
-        max(iff(a.is_active is null, 1, 0))      as is_active_unknown,
+        max({{ iff('a.is_active is null', '1', '0') }})      as is_active_unknown,
         count(distinct e.game_pk)          as games_played,
 
         -- CBS scored categories, day-summed
@@ -197,9 +197,9 @@ with_slots as (
         cs.pro_team,
         case
             when d.provenance = 'captured'
-                then coalesce(cs.roster_pos, iff(d.active_weight = 1, 'ACT', 'RS'))
+                then coalesce(cs.roster_pos, {{ iff('d.active_weight = 1', "'ACT'", "'RS'") }})
             when d.provenance = 'reconstructed_day'
-                then iff(d.is_active_known_true and d.is_active_unknown = 0, 'ACT', 'RS')
+                then {{ iff('d.is_active_known_true and d.is_active_unknown = 0', "'ACT'", "'RS'") }}
             else 'EST'
         end as lineup_slot
     from day_base d
@@ -222,9 +222,7 @@ eligibility as (
         season_year,
         game_date,
         cbs_player_id,
-        iff(array_size(array_remove(raw_slots, to_variant('DH'))) > 0,
-            array_remove(raw_slots, to_variant('DH')),
-            raw_slots) as eligible_slots
+        {{ iff("array_size(array_remove(raw_slots, to_variant('DH'))) > 0", "array_remove(raw_slots, to_variant('DH'))", 'raw_slots') }} as eligible_slots
     from (
         select
             d.league_key,
@@ -256,19 +254,17 @@ select
     d.cbs_player_name                            as player_name,
     d.cbs_player_name                            as display_name,
     coalesce(dp.position,
-             iff(x.stat_group_scope = 'pitching', 'P', 'DH')) as position,
+             {{ iff("x.stat_group_scope = 'pitching'", "'P'", "'DH'") }}) as position,
     d.pro_team,
     coalesce(el.eligible_slots,
-             iff(x.stat_group_scope = 'pitching',
-                 array_construct('P'), array_construct('DH'))) as eligible_slots,
+             {{ iff("x.stat_group_scope = 'pitching'", "array_construct('P')", "array_construct('DH')") }}) as eligible_slots,
     d.lineup_slot,
     case
         when d.lineup_slot = 'RS'  then 'inactive'
         when d.lineup_slot = 'EST' then 'estimated'
         when d.lineup_slot = 'P'   then 'pitching'
         when d.lineup_slot = 'ACT'
-            then iff(d.calculated_pitching_pts != 0 and d.calculated_hitting_pts = 0,
-                     'pitching', 'hitting')
+            then {{ iff('d.calculated_pitching_pts != 0 and d.calculated_hitting_pts = 0', "'pitching'", "'hitting'") }}
         else 'hitting'
     end                                          as lineup_slot_category,
     case
@@ -316,7 +312,7 @@ select
     d.calculated_hitting_pts                     as total_hitting_stat_pts,
     d.calculated_pitching_pts                    as total_pitching_stat_pts,
     d.calculated_fpts                            as total_stat_pts,
-    iff(d.calculated_fpts < 0, -d.calculated_fpts, 0) as negative_points,
+    {{ iff('d.calculated_fpts < 0', '-d.calculated_fpts', '0') }} as negative_points,
 
     -- Shared union-layer columns (the ESPN branch fills its own)
     d.cbs_player_id                              as player_key,

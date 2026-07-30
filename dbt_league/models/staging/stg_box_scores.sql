@@ -77,7 +77,7 @@ home_players as (
         {{ json_get('p.value', 'eligibleSlots') }}              as eligible_slots,
         coalesce(
             {{ json_text('p.value', 'games_played') }}::integer,
-            iff({{ json_keys_count(json_get('p.value', 'breakdown')) }} > 0, 1, 0)
+            {{ iff(json_keys_count(json_get('p.value', 'breakdown')) ~ ' > 0', '1', '0') }}
         )                                  as games_played
     from matchups,
         {{ flatten_array(json_get('matchup', 'home_lineup'), 'p') }}
@@ -104,7 +104,7 @@ away_players as (
         {{ json_get('p.value', 'eligibleSlots') }}              as eligible_slots,
         coalesce(
             {{ json_text('p.value', 'games_played') }}::integer,
-            iff({{ json_keys_count(json_get('p.value', 'breakdown')) }} > 0, 1, 0)
+            {{ iff(json_keys_count(json_get('p.value', 'breakdown')) ~ ' > 0', '1', '0') }}
         )                                  as games_played
     from matchups,
         {{ flatten_array(json_get('matchup', 'away_lineup'), 'p') }}
@@ -134,7 +134,7 @@ free_agents as (
         {{ json_get('f.value', 'eligibleSlots') }}              as eligible_slots,
         coalesce(
             {{ json_text('f.value', 'games_played') }}::integer,
-            iff({{ json_keys_count(json_get('f.value', 'breakdown')) }} > 0, 1, 0)
+            {{ iff(json_keys_count(json_get('f.value', 'breakdown')) ~ ' > 0', '1', '0') }}
         )                                  as games_played
     from raw,
         {{ flatten_array(json_get('raw_json', 'free_agents'), 'f') }}

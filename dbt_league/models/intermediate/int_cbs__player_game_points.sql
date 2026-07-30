@@ -110,7 +110,7 @@ derived_long as (
         is_home, is_win,
         'quality_starts'   as canonical_key,
         'pitching'         as stat_category,
-        iff(gs = 1 and outs >= 18 and er <= 3, 1, 0)::double as stat_value
+        {{ iff('gs = 1 and outs >= 18 and er <= 3', '1', '0') }}::double as stat_value
     from pitching_games
 
     union all
@@ -243,9 +243,8 @@ discipline as (
     select
         mlbam_id,
         season_year,
-        iff(sum(iff(stat_group = 'pitching', outs, 0))
-                >= 3 * sum(iff(stat_group = 'hitting', ab, 0)),
-            'pitching', 'hitting') as discipline
+        {{ iff("sum(iff(stat_group = 'pitching', outs, 0))
+                >= 3 * sum(iff(stat_group = 'hitting', ab, 0))", "'pitching'", "'hitting'") }} as discipline
     from game_wide
     group by 1, 2
     having count(distinct stat_group) > 1
@@ -287,7 +286,7 @@ select
     -- consistent (walkers who STAY on base do make bf > outs -- 18 of the
     -- archive's 22 no-hitters); the lesson is that base-state facts can't
     -- be reconstructed from one line's aggregates.
-    iff(g.cg = 1 and g.ha = 0 and g.outs >= 27, 1, 0) as nh,
+    {{ iff('g.cg = 1 and g.ha = 0 and g.outs >= 27', '1', '0') }} as nh,
     g.r_pts, g.rbi_pts, g.bb_pts, g.sb_pts, g.tb_pts,
     g.w_pts, g.s_pts, g.hd_pts, g.cg_pts, g.qs_pts, g.outs_pts, g.irstr_pts,
     g.k_pts, g.ha_pts, g.bbi_pts, g.er_pts,

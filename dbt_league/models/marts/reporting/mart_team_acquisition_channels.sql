@@ -128,21 +128,21 @@ pivoted as (
         season_year,
         team_id,
         -- Acquired, active lens
-        {{ stable_sum("iff(channel = 'KEEPER',      active_pts, 0)", none) }} as keeper_active_pts,
-        {{ stable_sum("iff(channel = 'DRAFT',       active_pts, 0)", none) }} as draft_active_pts,
-        {{ stable_sum("iff(channel = 'TRADE',       active_pts, 0)", none) }} as trade_active_pts,
-        {{ stable_sum("iff(channel = 'FA_ADD',      active_pts, 0)", none) }} as fa_add_active_pts,
+        {{ stable_sum(iff("channel = 'KEEPER'", 'active_pts', '0'), none) }} as keeper_active_pts,
+        {{ stable_sum(iff("channel = 'DRAFT'", 'active_pts', '0'), none) }} as draft_active_pts,
+        {{ stable_sum(iff("channel = 'TRADE'", 'active_pts', '0'), none) }} as trade_active_pts,
+        {{ stable_sum(iff("channel = 'FA_ADD'", 'active_pts', '0'), none) }} as fa_add_active_pts,
         -- Lost, active lens
-        {{ stable_sum("iff(channel = 'DROPPED',     active_pts, 0)", none) }} as dropped_active_pts,
-        {{ stable_sum("iff(channel = 'TRADED_AWAY', active_pts, 0)", none) }} as traded_away_active_pts,
+        {{ stable_sum(iff("channel = 'DROPPED'", 'active_pts', '0'), none) }} as dropped_active_pts,
+        {{ stable_sum(iff("channel = 'TRADED_AWAY'", 'active_pts', '0'), none) }} as traded_away_active_pts,
         -- Acquired, rostered lens
-        {{ stable_sum("iff(channel = 'KEEPER',      rostered_pts, 0)", none) }} as keeper_rostered_pts,
-        {{ stable_sum("iff(channel = 'DRAFT',       rostered_pts, 0)", none) }} as draft_rostered_pts,
-        {{ stable_sum("iff(channel = 'TRADE',       rostered_pts, 0)", none) }} as trade_rostered_pts,
-        {{ stable_sum("iff(channel = 'FA_ADD',      rostered_pts, 0)", none) }} as fa_add_rostered_pts,
+        {{ stable_sum(iff("channel = 'KEEPER'", 'rostered_pts', '0'), none) }} as keeper_rostered_pts,
+        {{ stable_sum(iff("channel = 'DRAFT'", 'rostered_pts', '0'), none) }} as draft_rostered_pts,
+        {{ stable_sum(iff("channel = 'TRADE'", 'rostered_pts', '0'), none) }} as trade_rostered_pts,
+        {{ stable_sum(iff("channel = 'FA_ADD'", 'rostered_pts', '0'), none) }} as fa_add_rostered_pts,
         -- Lost, rostered lens
-        {{ stable_sum("iff(channel = 'DROPPED',     rostered_pts, 0)", none) }} as dropped_rostered_pts,
-        {{ stable_sum("iff(channel = 'TRADED_AWAY', rostered_pts, 0)", none) }} as traded_away_rostered_pts
+        {{ stable_sum(iff("channel = 'DROPPED'", 'rostered_pts', '0'), none) }} as dropped_rostered_pts,
+        {{ stable_sum(iff("channel = 'TRADED_AWAY'", 'rostered_pts', '0'), none) }} as traded_away_rostered_pts
     from combined
     group by 1, 2, 3
 ),

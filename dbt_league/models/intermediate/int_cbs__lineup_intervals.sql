@@ -49,12 +49,11 @@ with raw_events as (
         -- imply the inverse of what they set.
         case
             when move_type = 'slot_move'
-                then iff(coalesce(from_slot, '') in ('BE', 'BN', 'RS', 'RES', 'IL', 'DL', 'MIN'),
-                         'RS', 'A')
+                then {{ iff("coalesce(from_slot, '') in ('BE', 'BN', 'RS', 'RES', 'IL', 'DL', 'MIN')", "'RS'", "'A'") }}
             when move_type = 'activate' then 'RS'
             else 'A'
         end as prior_state,
-        iff(move_type = 'slot_move', 'prior_direct', 'prior_inverse') as prior_source
+        {{ iff("move_type = 'slot_move'", "'prior_direct'", "'prior_inverse'") }} as prior_source
     from {{ ref('stg_cbs__ui_transactions') }}
     where move_type in ('activate', 'reserve', 'slot_move')
         and franchise_id is not null

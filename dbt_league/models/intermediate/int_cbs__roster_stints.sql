@@ -384,7 +384,7 @@ events as (
         o.league_key, o.season_year, o.franchise_id, o.name_key,
         b.season_start,
         dateadd(year, -1, b.season_start)::timestamp,
-        iff(o.opening_reason = 'lineup_opening', 999999, 1000000),
+        {{ iff("o.opening_reason = 'lineup_opening'", '999999', '1000000') }},
         0, 'acquisition', o.opening_reason
     from openings o
     inner join season_bounds b on o.season_year = b.season_year
@@ -482,9 +482,7 @@ changes as (
             b.league_key, b.season_year, b.franchise_id, b.name_key,
             b.boundary_date as event_date,
             g.event_kind,
-            iff(g.event_kind = 'acquisition',
-                coalesce(fa.first_acq_detail, g.event_detail),
-                g.event_detail) as event_detail,
+            {{ iff("g.event_kind = 'acquisition'", 'coalesce(fa.first_acq_detail, g.event_detail)', 'g.event_detail') }} as event_detail,
             lag(g.event_kind) over (
                 partition by b.league_key, b.season_year, b.franchise_id,
                              b.name_key

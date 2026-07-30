@@ -41,10 +41,8 @@ select
     sto.league_key,
     sto.season_year,
     sto.team_id,
-    iff(count(*) > 1,
-        listagg(own.first_name, ', ')
-            within group (order by own.first_name),
-        max(own.owner_display)) as owner_display
+    {{ iff('count(*) > 1', "listagg(own.first_name, ', ')
+            within group (order by own.first_name)", 'max(own.owner_display)') }} as owner_display
 from {{ ref('stg_cbs__team_owners') }} sto
 inner join {{ ref('dim_owner') }} own
     on sto.league_key = own.league_key

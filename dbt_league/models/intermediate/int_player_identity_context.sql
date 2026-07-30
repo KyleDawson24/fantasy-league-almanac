@@ -66,8 +66,8 @@ game_presence as (
 -- the dim counts them, decorated with their season discipline facts.
 disciplines as (
     select mlbam_id, season_year,
-           max(iff(stat_group = 'pitching', 1, 0)) as has_pitching,
-           max(iff(stat_group = 'hitting',  1, 0)) as has_hitting
+           max({{ iff("stat_group = 'pitching'", '1', '0') }}) as has_pitching,
+           max({{ iff("stat_group = 'hitting'", '1', '0') }}) as has_hitting
     from {{ ref('stg_mlb__player_game') }}
     group by 1, 2
 ),
@@ -83,7 +83,7 @@ mlb_positions as (
 fielding_coverage as (
     select mlbam_id, season_year,
            1                                              as has_fielding,
-           max(iff(cbs_position not in ('P','SP','RP'), 1, 0)) as has_nonp_pos
+           max({{ iff("cbs_position not in ('P','SP','RP')", '1', '0') }}) as has_nonp_pos
     from mlb_positions
     group by 1, 2
 ),
@@ -239,13 +239,13 @@ scored as (
 survivors as (
     select
         platform, league_key, season_year, franchise_id, name_key,
-        max(iff(is_ambiguous, 1, 0))                         as was_ambiguous,
+        max({{ iff('is_ambiguous', '1', '0') }})                         as was_ambiguous,
         count(*)                                             as n_candidates,
         count_if(club_ok and pos_ok)                         as n_survivors,
-        max(iff(club_ok and pos_ok, mlbam_id, null))         as survivor_mlbam,
-        max(iff(club_ok and pos_ok, stat_group_scope, null)) as survivor_scope,
-        max(iff(has_evidence, 1, 0))                         as had_evidence,
-        min(iff(club_refuted, 1, 0))                         as all_club_refuted
+        max({{ iff('club_ok and pos_ok', 'mlbam_id', 'null') }})         as survivor_mlbam,
+        max({{ iff('club_ok and pos_ok', 'stat_group_scope', 'null') }}) as survivor_scope,
+        max({{ iff('has_evidence', '1', '0') }})                         as had_evidence,
+        min({{ iff('club_refuted', '1', '0') }})                         as all_club_refuted
     from scored
     group by 1, 2, 3, 4, 5
 ),

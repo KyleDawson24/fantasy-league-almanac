@@ -40,8 +40,8 @@ main_x as (
         x.cbs_player_id,
         x.cbs_name                            as cbs_player_name,
         coalesce(o.mlbam_id, x.mlbam_id)      as mlbam_id,
-        iff(o.mlbam_id is not null, o.mlbam_name, x.mlbam_name) as mlbam_name,
-        iff(o.mlbam_id is not null, 'override', x.method)       as match_method
+        {{ iff('o.mlbam_id is not null', 'o.mlbam_name', 'x.mlbam_name') }} as mlbam_name,
+        {{ iff('o.mlbam_id is not null', "'override'", 'x.method') }}       as match_method
     from {{ source('raw', 'cbs_mlbam_crosswalk') }} x
     left join overrides o
         on o.cbs_name_key = {{ cbs_name_key('x.cbs_name') }}
@@ -52,8 +52,8 @@ ui_x as (
         u.cbs_name,
         u.ui_name,
         coalesce(o.mlbam_id, u.mlbam_id)      as mlbam_id,
-        iff(o.mlbam_id is not null, o.mlbam_name, u.mlbam_name) as mlbam_name,
-        iff(o.mlbam_id is not null, 'ui_override', 'ui_' || u.method) as match_method
+        {{ iff('o.mlbam_id is not null', 'o.mlbam_name', 'u.mlbam_name') }} as mlbam_name,
+        {{ iff('o.mlbam_id is not null', "'ui_override'", "'ui_' || u.method") }} as match_method
     from {{ source('raw', 'cbs_ui_mlbam_xwalk') }} u
     left join overrides o
         on o.cbs_name_key = {{ cbs_name_key('u.cbs_name') }}

@@ -355,7 +355,7 @@ final as (
         -- platform-served, hence 'captured' / binary weight.
         to_varchar(w.player_id) as player_key,
         cast(null as date)      as game_date,
-        iff(w.lineup_slot_category != 'inactive', 1.0, 0.0) as active_weight,
+        {{ iff("w.lineup_slot_category != 'inactive'", '1.0', '0.0') }} as active_weight,
         'captured'              as provenance
     from daily_wide w
     left join {{ ref('stg_box_scores') }} b

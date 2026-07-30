@@ -69,7 +69,7 @@ captured as (
         'captured'                       as provenance,
         'captured'                       as state_source,
         (r.roster_status = 'A')          as is_active,
-        iff(r.roster_status = 'A', 1.0, 0.0) as active_weight,
+        {{ iff("r.roster_status = 'A'", '1.0', '0.0') }} as active_weight,
         false                            as is_ambiguous_name,
         false                            as membership_end_inferred,
         false                            as attribution_contested,
@@ -243,10 +243,10 @@ reconstructed as (
             when ae.anchor_status is not null then ae.anchor_status = 'A'
         end                              as is_active,
         case
-            when li.state is not null        then iff(li.state = 'A', 1.0, 0.0)
+            when li.state is not null        then {{ iff("li.state = 'A'", '1.0', '0.0') }}
             when s.season_year between 2004 and 2020
                  then coalesce(aes.est_start_share, adj.borrowed_ratio)
-            when ae.anchor_status is not null then iff(ae.anchor_status = 'A', 1.0, 0.0)
+            when ae.anchor_status is not null then {{ iff("ae.anchor_status = 'A'", '1.0', '0.0') }}
         end                              as active_weight,
         coalesce(s.is_ambiguous_name, false)               as is_ambiguous_name,
         (s.was_truncated or coalesce(s.missing_departure, false))
@@ -339,10 +339,9 @@ reconstructed as (
     qualify row_number() over (
         partition by g.league_key, g.cbs_player_id, g.stat_group,
                      g.game_pk, g.game_date, g.game_index
-        order by iff(
-            case when ae.primary_pos in ('SP', 'RP', 'P')
+        order by {{ iff("case when ae.primary_pos in ('SP', 'RP', 'P')
                  then g.stat_group = 'pitching'
-                 else g.stat_group = 'hitting' end, 0, 1),
+                 else g.stat_group = 'hitting' end", '0', '1') }},
             s.stint_start desc,
             s.name_key,
             s.stint_index
@@ -429,9 +428,7 @@ select * from sentinel
 -- seasons by construction -- so it keeps the label it was built with, which is
 -- already the holding_pen_label var.
 select u.* replace (
-    iff(u.team_name is null,
-        null,
-        coalesce(d.canonical_name, u.team_name)) as team_name
+    {{ iff('u.team_name is null', 'null', 'coalesce(d.canonical_name, u.team_name)') }} as team_name
 )
 from unioned u
 left join {{ ref('dim_franchise_season') }} d

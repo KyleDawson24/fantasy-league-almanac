@@ -374,3 +374,163 @@ A `count(*)` over a view is not a proxy for the cost of materializing it.
 aggregation is the only remaining lever on the two marts' peak. It is a
 model change with value risk and wants its own reviewed ceremony; until
 then the three-invocation profile above is the supported build.
+
+### Headroom at cap (MLB-172) -- first data point, 2026-07-31
+
+MLB-172 makes the observed PEAK per invocation a release-over-release
+metric rather than a pass/fail. This is its first measurement.
+
+**Instrument.** A sampler process walks DuckDB's spill directory
+(`<dbfile>.tmp`) every 3s and records its total size, alongside the
+working set of the dbt worker. Three things make the numbers trustworthy:
+the spill dir holds at most 21 files and one walk costs 1.5ms against a
+3,000ms interval, so the sampler is not itself a perturbation; the spill
+dir settles to **0 bytes between invocations**, which makes per-invocation
+attribution exact rather than cumulative; and the worker is found by
+process size, because `dbt.exe` is only a launcher shim whose REAL worker
+is a grandchild (`dbt.exe` 6 MB -> `python.exe` 6 MB -> `python.exe`
+6 GB). Anything sampling `dbt.exe` reports ~10 MB and measures nothing.
+
+**At the pinned 6 GB caps** -- the supported profile, `--threads 1`:
+
+| invocation | result | wall | peak spill | of 5.59 GiB | headroom | peak worker RSS |
+|---|---|---|---|---|---|---|
+| `dbt run` | 72/74 | 613.8s | 4.54 GiB | 81% | 1.05 GiB | 6.76 GiB |
+| `dbt build -s mart_player_career_records` | pass | 40.3s | 3.84 GiB | 69% | 1.75 GiB | 5.96 GiB |
+| `dbt build -s mart_player_season_records` | pass | 36.2s | 4.58 GiB | 82% | 1.01 GiB | 6.06 GiB |
+
+`dbt run` reproduced the documented `PASS=72 WARN=0 ERROR=2 SKIP=0`
+exactly, and both bridged marts passed with their data tests.
+
+Note these per-mart peaks read ~0.4 GiB above the 3.42 / 4.14 GiB recorded
+for the same two marts higher up this section. The gap is consistent in
+both direction and magnitude across both marts, which points at an
+instrument difference -- a sampled directory high-water mark versus
+whatever the earlier figure was read from -- rather than at any movement
+in the models. **Trend future runs against this instrument's numbers, and
+do not mix the two series.**
+
+### The 8 GB-laptop diligence pass (2026-07-31)
+
+Re-run of the same three invocations with `DBT_DUCKDB_MEMORY_LIMIT=4GB`
+and the spill cap held at its 6 GB default. Tightening ONE cap is
+deliberate: it keeps a failure attributable to a single knob. 4 GB is the
+8 GB-machine end of operational finding #3's "modestly (4-8 GB)" range,
+since an 8 GB laptop cannot hand 6 GB to one process alongside its OS.
+
+| invocation | result | wall | peak spill | of 5.59 GiB | headroom |
+|---|---|---|---|---|---|
+| `dbt run` | **PASS=32 ERROR=4 SKIP=38** | 201.7s | 5.41 GiB | 97% | 0.18 GiB |
+| `dbt build -s mart_player_career_records` | pass | 36.4s | 4.89 GiB | 87% | 0.70 GiB |
+| `dbt build -s mart_player_season_records` | pass | 25.2s | 5.39 GiB | 96% | 0.20 GiB |
+
+(Worker RSS is not reported for this run -- it was taken before the
+launcher-shim problem above was found. Spill figures are unaffected,
+being read off the filesystem rather than off a process handle. The
+`dbt run` peak also understates a completing run, since that invocation
+abandoned 38 models.)
+
+**Tightening RAM raises spill.** Less memory means more of the same work
+offloads to disk, so the two marts' peaks ROSE (3.84 -> 4.89 GiB and
+4.58 -> 5.39 GiB) and headroom on the worst invocation collapsed from
+1.01 GiB to 0.20 GiB. The two caps trade against each other; lowering one
+pushes pressure onto the other.
+
+**The failures split across BOTH caps, and only one class is bridgeable:**
+
+| model | cap hit | own invocation? |
+|---|---|---|
+| `mart_player_career_records` | `max_temp_directory_size` (5.5/5.5 GiB) | **recovers** |
+| `mart_player_season_records` | `max_temp_directory_size` (5.5/5.5 GiB) | **recovers** |
+| `stg_cbs__rosters__teams` | `memory_limit` (3.7/3.7 GiB) | still fails |
+| `stg_box_scores` | `memory_limit` (3.7/3.7 GiB) | still fails |
+
+The two records marts behave exactly as documented -- they fail in
+company and pass alone, so the three-invocation profile still carries
+them at 4 GB. The two staging models are a different class: a fresh
+process resets the buffer pool but not the ceiling, so no number of
+invocations recovers a `memory_limit` failure. **74/74 is NOT reachable
+at 4 GB**, and the 38 SKIPs are the downstream cone of those two.
+
+**Measured floor**, isolated invocations of the two staging models:
+
+| `memory_limit` | `stg_cbs__rosters__teams` | `stg_box_scores` |
+|---|---|---|
+| 4 GB | fail | fail |
+| 5 GB | pass | fail |
+| 5.25 GB | -- | fail |
+| 5.5 GB | pass | pass |
+
+`stg_box_scores` is the binding model, with its floor between 5.25 and
+5.5 GB (single sample per boundary). **This is a headwind for MLB-109's
+"runs on a stranger's machine" claim**: ~5.5 GB of `memory_limit` is
+about 69% of an 8 GB machine's total RAM. Options are Kyle's call and are
+drafted in the overnight handoff -- nothing here was reshaped.
+
+## Sizing the output-layer connection swap (2026-07-31)
+
+This document's header says the output layer's connection swap
+(`output/db.py`) is "not sized here". Now it is.
+
+**The connection itself is one file.** 131 `query_snowflake()` call sites
+across 10 modules in `output/`, but `output/db.py` is the ONLY module in
+the layer that imports `snowflake.connector`. Phase 7's consolidation
+already made the connection a single choke point, so pointing the output
+layer at DuckDB means adding a second backend behind the existing
+`query_snowflake(sql, params) -> list[dict]` contract. **No call site
+changes for the connection's sake.**
+
+**The SQL dialect surface is small, and most of it is already free.**
+Counted across `output/*.py`:
+
+| construct | sites | on DuckDB |
+|---|---|---|
+| `QUALIFY` | 41 | free -- this document's known-good list |
+| `MAX_BY` | 31 | free |
+| `DATEDIFF('day', ...)` | 2 | free -- quoted-part form |
+| `LISTAGG` (incl. `WITHIN GROUP`, `DISTINCT`) | 6 | rewrite to `string_agg` |
+| `regexp_replace` | 6 | **the session-3 trap class** |
+| `TO_VARCHAR` | 3 | shim |
+| `try_to_number` | 2 | shim |
+| `IFF(` | 2 | shim |
+| `LATERAL FLATTEN` | 1 | rewrite; the template exists |
+
+So ~20 sites of genuine divergence, every one in a class already solved
+in `dbt_league/macros/dialect.sql`. The catch is that **none of that work
+is reusable here**: output-layer SQL is Python string literals with no
+Jinja, so the macros cannot dispatch and `re_literal` cannot guard
+anything. The fixes are known; the delivery vehicle is not shared. That,
+not the count, is the cost driver.
+
+The six `regexp_replace` sites deserve naming, because session 3 lost a
+day to exactly this class: `cbs_almanac_sheets.py:413-416` compose a name
+key and `:2329` / `:2370` strip a parenthetical. The engines disagree on
+backslash escaping AND on how many occurrences are replaced without a
+`'g'` flag, and in dbt that combination produced a silent no-op that
+fragmented the whole CBS identity spine.
+
+**The driver contract was measured, not assumed** (read-only probe
+against the built DuckDB file):
+
+- **JSON/VARIANT columns come back as `str`, not native objects**, and
+  `json.loads()` parses them. This is the same shape
+  `snowflake-connector` produces, so `formatters.py:90`'s documented
+  expectation and `generate_summary.py`'s defensive branch both hold
+  unchanged. This was the risk that looked biggest and it is a non-issue.
+- **Column case is NOT uniformly lowercase.** `mart_player_career_records`
+  returns `LEAGUE_KEY` uppercase beside lowercase siblings, and a plain
+  `select 1 as Mixed_Case_Col` preserves case. `db.py` already lowercases
+  `desc[0]`, so this is handled -- but that lowercasing is load-bearing on
+  DuckDB too, not a Snowflake-only affordance. Do not "simplify" it away.
+- **Numerics come back mixed**: `Decimal` for `first_season` /
+  `last_season`, `float` for `stat_value`, `int` for `rank` /
+  `seasons_played`. Snowflake's connector applies its own rule, so this is
+  the one contract difference with real potential to move a rendered cell,
+  and it is where the verification pass should aim. MLB-128's float
+  determinism work makes it worth taking seriously.
+
+**Estimate: 1.5-2.5 days.** Roughly half a day for the db.py backend plus
+type normalization, half a day for the ~20 dialect sites, and a day for a
+render-level A/B proving no cell moved -- the part that cannot be skipped,
+because every remaining contract risk surfaces as a formatting difference
+rather than as an error.

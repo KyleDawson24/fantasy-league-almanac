@@ -467,6 +467,50 @@ cast(try_strptime({{ expr }}, '{{ duckdb_format }}') as date)
 {%- endmacro %}
 
 
+{% macro regexp_replace(subject, pattern, replacement='') -%}
+{#- Substitute every match of `pattern` in `subject`. TWO independent
+    divergences ride this one function, and both are silent:
+
+    1. ESCAPING. The literal is read by the engine before the regex engine
+       ever sees it, so raw template text like '^([^,]+),\\s*(.+)$' is the
+       regex `,\s*` on Snowflake and `,\\s*` -- comma, LITERAL BACKSLASH,
+       zero-or-more 's' -- on DuckDB. It matches nothing and the
+       replacement silently no-ops. Same for the backreferences: '\\1'
+       is a capture reference on Snowflake and a literal on DuckDB.
+       `pattern` and `replacement` are therefore the LOGICAL regex --
+       write `\s`, not `\\s` -- and re_literal escapes per engine.
+
+    2. OCCURRENCE COUNT. Snowflake's REGEXP_REPLACE defaults to
+       occurrence 0 = replace ALL; DuckDB's defaults to the FIRST match
+       only and needs an explicit 'g'. Measured:
+         regexp_replace('a  b  c', ' +', ' ')  ->  'a b c'   Snowflake
+                                                   'a b  c'  DuckDB
+       so a whitespace-collapse or slugify silently stops collapsing
+       after the first run.
+
+    Together these emptied cbs_name_key on DuckDB (MLB-10): the packed
+    POS+TEAM strip and the 'Last, First' -> 'First Last' flip both
+    no-opped, so 'Abreu, Bobby RF ANA' keyed as itself instead of
+    'bobby abreu' and each franchise-season's spelling became its own
+    player. The CBS identity spine went from 2,745 distinct roster names
+    to 5,547, and int_cbs__roster_stints answered with 24,881 stints
+    against Snowflake's 20,077 -- every anchor that could no longer find
+    its transaction history synthesized a fresh opening.
+
+    Snowflake's emitted SQL is character-identical to the hand-written
+    form this replaces, so the byte-identity gate still covers it. -#}
+    {{ return(adapter.dispatch('regexp_replace', 'dbt_league')(subject, pattern, replacement)) }}
+{%- endmacro %}
+
+{% macro default__regexp_replace(subject, pattern, replacement) -%}
+regexp_replace({{ subject }}, {{ re_literal(pattern) }}, {{ re_literal(replacement) }})
+{%- endmacro %}
+
+{% macro duckdb__regexp_replace(subject, pattern, replacement) -%}
+regexp_replace({{ subject }}, {{ re_literal(pattern) }}, {{ re_literal(replacement) }}, 'g')
+{%- endmacro %}
+
+
 {% macro regexp_capture(subject, pattern, case_insensitive=False) -%}
 {#- Return capture group 1, or NULL if the pattern does not match.
     Snowflake spells it REGEXP_SUBSTR(subject, pattern, 1, 1, flags) with

@@ -57,8 +57,8 @@ resolved as (
         oy.owner_name,
         coalesce(
             cd.owner_id,
-            'cbs-' || trim(regexp_replace(lower(oy.owner_name),
-                                          '[^a-z0-9]+', '-'), '-')
+            'cbs-' || trim({{ regexp_replace('lower(oy.owner_name)',
+                                             '[^a-z0-9]+', '-') }}, '-')
         ) as raw_owner_id
     from owner_year oy
     left join current_display cd

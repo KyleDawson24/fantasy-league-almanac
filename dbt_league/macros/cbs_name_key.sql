@@ -15,17 +15,19 @@
          don't occur in the league era, and the ambiguity flag catches
          any that ever do.
     The two-way pseudo suffixes '(Batter)'/'(Pitcher)' deliberately
-    SURVIVE -- they are distinct CBS players. -#}
-trim(regexp_replace(
-    trim(regexp_replace(lower(
-        regexp_replace(
-            regexp_replace(
-                replace({{ col }}, '.', ''),
-                '^([^,]+,.+?)\\s+[A-Z0-9]{1,3}\\s+[A-Z]{2,4}$', '\\1'
-            ),
-            '^([^,]+),\\s*(.+)$', '\\2 \\1'
-        )
-    ), ' +', ' ')),
-    ' (jr|sr|ii|iii|iv)$', ''
-))
+    SURVIVE -- they are distinct CBS players.
+
+    Every substitution goes through the regexp_replace macro: written as
+    raw SQL these were four different regexes on DuckDB (backslash
+    escaping) and step 4 stopped after the first run of spaces (occurrence
+    default). See that macro's header -- this normalization is where the
+    damage was measured. -#}
+{%- set periods   = "replace(" ~ col ~ ", '.', '')" -%}
+{#- Backslashes are doubled because these are JINJA string literals, which
+    process escapes the way Python does: a bare '\1' is chr(1) and a bare
+    '\s' only survives by accident. re_literal re-escapes per engine. -#}
+{%- set unpacked  = regexp_replace(periods,  '^([^,]+,.+?)\\s+[A-Z0-9]{1,3}\\s+[A-Z]{2,4}$', '\\1') -%}
+{%- set flipped   = regexp_replace(unpacked, '^([^,]+),\\s*(.+)$', '\\2 \\1') -%}
+{%- set collapsed = regexp_replace('lower(' ~ flipped ~ ')', ' +', ' ') -%}
+trim({{ regexp_replace('trim(' ~ collapsed ~ ')', ' (jr|sr|ii|iii|iv)$', '') }})
 {% endmacro %}

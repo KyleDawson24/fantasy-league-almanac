@@ -69,7 +69,7 @@ named_variants as (
     -- middle-initial stripped: 'francisco j rodriguez' -> 'francisco rodriguez'
     -- (K-Rod, Bautista, V. Martinez, J. Reyes, Carlos E. Hernandez, ...)
     select platform, platform_player_id, mlbam_id, stat_group_scope,
-           regexp_replace(base_key, '^([a-z]+) [a-z] (.+)$', '\\1 \\2')
+           {{ regexp_replace('base_key', '^([a-z]+) [a-z] (.+)$', '\\1 \\2') }}
     from named
     where {{ regexp_like('base_key', '^[a-z]+ [a-z] .+$') }}
 
@@ -78,7 +78,7 @@ named_variants as (
     -- lets a UNIFIED roster entry resolve to the split-id mlbam; the scope
     -- collapse below then yields NULL = "either discipline" for such an entry.
     select platform, platform_player_id, mlbam_id, stat_group_scope,
-           trim(regexp_replace(base_key, ' \\((batter|pitcher)\\)$', ''))
+           trim({{ regexp_replace('base_key', ' \\((batter|pitcher)\\)$', '') }})
     from named
     where base_key like '% (batter)' or base_key like '% (pitcher)'
     -- NOTE: ASCII accent-folding is a future variant if an accented-only bridge
@@ -127,7 +127,7 @@ idless_bridged as (
            x.mlbam_id, x.stat_group_scope, f.name_key
     from idless_forms f
     join xw_keys x
-        on x.name_key = regexp_replace(f.name_key, '^([a-z]+) [a-z] (.+)$', '\\1 \\2')
+        on x.name_key = {{ regexp_replace('f.name_key', '^([a-z]+) [a-z] (.+)$', '\\1 \\2') }}
     where {{ regexp_like('f.name_key', '^[a-z]+ [a-z] .+$') }}
 ),
 

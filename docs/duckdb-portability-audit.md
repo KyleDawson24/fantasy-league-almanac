@@ -314,3 +314,63 @@ Artifacts (session scratchpad, `spk/`): construct battery + results,
 stable_sum shuffle test, the 9 ported staging models + fixed dims, stub
 generator, dump/load/compare scripts, wave + A/B logs, `raw_schema.json`,
 `mem_samples.csv`.
+
+## The laptop build profile (MLB-10, measured 2026-07-31)
+
+How the full chain is actually built at the pinned 6 GB caps, and why it
+takes more than one `dbt run`. This supersedes the earlier guess that the
+run-level failures were a thread-count problem -- they are not, and no
+`--threads` value moves them.
+
+**Profile:** `--threads 1`, `memory_limit=6GB`,
+`max_temp_directory_size=6GB` (5.59 GiB), `preserve_insertion_order=false`.
+
+**Step 1 -- `dbt run`: 72 of 74.** Everything builds except
+`mart_player_career_records` and `mart_player_season_records`, which fail
+on the SPILL cap, not `memory_limit`: *"failed to offload data block of
+size 256.0 KiB (5.5 GiB/5.5 GiB used) ... set by the
+'max_temp_directory_size' setting."*
+
+**Step 2 -- one further invocation PER failing mart.** Each then builds
+and passes its own data tests:
+
+| invocation | result |
+|---|---|
+| `dbt build -s mart_player_career_records` | model + 9 tests, 22.7s |
+| `dbt build -s mart_player_season_records` | model + 7 tests, 19.2s |
+
+Both are value-identical to Snowflake (5,460 and 4,620 cells, 0
+mismatches), so 74/74 is reachable -- it just is not reachable in one
+process.
+
+**Why one extra invocation is not enough.** Putting BOTH marts in a
+single second invocation fails exactly as the full run does: the first
+builds, the second dies. They share one connection there, and that
+adjacency is the whole problem. A fresh process resets the buffer pool
+once, not between two statements inside it. Measured both ways.
+
+**Why they are this expensive.** Each needs most of the entire spill
+budget ALONE, at one thread:
+
+| | peak spill | of the 5.59 GiB budget |
+|---|---|---|
+| `mart_player_career_records` | 3.42 GiB | 61% |
+| `mart_player_season_records` | 4.14 GiB | 74% |
+
+That leaves the worse one 1.45 GiB of margin, which anything else running
+first consumes -- hence a failure that is state-dependent and looks
+intermittent. Both read `int_cbs__player_season_stats`, whose
+`crosswalked_games` aggregation over `stg_mlb__player_game`'s 42M rows
+costs 3.37 GiB on its own.
+
+**Do not "fix" this by materializing that view.** It was tried and is
+worse -- 70/74, because the model then fails too and takes three
+dependents with it. As a view the aggregation streams and the group-by
+discards rows as it goes; as a table it must additionally retain all
+890,902 output rows to write them, so the peak rises rather than falls.
+A `count(*)` over a view is not a proxy for the cost of materializing it.
+
+**Standing follow-up (quality, not a gate):** reshaping that 42M-row
+aggregation is the only remaining lever on the two marts' peak. It is a
+model change with value risk and wants its own reviewed ceremony; until
+then the three-invocation profile above is the supported build.

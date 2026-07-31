@@ -662,6 +662,46 @@ try_cast({{ expr }} as decimal(38,0))
 {%- endmacro %}
 
 
+{% macro object_construct(args='') -%}
+{#- Build a JSON object, DROPPING every key whose value is NULL. The
+    dropping is not incidental -- mart_player_fpts_reconciliation uses it
+    as the filter itself: each of the 16 scoring categories evaluates to
+    NULL when its delta is zero, so `drivers` ends up holding exactly the
+    categories that diverged. DuckDB's json_object keeps NULL-valued keys
+    (`{"R":null,...}`), which would turn a 2-category divergence report
+    into all 16 every row.
+
+    RFC 7386 merge-patch semantics are precisely "a null in the patch
+    deletes the key", so patching onto {} is the translation. Verified
+    against Snowflake on the three cases that matter:
+
+      object_construct('R', null, 'RBI', object_construct(
+          'calculated', 5, 'platform', null, 'pts_delta', 2.5))
+                            -> {"RBI":{"calculated":5,"pts_delta":2.5}}
+      object_construct('R', null, 'RBI', null)             -> {}
+      object_construct('R', object_construct('a', null))   -> {"R":{}}
+
+    The merge is RECURSIVE, which is what makes the second line of that
+    first case right: Snowflake drops NULLs at every nesting level too
+    (the untracked-category 'platform' key), and an inner object that
+    empties out still keeps its key because {} is not NULL.
+
+    Two call shapes, because the argument list is SQL text either way:
+    pass it as a string, or wrap the block in {% raw %}{% call %}{% endraw %} when the
+    arguments themselves contain Jinja. -#}
+    {%- set body = args if args else caller() -%}
+    {{ return(adapter.dispatch('object_construct', 'dbt_league')(body)) }}
+{%- endmacro %}
+
+{% macro default__object_construct(body) -%}
+object_construct({{ body }})
+{%- endmacro %}
+
+{% macro duckdb__object_construct(body) -%}
+json_merge_patch('{}', json_object({{ body }}))
+{%- endmacro %}
+
+
 -- Array construction and inspection -------------------------------------
 
 {% macro date_as_yyyymmdd(expr) -%}

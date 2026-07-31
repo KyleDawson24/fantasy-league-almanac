@@ -146,24 +146,24 @@ select
     -- drops its key from OBJECT_CONSTRUCT). Platform NULLs (untracked
     -- categories -- early-year IRSTR) are compared as 0: exactly the gap
     -- the report exists to surface.
-    object_construct(
-        'R',     {{ iff('c.r_pts     - coalesce(p.r_pts, 0)     = 0', 'null', "object_construct('calculated', c.r,     'platform', p.r,     'pts_delta', c.r_pts     - coalesce(p.r_pts, 0))") }},
-        'RBI',   {{ iff('c.rbi_pts   - coalesce(p.rbi_pts, 0)   = 0', 'null', "object_construct('calculated', c.rbi,   'platform', p.rbi,   'pts_delta', c.rbi_pts   - coalesce(p.rbi_pts, 0))") }},
-        'BB',    {{ iff('c.bb_pts    - coalesce(p.bb_pts, 0)    = 0', 'null', "object_construct('calculated', c.bb,    'platform', p.bb,    'pts_delta', c.bb_pts    - coalesce(p.bb_pts, 0))") }},
-        'SB',    {{ iff('c.sb_pts    - coalesce(p.sb_pts, 0)    = 0', 'null', "object_construct('calculated', c.sb,    'platform', p.sb,    'pts_delta', c.sb_pts    - coalesce(p.sb_pts, 0))") }},
-        'TB',    {{ iff('c.tb_pts    - coalesce(p.tb_pts, 0)    = 0', 'null', "object_construct('calculated', c.tb,    'platform', p.tb,    'pts_delta', c.tb_pts    - coalesce(p.tb_pts, 0))") }},
-        'W',     {{ iff('c.w_pts     - coalesce(p.w_pts, 0)     = 0', 'null', "object_construct('calculated', c.w,     'platform', p.w,     'pts_delta', c.w_pts     - coalesce(p.w_pts, 0))") }},
-        'S',     {{ iff('c.s_pts     - coalesce(p.s_pts, 0)     = 0', 'null', "object_construct('calculated', c.s,     'platform', p.s,     'pts_delta', c.s_pts     - coalesce(p.s_pts, 0))") }},
-        'HD',    {{ iff('c.hd_pts    - coalesce(p.hd_pts, 0)    = 0', 'null', "object_construct('calculated', c.hd,    'platform', p.hd,    'pts_delta', c.hd_pts    - coalesce(p.hd_pts, 0))") }},
-        'CG',    {{ iff('c.cg_pts    - coalesce(p.cg_pts, 0)    = 0', 'null', "object_construct('calculated', c.cg,    'platform', p.cg,    'pts_delta', c.cg_pts    - coalesce(p.cg_pts, 0))") }},
-        'QS',    {{ iff('c.qs_pts    - coalesce(p.qs_pts, 0)    = 0', 'null', "object_construct('calculated', c.qs,    'platform', p.qs,    'pts_delta', c.qs_pts    - coalesce(p.qs_pts, 0))") }},
-        'INN',   {{ iff('c.outs_pts  - coalesce(p.outs_pts, 0)  = 0', 'null', "object_construct('calculated', c.outs,  'platform', p.outs,  'pts_delta', c.outs_pts  - coalesce(p.outs_pts, 0))") }},
-        'IRSTR', {{ iff('c.irstr_pts - coalesce(p.irstr_pts, 0) = 0', 'null', "object_construct('calculated', c.irstr, 'platform', p.irstr, 'pts_delta', c.irstr_pts - coalesce(p.irstr_pts, 0))") }},
-        'K',     {{ iff('c.k_pts     - coalesce(p.k_pts, 0)     = 0', 'null', "object_construct('calculated', c.k,     'platform', p.k,     'pts_delta', c.k_pts     - coalesce(p.k_pts, 0))") }},
-        'HA',    {{ iff('c.ha_pts    - coalesce(p.ha_pts, 0)    = 0', 'null', "object_construct('calculated', c.ha,    'platform', p.ha,    'pts_delta', c.ha_pts    - coalesce(p.ha_pts, 0))") }},
-        'BBI',   {{ iff('c.bbi_pts   - coalesce(p.bbi_pts, 0)   = 0', 'null', "object_construct('calculated', c.bbi,   'platform', p.bbi,   'pts_delta', c.bbi_pts   - coalesce(p.bbi_pts, 0))") }},
-        'ER',    {{ iff('c.er_pts    - coalesce(p.er_pts, 0)    = 0', 'null', "object_construct('calculated', c.er,    'platform', p.er,    'pts_delta', c.er_pts    - coalesce(p.er_pts, 0))") }}
-    ) as drivers
+    {% call object_construct() %}
+        'R',     {{ iff('c.r_pts     - coalesce(p.r_pts, 0)     = 0', 'null', object_construct("'calculated', c.r,     'platform', p.r,     'pts_delta', c.r_pts     - coalesce(p.r_pts, 0)")) }},
+        'RBI',   {{ iff('c.rbi_pts   - coalesce(p.rbi_pts, 0)   = 0', 'null', object_construct("'calculated', c.rbi,   'platform', p.rbi,   'pts_delta', c.rbi_pts   - coalesce(p.rbi_pts, 0)")) }},
+        'BB',    {{ iff('c.bb_pts    - coalesce(p.bb_pts, 0)    = 0', 'null', object_construct("'calculated', c.bb,    'platform', p.bb,    'pts_delta', c.bb_pts    - coalesce(p.bb_pts, 0)")) }},
+        'SB',    {{ iff('c.sb_pts    - coalesce(p.sb_pts, 0)    = 0', 'null', object_construct("'calculated', c.sb,    'platform', p.sb,    'pts_delta', c.sb_pts    - coalesce(p.sb_pts, 0)")) }},
+        'TB',    {{ iff('c.tb_pts    - coalesce(p.tb_pts, 0)    = 0', 'null', object_construct("'calculated', c.tb,    'platform', p.tb,    'pts_delta', c.tb_pts    - coalesce(p.tb_pts, 0)")) }},
+        'W',     {{ iff('c.w_pts     - coalesce(p.w_pts, 0)     = 0', 'null', object_construct("'calculated', c.w,     'platform', p.w,     'pts_delta', c.w_pts     - coalesce(p.w_pts, 0)")) }},
+        'S',     {{ iff('c.s_pts     - coalesce(p.s_pts, 0)     = 0', 'null', object_construct("'calculated', c.s,     'platform', p.s,     'pts_delta', c.s_pts     - coalesce(p.s_pts, 0)")) }},
+        'HD',    {{ iff('c.hd_pts    - coalesce(p.hd_pts, 0)    = 0', 'null', object_construct("'calculated', c.hd,    'platform', p.hd,    'pts_delta', c.hd_pts    - coalesce(p.hd_pts, 0)")) }},
+        'CG',    {{ iff('c.cg_pts    - coalesce(p.cg_pts, 0)    = 0', 'null', object_construct("'calculated', c.cg,    'platform', p.cg,    'pts_delta', c.cg_pts    - coalesce(p.cg_pts, 0)")) }},
+        'QS',    {{ iff('c.qs_pts    - coalesce(p.qs_pts, 0)    = 0', 'null', object_construct("'calculated', c.qs,    'platform', p.qs,    'pts_delta', c.qs_pts    - coalesce(p.qs_pts, 0)")) }},
+        'INN',   {{ iff('c.outs_pts  - coalesce(p.outs_pts, 0)  = 0', 'null', object_construct("'calculated', c.outs,  'platform', p.outs,  'pts_delta', c.outs_pts  - coalesce(p.outs_pts, 0)")) }},
+        'IRSTR', {{ iff('c.irstr_pts - coalesce(p.irstr_pts, 0) = 0', 'null', object_construct("'calculated', c.irstr, 'platform', p.irstr, 'pts_delta', c.irstr_pts - coalesce(p.irstr_pts, 0)")) }},
+        'K',     {{ iff('c.k_pts     - coalesce(p.k_pts, 0)     = 0', 'null', object_construct("'calculated', c.k,     'platform', p.k,     'pts_delta', c.k_pts     - coalesce(p.k_pts, 0)")) }},
+        'HA',    {{ iff('c.ha_pts    - coalesce(p.ha_pts, 0)    = 0', 'null', object_construct("'calculated', c.ha,    'platform', p.ha,    'pts_delta', c.ha_pts    - coalesce(p.ha_pts, 0)")) }},
+        'BBI',   {{ iff('c.bbi_pts   - coalesce(p.bbi_pts, 0)   = 0', 'null', object_construct("'calculated', c.bbi,   'platform', p.bbi,   'pts_delta', c.bbi_pts   - coalesce(p.bbi_pts, 0)")) }},
+        'ER',    {{ iff('c.er_pts    - coalesce(p.er_pts, 0)    = 0', 'null', object_construct("'calculated', c.er,    'platform', p.er,    'pts_delta', c.er_pts    - coalesce(p.er_pts, 0)")) }}
+    {% endcall %} as drivers
 from calc c
 inner join plat p
     on c.league_key = p.league_key

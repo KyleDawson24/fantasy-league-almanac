@@ -375,6 +375,15 @@ aggregation is the only remaining lever on the two marts' peak. It is a
 model change with value risk and wants its own reviewed ceremony; until
 then the three-invocation profile above is the supported build.
 
+**Run it with `tools/duckdb_run.sh`.** The wrapper sweeps, then reads
+`run_results.json` and re-invokes each failed model in its own process,
+rebuilding the skip cone as models recover. It deliberately does not
+hard-code the two marts: the failure set is cap-dependent (four models at
+4 GB, not two), and the wrapper distinguishes a spill-cap failure -- which
+its own invocation recovers -- from a `memory_limit` ceiling, which no
+number of invocations can fix, and exits non-zero on the latter rather
+than looping.
+
 ### Headroom at cap (MLB-172) -- first data point, 2026-07-31
 
 MLB-172 makes the observed PEAK per invocation a release-over-release
@@ -436,36 +445,52 @@ offloads to disk, so the two marts' peaks ROSE (3.84 -> 4.89 GiB and
 1.01 GiB to 0.20 GiB. The two caps trade against each other; lowering one
 pushes pressure onto the other.
 
-**The failures split across BOTH caps, and only one class is bridgeable:**
+**The failures split across BOTH caps**, which is what each error says:
 
-| model | cap hit | own invocation? |
+| model | cap named in its own error |
+|---|---|
+| `mart_player_career_records` | `max_temp_directory_size` (5.5/5.5 GiB) |
+| `mart_player_season_records` | `max_temp_directory_size` (5.5/5.5 GiB) |
+| `stg_cbs__rosters__teams` | `memory_limit` (3.7/3.7 GiB) |
+| `stg_box_scores` | `memory_limit` (3.7/3.7 GiB) |
+
+**At 4 GB the outcome is NOT reproducible run to run.** Two passes over
+the same chain at the same cap disagreed about three of those four
+models when each was re-run in its own process:
+
+| model, run alone at 4 GB | first pass | second pass |
 |---|---|---|
-| `mart_player_career_records` | `max_temp_directory_size` (5.5/5.5 GiB) | **recovers** |
-| `mart_player_season_records` | `max_temp_directory_size` (5.5/5.5 GiB) | **recovers** |
-| `stg_cbs__rosters__teams` | `memory_limit` (3.7/3.7 GiB) | still fails |
-| `stg_box_scores` | `memory_limit` (3.7/3.7 GiB) | still fails |
+| `mart_player_career_records` | pass (36.4s) | **fail** (spill cap) |
+| `mart_player_season_records` | pass (25.2s) | **fail** (spill cap) |
+| `stg_cbs__rosters__teams` | fail | **pass** |
+| `stg_box_scores` | fail | fail |
 
-The two records marts behave exactly as documented -- they fail in
-company and pass alone, so the three-invocation profile still carries
-them at 4 GB. The two staging models are a different class: a fresh
-process resets the buffer pool but not the ceiling, so no number of
-invocations recovers a `memory_limit` failure. **74/74 is NOT reachable
-at 4 GB**, and the 38 SKIPs are the downstream cone of those two.
+A fifth model, `stg_cbs__rosters`, failed in the second pass's skip-cone
+rebuild and never appeared in the first. So treat **any single 4 GB
+result as a sample, not a fact** -- the chain runs close enough to both
+caps there that warehouse state decides the outcome, and an earlier
+edition of this section over-read one pass as a property of the models.
 
-**Measured floor**, isolated invocations of the two staging models:
+**What IS stable across passes**, and what the conclusion rests on:
 
-| `memory_limit` | `stg_cbs__rosters__teams` | `stg_box_scores` |
-|---|---|---|
-| 4 GB | fail | fail |
-| 5 GB | pass | fail |
-| 5.25 GB | -- | fail |
-| 5.5 GB | pass | pass |
+| `memory_limit` | `stg_box_scores`, run alone |
+|---|---|
+| 4 GB | fail |
+| 5 GB | fail |
+| 5.25 GB | fail |
+| 5.5 GB | pass |
 
-`stg_box_scores` is the binding model, with its floor between 5.25 and
-5.5 GB (single sample per boundary). **This is a headwind for MLB-109's
-"runs on a stranger's machine" claim**: ~5.5 GB of `memory_limit` is
-about 69% of an 8 GB machine's total RAM. Options are Kyle's call and are
-drafted in the overnight handoff -- nothing here was reshaped.
+`stg_box_scores` binds in every pass, its floor sits between 5.25 and
+5.5 GB, and **74/74 was not reachable at 4 GB in any pass**. The
+distinction that survives is between the two CAPS, not between named
+models: a `max_temp_directory_size` failure is often adjacency and often
+recovers alone, while a `memory_limit` failure is a ceiling a fresh
+process cannot move. Which models land in which bucket shifts with state.
+
+**This is a headwind for MLB-109's "runs on a stranger's machine"
+claim**: ~5.5 GB of `memory_limit` is about 69% of an 8 GB machine's
+total RAM. Options are Kyle's call and are drafted in the overnight
+handoff -- nothing here was reshaped.
 
 ## Sizing the output-layer connection swap (2026-07-31)
 
@@ -534,3 +559,30 @@ type normalization, half a day for the ~20 dialect sites, and a day for a
 render-level A/B proving no cell moved -- the part that cannot be skipped,
 because every remaining contract risk surfaces as a formatting difference
 rather than as an error.
+
+### A ninth class the eight-class table misses: RESERVED WORDS
+
+Running the real almanac entry point against the local DuckDB, **183 of
+184 queries executed unchanged**. The single failure was not a construct
+at all:
+
+```
+LEFT JOIN active_totals at      -- almanac_data.py:1845
+```
+
+**`AT` is reserved in DuckDB** (its time-travel syntax), so all 22 `at.`
+references are a parser error in a query with nothing else wrong with it.
+Snowflake accepts it. No dialect table catches this, because it is an
+identifier collision rather than a feature gap -- the fix is a rename, and
+the only way to find the next one is to run the query. (Fixed at source;
+the alias is now `act`.)
+
+**And the count is a floor, not a verdict.** Renaming that alias exposed a
+SECOND divergence hiding behind the first *in the same query*:
+`LISTAGG(...) WITHIN GROUP (ORDER BY a, b)`, which DuckDB accepts with
+only one sort key. Divergences surface **serially** -- a query is not
+clean until it runs end to end, so any estimate built by counting
+first-contact failures (including the one above) is optimistic by
+construction. This is precisely why the render-level A/B is the
+load-bearing part of the estimate and not a formality: it is the only
+instrument that keeps peeling.

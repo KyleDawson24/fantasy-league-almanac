@@ -10,7 +10,7 @@ output, and engineering-decision log live in the
 itself: the layers, the conventions, and how to run and test it.
 
 Browse the compiled catalog (lineage + column-level docs) at the
-[hosted dbt docs site](https://kyledawson24.github.io/fantasy-league-front-page/).
+[hosted dbt docs site](https://kyledawson24.github.io/fantasy-league-almanac/).
 
 ## The DAG, top to bottom
 
@@ -18,7 +18,7 @@ Browse the compiled catalog (lineage + column-level docs) at the
 RAW.* sources (22)         seeds (18)
    │                          │
    ▼                          │
-staging/    (22) stg_*   1:1 reshapes of RAW; no business logic
+staging/    (24) stg_*   1:1 reshapes of RAW; no business logic
    │                          │
    ▼                          │
 intermediate/ (15) int_* business logic that isn't yet a contract:
@@ -35,7 +35,7 @@ exposures (4)            the Python output scripts, declared in
                          models/exposures.yml
 ```
 
-72 models in all. Counts here are regenerated at each release cut from
+74 models in all. Counts here are regenerated at each release cut from
 the parsed manifest (see [RELEASING.md](../RELEASING.md)); if you are
 reading them mid-cycle, `dbt parse` and the manifest are the truth.
 
@@ -43,7 +43,7 @@ Layer conventions:
 
 | Layer | Prefix | Default materialization | What belongs here |
 |---|---|---|---|
-| `staging/` | `stg_` | **table** (8 of 22 pin `view` themselves) | One model per raw-table *grain* (a multi-grain source like box_scores feeds several single-grain reshapes). Pure reshape: flatten VARIANT, type, rename. The only layer that reads `source()`. |
+| `staging/` | `stg_` | **table** (8 of 24 pin `view` themselves) | One model per raw-table *grain* (a multi-grain source like box_scores feeds several single-grain reshapes). Pure reshape: flatten VARIANT, type, rename. The only layer that reads `source()`. |
 | `intermediate/` | `int_` | **table** (all 15 pin their own; 10 are views) | Business logic that isn't yet a consumer contract: the slot-validity filter and the wide daily point rollup. |
 | `marts/core/` | `dim_` / `fct_` | table (3 weekly facts override to incremental; 8 thin dims/facts to view) | The contract layer. Grain-documented dimensions and facts that reporting marts and the Python output layer rely on. |
 | `marts/reporting/` | `mart_` | table (6 of 16 override to view) | Report-shaped derivations over core: rankings, league aggregates, matchup context, snapshot joins. |

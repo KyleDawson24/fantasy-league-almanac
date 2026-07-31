@@ -32,8 +32,8 @@ Snowflake free-tier provisioning.
 ## 2. Clone the repo and create a Python environment
 
 ```bash
-git clone https://github.com/KyleDawson24/fantasy-league-front-page.git
-cd fantasy-league-front-page
+git clone https://github.com/KyleDawson24/fantasy-league-almanac.git
+cd fantasy-league-almanac
 
 # Python 3.13 venv
 python -m venv .venv
@@ -372,7 +372,7 @@ cd dbt_league
 dbt deps                              # Install dbt_utils package (first
                                       # run only; idempotent)
 dbt seed                              # Load the 18 seed CSVs
-dbt build                             # Build 72 models + run 543 tests
+dbt build                             # Build 74 models + run 543 tests
 
 cd ..
 python output/generate_summary.py     # Weekly recap BBCode

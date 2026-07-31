@@ -22,13 +22,23 @@ The honesty note is the other half. Only 2026 was captured live. For our ESPN le
 
 2021-2025 is reconstructed day by day from the transaction log (which for this era _does_ include sit/start transactions).
 
+2001-2003 is the weakest stretch in the book, and it gets said out loud rather than buried: there are no year-end roster pages to anchor the reconstruction, so 2001 and 2002 carry error near 80% and are labelled as directional wherever they appear. Production that can be tied to the league but not to a team is parked in a clearly-labelled placeholder franchise rather than being silently assigned to somebody. That error bar is on reconstructed *point totals* only -- season finishes come from the league's official published standings, so the finish matrix above does not inherit it.
+
 Every era's provenance ships as a visible disclosure, not a footnote; the Home tab's Stat Sources table and every team page state plainly which years are captured live, reconstructed day-by-day, or estimated, and what share of the record falls into each bucket.
 
 ---
 
 ## The Big Picture
 
-Every Sunday, one command turns a week of fantasy baseball into a formatted recap: best and worst matchups with their top contributors, the wasted-performance callouts, and any records broken or tied.
+<!-- WORDING IS DELIBERATE: "one run of the pipeline", not "one command".
+     The weekly loop is four invocations (extract -> dbt build -> render,
+     plus the optional CBS capture) and SETUP.md documents it as such, so
+     "one command" contradicted our own runbook. A true single command is
+     actively landing via the phase-5 wrapper (cf. tools/duckdb_run.sh,
+     which already does this for the DuckDB target); when that ships for
+     the weekly loop, this sentence can go back to "one command" -- until
+     then, do not. MLB-157. -->
+Every Sunday, one run of the pipeline turns a week of fantasy baseball into a formatted recap: best and worst matchups with their top contributors, the wasted-performance callouts, and any records broken or tied.
 
 That was the original product, built to automate a tedious manual process for my personal league.
 It has since grown into a cross-platform data model that produces customized, browsable "Almanacs" containing entire league histories.
@@ -55,12 +65,12 @@ The pipeline was built for one league on one platform. Adding a second one that 
 
 What made this tractable rather than a fork:
 
-- **One warehouse, one set of models, a `league_key` grain.** Per-league schemas were considered and rejected. Every fact and mart carries the league key; the output layer filters. Adding a league does not add a model.
-- **Platform vocabulary stops at the staging layer.** Stat ids, slot ids and format labels stay native in staging and are translated to a canonical catalog through mapping seeds. Everything downstream speaks one language. The rules are written down in [docs/platform-adapter-contract.md](docs/platform-adapter-contract.md).
+- **One warehouse, one set of models, a `league_key` grain.** Per-league schemas were considered and rejected. Every fact and mart carries the league key; the output layer filters. It is designed so that a new league on an already-supported platform is configuration rather than code -- though in fairness that is designed-and-unexercised, not proven: both books today are one league per platform. The packaged sample league on the 2.0 roadmap is the live test, and it carries a zero-new-models acceptance rider precisely so the claim gets checked instead of assumed.
+- **Platform vocabulary is translated at staging; platform *work* converges at the facts.** Stat ids, slot ids and format labels stay native in staging and are mapped to a canonical catalog through seeds. Where a platform serves something the other cannot -- CBS has no per-day scoring, so its roster stints, lineup intervals and eligibility windows have to be reconstructed -- that reconstruction gets its own `int_cbs__*` models and lands in the shared fact family. Thirteen models below staging are platform-specific by design; everything downstream of the facts speaks one language. The rules are written down in [docs/platform-adapter-contract.md](docs/platform-adapter-contract.md).
 - **Format is a separate axis from platform.** "Points league" and "which website" are independent dimensions, so a feed can be required, optional, or conditional on format rather than on vendor.
 - **The universal layer is real baseball.** Stats come from the public MLB Stats API, not from a fantasy vendor, so the underlying numbers are never in doubt. Only the fantasy state around them (who owned whom, who was in the lineup on a given day) has to be reconstructed.
 
-The payoff is measurable: the second league's almanac renders through the *same* tab builders as the first, in the same shape, from a shared convergence layer.
+The payoff is measurable: both leagues' team pages render through the *same* builder, in the same shape, from a shared convergence layer -- the two screenshots below are one code path fed two `league_key`s. Several other tabs (Home, Records, Advanced Standings, Draft Recap) still have a platform-specific renderer each; collapsing those onto the shared path is ongoing.
 
 ![ESPN Team Tab, current-season and all-time optimal lineups](docs/img/espn-team-tab-comparison.png)
 
@@ -82,7 +92,7 @@ ESPN + CBS extract  ->  Snowflake RAW (append-only, platform-native shape)
                     ->  weekly recap · records report · Google Sheets almanac
 ```
 
-Built on dbt + Snowflake + Python: extract scripts land raw JSON, dbt owns everything from staging through marts, and three Python consumers read the marts to produce the recap, the records report, and the almanac. A full lineage/DAG image is coming once the current model-renaming refactor settles; drawing one today would be stale within weeks. The [hosted dbt catalog](https://kyledawson24.github.io/fantasy-league-front-page/) has the real, current lineage and column-level docs if you want that today; it's regenerated manually and regularly, so treat it as approximate rather than live (as we approach final state, I will update this doc accordingly).
+Built on dbt + Snowflake + Python: extract scripts land raw JSON, dbt owns everything from staging through marts, and the Python output layer reads the marts to produce the recap, the records report, and the almanac. Four of those consumers are formally declared as dbt exposures, so the lineage graph runs source → deliverable; the declared set is hand-maintained and currently incomplete, which is stated plainly in [dbt_league/README.md](dbt_league/README.md#exposures). A full lineage/DAG image is coming once the current model-renaming refactor settles; drawing one today would be stale within weeks. The [hosted dbt catalog](https://kyledawson24.github.io/fantasy-league-almanac/) has the real, current lineage and column-level docs if you want that today; it's regenerated manually and regularly, so treat it as approximate rather than live (as we approach final state, I will update this doc accordingly).
 
 ---
 
@@ -179,15 +189,19 @@ v1.x is polish on the current architecture: a player-entity layer (`dim_player` 
 
 ## Quick start
 
-**Just here to look?** The screenshots above and the [hosted dbt catalog](https://kyledawson24.github.io/fantasy-league-front-page/) cover the design; [docs/user-guide/](docs/user-guide/) covers how to read the almanac itself.
+**Just here to look?** The screenshots above and the [hosted dbt catalog](https://kyledawson24.github.io/fantasy-league-almanac/) cover the design; [docs/user-guide/](docs/user-guide/) covers how to read the almanac itself.
 
 **Want to run it?** Today that means bringing your own Snowflake account -- the free tier is enough, and [SETUP.md](SETUP.md) will get you most of the way there (~30-45 minutes, mostly Snowflake provisioning); a step-by-step setup wizard is planned for August 2026. A clone-and-run demo mode with no warehouse account at all (DuckDB, packaged sample data, one command) is planned for v2.0 and isn't available yet. A portability spike ([docs/duckdb-portability-audit.md](docs/duckdb-portability-audit.md)) sized the transform-layer port at roughly a focused week of engineering, so this is a scoped near-term plan, not a someday-maybe.
+
+**What it takes to run.** The full 26-season, 441-team-season, 1.09M-player-game reconstruction builds comfortably on a 16 GB machine ⟨minimum-RAM floor pending MLB-10's thread-pinned ladder⟩. That is where it has been tested, not a guaranteed minimum and not a ceiling.
 
 ---
 
 ## What this demonstrates
 
-The current shape of the transform layer: **72 dbt models** (32 views, 37 tables, 3 incremental), **18 seeds**, **542 data tests**, and **4 declared exposures**, building green end to end.
+The current shape of the transform layer: **74 dbt models** (32 views, 39 tables, 3 incremental), **18 seeds**, **543 data tests**, **22 sources**, and **4 declared exposures**. These counts are regenerated from the parsed manifest at each release cut; if you are reading them mid-cycle, `dbt parse` and the manifest are the truth.
+
+Most of that needs a warehouse to exercise, but not all of it: with no account and no credentials, `pytest tests/` runs **250 tests green** (17 warehouse-marked tests deselect, and the tests that need private regression corpora skip rather than fail), and `dbt deps && dbt parse` compiles the project.
 
 - **Modeling that survived a second implementation.** Wide convergence facts at consumer grain; a symmetric active/inactive split ("active is fantasy reality, inactive is MLB reality") that is what makes wasted-production analysis possible at all; a seed-driven UNPIVOT mart where adding a tracked stat is a CSV row rather than a five-file SQL change.
 - **Reproducibility.** Floating-point sums are not associative, and SQL engines do not promise summation order, so rebuilding with no code change could move a rendered cell by one, and oh boy it often did. Sums now run in exact decimal with pinned tie-breaks, and a byte-diff harness pins a known week so any drift fails loudly.
@@ -205,9 +219,10 @@ The current shape of the transform layer: **72 dbt models** (32 views, 37 tables
 - **[SETUP.md](SETUP.md)** -- bring-your-own-credentials walkthrough.
 - **[docs/known-data-issues.md](docs/known-data-issues.md)** -- the list of gaps, caveats, and open questions.
 - **[docs/platform-adapter-contract.md](docs/platform-adapter-contract.md)** -- the shape a new platform has to land data in.
+- **[docs/PRIVACY.md](docs/PRIVACY.md)** -- whose data is in here, what is synthetic, and what is never committed.
 - **[CHANGELOG.md](CHANGELOG.md)** · **[ROADMAP.md](ROADMAP.md)** -- version history, and what is Now / Next / Later / Decided Against.
 - **Phase X.Y Documentation.md** in the repo root -- the decision log, each with an "options considered → chosen → rationale" section. These were all pre-release/exploratory; their only real purpose is archival.
-- **[Hosted dbt catalog](https://kyledawson24.github.io/fantasy-league-front-page/)** -- model lineage and column-level docs, regenerated manually (may lag a release or two behind local `main`).
+- **[Hosted dbt catalog](https://kyledawson24.github.io/fantasy-league-almanac/)** -- model lineage and column-level docs, regenerated manually (may lag a release or two behind local `main`).
 
 ---
 
@@ -220,10 +235,6 @@ The current shape of the transform layer: **72 dbt models** (32 views, 37 tables
 - **v1.0.0 - v1.1.2** -- the original single-league ESPN foundation: the weekly BBCode recap, the all time records report, and the first Google Sheets almanac. Full per-release history in [CHANGELOG.md](CHANGELOG.md).
 - **License**: MIT (see [LICENSE](LICENSE)).
 - **Built with**: dbt 1.11 · Snowflake · Python 3.13 · `espn-api` wrapper · `gspread`.
-
-## A note on the name
-
-"Fantasy League Almanac" is the working personality name; the repository is still `fantasy-league-front-page` for historical reasons. Don't read too much into either, likely to change.
 
 ## Contact
 

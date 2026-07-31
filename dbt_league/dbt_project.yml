@@ -1,4 +1,4 @@
-# dbt_league -- transform layer for the Fantasy Beat Reporter pipeline.
+# dbt_league -- transform layer for the Fantasy League Almanac pipeline.
 # Layer conventions and the DAG walkthrough live in README.md alongside
 # this file; the hosted catalog is linked from there.
 

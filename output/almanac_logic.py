@@ -584,7 +584,7 @@ def build_home_tab_rows(weekly_rows, season_rows, weekly_all_rows,
     """
     stamp = updated_stamp()
     banner = [
-        ['Fantasy Beat Reporter Almanac'],
+        ['Fantasy League Almanac'],
         [_HOME_SCORING_CALLOUT],
         # A bare [] when suppressed, so the golden corpus stays
         # byte-identical to the pre-stamp shape ([''] serializes as "").

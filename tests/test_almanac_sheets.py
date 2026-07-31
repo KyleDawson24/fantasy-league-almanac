@@ -376,7 +376,7 @@ class TestHomeRows:
         # Banner (spans both bands). Row 3 carries the render-time
         # 'Updated ...' stamp (MLB-141); the byte-diff harnesses blank it
         # via SUPPRESS_UPDATED_STAMP=1.
-        assert rows[0] == ['Fantasy Beat Reporter Almanac']
+        assert rows[0] == ['Fantasy League Almanac']
         assert 'current-season scoring' in rows[1][0]
         assert rows[2][0].startswith('Updated ')
 

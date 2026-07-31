@@ -10,7 +10,10 @@ repository root for the architectural detail behind the change.
 
 ## [Unreleased]
 
-_Nothing yet._
+_In progress: the DuckDB engine port (MLB-10), so the project can run
+without a cloud warehouse. Release notes are built from the commit range
+at each cut rather than accumulated here, so this section staying short
+is not a sign the repository is idle._
 
 ## [1.6.0] — 2026-07-30
 
@@ -1195,7 +1198,7 @@ grew."
   template callouts (e.g., `hr_drought`) pick the same phrasing across
   rebuilds of the same MP.
 - **dbt docs catalog hosted via GitHub Pages** — initial publish at
-  https://kyledawson24.github.io/fantasy-league-front-page/.
+  https://kyledawson24.github.io/fantasy-league-almanac/.
 
 ### Changed
 

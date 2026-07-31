@@ -4,9 +4,17 @@ This project shipped v1.0.0 on 2026-05-13, v1.0.1 on 2026-05-18
 (polish + flavor expansion), v1.0.2 on 2026-05-19 (DAG hygiene and
 dbt-architecture cleanup; refactor-only), and v1.1.0 on 2026-05-22
 (Google Sheets league almanac). It has since shipped through v1.5.0
-(the multi-league foundation and a 25-year CBS almanac) and v1.5.1
-(a correctness pass over the CBS record book, 2026-07-25). See
-CHANGELOG.md for the per-release entries. The items below are what's still on deck, organized by
+(the multi-league foundation and a 25-year CBS almanac), v1.5.1
+(a correctness pass over the CBS record book, 2026-07-25), and v1.6.0
+(2026-07-30, the pre-port anchor release: Total-Points vocabulary,
+Advanced Standings banners, a re-render hygiene fix, and a determinism
+sweep). See CHANGELOG.md for the per-release entries.
+
+**In flight right now:** the DuckDB engine port (MLB-10) -- the work that
+makes the "runs without a cloud warehouse" item below real rather than
+planned.
+
+The items below are what's still on deck, organized by
 priority and ambition. v1.x = incremental polish on the current
 architecture; v2.0 = structural change.
 
@@ -17,8 +25,14 @@ a single afternoon.
 
 ### Almanac refactor (v1.1.1)
 
+> **Overtaken by events (noted 2026-07-31).** This block was written when
+> v1.1.0 was the current release; the project is now at v1.6.0 with the
+> engine port in flight. The individual items below are still wanted, but
+> "the next release" no longer describes any of them. Re-prioritizing this
+> section is its own pass.
+
 - **Byte-identical almanac refactor.** v1.1.0 shipped the product surface
-  first so the league can review it. The next release should be a pure
+  first so the league can review it. This would be a pure
   refactor against `tests/fixtures/almanac_v1_1_0/`: no tab/column
   changes, only relocation and cleanup.
 - **Build a wide `mart_team_matchup` view.** One row per team-week with

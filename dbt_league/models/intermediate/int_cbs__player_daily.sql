@@ -79,8 +79,9 @@ scoped_windows as (
         w.cbs_position,
         w.eligible_from,
         w.eligibility_source,
-        decode(w.cbs_position, 'C', 1, '1B', 2, '2B', 3, '3B', 4,
-               'SS', 5, 'OF', 6, 'DH', 7, 'P', 8, 9) as pos_rank
+        {{ decode_value('w.cbs_position',
+                        [('C', 1), ('1B', 2), ('2B', 3), ('3B', 4),
+                         ('SS', 5), ('OF', 6), ('DH', 7), ('P', 8)], 9) }} as pos_rank
     from {{ ref('int_cbs__eligibility_windows') }} w
     inner join xwalk x
         on w.mlbam_id = x.mlbam_id
@@ -222,15 +223,15 @@ eligibility as (
         season_year,
         game_date,
         cbs_player_id,
-        {{ iff("array_size(array_remove(raw_slots, to_variant('DH'))) > 0", "array_remove(raw_slots, to_variant('DH'))", 'raw_slots') }} as eligible_slots
+        {{ iff(array_length(array_without('raw_slots', "'DH'")) ~ " > 0",
+               array_without('raw_slots', "'DH'"), 'raw_slots') }} as eligible_slots
     from (
         select
             d.league_key,
             d.season_year,
             d.game_date,
             d.cbs_player_id,
-            array_agg(distinct s.cbs_position)
-                within group (order by s.cbs_position) as raw_slots
+            {{ array_agg_ordered('s.cbs_position', 's.cbs_position', distinct=true) }} as raw_slots
         from day_base d
         inner join scoped_windows s
             on d.league_key = s.league_key
@@ -245,19 +246,19 @@ select
     d.league_key,
     d.season_year,
     cast(null as integer)                        as matchup_period,
-    to_number(to_char(d.game_date, 'YYYYMMDD'))  as scoring_period,
+    {{ date_as_yyyymmdd('d.game_date') }}  as scoring_period,
     d.franchise_id                               as team_id,
     coalesce(d.captured_team_name, fn.team_name) as team_name,
     fr.abbrev                                    as team_abbrev,
     ow.owner_display                             as owner_name,
-    try_to_number(d.cbs_player_id)::integer      as player_id,
+    {{ try_to_number('d.cbs_player_id') }}::integer      as player_id,
     d.cbs_player_name                            as player_name,
     d.cbs_player_name                            as display_name,
     coalesce(dp.position,
              {{ iff("x.stat_group_scope = 'pitching'", "'P'", "'DH'") }}) as position,
     d.pro_team,
     coalesce(el.eligible_slots,
-             {{ iff("x.stat_group_scope = 'pitching'", "array_construct('P')", "array_construct('DH')") }}) as eligible_slots,
+             {{ iff("x.stat_group_scope = 'pitching'", array_of(["'P'"]), array_of(["'DH'"])) }}) as eligible_slots,
     d.lineup_slot,
     case
         when d.lineup_slot = 'RS'  then 'inactive'

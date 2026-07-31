@@ -498,6 +498,218 @@ regexp_extract({{ subject }}, '{{ '(?i)' if case_insensitive else '' }}{{ patter
 
 -- Scalar-function gaps --------------------------------------------------
 
+{% macro date_from_parts(year, month, day) -%}
+{#- Snowflake DATE_FROM_PARTS, DuckDB MAKE_DATE. Same argument order. -#}
+    {{ return(adapter.dispatch('date_from_parts', 'dbt_league')(year, month, day)) }}
+{%- endmacro %}
+
+{% macro default__date_from_parts(year, month, day) -%}
+date_from_parts({{ year }}, {{ month }}, {{ day }})
+{%- endmacro %}
+
+{% macro duckdb__date_from_parts(year, month, day) -%}
+{#- The bigint casts are required, not defensive: make_date binds only
+    (BIGINT, BIGINT, BIGINT) and season_year lands from RAW as
+    DECIMAL(38,0), so the unadorned call is a binder error. Snowflake's
+    DATE_FROM_PARTS takes the decimal directly. -#}
+make_date(cast({{ year }} as bigint), cast({{ month }} as bigint), cast({{ day }} as bigint))
+{%- endmacro %}
+
+
+{% macro date_add_unit(unit, amount, expr) -%}
+{#- Snowflake DATEADD(unit, n, x). DuckDB has no dateadd in any arity, and
+    its INTERVAL literal syntax wants a constant unit, so this adds a
+    to_<unit>s() interval instead -- which takes an expression for the
+    amount and so does not care whether n is a literal. Negative amounts
+    work (verified: ts + to_years(-1)).
+
+    `unit` is a bare SQL keyword on Snowflake (year, day) and pluralizes
+    into a DuckDB function name, which is why it is passed as text rather
+    than quoted. -#}
+    {{ return(adapter.dispatch('date_add_unit', 'dbt_league')(unit, amount, expr)) }}
+{%- endmacro %}
+
+{% macro default__date_add_unit(unit, amount, expr) -%}
+dateadd({{ unit }}, {{ amount }}, {{ expr }})
+{%- endmacro %}
+
+{% macro duckdb__date_add_unit(unit, amount, expr) -%}
+({{ expr }} + to_{{ unit }}s({{ amount }}))
+{%- endmacro %}
+
+
+{% macro div0(numerator, denominator) -%}
+{#- Divide, yielding 0 rather than an error when the denominator is 0.
+    Snowflake DIV0; DuckDB has no equivalent, so it gets the CASE.
+
+    A NULL denominator must stay NULL rather than becoming 0, and it does:
+    `NULL = 0` is NULL, so the CASE falls to ELSE and divides by NULL.
+    Verified, because collapsing NULL to 0 here would invent a 0% delta
+    for teams with no official total. -#}
+    {{ return(adapter.dispatch('div0', 'dbt_league')(numerator, denominator)) }}
+{%- endmacro %}
+
+{% macro default__div0(numerator, denominator) -%}
+div0({{ numerator }}, {{ denominator }})
+{%- endmacro %}
+
+{% macro duckdb__div0(numerator, denominator) -%}
+case when ({{ denominator }}) = 0 then 0 else ({{ numerator }}) / ({{ denominator }}) end
+{%- endmacro %}
+
+
+{% macro listagg_ordered(expr, separator, order_by, distinct=False) -%}
+{#- Snowflake LISTAGG(x, sep) WITHIN GROUP (ORDER BY y). DuckDB parses
+    plain listagg but rejects the ordered-aggregate form (`Unknown ordered
+    aggregate "listagg"`), so it takes string_agg with the ORDER BY inside
+    the argument list. The ordering is not decoration -- both call sites
+    build a displayed owner string, so an unordered aggregate would make
+    the label depend on scan order. -#}
+    {{ return(adapter.dispatch('listagg_ordered', 'dbt_league')(expr, separator, order_by, distinct)) }}
+{%- endmacro %}
+
+{% macro default__listagg_ordered(expr, separator, order_by, distinct) -%}
+listagg({% if distinct %}distinct {% endif %}{{ expr }}, '{{ separator }}')
+            within group (order by {{ order_by }})
+{%- endmacro %}
+
+{% macro duckdb__listagg_ordered(expr, separator, order_by, distinct) -%}
+string_agg({% if distinct %}distinct {% endif %}{{ expr }}, '{{ separator }}' order by {{ order_by }})
+{%- endmacro %}
+
+
+{% macro try_to_number(expr) -%}
+{#- Snowflake TRY_TO_NUMBER defaults to NUMBER(38,0) -- integer scale,
+    so '12.7' rounds to 13 rather than truncating. DuckDB's try_cast to
+    decimal(38,0) rounds the same way (verified), which keeps the two
+    engines agreeing on the fractional inputs that should not exist but
+    would otherwise diverge silently. Non-numeric text is NULL on both. -#}
+    {{ return(adapter.dispatch('try_to_number', 'dbt_league')(expr)) }}
+{%- endmacro %}
+
+{% macro default__try_to_number(expr) -%}
+try_to_number({{ expr }})
+{%- endmacro %}
+
+{% macro duckdb__try_to_number(expr) -%}
+try_cast({{ expr }} as decimal(38,0))
+{%- endmacro %}
+
+
+{% macro ignore_nulls(fn, expr) -%}
+{#- A navigation window function that skips NULLs. Identical semantics,
+    different PLACEMENT of the modifier: Snowflake writes
+    `last_value(x) IGNORE NULLS OVER (...)` and DuckDB writes
+    `last_value(x IGNORE NULLS) OVER (...)`, inside the argument list.
+    DuckDB's parser rejects the Snowflake position outright.
+
+    Emit this immediately before the model's own `over (...)` clause,
+    which both engines then share verbatim. -#}
+    {{ return(adapter.dispatch('ignore_nulls', 'dbt_league')(fn, expr)) }}
+{%- endmacro %}
+
+{% macro default__ignore_nulls(fn, expr) -%}
+{{ fn }}({{ expr }})
+                ignore nulls
+{%- endmacro %}
+
+{% macro duckdb__ignore_nulls(fn, expr) -%}
+{{ fn }}({{ expr }} ignore nulls)
+{%- endmacro %}
+
+
+-- Array construction and inspection -------------------------------------
+
+{% macro date_as_yyyymmdd(expr) -%}
+{#- A date rendered as the integer 20240305 -- CBS's scoring_period key,
+    which has to sort and join as a number. Snowflake composes TO_NUMBER
+    over TO_CHAR; DuckDB has neither name (its to_char does not exist and
+    to_number resolves to nothing), so it formats with strftime and casts.
+    bigint, not integer: the value is 8 digits and headroom is free. -#}
+    {{ return(adapter.dispatch('date_as_yyyymmdd', 'dbt_league')(expr)) }}
+{%- endmacro %}
+
+{% macro default__date_as_yyyymmdd(expr) -%}
+to_number(to_char({{ expr }}, 'YYYYMMDD'))
+{%- endmacro %}
+
+{% macro duckdb__date_as_yyyymmdd(expr) -%}
+cast(strftime({{ expr }}, '%Y%m%d') as bigint)
+{%- endmacro %}
+
+
+{% macro array_agg_ordered(expr, order_by, distinct=False) -%}
+{#- ARRAY_AGG(... ) WITHIN GROUP (ORDER BY ...). DuckDB accepts the
+    ordered-aggregate form but rejects it combined with DISTINCT
+    (`cannot use DISTINCT with WITHIN GROUP`), so it takes the ORDER BY
+    inside the argument list -- the same shape as listagg_ordered.
+
+    The ordering is load-bearing: raw_slots feeds eligible_slots, which
+    is compared and rendered downstream, so an unordered aggregate would
+    make the array's element order depend on scan order. That is exactly
+    the class MLB-134 spent a sweep removing. -#}
+    {{ return(adapter.dispatch('array_agg_ordered', 'dbt_league')(expr, order_by, distinct)) }}
+{%- endmacro %}
+
+{% macro default__array_agg_ordered(expr, order_by, distinct) -%}
+array_agg({% if distinct %}distinct {% endif %}{{ expr }})
+                within group (order by {{ order_by }})
+{%- endmacro %}
+
+{% macro duckdb__array_agg_ordered(expr, order_by, distinct) -%}
+array_agg({% if distinct %}distinct {% endif %}{{ expr }} order by {{ order_by }})
+{%- endmacro %}
+
+
+{% macro array_of(items) -%}
+{#- Snowflake ARRAY_CONSTRUCT(a, b, ...); DuckDB's list literal. `items`
+    is a Jinja list of already-quoted SQL scalars. -#}
+    {{ return(adapter.dispatch('array_of', 'dbt_league')(items)) }}
+{%- endmacro %}
+
+{% macro default__array_of(items) -%}
+array_construct({{ items | join(', ') }})
+{%- endmacro %}
+
+{% macro duckdb__array_of(items) -%}
+[{{ items | join(', ') }}]
+{%- endmacro %}
+
+
+{% macro array_without(arr, value) -%}
+{#- Remove every element equal to `value`. Snowflake ARRAY_REMOVE (whose
+    second argument must be a VARIANT, hence to_variant at the call site
+    -- DuckDB needs no such wrapper and the macro absorbs the difference).
+
+    `is distinct from` rather than `<>` on the DuckDB side so NULL
+    elements SURVIVE, which is what ARRAY_REMOVE does: `<>` evaluates to
+    NULL for a NULL element and list_filter would quietly drop it. -#}
+    {{ return(adapter.dispatch('array_without', 'dbt_league')(arr, value)) }}
+{%- endmacro %}
+
+{% macro default__array_without(arr, value) -%}
+array_remove({{ arr }}, to_variant({{ value }}))
+{%- endmacro %}
+
+{% macro duckdb__array_without(arr, value) -%}
+list_filter({{ arr }}, x -> x is distinct from {{ value }})
+{%- endmacro %}
+
+
+{% macro array_length(arr) -%}
+{#- Snowflake ARRAY_SIZE, DuckDB LEN. -#}
+    {{ return(adapter.dispatch('array_length', 'dbt_league')(arr)) }}
+{%- endmacro %}
+
+{% macro default__array_length(arr) -%}
+array_size({{ arr }})
+{%- endmacro %}
+
+{% macro duckdb__array_length(arr) -%}
+len({{ arr }})
+{%- endmacro %}
+
+
 {% macro try_to_double(expr) -%}
 {#- "parse this text as a float, NULL if it isn't one". Snowflake
     TRY_TO_DOUBLE; DuckDB has no TRY_TO_* family but TRY_CAST is exactly
@@ -517,6 +729,70 @@ try_to_double({{ expr }})
 
 {% macro duckdb__try_to_double(expr) -%}
 try_cast({{ expr }} as double)
+{%- endmacro %}
+
+
+{% macro regexp_like(subject, pattern) -%}
+{#- "does this string match the pattern", as a boolean.
+
+    NOT a rename. Snowflake's REGEXP_LIKE is implicitly anchored -- the
+    WHOLE subject must match -- while DuckDB's regexp_matches is a
+    substring search. The right DuckDB function is regexp_full_match:
+
+      '.*\((batter|pitcher)\)' vs 'xx(batter)yy'
+          Snowflake REGEXP_LIKE   false
+          regexp_matches          TRUE   <- wrong, and silently so
+          regexp_full_match       false  <- correct
+
+    Two of the three call sites use ^...$ patterns where the difference
+    cannot show; the draft-recap split-marker test is not anchored, so it
+    would have started matching names with trailing text. Pattern goes
+    through re_literal for the backslash-escaping reason. -#}
+    {{ return(adapter.dispatch('regexp_like', 'dbt_league')(subject, pattern)) }}
+{%- endmacro %}
+
+{% macro default__regexp_like(subject, pattern) -%}
+regexp_like({{ subject }}, {{ re_literal(pattern) }})
+{%- endmacro %}
+
+{% macro duckdb__regexp_like(subject, pattern) -%}
+regexp_full_match({{ subject }}, {{ re_literal(pattern) }})
+{%- endmacro %}
+
+
+{% macro decode_value(expr, mapping, default=none) -%}
+{#- Snowflake DECODE(expr, v1, r1, v2, r2, ..., default) -- a positional
+    CASE. DuckDB has no such function at all: its `decode` is the BLOB
+    one, so the call binds and fails with a candidate list about blobs.
+
+    `mapping` is a list of (value, result) pairs; values are emitted as
+    SQL string literals, results verbatim.
+
+    `default` is OPTIONAL because DECODE's trailing argument is only a
+    default when the argument count is even -- `decode(x, a, 1, b, 2, c,
+    3)` is THREE pairs with no default and yields NULL for anything
+    unmatched, not two pairs defaulting to 3. Passing it as a separate
+    argument makes that unambiguous at the call site; omitted, Snowflake
+    gets no trailing argument and DuckDB gets a CASE with no ELSE, which
+    is NULL on both.
+
+    NULL semantics, since DECODE and CASE genuinely differ there: DECODE
+    treats NULL as EQUAL to a NULL in its search list, where CASE's `=`
+    never matches NULL. No call site lists NULL as a search value, so a
+    NULL input falls to the default on both engines -- checked, because
+    if a NULL ever joins one of these lists the two spellings stop
+    agreeing. All three sites are sort keys inside row-selection windows
+    (MLB-134 territory), so a divergence here would change which row
+    survives, not raise an error. -#}
+    {{ return(adapter.dispatch('decode_value', 'dbt_league')(expr, mapping, default)) }}
+{%- endmacro %}
+
+{% macro default__decode_value(expr, mapping, default) -%}
+decode({{ expr }}{% for value, result in mapping %}, '{{ value }}', {{ result }}{% endfor %}{% if default is not none %}, {{ default }}{% endif %})
+{%- endmacro %}
+
+{% macro duckdb__decode_value(expr, mapping, default) -%}
+case {{ expr }}{% for value, result in mapping %} when '{{ value }}' then {{ result }}{% endfor %}{% if default is not none %} else {{ default }}{% endif %} end
 {%- endmacro %}
 
 

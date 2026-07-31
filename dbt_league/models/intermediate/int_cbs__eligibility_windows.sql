@@ -134,8 +134,9 @@ primary_pos as (
         order by pref,
                  games desc,
                  games_started desc,
-                 decode(cbs_position, 'C', 1, '1B', 2, '2B', 3, '3B', 4,
-                        'SS', 5, 'OF', 6, 'DH', 7, 'P', 8, 9)
+                 {{ decode_value('cbs_position',
+                                 [('C', 1), ('1B', 2), ('2B', 3), ('3B', 4),
+                                  ('SS', 5), ('OF', 6), ('DH', 7), ('P', 8)], 9) }}
     ) = 1
 ),
 
@@ -145,7 +146,7 @@ windows_raw as (
         mlbam_id,
         season_year,
         cbs_position,
-        date_from_parts(season_year, 1, 1) as eligible_from,
+        {{ date_from_parts('season_year', 1, 1) }} as eligible_from,
         'primary'                          as eligibility_source
     from primary_pos
 
@@ -155,7 +156,7 @@ windows_raw as (
         p.mlbam_id,
         p.season_year + 1,
         p.cbs_position,
-        date_from_parts(p.season_year + 1, 1, 1),
+        {{ date_from_parts('p.season_year + 1', 1, 1) }},
         'prior_year_20'
     from pos_season_games p
     inner join player_seasons u
@@ -202,5 +203,7 @@ cross join leagues lg
 qualify row_number() over (
     partition by lg.league_key, w.mlbam_id, w.season_year, w.cbs_position
     order by w.eligible_from,
-             decode(w.eligibility_source, 'primary', 1, 'prior_year_20', 2, 'in_season_10', 3)
+             {{ decode_value('w.eligibility_source',
+                             [('primary', 1), ('prior_year_20', 2),
+                              ('in_season_10', 3)]) }}
 ) = 1

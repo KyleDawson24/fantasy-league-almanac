@@ -243,8 +243,8 @@ discipline as (
     select
         mlbam_id,
         season_year,
-        {{ iff("sum(iff(stat_group = 'pitching', outs, 0))
-                >= 3 * sum(iff(stat_group = 'hitting', ab, 0))", "'pitching'", "'hitting'") }} as discipline
+        {{ iff("sum(" ~ iff("stat_group = 'pitching'", 'outs', '0') ~ ")
+                >= 3 * sum(" ~ iff("stat_group = 'hitting'", 'ab', '0') ~ ")", "'pitching'", "'hitting'") }} as discipline
     from game_wide
     group by 1, 2
     having count(distinct stat_group) > 1

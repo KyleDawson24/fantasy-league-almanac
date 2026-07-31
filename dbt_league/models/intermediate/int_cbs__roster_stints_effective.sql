@@ -21,7 +21,7 @@ with stints as (
         s.*,
         case when s.close_type in ('drop', 'trade_out')
              then s.stint_end
-             else dateadd(day, 1, s.stint_end)
+             else {{ date_add_unit('day', 1, 's.stint_end') }}
         end as base_end_exclusive,
         -- Single-rostering runs on the PLAYER, so key on the MLB-81 identity
         -- (mlbam), not the name form: K-Rod's 'francisco rodriguez' and
@@ -30,7 +30,7 @@ with stints as (
         -- -- today's behaviour. The scope term keeps a two-way player's two
         -- halves (Ohtani 2025: batter on one franchise, pitcher on another) as
         -- INDEPENDENT single-rostering streams.
-        coalesce(to_varchar(s.mlbam_id), 'name:' || s.name_key) as _ident,
+        coalesce({{ to_varchar('s.mlbam_id') }}, 'name:' || s.name_key) as _ident,
         coalesce(s.stat_group_scope, '')                        as _scope
     from {{ ref('int_cbs__roster_stints') }} s
 ),

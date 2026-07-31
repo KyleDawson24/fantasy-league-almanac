@@ -353,7 +353,7 @@ final as (
 
         -- Union-layer columns (see the header). ESPN state is always
         -- platform-served, hence 'captured' / binary weight.
-        to_varchar(w.player_id) as player_key,
+        {{ to_varchar('w.player_id') }} as player_key,
         cast(null as date)      as game_date,
         {{ iff("w.lineup_slot_category != 'inactive'", '1.0', '0.0') }} as active_weight,
         'captured'              as provenance

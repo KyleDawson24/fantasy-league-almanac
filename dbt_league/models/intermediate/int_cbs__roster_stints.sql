@@ -227,15 +227,13 @@ lineup_reopens as (
     from (
         select
             e.*,
-            last_value(case when e.kind != 'evidence' then e.kind end)
-                ignore nulls over (
+            {{ ignore_nulls('last_value', "case when e.kind != 'evidence' then e.kind end") }} over (
                     partition by e.league_key, e.season_year,
                                  e.franchise_id, e.name_key
                     order by e.event_date, e.row_seq desc nulls last, e.entry_seq asc
                     rows between unbounded preceding and 1 preceding
                 ) as prev_membership_kind,
-            last_value(case when e.kind != 'evidence' then e.exec_ts end)
-                ignore nulls over (
+            {{ ignore_nulls('last_value', "case when e.kind != 'evidence' then e.exec_ts end") }} over (
                     partition by e.league_key, e.season_year,
                                  e.franchise_id, e.name_key
                     order by e.event_date, e.row_seq desc nulls last, e.entry_seq asc
@@ -383,7 +381,7 @@ events as (
     select
         o.league_key, o.season_year, o.franchise_id, o.name_key,
         b.season_start,
-        dateadd(year, -1, b.season_start)::timestamp,
+        {{ date_add_unit('year', -1, 'b.season_start') }}::timestamp,
         {{ iff("o.opening_reason = 'lineup_opening'", '999999', '1000000') }},
         0, 'acquisition', o.opening_reason
     from openings o

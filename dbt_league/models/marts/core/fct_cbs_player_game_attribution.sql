@@ -90,7 +90,7 @@ captured as (
 stints as (
     select
         se.*,
-        coalesce(to_varchar(se.mlbam_id), 'name:' || se.name_key) as ident,
+        coalesce({{ to_varchar('se.mlbam_id') }}, 'name:' || se.name_key) as ident,
         coalesce(se.stat_group_scope, '')                         as scope_key
     from {{ ref('int_cbs__roster_stints_effective') }} se
 ),
@@ -115,7 +115,7 @@ anchors_resolved as (
         r.primary_pos,
         r.roster_status,
         coalesce(ctx.mlbam_id, pid.mlbam_id)                      as mlbam_id,
-        coalesce(to_varchar(coalesce(ctx.mlbam_id, pid.mlbam_id)),
+        coalesce({{ to_varchar('coalesce(ctx.mlbam_id, pid.mlbam_id)') }},
                  'name:' || {{ cbs_name_key('r.player_name_raw') }}) as ident,
         coalesce(coalesce(ctx.stat_group_scope, pid.stat_group_scope), '') as scope_key
     from {{ ref('stg_cbs__ui_rosters') }} r
@@ -298,7 +298,7 @@ reconstructed as (
         on s.league_key = li.league_key
         and s.season_year = li.season_year
         and s.franchise_id = li.franchise_id
-        and s.ident = coalesce(to_varchar(li.mlbam_id), 'name:' || li.name_key)
+        and s.ident = coalesce({{ to_varchar('li.mlbam_id') }}, 'name:' || li.name_key)
         and s.scope_key = coalesce(li.stat_group_scope, '')
         and g.game_date >= li.state_start
         and g.game_date < li.state_end_exclusive

@@ -71,7 +71,7 @@ lineup_events as (
         e.*,
         pid.mlbam_id,
         pid.stat_group_scope,
-        coalesce(to_varchar(pid.mlbam_id), 'name:' || e.name_key) as ident,
+        coalesce({{ to_varchar('pid.mlbam_id') }}, 'name:' || e.name_key) as ident,
         coalesce(pid.stat_group_scope, '')                        as scope_key
     from raw_events e
     left join {{ ref('dim_player_identity') }} pid

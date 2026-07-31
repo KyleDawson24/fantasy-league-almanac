@@ -71,7 +71,7 @@ named_variants as (
     select platform, platform_player_id, mlbam_id, stat_group_scope,
            regexp_replace(base_key, '^([a-z]+) [a-z] (.+)$', '\\1 \\2')
     from named
-    where regexp_like(base_key, '^[a-z]+ [a-z] .+$')
+    where {{ regexp_like('base_key', '^[a-z]+ [a-z] .+$') }}
 
     union all
     -- two-way parenthetical stripped: 'shohei ohtani (batter)' -> 'shohei ohtani'
@@ -128,7 +128,7 @@ idless_bridged as (
     from idless_forms f
     join xw_keys x
         on x.name_key = regexp_replace(f.name_key, '^([a-z]+) [a-z] (.+)$', '\\1 \\2')
-    where regexp_like(f.name_key, '^[a-z]+ [a-z] .+$')
+    where {{ regexp_like('f.name_key', '^[a-z]+ [a-z] .+$') }}
 ),
 
 candidates as (

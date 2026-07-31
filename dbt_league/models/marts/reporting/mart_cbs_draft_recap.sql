@@ -174,8 +174,8 @@ resolved as (
         {{ cbs_name_key('p.player_name_raw') }} as name_key,
 
         -- A '(Batter)'/'(Pitcher)' marker survives cbs_name_key by design.
-        regexp_like({{ cbs_name_key('p.player_name_raw') }},
-                    '.*\\((batter|pitcher)\\)') as is_split,
+        {{ regexp_like(cbs_name_key('p.player_name_raw'),
+                       '.*\\((batter|pitcher)\\)') }} as is_split,
 
         i.name_key is not null                  as has_ident,
         coalesce(i.is_ambiguous, false)         as ident_ambiguous,

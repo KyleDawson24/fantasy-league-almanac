@@ -59,7 +59,7 @@ import gspread
 
 import db
 from config.dbt_vars import get_dbt_var
-from db import league_predicate, listagg, query_snowflake
+from db import flatten_array, json_text, league_predicate, listagg, query_snowflake
 from almanac_data import get_optimal_season_candidates, get_optimal_team_candidates
 from cbs_draft_recap_data import get_draft_history
 # Shared board machinery ((a) reuse per Kyle 2026-07-13): the CBS Home
@@ -916,7 +916,11 @@ def get_acquisition_channels_alltime(last_closed_season):
                        PARTITION BY franchise_id, pid, season_year
                        ORDER BY stint_start
                        ROWS BETWEEN 1 FOLLOWING AND UNBOUNDED FOLLOWING),
-                       DATE_FROM_PARTS(season_year, 12, 31)) AS window_end
+                       -- Concat-cast, not DATE_FROM_PARTS: DuckDB has no
+                       -- DATE_FROM_PARTS and Snowflake has no MAKE_DATE, but
+                       -- both cast 'YYYY-12-31'. Verified equal to
+                       -- DATE_FROM_PARTS over 34,344 rows, 0 mismatches.
+                       CAST(season_year || '-12-31' AS DATE)) AS window_end
             FROM stints
         ),
         departures AS (
@@ -1952,10 +1956,12 @@ def get_current_rostered():
         FROM stg_cbs__rosters r
         LEFT JOIN cbs_franchises f
             ON r.league_key = f.league_key
-            AND try_to_number(r.team_id) = f.franchise_id
+            -- TRY_CAST, not try_to_number: DuckDB has no try_to_number and
+            -- both engines take TRY_CAST. Verified equal over 60,000 rows.
+            AND TRY_CAST(r.team_id AS BIGINT) = f.franchise_id
         LEFT JOIN dim_team_owner o
             ON r.league_key = o.league_key
-            AND try_to_number(r.team_id) = o.team_id
+            AND TRY_CAST(r.team_id AS BIGINT) = o.team_id
             AND o.season_year = r.season_year
         WHERE {league_predicate('r')}
           AND r.roster_date = (SELECT MAX(roster_date) FROM stg_cbs__rosters
@@ -2145,16 +2151,16 @@ def get_window_lineup(date_from, date_to, weighted=True):
         WITH exploded AS (
             SELECT
                 player_key, player_id, player_name, display_name,
-                slot.value::string AS position,
-                CASE WHEN slot.value::string = 'P'
+                {json_text('slot.value')} AS position,
+                CASE WHEN {json_text('slot.value')} = 'P'
                      THEN total_pitching_stat_pts
                      ELSE total_hitting_stat_pts END
                     * {weight} AS pos_pts
             FROM fct_player_daily_performance,
-                 LATERAL FLATTEN(input => eligible_slots) slot
+                 {flatten_array('eligible_slots', 'slot')}
             WHERE {league_predicate()}
               AND game_date BETWEEN '{date_from}' AND '{date_to}'
-              AND slot.value::string NOT IN ('BE', 'IL')
+              AND {json_text('slot.value')} NOT IN ('BE', 'IL')
         )
         SELECT
             player_key,

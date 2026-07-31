@@ -283,6 +283,41 @@ def listagg(expr, sep, order_by, distinct=False):
             f"WITHIN GROUP (ORDER BY {order_by})")
 
 
+def flatten_array(expr, alias):
+    """A JSON array flattened into rows, as a FROM-clause fragment.
+
+    Snowflake's LATERAL FLATTEN has no DuckDB equivalent and DuckDB's
+    unnest has no Snowflake one, so this is the second construct that
+    genuinely needs per-engine emission. Both spellings mirror the dbt
+    layer's `flatten_array` macro, which was verified against RAW: a NULL
+    input and an empty array each yield zero rows on both engines.
+
+    Pairs with json_text() -- see the warning there. Flattening without
+    unwrapping is the silent-value-change trap, not a style choice.
+    """
+    if _dialect == 'duckdb':
+        return f"unnest(cast({expr} as json[])) as {alias}(value)"
+    return f"LATERAL FLATTEN(input => {expr}) {alias}"
+
+
+def json_text(expr):
+    """The bare text of an ALREADY-EXTRACTED JSON value.
+
+    Snowflake's `VARIANT::string` UNWRAPS a JSON string to its text;
+    DuckDB's `cast(json as varchar)` SERIALIZES it and keeps the quotes.
+    Same SQL, no error, different values -- `'1B'` against `'"1B"'` -- so
+    a comparison like `NOT IN ('BE','IL')` quietly stops matching. The
+    dbt layer hit exactly this and documents it; this is its output-layer
+    twin, and it uses the same DuckDB spelling (`->>'$'`).
+
+    Use this for anything flatten_array() hands back. The two belong
+    together: the flatten is loud when it is wrong, this one is silent.
+    """
+    if _dialect == 'duckdb':
+        return f"({expr}->>'$')"
+    return f"{expr}::string"
+
+
 def league_file_tag():
     """League segment for output artifact filenames (MLB-58: log-file
     naming is league-scoped so multi-league runs never collide). Empty

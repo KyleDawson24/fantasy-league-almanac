@@ -487,10 +487,35 @@ models: a `max_temp_directory_size` failure is often adjacency and often
 recovers alone, while a `memory_limit` failure is a ceiling a fresh
 process cannot move. Which models land in which bucket shifts with state.
 
-**This is a headwind for MLB-109's "runs on a stranger's machine"
-claim**: ~5.5 GB of `memory_limit` is about 69% of an 8 GB machine's
-total RAM. Options are Kyle's call and are drafted in the overnight
-handoff -- nothing here was reshaped.
+**RULING, 2026-07-31 -- document the floor.** No reshape and no further
+bisection: the reshape candidates stay parked in MLB-172. The supported
+position is exactly the measured one, and nothing between the measured
+points is claimed:
+
+- **Green at the pinned caps** via `tools/duckdb_run.sh` -- 74/74 in a
+  single round, worst-invocation headroom 1.01 GiB of the 5.59 GiB spill
+  budget.
+- **`stg_box_scores` binds**, with its floor between 5.25 and 5.5 GB.
+- **4 GB is unreachable**, in every pass taken.
+
+A single 4 GB result is a sample, not a property; the caps, not the model
+names, are the durable distinction.
+
+**The user-facing hardware sentence ships through the claims surgery, not
+this document.** For that sentence: comfortable at 16 GB, with ~5.5-6 GB
+free needed to build. The corpus it describes, measured 2026-07-31:
+
+| quantity | measured |
+|---|---|
+| seasons | **26** (2001-2026) |
+| player-games | **1,094,627** (cbs-bsb 979,958 + espn-main 114,669) |
+| team-seasons | **441** (cbs-bsb 411 + espn-main 30) |
+
+Seasons and player-games match the drafted sentence exactly. **The
+drafted 425 does not.** 425 is 411 + 14 -- the ESPN league counted at its
+current 14 teams rather than across both of its seasons, since 2025
+carried 16. The full franchise-season count is 441. Which of the two the
+claim intends is a claims-surgery call, not a warehouse question.
 
 ## Sizing the output-layer connection swap (2026-07-31)
 

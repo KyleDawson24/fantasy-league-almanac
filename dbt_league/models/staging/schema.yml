@@ -940,7 +940,15 @@ models:
     tests:
       - dbt_utils.expression_is_true:
           arguments:
-            expression: "not (match_method like '%\\_COLLISION' and cbs_player_id not like 'ui-only-%')"
+            # '%_COLLISION', not '%\_COLLISION': neither engine gives LIKE a
+            # default escape character, so the backslash was never escaping
+            # anything on Snowflake -- `_` was already matching any single
+            # char there. DuckDB read the same literal as a REAL backslash,
+            # so the predicate was always false and the test passed
+            # vacuously. This spells Snowflake's actual behaviour, which
+            # both engines now share. (Every _COLLISION value carries a
+            # literal underscore, so the same 10 rows match either way.)
+            expression: "not (match_method like '%_COLLISION' and cbs_player_id not like 'ui-only-%')"
     columns:
       - name: cbs_player_id
         description: 'CBS stable numeric player id (string-typed as CBS serves it). Two-way pseudo-ids included.'

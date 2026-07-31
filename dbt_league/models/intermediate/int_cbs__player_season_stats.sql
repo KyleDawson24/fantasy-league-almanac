@@ -44,6 +44,20 @@
 -- league_key fans from the engine/scoring settings -- each league's book
 -- prices and scopes independently.
 
+-- STAYS A VIEW -- materializing it was TRIED and is WORSE (MLB-10,
+-- 2026-07-31). The theory was that three consumers each re-pay this
+-- relation's cost (a count(*) over it spills 3.37 GiB on DuckDB), so
+-- computing it once would buy headroom back. It does not: the cost is
+-- not per-consumer overhead, it is the intrinsic price of the
+-- crosswalked_games aggregation over stg_mlb__player_game's 42M rows.
+-- As a VIEW that streams -- the group-by discards rows as it goes. As a
+-- TABLE the same aggregation ALSO has to retain all 890,902 output rows
+-- to write them, which pushes the peak past the 5.5 GiB spill cap: the
+-- model itself then fails and takes three dependents down with it, for a
+-- full run of 70/74 against the view's 72/74.
+--
+-- So do not reach for materialization here again. The lever, if this is
+-- ever worth spending on, is the 42M-row aggregation's own shape.
 {{ config(materialized='view') }}
 
 with archive_floor as (

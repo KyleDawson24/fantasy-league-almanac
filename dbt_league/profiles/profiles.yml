@@ -64,6 +64,16 @@ dbt_league:
         # buffers -- which is a memory floor made of parallelism, not of
         # the data. Pinned here so the cap means what it appears to mean;
         # sweepable for the threads-vs-peak ladder.
+        #
+        # DEFAULT RULED 1 (MLB-172, 2026-07-31). The sweep found 4 fastest
+        # -- 74/74 in 499-613s against 987s at 2 and 1120s at 1 -- but that
+        # was measured on a 32-CORE box, where 4 threads is an eighth of the
+        # machine. On a 4-core laptop, 4 threads is ALL cores, which is the
+        # same shape as the 32-worker case that just failed two models. The
+        # fast number does not transfer to the hardware this target exists
+        # to serve, so the default is the safe one and the knob is
+        # documented. Revisiting the default is MLB-172's call, not a
+        # per-session tuning decision.
         threads: "{{ env_var('DBT_DUCKDB_THREADS', '1') }}"
         # The reshape layer is wide and materializes as tables; row order
         # is never load-bearing (every model that cares carries an explicit

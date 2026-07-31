@@ -572,10 +572,33 @@ invocation.**
 | **4** | **74/74** (2 of 2 runs) | **613.1s / 499.8s** |
 | 32 (the old unintended default) | 72/74 | 613.8s |
 
-**Fastest-safe is 4.** It builds the COMPLETE chain in the same wall time
-that 32 workers took to fail two models, and it repeated clean. More
-workers past that point buy nothing and cost correctness: 32 is the only
-row here that fails.
+**Fastest-safe is 4** on this machine: it builds the COMPLETE chain in the
+same wall time that 32 workers took to fail two models, and it repeated
+clean. More workers past that buy nothing and cost correctness -- 32 is
+the only failing row.
+
+**The default is nevertheless RULED to 1** (2026-07-31). This box has 32
+cores, so 4 threads is an eighth of it; on a 4-core laptop -- the hardware
+this target exists to serve -- 4 threads is EVERY core, which is the same
+shape as the 32-worker case that just failed two models. A fast number
+measured on a big machine does not transfer to a small one, and the whole
+point of the pin is that the cap means what it appears to mean. The knob
+stays documented and sweepable; revisiting the default belongs to
+MLB-172.
+
+### The claim this supports
+
+Freezable for the claims surgery, as measured: **"builds complete at a
+6 GB memory cap, in a single run, with threads pinned."**
+
+Still NOT ready: any "needs N GB of free RAM" figure. The engine's peak
+counters exist (`system_peak_buffer_memory` /
+`system_peak_temp_dir_size`, via the `duckdb_profiled` target) but DuckDB
+rewrites the profile per query, so on a multi-statement run the file
+holds the LAST query's peak -- a trivial test reported 0.01 GiB for a
+model that had just been OOMing. Until a max-over-time capture exists,
+there is no trustworthy peak, and quoting one would repeat the mistake
+this whole section documents.
 
 ### What this retires
 
@@ -701,3 +724,30 @@ first-contact failures (including the one above) is optimistic by
 construction. This is precisely why the render-level A/B is the
 load-bearing part of the estimate and not a formality: it is the only
 instrument that keeps peeling.
+
+### Status: the ESPN almanac renders off DuckDB, byte-identically
+
+Five divergences were found and cleared. **Four were fixed in the SQL
+itself**, because one spelling satisfied both engines -- the reserved-word
+alias (`at` -> `act`), `TO_VARCHAR` -> `CAST(x AS VARCHAR)`, an ORDER BY
+moved outside its aggregate so a shadowed alias means the same thing on
+both, and `CAST(... AS FLOAT)` -> `AS DOUBLE` at 161 sites.
+
+**Only `LISTAGG` needed per-engine emission**, and it is now `db.listagg()`
+-- four call sites, alongside `league_predicate()` in the same
+fragment-builder role. DuckDB rejects `WITHIN GROUP` outright and
+Snowflake rejects the inline `ORDER BY`, so no single spelling exists;
+that is the entire justification for the function, and it is deliberately
+one function rather than a general shim. A shim broad enough to absorb
+all five would have hidden four fixes that belonged in the source.
+
+Result: **all 19 ESPN almanac tabs render byte-identically off the local
+DuckDB**, through production code with nothing patched by the harness,
+and the Snowflake side is unmoved (warehouse suite green at every step).
+Two instruments got it there and neither is redundant -- `EXPLAIN` over
+the captured corpus finds parser/binder divergences all at once
+(176 of 177 clean), while the render A/B finds the runtime class, which
+is what silently moved 13 of 19 tabs before the float32 fix.
+
+Still open: the CBS almanac renders in-process against its own fixtures
+and has not had the same A/B.

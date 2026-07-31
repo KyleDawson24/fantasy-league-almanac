@@ -141,6 +141,16 @@ A few of its tabs:
 
 *Team Tab: arguably the core deliverable of the project; a team's current-season top producers, its all-time optimal lineup, and every player's actual stat line for their specific time on this team, not their career or league-wide numbers. The single view of "who are my team's guys" as though your fantasy league was a real world competition.*
 
+<!-- VERIFIED 2026-07-31, MLB-157 -- do not "correct" the ranking. "Third-biggest
+     if never benched" means his unbenched total (1726) inserted into the
+     franchise's ACTIVE pitching leaderboard, which is the list the team page
+     renders: Verlander 2091, Wainwright 1894, [1726], Mussina 1364 -> 3rd.
+     Ranking him among everyone's UNBENCHED totals instead gives 5th; that is
+     the wrong comparison set. Other halves check out too: bench share 40.6%,
+     active-weighted ERA 3.198 -> 3.20, career 3.74 exactly (402 ER / 967.0 IP),
+     active rank 11th vs 9 P slots. NB the 2004-2020 era has no boolean bench
+     flag -- IS_ACTIVE is NULL and attribution is a fractional ACTIVE_WEIGHT, so
+     `WHERE IS_ACTIVE` returns nothing and looks like a falsification. -->
 **One thing this makes possible that no standard fantasy site can answer:** Carlos Martinez spent more time on FLV's roster than almost anyone in franchise history, and if he'd never been benched he would have been the franchise's third-biggest pitching contributor of all time. But he scored over 40% of his points from the bench, and ends up missing the "Starting Lineup" entirely. That said, he was used well: his 3.20 ERA while active for FLV beats his career mark of 3.74 by more than half a run.
 
 That comparison -- not his career line, the line for what he actually did *for this team, in the games this team started him* -- only exists because the pipeline creates visibility into active-vs-benched performance for every player, every day, across 25 years.

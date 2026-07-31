@@ -591,14 +591,33 @@ MLB-172.
 Freezable for the claims surgery, as measured: **"builds complete at a
 6 GB memory cap, in a single run, with threads pinned."**
 
-Still NOT ready: any "needs N GB of free RAM" figure. The engine's peak
-counters exist (`system_peak_buffer_memory` /
-`system_peak_temp_dir_size`, via the `duckdb_profiled` target) but DuckDB
-rewrites the profile per query, so on a multi-statement run the file
-holds the LAST query's peak -- a trivial test reported 0.01 GiB for a
-model that had just been OOMing. Until a max-over-time capture exists,
-there is no trustworthy peak, and quoting one would repeat the mistake
-this whole section documents.
+Still NOT ready: any "needs N GB of free RAM" figure -- and the reason
+turned out to be deeper than a capture problem.
+
+**`system_peak_buffer_memory` does not measure what the name suggests.**
+Measured on the same model at two caps:
+
+| `memory_limit` | peak_buffer | peak_temp |
+|---|---|---|
+| 6 GB (5.59 GiB) | 11.18 GiB | 0.72 GiB |
+| 4 GB (3.71 GiB) | 7.45 GiB | 1.75 GiB |
+
+The buffer figure is **2.0x the cap in both cases** and exceeds a limit
+DuckDB actually enforces, so it is not concurrent residency -- for a
+workload that saturates the cap it reports a multiple of what it was
+ALLOWED, not what it NEEDED. Trending it release over release would
+track our own configuration. `peak_temp` behaves correctly and inversely
+(tighten memory, spill rises), and is the counter worth adopting.
+
+There is also a capture problem on top: DuckDB rewrites the profile per
+query, so a multi-statement invocation leaves the LAST query's profile --
+a trailing `not_null` test reported 0.01 GiB for a model that had just
+been OOMing. Single-node invocations are unaffected.
+
+So the free-RAM claim needs a different method than either counter --
+and the obvious one, bisecting `memory_limit`, is exactly what the ruling
+parked. Left pending rather than answered with a number that would
+describe our settings back to us.
 
 ### What this retires
 

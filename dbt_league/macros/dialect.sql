@@ -354,6 +354,148 @@ epoch_ms({{ ms_expr }}::bigint)
 {%- endmacro %}
 
 
+{% macro char_from_code(code) -%}
+{#- Snowflake CHAR(n), DuckDB CHR(n). Used for char(160), the non-breaking
+    space CBS renders between date and time in some eras. -#}
+    {{ return(adapter.dispatch('char_from_code', 'dbt_league')(code)) }}
+{%- endmacro %}
+
+{% macro default__char_from_code(code) -%}
+char({{ code }})
+{%- endmacro %}
+
+{% macro duckdb__char_from_code(code) -%}
+chr({{ code }})
+{%- endmacro %}
+
+
+{% macro to_date_of(expr) -%}
+{#- Timestamp -> date. Snowflake TO_DATE(ts); DuckDB has no to_date at all
+    (`Catalog Error: Scalar Function with name to_date does not exist`),
+    so it takes the plain cast, which is what TO_DATE does here anyway. -#}
+    {{ return(adapter.dispatch('to_date_of', 'dbt_league')(expr)) }}
+{%- endmacro %}
+
+{% macro default__to_date_of(expr) -%}
+to_date({{ expr }})
+{%- endmacro %}
+
+{% macro duckdb__to_date_of(expr) -%}
+cast({{ expr }} as date)
+{%- endmacro %}
+
+
+{% macro epoch_s_to_wallclock(expr, tz) -%}
+{#- Epoch SECONDS -> wall-clock time in `tz`. CBS renders most eras'
+    timestamps client-side as formatTime('...', <unix epoch>), so the epoch
+    is the timezone-exact record and the league's wall clock is ET.
+
+    Snowflake: TO_TIMESTAMP_TZ(seconds) then CONVERT_TIMEZONE then drop the
+    offset. DuckDB: to_timestamp(seconds) is already TIMESTAMPTZ, and
+    timezone(tz, ts) returns the naive wall clock directly -- one step
+    fewer for the same answer. Verified equal on a live epoch. -#}
+    {{ return(adapter.dispatch('epoch_s_to_wallclock', 'dbt_league')(expr, tz)) }}
+{%- endmacro %}
+
+{% macro default__epoch_s_to_wallclock(expr, tz) -%}
+convert_timezone('{{ tz }}', to_timestamp_tz({{ expr }}))::timestamp_ntz
+{%- endmacro %}
+
+{% macro duckdb__epoch_s_to_wallclock(expr, tz) -%}
+timezone('{{ tz }}', to_timestamp({{ expr }}))
+{%- endmacro %}
+
+
+{% macro try_parse_timestamp(expr, sf_format, duckdb_format) -%}
+{#- Parse text to a timestamp, NULL when it does not match. Snowflake
+    TRY_TO_TIMESTAMP_NTZ; DuckDB TRY_STRPTIME. The format strings are
+    different languages, so both are passed explicitly rather than
+    translated -- a silent mistranslation here would move dates, and the
+    call site is the honest place to see both spellings side by side.
+
+    Two-digit-year pivot: Snowflake's default TWO_DIGIT_CENTURY_START is
+    1970 (00-69 -> 2000s), DuckDB's %y follows the 1969 pivot. They differ
+    only at literal '69', and this log runs 2001-2026, so no row can
+    reach the disagreement. Noted because it is invisible, not because
+    it bites. -#}
+    {{ return(adapter.dispatch('try_parse_timestamp', 'dbt_league')(expr, sf_format, duckdb_format)) }}
+{%- endmacro %}
+
+{% macro default__try_parse_timestamp(expr, sf_format, duckdb_format) -%}
+try_to_timestamp_ntz({{ expr }}, '{{ sf_format }}')
+{%- endmacro %}
+
+{% macro duckdb__try_parse_timestamp(expr, sf_format, duckdb_format) -%}
+try_strptime({{ expr }}, '{{ duckdb_format }}')
+{%- endmacro %}
+
+
+{% macro try_parse_date(expr, sf_format, duckdb_format) -%}
+{#- As try_parse_timestamp, landing a DATE. DuckDB has no try_to_date, so
+    it parses then casts; try_strptime already returns NULL rather than
+    raising on a non-match, so the cast never sees garbage. -#}
+    {{ return(adapter.dispatch('try_parse_date', 'dbt_league')(expr, sf_format, duckdb_format)) }}
+{%- endmacro %}
+
+{% macro default__try_parse_date(expr, sf_format, duckdb_format) -%}
+try_to_date({{ expr }}, '{{ sf_format }}')
+{%- endmacro %}
+
+{% macro duckdb__try_parse_date(expr, sf_format, duckdb_format) -%}
+cast(try_strptime({{ expr }}, '{{ duckdb_format }}') as date)
+{%- endmacro %}
+
+
+{% macro re_literal(pattern) -%}
+{#- A regex written once, spelled as a correct SQL string literal on both
+    engines. Snowflake processes backslash escapes inside string literals
+    and DuckDB does not, so the SAME source text is two different regexes
+    (see regexp_capture's header). Callers pass the logical pattern --
+    `\s*ET$` -- and this decides the escaping. Use it for every regex
+    argument to a function that IS spelled the same on both engines,
+    regexp_replace above all; functions that also need renaming get their
+    own macro and handle the literal themselves. -#}
+    {{ return(adapter.dispatch('re_literal', 'dbt_league')(pattern)) }}
+{%- endmacro %}
+
+{% macro default__re_literal(pattern) -%}
+'{{ pattern | replace('\\', '\\\\') }}'
+{%- endmacro %}
+
+{% macro duckdb__re_literal(pattern) -%}
+'{{ pattern }}'
+{%- endmacro %}
+
+
+{% macro regexp_capture(subject, pattern, case_insensitive=False) -%}
+{#- Return capture group 1, or NULL if the pattern does not match.
+    Snowflake spells it REGEXP_SUBSTR(subject, pattern, 1, 1, flags) with
+    'e' meaning "give me the submatch, not the whole match"; DuckDB spells
+    it REGEXP_EXTRACT(subject, pattern, 1).
+
+    THE ESCAPING TRAP, and the reason `pattern` is the LOGICAL regex
+    rather than a SQL literal: Snowflake processes backslash escapes
+    INSIDE string literals, DuckDB does not. The same source text
+    '(\\d{10})\\)' is therefore the regex (\d{10})\) on Snowflake and
+    (\\d{10})\\) -- a literal backslash followed by 'd' -- on DuckDB,
+    which matches nothing and silently returns NULL for every row. So the
+    caller passes one unescaped regex and each engine doubles the
+    backslashes or not, according to its own literal rules.
+
+    Case-insensitivity is a flag on Snowflake and an inline (?i) on
+    DuckDB's RE2. -#}
+    {{ return(adapter.dispatch('regexp_capture', 'dbt_league')(subject, pattern, case_insensitive)) }}
+{%- endmacro %}
+
+{% macro default__regexp_capture(subject, pattern, case_insensitive) -%}
+regexp_substr({{ subject }}, '{{ pattern | replace('\\', '\\\\') }}', 1, 1, '{{ 'ie' if case_insensitive else 'e' }}')
+{%- endmacro %}
+
+{% macro duckdb__regexp_capture(subject, pattern, case_insensitive) -%}
+regexp_extract({{ subject }}, '{{ '(?i)' if case_insensitive else '' }}{{ pattern }}', 1)
+{%- endmacro %}
+
+
 -- Scalar-function gaps --------------------------------------------------
 
 {% macro try_to_double(expr) -%}

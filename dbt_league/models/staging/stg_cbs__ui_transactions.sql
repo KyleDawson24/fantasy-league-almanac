@@ -51,16 +51,15 @@ with txns as (
         -- date-only '10/02/01'.
         case
             when s.txn_ts_raw like '%formatTime%'
-                then convert_timezone(
-                    'America/New_York',
-                    to_timestamp_tz(
-                        regexp_substr(s.txn_ts_raw, '(\\d{10})\\)',
-                                      1, 1, 'e')::integer)
-                )::timestamp_ntz
-            else try_to_timestamp_ntz(
-                regexp_replace(replace(s.txn_ts_raw, char(160), ' '),
-                               '\\s*ET$', ''),
-                'MM/DD/YY HH12:MI AM')
+                then {{ epoch_s_to_wallclock(
+                        regexp_capture('s.txn_ts_raw', '(\\d{10})\\)') ~ '::integer',
+                        'America/New_York') }}
+            else {{ try_parse_timestamp(
+                        "regexp_replace(replace(s.txn_ts_raw, "
+                            ~ char_from_code(160) ~ ", ' '), "
+                            ~ re_literal('\\s*ET$') ~ ", '')",
+                        'MM/DD/YY HH12:MI AM',
+                        '%-m/%-d/%y %-I:%M %p') }}
         end as txn_ts_parsed
     from {{ source('raw', 'cbs_ui_transactions') }} s
 ),
@@ -97,10 +96,10 @@ select
 
     t.txn_ts_parsed                                  as txn_ts,
     coalesce(
-        to_date(t.txn_ts_parsed),
-        try_to_date(split_part(replace(t.txn_ts_raw, char(160), ' '), ' ', 1),
-                    'MM/DD/YY'))                     as txn_date,
-    try_to_date(t.effective_date_raw, 'MM/DD/YY')    as effective_date,
+        {{ to_date_of('t.txn_ts_parsed') }},
+        {{ try_parse_date("split_part(replace(t.txn_ts_raw, " ~ char_from_code(160) ~ ", ' '), ' ', 1)",
+                          'MM/DD/YY', '%-m/%-d/%y') }})                     as txn_date,
+    {{ try_parse_date('t.effective_date_raw', 'MM/DD/YY', '%-m/%-d/%y') }}    as effective_date,
 
     -- The acting team.
     coalesce(t.team_id::integer, m.franchise_id)     as franchise_id,
@@ -138,13 +137,13 @@ select
     -- three verb shapes (Moved from X to Y | Moved to Y | ... and Moved to Y).
     case
         when t.action_raw ilike 'Moved from % to %'
-            then trim(regexp_substr(t.action_raw, 'Moved from (\\S+) to', 1, 1, 'ie'))
+            then trim({{ regexp_capture('t.action_raw', 'Moved from (\\S+) to', true) }})
     end                                              as from_slot,
     case
         when t.action_raw ilike 'Moved from % to %'
           or t.action_raw ilike '% Moved to %'
           or t.action_raw ilike 'Moved to %'
-            then trim(regexp_substr(t.action_raw, ' to (\\S+)$', 1, 1, 'ie'))
+            then trim({{ regexp_capture('t.action_raw', ' to (\\S+)$', true) }})
     end                                              as to_slot,
 
     -- Trade counterparty ('Traded from X' names the SENDING team, in that

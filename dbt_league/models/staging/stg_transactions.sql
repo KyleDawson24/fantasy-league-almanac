@@ -45,20 +45,34 @@ with latest_extraction as (
     ) = 1
 ),
 
-legs as (
+-- One row per transaction TOPIC. This is a boundary, not a step: on
+-- DuckDB the topic flatten has to land in a column before the message
+-- flatten can read it, because a lateral flatten of the 5 MB payload
+-- pins that payload once per element and cannot allocate (see
+-- streamed_array_join). Each topic is ~1.6 KB, so the message flatten
+-- below is an ordinary lateral on both engines.
+topics as (
     select
         le.league_key,
         le.season_year,
-        {{ json_text('topic.value', 'id') }}::string                            as transaction_id,
+        {{ streamed_array_value('le.raw_json', 'topic') }} as topic_value
+    from latest_extraction le
+        {{- streamed_array_join('le.raw_json', 'topic') }}
+),
+
+legs as (
+    select
+        t.league_key,
+        t.season_year,
+        {{ json_text('t.topic_value', 'id') }}::string                          as transaction_id,
         {{ json_text('msg.value', 'messageTypeId') }}::integer                  as source_message_type_id,
         {{ json_text('msg.value', 'targetId') }}::integer                       as player_id,
         {{ epoch_ms_to_timestamp(json_text('msg.value', 'date')) }}   as event_ts,
         nullif(nullif({{ json_text('msg.value', 'from') }}::integer, 0), -1)  as raw_from_team_id,
         nullif(nullif({{ json_text('msg.value', 'to') }}::integer, 0), -1)    as raw_to_team_id,
         nullif(nullif({{ json_text('msg.value', 'for') }}::integer, 0), -1)   as raw_for_team_id
-    from latest_extraction le,
-        {{ flatten_array('le.raw_json', 'topic') }},
-        {{ flatten_array(json_get('topic.value', 'messages'), 'msg') }}
+    from topics t,
+        {{ flatten_array(json_get('t.topic_value', 'messages'), 'msg') }}
     where {{ json_text('msg.value', 'messageTypeId') }}::integer in (178, 179, 224, 239, 244)
 )
 

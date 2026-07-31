@@ -141,6 +141,60 @@ lateral flatten(input => {{ expr }}) {{ alias }}
 {%- endmacro %}
 
 
+{% macro streamed_array_join(expr, alias) -%}
+{#- streamed_object_join's ARRAY twin: _join goes in the FROM clause and
+    _value in the SELECT list, both naming the same (expr, alias).
+
+    Same root cause as the two flattens session 1 broke at a table
+    boundary -- DuckDB's cast(json as json[]) materializes the array and
+    each extracted element keeps its PARENT document alive, so a lateral
+    flatten costs parent_bytes x elements no matter how little text comes
+    out. What this call site adds is how brutally cheap the trigger is:
+    RAW.TRANSACTIONS is TWO rows and yields 1,092 legs, and it still
+    could not allocate at the 6 GB cap. Measured at a fixed 3,000
+    elements, varying only the payload:
+
+        0.03 MB parent   OK    0.03s
+        0.63 MB parent   OK    0.81s
+        4.83 MB parent   OUT OF MEMORY
+
+    Row count is not the variable and never was. Projecting only the
+    small columns does not help either -- the parent is pinned by the
+    element, not by the SELECT list.
+
+    Unlike the object twin, this one does NOT need a _key: an array
+    flatten yields values only. And it takes a CTE boundary rather than a
+    whole model to use, because the SELECT-list unnest has to land in a
+    column before a second flatten can read it -- which is why
+    stg_transactions grew a `topics` CTE instead of a sibling model. -#}
+    {{ return(adapter.dispatch('streamed_array_join', 'dbt_league')(expr, alias)) }}
+{%- endmacro %}
+
+{% macro default__streamed_array_join(expr, alias) -%}
+,
+        lateral flatten(input => {{ expr }}) {{ alias }}
+{%- endmacro %}
+
+{% macro duckdb__streamed_array_join(expr, alias) -%}
+{%- endmacro %}
+
+
+{% macro streamed_array_value(expr, alias) -%}
+{#- The element itself, still JSON on both engines so a further path step
+    or flatten can read it (this is json_get's contract, not
+    json_text's). -#}
+    {{ return(adapter.dispatch('streamed_array_value', 'dbt_league')(expr, alias)) }}
+{%- endmacro %}
+
+{% macro default__streamed_array_value(expr, alias) -%}
+{{ alias }}.value
+{%- endmacro %}
+
+{% macro duckdb__streamed_array_value(expr, alias) -%}
+unnest(cast({{ expr }} as json[]))
+{%- endmacro %}
+
+
 {% macro streamed_object_key(expr, alias) -%}
     {{ return(adapter.dispatch('streamed_object_key', 'dbt_league')(expr, alias)) }}
 {%- endmacro %}

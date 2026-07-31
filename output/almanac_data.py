@@ -1769,7 +1769,11 @@ def get_team_roster_history_stats(season_year):
                 scope,
                 team_id,
                 player_id,
-                LISTAGG(TO_VARCHAR(season_year), ',')
+                -- CAST, not TO_VARCHAR: DuckDB has no to_varchar, while
+                -- CAST(x AS VARCHAR) is valid on both engines. Verified
+                -- equal to TO_VARCHAR over all 141,350 season_year rows
+                -- on Snowflake, 0 mismatches (MLB-10 phase 5).
+                LISTAGG(CAST(season_year AS VARCHAR), ',')
                     WITHIN GROUP (ORDER BY season_year) AS service_years
             FROM (
                 SELECT scope, team_id, player_id, season_year

@@ -2461,7 +2461,8 @@ def get_cbs_team_history_data(context, franchises, franchise_map):
     current_club_cte = f"""
         current_club AS (
             SELECT
-                TO_VARCHAR(x.cbs_player_id) AS cc_key,
+                -- CAST, not TO_VARCHAR -- DuckDB has no to_varchar.
+                CAST(x.cbs_player_id AS VARCHAR) AS cc_key,
                 ab.abbrev                   AS current_club
             FROM (
                 SELECT mlbam_id, MAX_BY(team_id, game_date) AS mlb_team_id
@@ -2559,7 +2560,8 @@ def get_cbs_team_history_data(context, franchises, franchise_map):
             -- a season counts on ANY nonzero active production (negative
             -- seasons are still service -- Kyle 2026-07-15).
             SELECT scope, team_id, player_key,
-                   LISTAGG(TO_VARCHAR(season_year), ',')
+                   -- CAST, not TO_VARCHAR -- DuckDB has no to_varchar.
+                   LISTAGG(CAST(season_year AS VARCHAR), ',')
                        WITHIN GROUP (ORDER BY season_year) AS service_years
             FROM (
                 SELECT scope, team_id, player_key, season_year

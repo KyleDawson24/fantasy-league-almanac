@@ -25,7 +25,7 @@
 dbt_league:
   target: duckdb
   outputs:
-    duckdb:
+    duckdb: &duckdb_base
       type: duckdb
       path: "{{ env_var('DBT_DUCKDB_PATH', 'data/duckdb/ESPN_FANTASY.duckdb') }}"
       database: ESPN_FANTASY
@@ -51,7 +51,7 @@ dbt_league:
       # model. Its default for a file-backed database is <dbfile>.tmp --
       # i.e. already inside the gitignored data/duckdb/ -- so pinning it
       # bought nothing and cost that. The size cap still applies.
-      settings:
+      settings: &duckdb_settings
         memory_limit: "{{ env_var('DBT_DUCKDB_MEMORY_LIMIT', '6GB') }}"
         max_temp_directory_size: "{{ env_var('DBT_DUCKDB_TEMP_LIMIT', '6GB') }}"
         # ENGINE worker threads -- NOT the same knob as dbt's `--threads`,
@@ -70,3 +70,27 @@ dbt_league:
         # ORDER BY), so letting DuckDB parallelize freely is free speed --
         # but see the thread note above: "freely" is not free of memory.
         preserve_insertion_order: false
+
+    # Measurement-only target. Identical to `duckdb` plus DuckDB's own
+    # profiling, so the release metric can be the ENGINE's peak rather than
+    # a sampled one: `system_peak_buffer_memory` is what `memory_limit`
+    # actually caps, and no external sampler can see the buffer pool -- RSS
+    # is not it. Both counters are SYSTEM-level and CUMULATIVE for the
+    # connection (verified: a trivial query after a heavy one still reports
+    # the heavy one's peak), so the last profile a run writes holds the
+    # whole-run peak.
+    #
+    # A separate target because there is no value of `enable_profiling`
+    # that means "off", and normal runs should not pay for a JSON write per
+    # query. Select it with `--target duckdb_profiled`.
+    #
+    # `enable_profiling` MUST be listed before `profiling_output`: DuckDB
+    # validates the output file's extension against the current profiling
+    # format, so setting the path first fails with a parser error.
+    duckdb_profiled:
+      <<: *duckdb_base
+      settings:
+        <<: *duckdb_settings
+        custom_profiling_settings: '{"SYSTEM_PEAK_BUFFER_MEMORY":"true","SYSTEM_PEAK_TEMP_DIR_SIZE":"true"}'
+        enable_profiling: json
+        profiling_output: "{{ env_var('DBT_DUCKDB_PROFILE_OUT', 'duckdb_profile.json') }}"

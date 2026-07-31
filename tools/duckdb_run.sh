@@ -2,12 +2,18 @@
 #
 # duckdb_run.sh -- one command to build the whole chain on the DuckDB target.
 #
-# WHY THIS EXISTS. On DuckDB the chain does not build in a single process at
-# laptop-class caps: two marts each need most of the entire spill budget on
-# their own, and they cannot share a connection with each other. A fresh
-# process resets the buffer pool, so the fix is more invocations, not more
-# memory. `dbt_league/profiles/profiles.yml` has referred to this script for
-# a while; until now it did not exist.
+# WHY THIS EXISTS. It was written when the chain would not build in a single
+# process at laptop-class caps. With DuckDB's engine thread count actually
+# pinned (profiles.yml `settings.threads`), it does: 74/74 in one `dbt run`,
+# measured at 1, 2 and 4 threads. The old behaviour was 32 unintended engine
+# workers, not a property of the data.
+#
+# So this is now a SAFETY NET rather than the normal path. It costs one extra
+# results-file read on a healthy run and reports "clean" in a single round.
+# It earns its keep when something does fail: it re-invokes each failed model
+# alone, rebuilds the skip cone, and distinguishes a spill-cap failure (which
+# its own process recovers) from a `memory_limit` ceiling (which no number of
+# invocations fixes) instead of leaving that to be rediscovered by hand.
 #
 # WHY IT PARSES run_results.json INSTEAD OF HARD-CODING THE TWO MARTS.
 # A hard-coded bridge encodes today's failure set and breaks silently when

@@ -408,10 +408,12 @@ than looping.
 > claims-surgery hardware sentence.
 >
 > `settings.threads` is now pinned in `profiles.yml` (default 1,
-> sweepable via `DBT_DUCKDB_THREADS`). The re-measurement ladder is:
-> the staging pair alone at 4 GB / 6 GB, then the full profile if green,
-> then an engine-thread sweep of 1/2/4 for fastest-safe -- each repeated
-> before anything is declared, per the sample-not-property rule below.
+> sweepable via `DBT_DUCKDB_THREADS`). **The re-measurement is done, and
+> it supersedes this whole section -- see "The profile after pinning the
+> engine threads" below. Short version: with the thread count pinned the
+> chain builds 74/74 in ONE `dbt run`, so the three-invocation profile
+> described here was an artifact of the 32 workers, not a property of the
+> data.**
 
 MLB-172 makes the observed PEAK per invocation a release-over-release
 metric rather than a pass/fail. This is its first measurement.
@@ -553,6 +555,57 @@ drafted 425 does not.** 425 is 411 + 14 -- the ESPN league counted at its
 current 14 teams rather than across both of its seasons, since 2025
 carried 16. The full franchise-season count is 441. Which of the two the
 claim intends is a claims-surgery call, not a warehouse question.
+
+## The profile after pinning the engine threads (2026-07-31)
+
+This supersedes "The laptop build profile" and the 8 GB pass above. Same
+caps, same models, same machine -- the only change is that DuckDB's
+engine worker count is now set, instead of silently defaulting to 32.
+
+**74/74 in a single `dbt run`. No bridge, no escalation, no second
+invocation.**
+
+| engine threads | result | wall time |
+|---|---|---|
+| 1 | **74/74** | 1119.6s |
+| 2 | **74/74** | 986.6s |
+| **4** | **74/74** (2 of 2 runs) | **613.1s / 499.8s** |
+| 32 (the old unintended default) | 72/74 | 613.8s |
+
+**Fastest-safe is 4.** It builds the COMPLETE chain in the same wall time
+that 32 workers took to fail two models, and it repeated clean. More
+workers past that point buy nothing and cost correctness: 32 is the only
+row here that fails.
+
+### What this retires
+
+- **The three-invocation profile.** Both records marts build inside the
+  ordinary run. Nothing needs its own process.
+- **The "adjacency" explanation** -- that the two marts "cannot share a
+  connection with each other". They can. What they could not share was a
+  connection with 32 workers' worth of buffers.
+- **The floor.** `stg_box_scores`, documented above as binding at
+  5.25-5.5 GB, passes at **4 GB** at every thread count of 1, 2 and 4
+  (6 runs). It failed only at 32.
+- **"4 GB is unreachable."** At 4 GB the binding model is now
+  `stg_cbs__rosters__teams`, which fails at threads 1/2/4 (6 runs) -- so
+  4 GB is still not green, but for a different reason than published, and
+  the model that was said to bind does not.
+
+`tools/duckdb_run.sh` keeps its escalation logic: it is now a safety net
+that reports a clean single round rather than the normal path, and it
+still tells a spill-cap failure from a `memory_limit` ceiling if either
+returns.
+
+### The lesson worth keeping
+
+Two sessions of memory archaeology -- a bridge, an adjacency theory, a
+cost model, a floor, a headwind against the run-anywhere claim -- rested
+on a setting nobody had asserted from the engine. `dbt --threads 1` says
+"Concurrency: 1 threads" in its own log, and it is telling the truth
+about dbt while saying nothing about DuckDB. **When a measurement depends
+on a setting, read the setting back from the thing being measured**, not
+from the tool that claims to have set it.
 
 ## Sizing the output-layer connection swap (2026-07-31)
 

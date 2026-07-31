@@ -1018,6 +1018,7 @@ def get_team_standings_alltime(stat_specs):
     stat_select = ',\n            '.join(
         f'SUM({c}) AS {c}' for c in stat_columns)
     return query_snowflake(f"""
+        SELECT * FROM (
         SELECT
             team_id,
             MAX_BY(team_abbrev, season_year) AS team_abbrev,
@@ -1037,8 +1038,17 @@ def get_team_standings_alltime(stat_specs):
         FROM mart_team_season_standings
         WHERE {league_predicate()}
         GROUP BY team_id
-        -- Aliases, not SUM(...): Snowflake resolves ORDER BY names to
-        -- the output aliases, and SUM(alias) would nest aggregates.
+        ) standings
+        -- The aggregate is wrapped and the ORDER BY sits OUTSIDE it,
+        -- because the engines disagree about what `wins` MEANS here:
+        -- `SUM(wins) AS wins` shadows the base column, and Snowflake
+        -- binds the ORDER BY name to the output alias while DuckDB binds
+        -- it to the base column and demands a GROUP BY. Neither in-place
+        -- spelling is portable. The note this replaces was right that
+        -- SUM(alias) nests aggregates -- Snowflake does reject it,
+        -- measured -- so that is not the way out either. Ordering
+        -- outside the aggregate makes `wins` an ordinary column, which
+        -- means the same thing on both engines (MLB-10 phase 5).
         ORDER BY (wins + 0.5 * ties)
                  / NULLIF(wins + losses + ties, 0) DESC,
                  calculated_points DESC

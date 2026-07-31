@@ -203,7 +203,7 @@ v1.x is polish on the current architecture: a player-entity layer (`dim_player` 
 
 **Want to run it?** Today that means bringing your own Snowflake account -- the free tier is enough, and [SETUP.md](SETUP.md) will get you most of the way there (~30-45 minutes, mostly Snowflake provisioning); a step-by-step setup wizard is planned for August 2026. A clone-and-run demo mode with no warehouse account at all (DuckDB, packaged sample data, one command) is planned for v2.0 and isn't available yet. A portability spike ([docs/duckdb-portability-audit.md](docs/duckdb-portability-audit.md)) sized the transform-layer port at roughly a focused week of engineering, so this is a scoped near-term plan, not a someday-maybe.
 
-**What it takes to run.** The full 26-season, 441-team-season, 1.09M-player-game reconstruction builds comfortably on a 16 GB machine ⟨minimum-RAM floor pending MLB-10's thread-pinned ladder⟩. That is where it has been tested, not a guaranteed minimum and not a ceiling.
+**What it takes to run.** The full 26-season, 441-team-season, 1.09M-player-game reconstruction builds comfortably on a 16 GB machine, and on the in-progress DuckDB target it completes at a **6 GB memory cap, in a single run, with engine threads pinned**. Both of those are where it has been tested -- not guaranteed minimums, and not ceilings. ⟨A "needs N GB free" figure stays bracketed until there is an instrument that can measure it: DuckDB rewrites its profile per query, so a multi-statement run retains only the last query's peak.⟩
 
 ---
 

@@ -3,3 +3,11 @@
 # checkout, breaking byte-diff tests that compare against UTF-8 writer
 # output (which emits LF).
 tests/fixtures/** text eol=lf
+
+# Same autocrlf hazard, worse consequence: a shell script checked out with
+# CRLF fails at the shebang -- `bad interpreter: /usr/bin/env bash^M` -- so
+# tools/duckdb_run.sh would be broken on a fresh clone on Windows while
+# working fine in the checkout that authored it. That script exists to make
+# the build run on someone else's machine, which is exactly the case this
+# would break.
+*.sh text eol=lf

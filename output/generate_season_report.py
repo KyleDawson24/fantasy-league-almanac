@@ -347,7 +347,7 @@ def get_season_wasted_players(season_year, limit=5):
         WITH bench AS (
             SELECT player_id,
                    MAX(player_name) AS player_name,
-                   CAST(SUM(CAST(calculated_points AS DECIMAL(18, 6))) AS FLOAT) AS bench_wasted_pts,
+                   CAST(SUM(CAST(calculated_points AS DECIMAL(18, 6))) AS DOUBLE) AS bench_wasted_pts,
                    MAX(team_name) AS bench_team_name
             FROM fct_player_weekly_inactive_performance
             WHERE season_year = %s AND wasted_bucket = 'ROSTERED_INACTIVE'
@@ -357,8 +357,8 @@ def get_season_wasted_players(season_year, limit=5):
         active AS (
             SELECT player_id,
                    MAX_BY(team_name, matchup_period) AS active_team_name,
-                   CAST(SUM(CAST(GREATEST(0, -platform_points) AS DECIMAL(18, 6))) AS FLOAT) AS negative_active_pts,
-                   CAST(SUM(CAST(platform_points AS DECIMAL(18, 6))) AS FLOAT) AS active_points
+                   CAST(SUM(CAST(GREATEST(0, -platform_points) AS DECIMAL(18, 6))) AS DOUBLE) AS negative_active_pts,
+                   CAST(SUM(CAST(platform_points AS DECIMAL(18, 6))) AS DOUBLE) AS active_points
             FROM fct_player_weekly_active_performance
             WHERE season_year = %s
               AND {league_predicate()}
@@ -406,14 +406,14 @@ def get_team_wasted_totals(season_year):
     here too."""
     return query_snowflake(f"""
         WITH bench AS (
-            SELECT team_id, CAST(SUM(CAST(calculated_points AS DECIMAL(18, 6))) AS FLOAT) AS bench_pts
+            SELECT team_id, CAST(SUM(CAST(calculated_points AS DECIMAL(18, 6))) AS DOUBLE) AS bench_pts
             FROM fct_team_weekly_inactive_performance
             WHERE season_year = %s AND team_id IS NOT NULL
               AND {league_predicate()}
             GROUP BY team_id
         ),
         neg AS (
-            SELECT team_id, CAST(SUM(CAST(GREATEST(0, -platform_points) AS DECIMAL(18, 6))) AS FLOAT) AS neg_pts
+            SELECT team_id, CAST(SUM(CAST(GREATEST(0, -platform_points) AS DECIMAL(18, 6))) AS DOUBLE) AS neg_pts
             FROM fct_player_weekly_active_performance
             WHERE season_year = %s
               AND {league_predicate()}

@@ -559,14 +559,14 @@ def get_acquisition_channels(season_year):
         ),
         acquired AS (
             SELECT franchise_id,
-                   ROUND(CAST(SUM(CAST(CASE WHEN channel = 'opening' THEN fpts * w END AS DECIMAL(18, 6))) AS FLOAT), 1)   AS opening_active_pts,
-                   ROUND(CAST(SUM(CAST(CASE WHEN channel = 'add' THEN fpts * w END AS DECIMAL(18, 6))) AS FLOAT), 1)       AS fa_add_active_pts,
-                   ROUND(CAST(SUM(CAST(CASE WHEN channel = 'trade_in' THEN fpts * w END AS DECIMAL(18, 6))) AS FLOAT), 1)  AS trade_active_pts,
-                   ROUND(CAST(SUM(CAST(fpts * w AS DECIMAL(18, 6))) AS FLOAT), 1)                                          AS acquired_active_pts,
-                   ROUND(CAST(SUM(CAST(CASE WHEN channel = 'opening' THEN fpts END AS DECIMAL(18, 6))) AS FLOAT), 1)       AS opening_rostered_pts,
-                   ROUND(CAST(SUM(CAST(CASE WHEN channel = 'add' THEN fpts END AS DECIMAL(18, 6))) AS FLOAT), 1)           AS fa_add_rostered_pts,
-                   ROUND(CAST(SUM(CAST(CASE WHEN channel = 'trade_in' THEN fpts END AS DECIMAL(18, 6))) AS FLOAT), 1)      AS trade_rostered_pts,
-                   ROUND(CAST(SUM(CAST(fpts AS DECIMAL(18, 6))) AS FLOAT), 1)                                              AS acquired_rostered_pts
+                   ROUND(CAST(SUM(CAST(CASE WHEN channel = 'opening' THEN fpts * w END AS DECIMAL(18, 6))) AS DOUBLE), 1)   AS opening_active_pts,
+                   ROUND(CAST(SUM(CAST(CASE WHEN channel = 'add' THEN fpts * w END AS DECIMAL(18, 6))) AS DOUBLE), 1)       AS fa_add_active_pts,
+                   ROUND(CAST(SUM(CAST(CASE WHEN channel = 'trade_in' THEN fpts * w END AS DECIMAL(18, 6))) AS DOUBLE), 1)  AS trade_active_pts,
+                   ROUND(CAST(SUM(CAST(fpts * w AS DECIMAL(18, 6))) AS DOUBLE), 1)                                          AS acquired_active_pts,
+                   ROUND(CAST(SUM(CAST(CASE WHEN channel = 'opening' THEN fpts END AS DECIMAL(18, 6))) AS DOUBLE), 1)       AS opening_rostered_pts,
+                   ROUND(CAST(SUM(CAST(CASE WHEN channel = 'add' THEN fpts END AS DECIMAL(18, 6))) AS DOUBLE), 1)           AS fa_add_rostered_pts,
+                   ROUND(CAST(SUM(CAST(CASE WHEN channel = 'trade_in' THEN fpts END AS DECIMAL(18, 6))) AS DOUBLE), 1)      AS trade_rostered_pts,
+                   ROUND(CAST(SUM(CAST(fpts AS DECIMAL(18, 6))) AS DOUBLE), 1)                                              AS acquired_rostered_pts
             FROM channeled
             GROUP BY franchise_id
         ),
@@ -586,8 +586,8 @@ def get_acquisition_channels(season_year):
         ),
         lost_rostered_franchise AS (
             SELECT d.franchise_id, d.move_type,
-                   CAST(SUM(CAST(a.fpts * a.w AS DECIMAL(18, 6))) AS FLOAT) AS lost_active,
-                   CAST(SUM(CAST(a.fpts AS DECIMAL(18, 6))) AS FLOAT) AS lost_rostered
+                   CAST(SUM(CAST(a.fpts * a.w AS DECIMAL(18, 6))) AS DOUBLE) AS lost_active,
+                   CAST(SUM(CAST(a.fpts AS DECIMAL(18, 6))) AS DOUBLE) AS lost_rostered
             FROM dep_windows d
             JOIN attr a
               ON a.cbs_player_id = d.player_cbs_id
@@ -599,7 +599,7 @@ def get_acquisition_channels(season_year):
         unowned AS (
             -- Priced games with no attribution row = free-agent games.
             SELECT g.cbs_player_id, g.game_date,
-                   CAST(SUM(CAST(g.calculated_fpts AS DECIMAL(18, 6))) AS FLOAT) AS fpts
+                   CAST(SUM(CAST(g.calculated_fpts AS DECIMAL(18, 6))) AS DOUBLE) AS fpts
             FROM int_cbs__player_game_points g
             LEFT JOIN fct_cbs_player_game_attribution a
               ON a.league_key = g.league_key
@@ -614,7 +614,7 @@ def get_acquisition_channels(season_year):
             GROUP BY g.cbs_player_id, g.game_date
         ),
         lost_unowned AS (
-            SELECT d.franchise_id, d.move_type, CAST(SUM(CAST(u.fpts AS DECIMAL(18, 6))) AS FLOAT) AS lost_unowned
+            SELECT d.franchise_id, d.move_type, CAST(SUM(CAST(u.fpts AS DECIMAL(18, 6))) AS DOUBLE) AS lost_unowned
             FROM dep_windows d
             JOIN unowned u
               ON u.cbs_player_id = d.player_cbs_id
@@ -637,10 +637,10 @@ def get_acquisition_channels(season_year):
             SELECT franchise_id,
                    ROUND(SUM(CASE WHEN move_type = 'drop' THEN lost_active END), 1)          AS dropped_active_pts,
                    ROUND(SUM(CASE WHEN move_type = 'trade_out' THEN lost_active END), 1)     AS traded_away_active_pts,
-                   ROUND(CAST(SUM(CAST(lost_active AS DECIMAL(18, 6))) AS FLOAT), 1)                                                AS lost_active_pts,
+                   ROUND(CAST(SUM(CAST(lost_active AS DECIMAL(18, 6))) AS DOUBLE), 1)                                                AS lost_active_pts,
                    ROUND(SUM(CASE WHEN move_type = 'drop' THEN lost_rostered END), 1)        AS dropped_rostered_pts,
                    ROUND(SUM(CASE WHEN move_type = 'trade_out' THEN lost_rostered END), 1)   AS traded_away_rostered_pts,
-                   ROUND(CAST(SUM(CAST(lost_rostered AS DECIMAL(18, 6))) AS FLOAT), 1)                                              AS lost_rostered_pts
+                   ROUND(CAST(SUM(CAST(lost_rostered AS DECIMAL(18, 6))) AS DOUBLE), 1)                                              AS lost_rostered_pts
             FROM lost
             GROUP BY franchise_id
         )
@@ -702,7 +702,7 @@ def get_slot_points(season_year):
     slots = ", ".join(f"'{s}'" for s in CBS_SLOT_CAPS)
     return query_snowflake(f"""
         SELECT team_id, lineup_slot,
-               ROUND(CAST(SUM(CAST(total_stat_pts AS DECIMAL(18, 6))) AS FLOAT), 1) AS slot_pts
+               ROUND(CAST(SUM(CAST(total_stat_pts AS DECIMAL(18, 6))) AS DOUBLE), 1) AS slot_pts
         FROM fct_player_daily_performance
         WHERE {league_predicate()} AND season_year = {int(season_year)}
           AND game_date IS NOT NULL AND lineup_slot IN ({slots})
@@ -721,7 +721,7 @@ def get_slot_points_alltime():
     slots = ", ".join(f"'{s}'" for s in CBS_SLOT_CAPS if s != 'P')
     return query_snowflake(f"""
         SELECT team_id, lineup_slot, season_year,
-               ROUND(CAST(SUM(CAST(total_stat_pts AS DECIMAL(18, 6))) AS FLOAT), 1) AS slot_pts
+               ROUND(CAST(SUM(CAST(total_stat_pts AS DECIMAL(18, 6))) AS DOUBLE), 1) AS slot_pts
         FROM fct_player_daily_performance
         WHERE {league_predicate()} AND game_date IS NOT NULL
           AND lineup_slot IN ({slots})
@@ -737,7 +737,7 @@ def get_pitching_points_alltime():
     return query_snowflake(f"""
         SELECT team_id,
                ROUND(CAST(SUM(CAST(total_pitching_stat_pts
-                         * COALESCE(active_weight, 0) AS DECIMAL(18, 6))) AS FLOAT), 1) AS p_pts
+                         * COALESCE(active_weight, 0) AS DECIMAL(18, 6))) AS DOUBLE), 1) AS p_pts
         FROM fct_player_daily_performance
         WHERE {league_predicate()} AND game_date IS NOT NULL
         GROUP BY team_id
@@ -753,17 +753,17 @@ def get_detailed_stats_alltime():
     stat_cols = ([_REC_STAT_COL[s] for s in _HIT_ORDER]
                  + [_REC_STAT_COL[s] for s in _PIT_ORDER])
     col_select = ',\n               '.join(
-        f'ROUND(CAST(SUM(CAST({c} * COALESCE(active_weight, 0) AS DECIMAL(18, 6))) AS FLOAT), 1) AS {c}'
+        f'ROUND(CAST(SUM(CAST({c} * COALESCE(active_weight, 0) AS DECIMAL(18, 6))) AS DOUBLE), 1) AS {c}'
         for c in stat_cols)
     return query_snowflake(f"""
         SELECT team_id,
                {col_select},
                ROUND(CAST(SUM(CAST(total_hitting_stat_pts
-                         * COALESCE(active_weight, 0) AS DECIMAL(18, 6))) AS FLOAT), 1) AS hit_pts,
+                         * COALESCE(active_weight, 0) AS DECIMAL(18, 6))) AS DOUBLE), 1) AS hit_pts,
                ROUND(CAST(SUM(CAST(total_pitching_stat_pts
-                         * COALESCE(active_weight, 0) AS DECIMAL(18, 6))) AS FLOAT), 1) AS pit_pts,
+                         * COALESCE(active_weight, 0) AS DECIMAL(18, 6))) AS DOUBLE), 1) AS pit_pts,
                ROUND(CAST(SUM(CAST(total_stat_pts
-                         * COALESCE(active_weight, 0) AS DECIMAL(18, 6))) AS FLOAT), 1) AS total_pts
+                         * COALESCE(active_weight, 0) AS DECIMAL(18, 6))) AS DOUBLE), 1) AS total_pts
         FROM fct_player_daily_performance
         WHERE {league_predicate()} AND game_date IS NOT NULL
         GROUP BY team_id
@@ -811,7 +811,7 @@ def get_mlb_affinity(season_year):
                                   + COALESCE(g.hbp, 0) + COALESCE(g.sf, 0)
                              ELSE COALESCE(g.outs, 0) + COALESCE(g.ha, 0)
                                   + COALESCE(g.bbi, 0) END)
-                       * COALESCE(a.active_weight, 0) AS DECIMAL(18, 6))) AS FLOAT) AS wt
+                       * COALESCE(a.active_weight, 0) AS DECIMAL(18, 6))) AS DOUBLE) AS wt
             FROM fct_cbs_player_game_attribution a
             JOIN int_cbs__player_game_points g
               ON  a.league_key = g.league_key
@@ -836,7 +836,7 @@ def get_mlb_affinity(season_year):
         SELECT i.team_id, i.mlb_team_id, n.mlb_team_name,
                ROUND(SUM(CASE WHEN i.season_year = {int(season_year)}
                               THEN i.wt ELSE 0 END), 1) AS season_wt,
-               ROUND(CAST(SUM(CAST(i.wt AS DECIMAL(18, 6))) AS FLOAT), 1) AS alltime_wt
+               ROUND(CAST(SUM(CAST(i.wt AS DECIMAL(18, 6))) AS DOUBLE), 1) AS alltime_wt
         FROM involvement i
         JOIN latest_names n ON n.mlb_team_id = i.mlb_team_id
         GROUP BY i.team_id, i.mlb_team_id, n.mlb_team_name
@@ -898,14 +898,14 @@ def get_acquisition_channels_alltime(last_closed_season):
         ),
         acquired AS (
             SELECT franchise_id,
-                   ROUND(CAST(SUM(CAST(CASE WHEN channel = 'opening' THEN fpts * w END AS DECIMAL(18, 6))) AS FLOAT), 1)   AS opening_active_pts,
-                   ROUND(CAST(SUM(CAST(CASE WHEN channel = 'add' THEN fpts * w END AS DECIMAL(18, 6))) AS FLOAT), 1)       AS fa_add_active_pts,
-                   ROUND(CAST(SUM(CAST(CASE WHEN channel = 'trade_in' THEN fpts * w END AS DECIMAL(18, 6))) AS FLOAT), 1)  AS trade_active_pts,
-                   ROUND(CAST(SUM(CAST(fpts * w AS DECIMAL(18, 6))) AS FLOAT), 1)                                          AS acquired_active_pts,
-                   ROUND(CAST(SUM(CAST(CASE WHEN channel = 'opening' THEN fpts END AS DECIMAL(18, 6))) AS FLOAT), 1)       AS opening_rostered_pts,
-                   ROUND(CAST(SUM(CAST(CASE WHEN channel = 'add' THEN fpts END AS DECIMAL(18, 6))) AS FLOAT), 1)           AS fa_add_rostered_pts,
-                   ROUND(CAST(SUM(CAST(CASE WHEN channel = 'trade_in' THEN fpts END AS DECIMAL(18, 6))) AS FLOAT), 1)      AS trade_rostered_pts,
-                   ROUND(CAST(SUM(CAST(fpts AS DECIMAL(18, 6))) AS FLOAT), 1)                                              AS acquired_rostered_pts
+                   ROUND(CAST(SUM(CAST(CASE WHEN channel = 'opening' THEN fpts * w END AS DECIMAL(18, 6))) AS DOUBLE), 1)   AS opening_active_pts,
+                   ROUND(CAST(SUM(CAST(CASE WHEN channel = 'add' THEN fpts * w END AS DECIMAL(18, 6))) AS DOUBLE), 1)       AS fa_add_active_pts,
+                   ROUND(CAST(SUM(CAST(CASE WHEN channel = 'trade_in' THEN fpts * w END AS DECIMAL(18, 6))) AS DOUBLE), 1)  AS trade_active_pts,
+                   ROUND(CAST(SUM(CAST(fpts * w AS DECIMAL(18, 6))) AS DOUBLE), 1)                                          AS acquired_active_pts,
+                   ROUND(CAST(SUM(CAST(CASE WHEN channel = 'opening' THEN fpts END AS DECIMAL(18, 6))) AS DOUBLE), 1)       AS opening_rostered_pts,
+                   ROUND(CAST(SUM(CAST(CASE WHEN channel = 'add' THEN fpts END AS DECIMAL(18, 6))) AS DOUBLE), 1)           AS fa_add_rostered_pts,
+                   ROUND(CAST(SUM(CAST(CASE WHEN channel = 'trade_in' THEN fpts END AS DECIMAL(18, 6))) AS DOUBLE), 1)      AS trade_rostered_pts,
+                   ROUND(CAST(SUM(CAST(fpts AS DECIMAL(18, 6))) AS DOUBLE), 1)                                              AS acquired_rostered_pts
             FROM channeled
             GROUP BY franchise_id
         ),
@@ -925,8 +925,8 @@ def get_acquisition_channels_alltime(last_closed_season):
         ),
         lost_franchise AS (
             SELECT d.franchise_id, d.close_type,
-                   CAST(SUM(CAST(a.fpts * a.w AS DECIMAL(18, 6))) AS FLOAT) AS lost_active,
-                   CAST(SUM(CAST(a.fpts AS DECIMAL(18, 6))) AS FLOAT) AS lost_rostered
+                   CAST(SUM(CAST(a.fpts * a.w AS DECIMAL(18, 6))) AS DOUBLE) AS lost_active,
+                   CAST(SUM(CAST(a.fpts AS DECIMAL(18, 6))) AS DOUBLE) AS lost_rostered
             FROM departures d
             JOIN attr a
               ON a.cbs_player_id = d.pid
@@ -938,7 +938,7 @@ def get_acquisition_channels_alltime(last_closed_season):
         ),
         unowned AS (
             SELECT g.cbs_player_id, g.season_year, g.game_date,
-                   CAST(SUM(CAST(g.calculated_fpts AS DECIMAL(18, 6))) AS FLOAT) AS fpts
+                   CAST(SUM(CAST(g.calculated_fpts AS DECIMAL(18, 6))) AS DOUBLE) AS fpts
             FROM int_cbs__player_game_points g
             LEFT JOIN fct_cbs_player_game_attribution a
               ON a.league_key = g.league_key
@@ -952,7 +952,7 @@ def get_acquisition_channels_alltime(last_closed_season):
             GROUP BY g.cbs_player_id, g.season_year, g.game_date
         ),
         lost_unowned AS (
-            SELECT d.franchise_id, d.close_type, CAST(SUM(CAST(u.fpts AS DECIMAL(18, 6))) AS FLOAT) AS lost_unowned
+            SELECT d.franchise_id, d.close_type, CAST(SUM(CAST(u.fpts AS DECIMAL(18, 6))) AS DOUBLE) AS lost_unowned
             FROM departures d
             JOIN unowned u
               ON u.cbs_player_id = d.pid
@@ -976,10 +976,10 @@ def get_acquisition_channels_alltime(last_closed_season):
             SELECT franchise_id,
                    ROUND(SUM(CASE WHEN close_type = 'drop' THEN lost_active END), 1)          AS dropped_active_pts,
                    ROUND(SUM(CASE WHEN close_type = 'trade_out' THEN lost_active END), 1)     AS traded_away_active_pts,
-                   ROUND(CAST(SUM(CAST(lost_active AS DECIMAL(18, 6))) AS FLOAT), 1)                                                 AS lost_active_pts,
+                   ROUND(CAST(SUM(CAST(lost_active AS DECIMAL(18, 6))) AS DOUBLE), 1)                                                 AS lost_active_pts,
                    ROUND(SUM(CASE WHEN close_type = 'drop' THEN lost_rostered END), 1)        AS dropped_rostered_pts,
                    ROUND(SUM(CASE WHEN close_type = 'trade_out' THEN lost_rostered END), 1)   AS traded_away_rostered_pts,
-                   ROUND(CAST(SUM(CAST(lost_rostered AS DECIMAL(18, 6))) AS FLOAT), 1)                                               AS lost_rostered_pts
+                   ROUND(CAST(SUM(CAST(lost_rostered AS DECIMAL(18, 6))) AS DOUBLE), 1)                                               AS lost_rostered_pts
             FROM lost
             GROUP BY franchise_id
         )
@@ -1079,7 +1079,7 @@ def _rec_agg(group_cols, extra_selects=''):
     handed back the rows, with no code or data change. That is what made
     the CBS byte-diff golden flap. Ordering by the grain pins it."""
     cols = ", ".join(
-        f'ROUND(CAST(SUM(CAST({c} * COALESCE(active_weight, 0) AS DECIMAL(18, 6))) AS FLOAT), 6) AS "{n}"'
+        f'ROUND(CAST(SUM(CAST({c} * COALESCE(active_weight, 0) AS DECIMAL(18, 6))) AS DOUBLE), 6) AS "{n}"'
         for n, c in {**_REC_STAT_COL, **_REC_RATE_COL, **_REC_POINTS_COL}.items())
     return query_snowflake(f"""
         SELECT {group_cols}{extra_selects}, {cols}
@@ -1601,7 +1601,7 @@ def get_cbs_records_data():
     slot_rows = query_snowflake(f"""
         SELECT position, season_year, team_id, player_key,
                MAX(display_name) AS display_name,
-               ROUND(CAST(SUM(CAST(weighted_active_pts AS DECIMAL(18, 6))) AS FLOAT), 6) AS pts
+               ROUND(CAST(SUM(CAST(weighted_active_pts AS DECIMAL(18, 6))) AS DOUBLE), 6) AS pts
         FROM fct_player_position_pts
         WHERE {league_predicate()} AND weighted_active_pts IS NOT NULL
         GROUP BY position, season_year, team_id, player_key
@@ -1631,7 +1631,7 @@ def get_cbs_records_data():
     slot_actual_rows = query_snowflake(f"""
         SELECT lineup_slot AS position, season_year, team_id, player_key,
                MAX(display_name) AS display_name,
-               ROUND(CAST(SUM(CAST(total_hitting_stat_pts * COALESCE(active_weight, 0) AS DECIMAL(18, 6))) AS FLOAT), 6)
+               ROUND(CAST(SUM(CAST(total_hitting_stat_pts * COALESCE(active_weight, 0) AS DECIMAL(18, 6))) AS DOUBLE), 6)
                    AS pts
         FROM fct_player_daily_performance
         WHERE {league_predicate()} AND game_date IS NOT NULL
@@ -1758,8 +1758,8 @@ def get_cbs_records_data():
     # are accumulated in Python and rounded again at display.
     hos_rows = query_snowflake(f"""
         SELECT player_key, team_id, MAX(display_name) AS display_name,
-               ROUND(CAST(SUM(CAST(total_stat_pts * COALESCE(active_weight, 0) AS DECIMAL(18, 6))) AS FLOAT), 6) AS act,
-               ROUND(CAST(SUM(CAST(total_stat_pts * (1 - COALESCE(active_weight, 0)) AS DECIMAL(18, 6))) AS FLOAT), 6)
+               ROUND(CAST(SUM(CAST(total_stat_pts * COALESCE(active_weight, 0) AS DECIMAL(18, 6))) AS DOUBLE), 6) AS act,
+               ROUND(CAST(SUM(CAST(total_stat_pts * (1 - COALESCE(active_weight, 0)) AS DECIMAL(18, 6))) AS DOUBLE), 6)
                    AS benched,
                -- MLB-135: the third term of the canonical definition. Weighted
                -- by active_weight for the same reason act/benched are: in the
@@ -1769,7 +1769,7 @@ def get_cbs_records_data():
                -- 2004-2020 shame against the known era. The (1 - weight) share
                -- is bench-incurred and is already inside `benched`, which is a
                -- NET total -- so this adds the active share exactly once.
-               ROUND(CAST(SUM(CAST(negative_points * COALESCE(active_weight, 0) AS DECIMAL(18, 6))) AS FLOAT), 6)
+               ROUND(CAST(SUM(CAST(negative_points * COALESCE(active_weight, 0) AS DECIMAL(18, 6))) AS DOUBLE), 6)
                    AS neg_active
         FROM fct_player_daily_performance
         WHERE {league_predicate()} AND game_date IS NOT NULL
@@ -1777,7 +1777,7 @@ def get_cbs_records_data():
         ORDER BY player_key, team_id
     """)
     total_by_pk = {r['cbs_player_id']: _rec_fnum(r['pts']) for r in query_snowflake(f"""
-        SELECT cbs_player_id, CAST(SUM(CAST(stat_value AS DECIMAL(18, 6))) AS FLOAT) AS pts
+        SELECT cbs_player_id, CAST(SUM(CAST(stat_value AS DECIMAL(18, 6))) AS DOUBLE) AS pts
         FROM int_cbs__player_season_stats
         WHERE {league_predicate()} AND stat_name = 'CALCULATED_POINTS'
         GROUP BY cbs_player_id
@@ -1789,7 +1789,7 @@ def get_cbs_records_data():
         SELECT player_key FROM fct_player_daily_performance
         WHERE {league_predicate()}
         GROUP BY player_key
-        HAVING CAST(SUM(CAST(total_pitching_stat_pts AS DECIMAL(18, 6))) AS FLOAT) > CAST(SUM(CAST(total_hitting_stat_pts AS DECIMAL(18, 6))) AS FLOAT)""")}
+        HAVING CAST(SUM(CAST(total_pitching_stat_pts AS DECIMAL(18, 6))) AS DOUBLE) > CAST(SUM(CAST(total_hitting_stat_pts AS DECIMAL(18, 6))) AS DOUBLE)""")}
     hos = {}
     for r in hos_rows:
         ab = _abbrev_of.get(_fid(r.get('team_id')))
@@ -1987,7 +1987,7 @@ def get_years_of_service(keys, entity_id=None):
         FROM fct_player_daily_performance
         WHERE {' AND '.join(filters)}
         GROUP BY player_key, season_year
-        HAVING CAST(SUM(CAST(total_stat_pts * COALESCE(active_weight, 0) AS DECIMAL(18, 6))) AS FLOAT) <> 0
+        HAVING CAST(SUM(CAST(total_stat_pts * COALESCE(active_weight, 0) AS DECIMAL(18, 6))) AS DOUBLE) <> 0
     """)
     out = {}
     for r in rows:
@@ -2162,10 +2162,10 @@ def get_window_lineup(date_from, date_to, weighted=True):
             MAX(player_name)  AS player_name,
             MAX(display_name) AS display_name,
             position,
-            ROUND(CAST(SUM(CAST(pos_pts AS DECIMAL(18, 6))) AS FLOAT), 1) AS position_pts
+            ROUND(CAST(SUM(CAST(pos_pts AS DECIMAL(18, 6))) AS DOUBLE), 1) AS position_pts
         FROM exploded
         GROUP BY player_key, position
-        HAVING CAST(SUM(CAST(pos_pts AS DECIMAL(18, 6))) AS FLOAT) > 0
+        HAVING CAST(SUM(CAST(pos_pts AS DECIMAL(18, 6))) AS DOUBLE) > 0
         ORDER BY position, position_pts DESC, player_key
     """)
     candidates = _synthesize_universal_slots(candidates)
@@ -2208,22 +2208,22 @@ def _enrich_lineup(lineup, entity_id=None, season_year=None,
             player_key,
             MIN(season_year)                          AS first_season,
             MAX(season_year)                          AS last_season,
-            CAST(SUM(CAST(games_played AS DECIMAL(18, 6))) AS FLOAT)                         AS games,
-            ROUND(CAST(SUM(CAST(games_played * COALESCE(active_weight, 0) AS DECIMAL(18, 6))) AS FLOAT), 1)
+            CAST(SUM(CAST(games_played AS DECIMAL(18, 6))) AS DOUBLE)                         AS games,
+            ROUND(CAST(SUM(CAST(games_played * COALESCE(active_weight, 0) AS DECIMAL(18, 6))) AS DOUBLE), 1)
                                                       AS weighted_games,
-            CAST(SUM(CAST(r AS DECIMAL(18, 6))) AS FLOAT) AS r, CAST(SUM(CAST(rbi AS DECIMAL(18, 6))) AS FLOAT) AS rbi, CAST(SUM(CAST(b_bb AS DECIMAL(18, 6))) AS FLOAT) AS b_bb,
-            CAST(SUM(CAST(sb AS DECIMAL(18, 6))) AS FLOAT) AS sb, CAST(SUM(CAST(tb AS DECIMAL(18, 6))) AS FLOAT) AS tb,
-            CAST(SUM(CAST(h AS DECIMAL(18, 6))) AS FLOAT) AS h, CAST(SUM(CAST(ab AS DECIMAL(18, 6))) AS FLOAT) AS ab, CAST(SUM(CAST(hbp AS DECIMAL(18, 6))) AS FLOAT) AS hbp, CAST(SUM(CAST(sf AS DECIMAL(18, 6))) AS FLOAT) AS sf,
-            CAST(SUM(CAST(k AS DECIMAL(18, 6))) AS FLOAT) AS k, CAST(SUM(CAST(w AS DECIMAL(18, 6))) AS FLOAT) AS w, CAST(SUM(CAST(l AS DECIMAL(18, 6))) AS FLOAT) AS l, CAST(SUM(CAST(sv AS DECIMAL(18, 6))) AS FLOAT) AS sv,
-            CAST(SUM(CAST(hld AS DECIMAL(18, 6))) AS FLOAT) AS hld, CAST(SUM(CAST(qs AS DECIMAL(18, 6))) AS FLOAT) AS qs, CAST(SUM(CAST(outs AS DECIMAL(18, 6))) AS FLOAT) AS outs,
-            CAST(SUM(CAST(cg AS DECIMAL(18, 6))) AS FLOAT) AS cg, CAST(SUM(CAST(er AS DECIMAL(18, 6))) AS FLOAT) AS er,
-            CAST(SUM(CAST(p_h AS DECIMAL(18, 6))) AS FLOAT) AS p_h, CAST(SUM(CAST(p_bb AS DECIMAL(18, 6))) AS FLOAT) AS p_bb,
-            CAST(SUM(CAST(r_pts AS DECIMAL(18, 6))) AS FLOAT) AS r_pts, CAST(SUM(CAST(rbi_pts AS DECIMAL(18, 6))) AS FLOAT) AS rbi_pts,
-            CAST(SUM(CAST(b_bb_pts AS DECIMAL(18, 6))) AS FLOAT) AS b_bb_pts, CAST(SUM(CAST(sb_pts AS DECIMAL(18, 6))) AS FLOAT) AS sb_pts,
-            CAST(SUM(CAST(tb_pts AS DECIMAL(18, 6))) AS FLOAT) AS tb_pts, CAST(SUM(CAST(k_pts AS DECIMAL(18, 6))) AS FLOAT) AS k_pts, CAST(SUM(CAST(w_pts AS DECIMAL(18, 6))) AS FLOAT) AS w_pts,
-            CAST(SUM(CAST(sv_pts AS DECIMAL(18, 6))) AS FLOAT) AS sv_pts, CAST(SUM(CAST(hld_pts AS DECIMAL(18, 6))) AS FLOAT) AS hld_pts,
-            CAST(SUM(CAST(qs_pts AS DECIMAL(18, 6))) AS FLOAT) AS qs_pts, CAST(SUM(CAST(outs_pts AS DECIMAL(18, 6))) AS FLOAT) AS outs_pts,
-            CAST(SUM(CAST(cg_pts AS DECIMAL(18, 6))) AS FLOAT) AS cg_pts, CAST(SUM(CAST(er_pts AS DECIMAL(18, 6))) AS FLOAT) AS er_pts,
+            CAST(SUM(CAST(r AS DECIMAL(18, 6))) AS DOUBLE) AS r, CAST(SUM(CAST(rbi AS DECIMAL(18, 6))) AS DOUBLE) AS rbi, CAST(SUM(CAST(b_bb AS DECIMAL(18, 6))) AS DOUBLE) AS b_bb,
+            CAST(SUM(CAST(sb AS DECIMAL(18, 6))) AS DOUBLE) AS sb, CAST(SUM(CAST(tb AS DECIMAL(18, 6))) AS DOUBLE) AS tb,
+            CAST(SUM(CAST(h AS DECIMAL(18, 6))) AS DOUBLE) AS h, CAST(SUM(CAST(ab AS DECIMAL(18, 6))) AS DOUBLE) AS ab, CAST(SUM(CAST(hbp AS DECIMAL(18, 6))) AS DOUBLE) AS hbp, CAST(SUM(CAST(sf AS DECIMAL(18, 6))) AS DOUBLE) AS sf,
+            CAST(SUM(CAST(k AS DECIMAL(18, 6))) AS DOUBLE) AS k, CAST(SUM(CAST(w AS DECIMAL(18, 6))) AS DOUBLE) AS w, CAST(SUM(CAST(l AS DECIMAL(18, 6))) AS DOUBLE) AS l, CAST(SUM(CAST(sv AS DECIMAL(18, 6))) AS DOUBLE) AS sv,
+            CAST(SUM(CAST(hld AS DECIMAL(18, 6))) AS DOUBLE) AS hld, CAST(SUM(CAST(qs AS DECIMAL(18, 6))) AS DOUBLE) AS qs, CAST(SUM(CAST(outs AS DECIMAL(18, 6))) AS DOUBLE) AS outs,
+            CAST(SUM(CAST(cg AS DECIMAL(18, 6))) AS DOUBLE) AS cg, CAST(SUM(CAST(er AS DECIMAL(18, 6))) AS DOUBLE) AS er,
+            CAST(SUM(CAST(p_h AS DECIMAL(18, 6))) AS DOUBLE) AS p_h, CAST(SUM(CAST(p_bb AS DECIMAL(18, 6))) AS DOUBLE) AS p_bb,
+            CAST(SUM(CAST(r_pts AS DECIMAL(18, 6))) AS DOUBLE) AS r_pts, CAST(SUM(CAST(rbi_pts AS DECIMAL(18, 6))) AS DOUBLE) AS rbi_pts,
+            CAST(SUM(CAST(b_bb_pts AS DECIMAL(18, 6))) AS DOUBLE) AS b_bb_pts, CAST(SUM(CAST(sb_pts AS DECIMAL(18, 6))) AS DOUBLE) AS sb_pts,
+            CAST(SUM(CAST(tb_pts AS DECIMAL(18, 6))) AS DOUBLE) AS tb_pts, CAST(SUM(CAST(k_pts AS DECIMAL(18, 6))) AS DOUBLE) AS k_pts, CAST(SUM(CAST(w_pts AS DECIMAL(18, 6))) AS DOUBLE) AS w_pts,
+            CAST(SUM(CAST(sv_pts AS DECIMAL(18, 6))) AS DOUBLE) AS sv_pts, CAST(SUM(CAST(hld_pts AS DECIMAL(18, 6))) AS DOUBLE) AS hld_pts,
+            CAST(SUM(CAST(qs_pts AS DECIMAL(18, 6))) AS DOUBLE) AS qs_pts, CAST(SUM(CAST(outs_pts AS DECIMAL(18, 6))) AS DOUBLE) AS outs_pts,
+            CAST(SUM(CAST(cg_pts AS DECIMAL(18, 6))) AS DOUBLE) AS cg_pts, CAST(SUM(CAST(er_pts AS DECIMAL(18, 6))) AS DOUBLE) AS er_pts,
             MAX_BY(team_name, game_date)              AS latest_team_name,
             MAX_BY(team_abbrev, game_date)            AS team_abbrev,
             MAX_BY(owner_name, game_date)             AS owner_name,
@@ -2276,12 +2276,12 @@ def _apply_alltime_board_context(lineup, current_key, current_name, years_map, t
                     player_key,
                     MAX_BY(team_abbrev, game_date)                 AS abbrev,
                     MAX_BY(team_name, game_date)                   AS name,
-                    CAST(SUM(CAST(total_stat_pts * COALESCE(active_weight, 0) AS DECIMAL(18, 6))) AS FLOAT) AS pts
+                    CAST(SUM(CAST(total_stat_pts * COALESCE(active_weight, 0) AS DECIMAL(18, 6))) AS DOUBLE) AS pts
                 FROM fct_player_daily_performance
                 WHERE {league_predicate()} AND game_date IS NOT NULL
                   AND player_key IN ({quoted})
                 GROUP BY player_key, team_id
-                HAVING CAST(SUM(CAST(total_stat_pts * COALESCE(active_weight, 0) AS DECIMAL(18, 6))) AS FLOAT) > 0
+                HAVING CAST(SUM(CAST(total_stat_pts * COALESCE(active_weight, 0) AS DECIMAL(18, 6))) AS DOUBLE) > 0
             )
             SELECT player_key,
                    LISTAGG(COALESCE(abbrev, name), ', ')
@@ -2398,7 +2398,7 @@ def get_roster_days_by_season(entity_id):
             UNION ALL
             SELECT player_key, season_year, days FROM captured
         )
-        SELECT player_key, season_year, CAST(SUM(CAST(days AS DECIMAL(18, 6))) AS FLOAT) AS roster_days
+        SELECT player_key, season_year, CAST(SUM(CAST(days AS DECIMAL(18, 6))) AS DOUBLE) AS roster_days
         FROM unioned
         GROUP BY 1, 2
     """)
@@ -2501,27 +2501,27 @@ def get_cbs_team_history_data(context, franchises, franchise_map):
                 MAX_BY(position, game_date)     AS position,
                 COALESCE(MAX_BY(pro_team, game_date),
                          MAX(current_club)) AS pro_team,
-                ROUND(CAST(SUM(CAST(total_stat_pts * {w} AS DECIMAL(18, 6))) AS FLOAT), 6)          AS active_points,
-                ROUND(CAST(SUM(CAST(total_hitting_stat_pts * {w} AS DECIMAL(18, 6))) AS FLOAT), 6)  AS active_hitting_points,
-                ROUND(CAST(SUM(CAST(total_pitching_stat_pts * {w} AS DECIMAL(18, 6))) AS FLOAT), 6) AS active_pitching_points,
-                ROUND(CAST(SUM(CAST(total_stat_pts * (1 - {w}) AS DECIMAL(18, 6))) AS FLOAT), 6)    AS bench_il_points,
-                ROUND(CAST(SUM(CAST(games_played * {w} AS DECIMAL(18, 6))) AS FLOAT))               AS active_games,
-                ROUND(CAST(SUM(CAST(h * {w} AS DECIMAL(18, 6))) AS FLOAT), 6)    AS h,
-                ROUND(CAST(SUM(CAST(ab * {w} AS DECIMAL(18, 6))) AS FLOAT), 6)   AS ab,
-                ROUND(CAST(SUM(CAST(b_bb * {w} AS DECIMAL(18, 6))) AS FLOAT), 6) AS b_bb,
-                ROUND(CAST(SUM(CAST(hbp * {w} AS DECIMAL(18, 6))) AS FLOAT), 6)  AS hbp,
-                ROUND(CAST(SUM(CAST(sf * {w} AS DECIMAL(18, 6))) AS FLOAT), 6)   AS sf,
-                ROUND(CAST(SUM(CAST(tb * {w} AS DECIMAL(18, 6))) AS FLOAT), 6)   AS tb,
-                ROUND(CAST(SUM(CAST(hr * {w} AS DECIMAL(18, 6))) AS FLOAT))      AS hr,
-                ROUND(CAST(SUM(CAST(sb * {w} AS DECIMAL(18, 6))) AS FLOAT))      AS sb,
-                ROUND(CAST(SUM(CAST(w * {w} AS DECIMAL(18, 6))) AS FLOAT))       AS w,
-                ROUND(CAST(SUM(CAST(l * {w} AS DECIMAL(18, 6))) AS FLOAT))       AS l,
-                ROUND(CAST(SUM(CAST(sv * {w} AS DECIMAL(18, 6))) AS FLOAT))      AS sv,
-                ROUND(CAST(SUM(CAST(er * {w} AS DECIMAL(18, 6))) AS FLOAT), 6)   AS er,
-                ROUND(CAST(SUM(CAST(outs * {w} AS DECIMAL(18, 6))) AS FLOAT), 6) AS outs,
-                ROUND(CAST(SUM(CAST(k * {w} AS DECIMAL(18, 6))) AS FLOAT))       AS k,
-                ROUND(CAST(SUM(CAST(p_bb * {w} AS DECIMAL(18, 6))) AS FLOAT))    AS p_bb,
-                ROUND(CAST(SUM(CAST(p_h * {w} AS DECIMAL(18, 6))) AS FLOAT), 6)  AS p_h,
+                ROUND(CAST(SUM(CAST(total_stat_pts * {w} AS DECIMAL(18, 6))) AS DOUBLE), 6)          AS active_points,
+                ROUND(CAST(SUM(CAST(total_hitting_stat_pts * {w} AS DECIMAL(18, 6))) AS DOUBLE), 6)  AS active_hitting_points,
+                ROUND(CAST(SUM(CAST(total_pitching_stat_pts * {w} AS DECIMAL(18, 6))) AS DOUBLE), 6) AS active_pitching_points,
+                ROUND(CAST(SUM(CAST(total_stat_pts * (1 - {w}) AS DECIMAL(18, 6))) AS DOUBLE), 6)    AS bench_il_points,
+                ROUND(CAST(SUM(CAST(games_played * {w} AS DECIMAL(18, 6))) AS DOUBLE))               AS active_games,
+                ROUND(CAST(SUM(CAST(h * {w} AS DECIMAL(18, 6))) AS DOUBLE), 6)    AS h,
+                ROUND(CAST(SUM(CAST(ab * {w} AS DECIMAL(18, 6))) AS DOUBLE), 6)   AS ab,
+                ROUND(CAST(SUM(CAST(b_bb * {w} AS DECIMAL(18, 6))) AS DOUBLE), 6) AS b_bb,
+                ROUND(CAST(SUM(CAST(hbp * {w} AS DECIMAL(18, 6))) AS DOUBLE), 6)  AS hbp,
+                ROUND(CAST(SUM(CAST(sf * {w} AS DECIMAL(18, 6))) AS DOUBLE), 6)   AS sf,
+                ROUND(CAST(SUM(CAST(tb * {w} AS DECIMAL(18, 6))) AS DOUBLE), 6)   AS tb,
+                ROUND(CAST(SUM(CAST(hr * {w} AS DECIMAL(18, 6))) AS DOUBLE))      AS hr,
+                ROUND(CAST(SUM(CAST(sb * {w} AS DECIMAL(18, 6))) AS DOUBLE))      AS sb,
+                ROUND(CAST(SUM(CAST(w * {w} AS DECIMAL(18, 6))) AS DOUBLE))       AS w,
+                ROUND(CAST(SUM(CAST(l * {w} AS DECIMAL(18, 6))) AS DOUBLE))       AS l,
+                ROUND(CAST(SUM(CAST(sv * {w} AS DECIMAL(18, 6))) AS DOUBLE))      AS sv,
+                ROUND(CAST(SUM(CAST(er * {w} AS DECIMAL(18, 6))) AS DOUBLE), 6)   AS er,
+                ROUND(CAST(SUM(CAST(outs * {w} AS DECIMAL(18, 6))) AS DOUBLE), 6) AS outs,
+                ROUND(CAST(SUM(CAST(k * {w} AS DECIMAL(18, 6))) AS DOUBLE))       AS k,
+                ROUND(CAST(SUM(CAST(p_bb * {w} AS DECIMAL(18, 6))) AS DOUBLE))    AS p_bb,
+                ROUND(CAST(SUM(CAST(p_h * {w} AS DECIMAL(18, 6))) AS DOUBLE), 6)  AS p_h,
                 LISTAGG(DISTINCT CASE
                     WHEN {w} > 0
                      AND lineup_slot NOT IN ('BE', 'IL', 'FA', 'RS', 'EST', 'ACT')
@@ -2567,7 +2567,7 @@ def get_cbs_team_history_data(context, franchises, franchise_map):
                 SELECT scope, team_id, player_key, season_year
                 FROM scoped
                 GROUP BY scope, team_id, player_key, season_year
-                HAVING CAST(SUM(CAST(total_stat_pts * {w} AS DECIMAL(18, 6))) AS FLOAT) <> 0
+                HAVING CAST(SUM(CAST(total_stat_pts * {w} AS DECIMAL(18, 6))) AS DOUBLE) <> 0
             )
             GROUP BY scope, team_id, player_key
         )

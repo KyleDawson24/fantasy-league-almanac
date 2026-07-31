@@ -251,7 +251,7 @@ def get_wasted_points(season_year, matchup_period, limit=5):
                          THEN calculated_points END) AS fa_wasted_pts,
                 MAX(CASE WHEN wasted_bucket = 'ROSTERED_INACTIVE'
                          THEN calculated_points END) AS bench_wasted_pts,
-                CAST(SUM(CAST(calculated_points AS DECIMAL(18, 6))) AS FLOAT) AS wasted_points_total,
+                CAST(SUM(CAST(calculated_points AS DECIMAL(18, 6))) AS DOUBLE) AS wasted_points_total,
                 MAX(CASE WHEN wasted_bucket = 'ROSTERED_INACTIVE'
                          THEN team_name END) AS bench_team_name
             FROM fct_player_weekly_inactive_performance

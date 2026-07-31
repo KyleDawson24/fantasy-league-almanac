@@ -16,14 +16,25 @@ Standing conventions for every session in this repo:
   resolver drift breaks the weekly run). Experiments get their own venv.
 - tests/test_records_report.py is Kyle's untracked WIP -- ignore it.
 - Five owner seeds under dbt_league/seeds/ are `skip-worktree`: the file
-  ON DISK is real league data, the file COMMITTED is the anonymized twin
-  (MLB-95). Reading the working copy and concluding "real names/phones
-  are tracked in git" is a FALSE ALARM and a recurring one -- `git
-  ls-files` lists the path because the path is tracked, not because that
-  content is. Before reporting any leak from these files, confirm with
-  `git show HEAD:<path>`, which is what actually shows the committed
-  bytes. Still report a real finding; just check HEAD first. Full
-  mechanics in archives/anonymization/RESTORE.md (local-only).
+  ON DISK is real league data, the file COMMITTED carries synthetic names
+  and real member GUIDs -- no email or phone data is ever committed
+  (MLB-95). The GUIDs are retained deliberately: identity resolution
+  depends on them. Do not describe the committed seeds as "fully
+  anonymized" -- they are name-anonymized, not identifier-anonymized.
+  Reading the working copy and concluding "real names/phones are tracked
+  in git" is a FALSE ALARM and a recurring one -- `git ls-files` lists
+  the path because the path is tracked, not because that content is.
+  Before reporting any leak from these files, confirm with `git show
+  HEAD:<path>`, which is what actually shows the committed bytes. Still
+  report a real finding; just check HEAD first. The mirror image is also
+  a false alarm: a franchise or owner name that the README uses and the
+  WAREHOUSE cannot find is almost always the twin doing its job, not an
+  invented claim -- the warehouse holds real data, the README holds the
+  committed twins. Verify anything about franchises, teams or owners BY
+  ID, resolving name -> id through cbs_franchises.csv /
+  owner_nicknames.csv first. Real MLB player names are not twinned and
+  are safe by name. Full mechanics in
+  archives/anonymization/RESTORE.md (local-only).
 - Linear is written from the Cowork PM thread only. End sessions with a
   report-back block instead of touching the tracker.
 - CHANGELOG [Unreleased] is a curated staging area. Release ceremony =

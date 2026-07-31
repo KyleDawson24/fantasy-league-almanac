@@ -59,7 +59,7 @@ import gspread
 
 import db
 from config.dbt_vars import get_dbt_var
-from db import league_predicate, query_snowflake
+from db import league_predicate, listagg, query_snowflake
 from almanac_data import get_optimal_season_candidates, get_optimal_team_candidates
 from cbs_draft_recap_data import get_draft_history
 # Shared board machinery ((a) reuse per Kyle 2026-07-13): the CBS Home
@@ -2284,8 +2284,8 @@ def _apply_alltime_board_context(lineup, current_key, current_name, years_map, t
                 HAVING CAST(SUM(CAST(total_stat_pts * COALESCE(active_weight, 0) AS DECIMAL(18, 6))) AS DOUBLE) > 0
             )
             SELECT player_key,
-                   LISTAGG(COALESCE(abbrev, name), ', ')
-                       WITHIN GROUP (ORDER BY pts DESC) AS franchises
+                   {listagg('COALESCE(abbrev, name)', ', ', 'pts DESC')}
+                       AS franchises
             FROM (
                 SELECT *,
                        ROW_NUMBER() OVER (PARTITION BY player_key
@@ -2561,8 +2561,8 @@ def get_cbs_team_history_data(context, franchises, franchise_map):
             -- seasons are still service -- Kyle 2026-07-15).
             SELECT scope, team_id, player_key,
                    -- CAST, not TO_VARCHAR -- DuckDB has no to_varchar.
-                   LISTAGG(CAST(season_year AS VARCHAR), ',')
-                       WITHIN GROUP (ORDER BY season_year) AS service_years
+                   {listagg('CAST(season_year AS VARCHAR)', ',', 'season_year')}
+                       AS service_years
             FROM (
                 SELECT scope, team_id, player_key, season_year
                 FROM scoped

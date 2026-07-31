@@ -30,7 +30,7 @@ from datetime import datetime
 
 import requests
 
-from db import league_predicate, query_snowflake
+from db import league_predicate, listagg, query_snowflake
 import records
 
 
@@ -1649,7 +1649,7 @@ def get_team_roster_history_stats(season_year):
                 scope,
                 team_id,
                 player_id,
-                LISTAGG(lineup_slot, ', ') WITHIN GROUP (ORDER BY sort_order, lineup_slot)
+                {listagg('lineup_slot', ', ', 'sort_order, lineup_slot')}
                     AS active_slots_played
             FROM active_slot_distinct
             GROUP BY 1, 2, 3
@@ -1783,8 +1783,8 @@ def get_team_roster_history_stats(season_year):
                 -- CAST(x AS VARCHAR) is valid on both engines. Verified
                 -- equal to TO_VARCHAR over all 141,350 season_year rows
                 -- on Snowflake, 0 mismatches (MLB-10 phase 5).
-                LISTAGG(CAST(season_year AS VARCHAR), ',')
-                    WITHIN GROUP (ORDER BY season_year) AS service_years
+                {listagg('CAST(season_year AS VARCHAR)', ',', 'season_year')}
+                    AS service_years
             FROM (
                 SELECT scope, team_id, player_id, season_year
                 FROM scoped_season

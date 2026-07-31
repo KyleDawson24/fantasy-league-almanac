@@ -222,6 +222,67 @@ def league_predicate(alias=None):
     return f"{column} = '{league_key()}'"
 
 
+# ---------------------------------------------------------------------------
+# SQL dialect (MLB-10 phase 5). Most of the output layer's SQL is portable
+# between Snowflake and DuckDB, and where it was not, the fix belonged in the
+# SQL itself -- a reserved word renamed, TO_VARCHAR spelled CAST, an ORDER BY
+# moved outside its aggregate. Those are gone from here on purpose: a shim is
+# the wrong home for something one spelling can satisfy.
+#
+# LISTAGG is the case where no spelling can. Measured on both engines:
+#
+#   LISTAGG(v, sep) WITHIN GROUP (ORDER BY ...)   Snowflake OK,  DuckDB no
+#   LISTAGG(v, sep ORDER BY ...)                  DuckDB OK,     Snowflake no
+#
+# DuckDB rejects WITHIN GROUP outright ("Unknown ordered aggregate"), not
+# merely with multiple sort keys, and Snowflake rejects the inline form. So
+# this is the one construct that genuinely needs per-engine emission, and it
+# is the whole reason this section exists rather than a general shim layer.
+#
+# Emitted as a fragment into an f-string, exactly like league_predicate().
+# ---------------------------------------------------------------------------
+
+_dialect = 'snowflake'
+
+_SUPPORTED_DIALECTS = ('snowflake', 'duckdb')
+
+
+def set_dialect(name):
+    """Pin the SQL dialect the output layer emits. Defaults to snowflake,
+    which is what the live pipeline runs; the DuckDB target sets this."""
+    global _dialect
+    if name not in _SUPPORTED_DIALECTS:
+        raise ValueError(
+            f"unknown dialect {name!r}; expected one of {_SUPPORTED_DIALECTS}"
+        )
+    _dialect = name
+
+
+def dialect():
+    """The active SQL dialect."""
+    return _dialect
+
+
+def listagg(expr, sep, order_by, distinct=False):
+    """Ordered string aggregation, spelled for the active engine.
+
+    `sep` is a Python string and is quoted here, so call sites read
+    listagg('lineup_slot', ', ', 'sort_order, lineup_slot') rather than
+    carrying their own quoting.
+
+    Note that ordering is NOT optional in this helper. Unordered LISTAGG
+    happens to be portable already, so a call site that does not care about
+    order should keep writing plain SQL rather than route through here --
+    the helper exists for the divergence, not for uniformity.
+    """
+    quoted_sep = "'" + str(sep).replace("'", "''") + "'"
+    prefix = 'DISTINCT ' if distinct else ''
+    if _dialect == 'duckdb':
+        return f"LISTAGG({prefix}{expr}, {quoted_sep} ORDER BY {order_by})"
+    return (f"LISTAGG({prefix}{expr}, {quoted_sep}) "
+            f"WITHIN GROUP (ORDER BY {order_by})")
+
+
 def league_file_tag():
     """League segment for output artifact filenames (MLB-58: log-file
     naming is league-scoped so multi-league runs never collide). Empty

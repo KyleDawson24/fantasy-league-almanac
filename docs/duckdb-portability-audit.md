@@ -363,12 +363,18 @@ intermittent. Both read `int_cbs__player_season_stats`, whose
 `crosswalked_games` aggregation over `stg_mlb__player_game`'s 42M rows
 costs 3.37 GiB on its own.
 
-**Do not "fix" this by materializing that view.** It was tried and is
-worse -- 70/74, because the model then fails too and takes three
-dependents with it. As a view the aggregation streams and the group-by
-discards rows as it goes; as a table it must additionally retain all
-890,902 output rows to write them, so the peak rises rather than falls.
-A `count(*)` over a view is not a proxy for the cost of materializing it.
+**Do not "fix" this by materializing that view.** It was tried and it is
+worse **under the configuration tested** -- 70/74, because the model then
+fails too and takes three dependents with it. That result stands as a
+measurement. **The mechanism behind it is contested**: the earlier
+explanation here (as a view the aggregation streams and discards rows,
+while as a table it must additionally retain all 890,902 output rows to
+write them) is one candidate, but so are engine worker count and write
+buffers, and that configuration ran 32 workers without anyone intending
+it. Do not quote a mechanism until it is isolated. What survives
+regardless: a `count(*)` over a view is not a proxy for the cost of
+materializing it, so trial-build before recommending a materialization
+change.
 
 **Standing follow-up (quality, not a gate):** reshaping that 42M-row
 aggregation is the only remaining lever on the two marts' peak. It is a
@@ -385,6 +391,27 @@ number of invocations can fix, and exits non-zero on the latter rather
 than looping.
 
 ### Headroom at cap (MLB-172) -- first data point, 2026-07-31
+
+> **SUPERSEDED AS A FLOOR -- PENDING RE-MEASUREMENT (2026-07-31, cold
+> review).** Every figure in this section and the next was measured with
+> **DuckDB running 32 engine worker threads**. `dbt --threads 1` does NOT
+> reach the engine: it sets dbt's model concurrency, and the dbt-duckdb
+> adapter forwards the `settings:` block only. Measured directly --
+> `dbt show --threads 1` prints "Concurrency: 1 threads" while
+> `current_setting('threads')` returns **32**.
+>
+> Thirty-two workers each carry their own buffers, so these numbers
+> describe a memory floor made largely of **parallelism**, not of the
+> data. They remain valid as measurements OF THAT CONFIGURATION and are
+> kept for that reason. They must not be read as a property of the
+> workload, quoted as a hardware requirement, or used to freeze the
+> claims-surgery hardware sentence.
+>
+> `settings.threads` is now pinned in `profiles.yml` (default 1,
+> sweepable via `DBT_DUCKDB_THREADS`). The re-measurement ladder is:
+> the staging pair alone at 4 GB / 6 GB, then the full profile if green,
+> then an engine-thread sweep of 1/2/4 for fastest-safe -- each repeated
+> before anything is declared, per the sample-not-property rule below.
 
 MLB-172 makes the observed PEAK per invocation a release-over-release
 metric rather than a pass/fail. This is its first measurement.
@@ -495,15 +522,25 @@ points is claimed:
 - **Green at the pinned caps** via `tools/duckdb_run.sh` -- 74/74 in a
   single round, worst-invocation headroom 1.01 GiB of the 5.59 GiB spill
   budget.
-- **`stg_box_scores` binds**, with its floor between 5.25 and 5.5 GB.
-- **4 GB is unreachable**, in every pass taken.
+- ~~**`stg_box_scores` binds**, with its floor between 5.25 and 5.5 GB.~~
+- ~~**4 GB is unreachable**, in every pass taken.~~
 
-A single 4 GB result is a sample, not a property; the caps, not the model
+**The two struck lines are withdrawn pending re-measurement.** Both were
+measured at 32 engine workers (see the banner above), so they describe a
+parallelism floor rather than a data floor. The ruling itself is
+unchanged -- document the floor, no reshape, no bisection, config levers
+first -- but *which* floor gets documented is now an open measurement,
+not a settled number.
+
+A single result is a sample, not a property; the caps, not the model
 names, are the durable distinction.
 
 **The user-facing hardware sentence ships through the claims surgery, not
-this document.** For that sentence: comfortable at 16 GB, with ~5.5-6 GB
-free needed to build. The corpus it describes, measured 2026-07-31:
+this document, and its BUILD figure is not ready.** "Comfortable at
+16 GB" is safe. The "free to build" number must wait for the re-measured
+ladder -- quoting ~5.5-6 GB now would publish a 32-worker artifact as a
+hardware requirement. The corpus figures below are unaffected by thread
+count and stand as measured 2026-07-31:
 
 | quantity | measured |
 |---|---|

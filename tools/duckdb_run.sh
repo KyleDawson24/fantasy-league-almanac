@@ -66,16 +66,14 @@ COMMON=(--project-dir "$PROJECT_DIR" --profiles-dir "$PROFILES_DIR"
 
 say() { printf '[duckdb_run] %s\n' "$*"; }
 
-# Measured floor, MLB-172: stg_box_scores needs >5.25 GB of memory_limit.
-# A warning, not a refusal -- measuring below the floor is a legitimate thing
-# to want to do, and that is exactly how the floor got measured.
-case "$DBT_DUCKDB_MEMORY_LIMIT" in
-  1GB|2GB|3GB|4GB|5GB|1024MB|2048MB|3072MB|4096MB|5120MB)
-    say "WARNING: memory_limit=$DBT_DUCKDB_MEMORY_LIMIT is at or below the"
-    say "         measured floor (~5.5GB). stg_box_scores is expected to"
-    say "         fail with a hard ceiling. See docs/duckdb-portability-audit.md."
-    ;;
-esac
+# NO floor check here, deliberately. An earlier version warned below ~5.5 GB
+# on the strength of a measured "floor" -- but that floor was measured while
+# DuckDB was running 32 engine workers, because dbt's `--threads` never
+# reached the engine (it sets dbt's model concurrency; the adapter forwards
+# the `settings:` block only). A floor made of worker count is not a floor,
+# and baking it in here would enshrine a 32-worker number as a property of
+# the data. The engine thread count is now pinned in profiles.yml; whatever
+# replaces that figure has to be re-measured with it pinned.
 
 parse_results() {   # -> line 1: error models, line 2: skipped models
   "$PY_BIN" - "$RESULTS" <<'PY'

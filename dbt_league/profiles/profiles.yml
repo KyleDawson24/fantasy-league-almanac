@@ -54,7 +54,19 @@ dbt_league:
       settings:
         memory_limit: "{{ env_var('DBT_DUCKDB_MEMORY_LIMIT', '6GB') }}"
         max_temp_directory_size: "{{ env_var('DBT_DUCKDB_TEMP_LIMIT', '6GB') }}"
+        # ENGINE worker threads -- NOT the same knob as dbt's `--threads`,
+        # and the difference is load-bearing. `--threads` sets dbt's model
+        # concurrency only; the adapter forwards this `settings:` block and
+        # nothing else, so with `--threads 1` the engine still reported
+        # `current_setting('threads') = 32` on this box (measured
+        # 2026-07-31). Every memory figure taken before this line existed
+        # was therefore measured at 32 workers, each carrying its own
+        # buffers -- which is a memory floor made of parallelism, not of
+        # the data. Pinned here so the cap means what it appears to mean;
+        # sweepable for the threads-vs-peak ladder.
+        threads: "{{ env_var('DBT_DUCKDB_THREADS', '1') }}"
         # The reshape layer is wide and materializes as tables; row order
         # is never load-bearing (every model that cares carries an explicit
-        # ORDER BY), so letting DuckDB parallelize freely is free speed.
+        # ORDER BY), so letting DuckDB parallelize freely is free speed --
+        # but see the thread note above: "freely" is not free of memory.
         preserve_insertion_order: false

@@ -1810,25 +1810,25 @@ def get_team_roster_history_stats(season_year):
             rt.bench_days,
             rt.il_days,
             COALESCE(it.bench_il_points, 0) AS bench_il_points,
-            COALESCE(at.active_points, 0) AS active_points,
-            COALESCE(at.active_hitting_points, 0) AS active_hitting_points,
-            COALESCE(at.active_pitching_points, 0) AS active_pitching_points,
-            COALESCE(at.h, 0) AS h,
-            COALESCE(at.ab, 0) AS ab,
-            COALESCE(at.b_bb, 0) AS b_bb,
-            COALESCE(at.hbp, 0) AS hbp,
-            COALESCE(at.sf, 0) AS sf,
-            COALESCE(at.tb, 0) AS tb,
-            COALESCE(at.hr, 0) AS hr,
-            COALESCE(at.sb, 0) AS sb,
-            COALESCE(at.w, 0) AS w,
-            COALESCE(at.l, 0) AS l,
-            COALESCE(at.sv, 0) AS sv,
-            COALESCE(at.er, 0) AS er,
-            COALESCE(at.outs, 0) AS outs,
-            COALESCE(at.k, 0) AS k,
-            COALESCE(at.p_bb, 0) AS p_bb,
-            COALESCE(at.p_h, 0) AS p_h,
+            COALESCE(act.active_points, 0) AS active_points,
+            COALESCE(act.active_hitting_points, 0) AS active_hitting_points,
+            COALESCE(act.active_pitching_points, 0) AS active_pitching_points,
+            COALESCE(act.h, 0) AS h,
+            COALESCE(act.ab, 0) AS ab,
+            COALESCE(act.b_bb, 0) AS b_bb,
+            COALESCE(act.hbp, 0) AS hbp,
+            COALESCE(act.sf, 0) AS sf,
+            COALESCE(act.tb, 0) AS tb,
+            COALESCE(act.hr, 0) AS hr,
+            COALESCE(act.sb, 0) AS sb,
+            COALESCE(act.w, 0) AS w,
+            COALESCE(act.l, 0) AS l,
+            COALESCE(act.sv, 0) AS sv,
+            COALESCE(act.er, 0) AS er,
+            COALESCE(act.outs, 0) AS outs,
+            COALESCE(act.k, 0) AS k,
+            COALESCE(act.p_bb, 0) AS p_bb,
+            COALESCE(act.p_h, 0) AS p_h,
             COALESCE(ss.service_years, '') AS service_years
         FROM roster_totals rt
         INNER JOIN current_teams ct
@@ -1842,10 +1842,14 @@ def get_team_roster_history_stats(season_year):
             ON rt.scope = asl.scope
             AND rt.team_id = asl.team_id
             AND rt.player_id = asl.player_id
-        LEFT JOIN active_totals at
-            ON rt.scope = at.scope
-            AND rt.team_id = at.team_id
-            AND rt.player_id = at.player_id
+        -- Alias is `act`, not `at`: AT is a RESERVED WORD in DuckDB (its
+        -- time-travel syntax), so `at.` is a parser error there while
+        -- Snowflake accepts it. Purely a naming change -- see MLB-10
+        -- phase 5. Don't shorten it back.
+        LEFT JOIN active_totals act
+            ON rt.scope = act.scope
+            AND rt.team_id = act.team_id
+            AND rt.player_id = act.player_id
         LEFT JOIN inactive_totals it
             ON rt.scope = it.scope
             AND rt.team_id = it.team_id

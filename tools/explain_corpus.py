@@ -16,15 +16,24 @@ THE APPROACH. Two phases, so control flow is never the thing under test:
              parses and binds without executing, so every parser/binder
              divergence in the whole corpus reports at once, in seconds,
              and none of them can hide behind another.
+  compare -- EXECUTE each captured statement on BOTH engines and diff the
+             result sets. This is the RUNTIME class that EXPLAIN
+             structurally cannot see.
 
-What EXPLAIN does NOT catch: anything that only shows up at runtime --
-value differences, float width, ordering, type coercion. Those need the
-render A/B. This finds the ones that would stop the render; the A/B finds
-the ones that would quietly change a cell.
+EXPLAIN finds the divergences that would STOP the render; compare finds
+the ones that would quietly CHANGE A CELL. Neither substitutes for the
+other, and the CBS almanac needed both: EXPLAIN cleared its three
+parser/binder classes, after which 7 tabs still differed on values alone.
+
+Why `compare` rather than reading the renderer backwards: a divergent cell
+gives you a number, not a query, and the CBS almanac issues ~200 of them.
+Running the whole corpus localises every divergence in one pass, which is
+the same argument that motivated `explain`, applied one class over.
 
 Usage:
-  python explain_corpus.py capture --entry espn   [-- extra args]
-  python explain_corpus.py explain
+  python tools/explain_corpus.py capture --entry espn   [-- extra args]
+  python tools/explain_corpus.py explain --entry espn
+  python tools/explain_corpus.py compare --entry cbs
 """
 import argparse
 import json
@@ -49,7 +58,12 @@ def capture(entry, extra):
     seen = []
 
     def recording(sql, params=None):
-        seen.append({"sql": sql, "has_params": bool(params)})
+        # params are RECORDED, not merely counted. A bare has_params flag is
+        # enough to EXPLAIN a statement (placeholders become NULL) and not
+        # enough to RE-EXECUTE one, which `compare` must do. 50 of the CBS
+        # corpus's statements are parameterised -- skipping them would leave
+        # a hole exactly where a value divergence could hide.
+        seen.append({"sql": sql, "params": list(params) if params else None})
         return real(sql, params)
 
     _db.query_snowflake = recording
@@ -89,18 +103,24 @@ def capture(entry, extra):
     except BaseException as exc:  # noqa: BLE001 - a partial corpus is still a corpus
         print(f"  entry point raised (corpus kept): {type(exc).__name__}: {exc}")
 
-    # Deduplicate: the same statement text issued per-team is one divergence.
+    # Deduplicate on TEXT AND PARAMS. Text alone was right for `explain` --
+    # one spelling is one parser divergence however many teams issue it --
+    # but wrong for `compare`, where the same text with a different team id
+    # is a different result set. Collapsing those hid 45 of the CBS corpus's
+    # 196 statements behind their first binding.
     uniq, keys = [], set()
     for q in seen:
-        k = " ".join(q["sql"].split())
+        k = (" ".join(q["sql"].split()), json.dumps(q["params"], default=str))
         if k in keys:
             continue
         keys.add(k)
         uniq.append(q)
 
     path = corpus_path(entry)
-    path.write_text(json.dumps(uniq, indent=1), encoding="utf-8")
-    print(f"  captured {len(seen)} statements, {len(uniq)} distinct -> {path.name}")
+    path.write_text(json.dumps(uniq, indent=1, default=str), encoding="utf-8")
+    n_par = sum(1 for q in uniq if q.get("params"))
+    print(f"  captured {len(seen)} statements, {len(uniq)} distinct "
+          f"({n_par} parameterised) -> {path.name}")
 
 
 def to_duckdb_dialect(sql):
@@ -213,14 +233,157 @@ def explain(entry):
     return 1
 
 
+def _canon(v):
+    """One comparable form per value, WITHOUT deciding equality by rounding.
+
+    The driver contract differs where the values do not: Snowflake hands
+    back Decimal where DuckDB hands back float, and dates arrive as
+    different objects. Those are normalised. Numeric PRECISION is not --
+    a 1e-16 delta is representation and 1e-7 is a real divergence, and
+    picking a tolerance here would decide that in advance.
+    """
+    import datetime
+    import decimal
+
+    if v is None or isinstance(v, bool):
+        return v
+    if isinstance(v, (decimal.Decimal, int, float)):
+        return float(v)
+    if isinstance(v, (datetime.datetime, datetime.date)):
+        return v.isoformat()
+    if isinstance(v, (bytes, bytearray)):
+        return bytes(v).hex()
+    return str(v)
+
+
+def compare(entry, limit_report):
+    """Execute the corpus on both engines; diff values, then order."""
+    import duckdb
+
+    import db as _db
+
+    path = corpus_path(entry)
+    if not path.exists():
+        raise SystemExit(f"no corpus for {entry!r}; run `capture --entry {entry}` first")
+    corpus = json.loads(path.read_text(encoding="utf-8"))
+    if corpus and "params" not in corpus[0]:
+        raise SystemExit(
+            "this corpus predates param capture and cannot be re-executed; "
+            f"re-run `capture --entry {entry}`")
+
+    _db.init()
+    if entry == "cbs":
+        _db.set_league("cbs-bsb")
+
+    con = duckdb.connect(str(DB_PATH), read_only=True)
+    con.execute("USE ESPN_FANTASY.ANALYTICS")
+
+    def duck(sql, params):
+        # to_duckdb_dialect, for the same reason `explain` needs it: the
+        # corpus holds Snowflake's spelling of anything dispatched per
+        # engine, and the DuckDB path would never issue that text.
+        cur = con.execute(to_duckdb_dialect(sql).replace("%s", "?"),
+                          list(params) if params else [])
+        cols = [d[0].lower() for d in cur.description]
+        return [dict(zip(cols, r)) for r in cur.fetchall()]
+
+    def rowkey(row, cols):
+        return tuple(repr(_canon(row.get(c))) for c in cols)
+
+    clean, errors, diffs, order_only = 0, [], [], 0
+
+    for i, q in enumerate(corpus):
+        sql, params = q["sql"], q.get("params")
+        try:
+            sf = _db.query_snowflake(sql, params)
+        except Exception as exc:  # noqa: BLE001
+            errors.append((i, "SNOWFLAKE", type(exc).__name__, str(exc)[:150], sql))
+            continue
+        try:
+            dd = duck(sql, params)
+        except Exception as exc:  # noqa: BLE001
+            errors.append((i, "DUCKDB", type(exc).__name__, str(exc)[:150], sql))
+            continue
+
+        sf_cols = list(sf[0]) if sf else []
+        dd_cols = list(dd[0]) if dd else []
+        if sf and dd and sf_cols != dd_cols:
+            diffs.append({"i": i, "kind": "COLUMNS", "sql": sql,
+                          "detail": f"{sf_cols} vs {dd_cols}"})
+            continue
+        if len(sf) != len(dd):
+            diffs.append({"i": i, "kind": "ROWCOUNT", "sql": sql,
+                          "detail": f"{len(sf)} vs {len(dd)} rows"})
+            continue
+        if not sf:
+            clean += 1
+            continue
+
+        cols = sf_cols
+        # Content is compared as a SORTED MULTISET and order reported
+        # separately. Session 3's harness gotcha was four models reporting
+        # thousands of mismatches purely because a partial ORDER BY tied and
+        # the engines broke the tie differently -- a real finding, but not a
+        # value finding, and conflating the two buries the values.
+        a_sorted = sorted(sf, key=lambda r: rowkey(r, cols))
+        b_sorted = sorted(dd, key=lambda r: rowkey(r, cols))
+
+        bad = []
+        for ri, (x, y) in enumerate(zip(a_sorted, b_sorted)):
+            for c in cols:
+                cx, cy = _canon(x.get(c)), _canon(y.get(c))
+                if cx != cy:
+                    bad.append((ri, c, cx, cy))
+
+        if bad:
+            diffs.append({"i": i, "kind": "VALUES", "sql": sql, "cells": bad,
+                          "rows": len(sf), "cols": len(cols)})
+        else:
+            clean += 1
+            if [rowkey(r, cols) for r in sf] != [rowkey(r, cols) for r in dd]:
+                order_only += 1
+
+    con.close()
+
+    print(f"\n  corpus: {len(corpus)} distinct statements ({entry})")
+    print(f"  value-identical : {clean}")
+    print(f"  VALUE DIFFS     : {len(diffs)}")
+    print(f"  errored         : {len(errors)}")
+    print(f"  (of the identical, {order_only} returned the same rows in a "
+          f"different ORDER -- not a value finding)")
+
+    for e in errors:
+        print(f"\n  [{e[1]} {e[2]}] stmt {e[0]}: {e[3]}")
+        print(f"      {' '.join(e[4].split())[:200]}")
+
+    for d in diffs[:limit_report]:
+        print(f"\n  --- stmt {d['i']}  {d['kind']} ---")
+        if d["kind"] != "VALUES":
+            print(f"      {d['detail']}")
+        else:
+            bycol = {}
+            for _, c, _, _ in d["cells"]:
+                bycol[c] = bycol.get(c, 0) + 1
+            print(f"      {len(d['cells'])} divergent cells over {d['rows']} rows "
+                  f"x {d['cols']} cols; columns: {bycol}")
+            for ri, c, cx, cy in d["cells"][:6]:
+                print(f"        row {ri} [{c}]  SF={cx!r}  DD={cy!r}")
+        print(f"      SQL: {' '.join(d['sql'].split())[:240]}")
+
+    return 1 if (diffs or errors) else 0
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("mode", choices=["capture", "explain"])
+    ap.add_argument("mode", choices=["capture", "explain", "compare"])
     ap.add_argument("--entry", default="espn")
+    ap.add_argument("--limit-report", type=int, default=12)
     args, extra = ap.parse_known_args()
     if args.mode == "capture":
         capture(args.entry, extra)
         return 0
+    if args.mode == "compare":
+        return compare(args.entry, args.limit_report)
     return explain(args.entry)
 
 

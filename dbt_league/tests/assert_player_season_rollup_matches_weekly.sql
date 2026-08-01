@@ -60,7 +60,11 @@ from season s
 full outer join weekly_rollup w
     on  s.league_key = w.league_key
     and s.season_year = w.season_year
-    and coalesce(to_varchar(s.team_id), 'FA') = coalesce(to_varchar(w.team_id), 'FA')
+    -- CAST, not TO_VARCHAR: DuckDB has no to_varchar, and both sites are
+    -- single-argument so the cast is equivalent (MLB-10; proven on
+    -- Snowflake over all 141,350 season_year rows, 0 mismatches).
+    and coalesce(cast(s.team_id as varchar), 'FA')
+        = coalesce(cast(w.team_id as varchar), 'FA')
     and s.player_id = w.player_id
     and s.lineup_slot = w.lineup_slot
 where

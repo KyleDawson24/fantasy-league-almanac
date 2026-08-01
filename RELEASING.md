@@ -23,6 +23,16 @@ lands), not on a calendar. Hard backstop: if `[Unreleased]` exceeds
 
 ## The cut
 
+- [ ] Refresh what's derived, re-cut what's stale:
+      `python tools/refresh_doc_inventory.py` rewrites the inventory
+      counts in `SETUP.md` and `dbt_league/README.md` from the parsed
+      manifest + pytest collection, and `RELEASE PLAN.md` gets re-cut in
+      the same pass so the plan describes the release actually being cut
+      (that recurring step is what retires the standing "re-cut owed"
+      debt). Never hand-count either one — the ticket that asked for the
+      script had itself gone stale by two models. Ceremony only, not CI:
+      these are allowed to lag mid-cycle, and a check that goes red
+      between releases is one people learn to ignore.
 - [ ] Curate `CHANGELOG.md`: move `[Unreleased]` content under a new
       `## [X.Y.Z] — YYYY-MM-DD` header; prune stale forward-references
       (nothing in a cut section should promise future version numbers).

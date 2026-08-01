@@ -50,6 +50,46 @@ sys.path.insert(0, str(OUTPUT_DIR))
 sys.path.insert(0, str(REPO))
 
 
+def _install_sheets_stubs():
+    """Let the CBS entry point import in a venv without the Sheets stack.
+
+    `compare` needs BOTH connectors in one process, so it can only run from
+    the DuckDB venv -- and that venv deliberately does not carry gspread
+    (the house rule is that experiments get their own venv and the repo
+    .venv never grows dependencies for one). Neither `capture` nor
+    `compare` ever calls Sheets, so stubbing the imports is sufficient and
+    mutates no environment.
+
+    rowcol_to_a1 gets a REAL implementation, because a stub is not inert
+    here: it is called at RENDER time to build in-sheet formulas
+    (cbs_almanac_sheets:2754, :3668), so a MagicMock lands its repr in a
+    cell rather than quietly doing nothing. A stub that participates in the
+    output under test is part of the measurement, not scaffolding around
+    it.
+    """
+    from unittest.mock import MagicMock
+
+    for name in ("gspread", "requests", "google.auth", "google.auth.exceptions",
+                 "google.auth.transport", "google.auth.transport.requests",
+                 "google.oauth2", "google.oauth2.credentials",
+                 "google_auth_oauthlib", "google_auth_oauthlib.flow"):
+        try:
+            __import__(name)
+        except ImportError:
+            sys.modules[name] = MagicMock()
+
+    gs = sys.modules.get("gspread")
+    if gs is not None and hasattr(gs, "_mock_name"):
+        def rowcol_to_a1(row, col):
+            letters = ""
+            while col > 0:
+                col, rem = divmod(col - 1, 26)
+                letters = chr(65 + rem) + letters
+            return f"{letters}{row}"
+
+        gs.utils.rowcol_to_a1 = rowcol_to_a1
+
+
 def capture(entry, extra):
     """Run an entry point against Snowflake, recording every statement."""
     import db as _db
@@ -83,6 +123,7 @@ def capture(entry, extra):
         import datetime
         import os
 
+        _install_sheets_stubs()
         import cbs_almanac_sheets
 
         _db.set_league("cbs-bsb")
@@ -273,6 +314,7 @@ def compare(entry, limit_report):
 
     _db.init()
     if entry == "cbs":
+        _install_sheets_stubs()
         _db.set_league("cbs-bsb")
 
     con = duckdb.connect(str(DB_PATH), read_only=True)
@@ -290,10 +332,23 @@ def compare(entry, limit_report):
     def rowkey(row, cols):
         return tuple(repr(_canon(row.get(c))) for c in cols)
 
-    clean, errors, diffs, order_only = 0, [], [], 0
+    clean, errors, diffs, order_only, unmodelled = 0, [], [], 0, []
 
     for i, q in enumerate(corpus):
         sql, params = q["sql"], q.get("params")
+
+        # A construct the re-emitter does not model cannot be judged, and
+        # saying so is the whole point. to_duckdb_dialect mirrors
+        # db.listagg() only; the dialect layer has since grown
+        # db.flatten_array() and db.json_text(), so a captured LATERAL
+        # FLATTEN reaches DuckDB in Snowflake's spelling and fails with a
+        # Catalog Error that looks like a product defect and is not.
+        # Reported as UNMODELLED so the count of real divergences stays
+        # honest -- the tool's own docstring predicted this drift.
+        if re.search(r"\blateral\s+flatten\b", sql, re.I):
+            unmodelled.append((i, "LATERAL FLATTEN", sql))
+            continue
+
         try:
             sf = _db.query_snowflake(sql, params)
         except Exception as exc:  # noqa: BLE001
@@ -349,8 +404,15 @@ def compare(entry, limit_report):
     print(f"  value-identical : {clean}")
     print(f"  VALUE DIFFS     : {len(diffs)}")
     print(f"  errored         : {len(errors)}")
+    print(f"  UNMODELLED      : {len(unmodelled)}  (this tool cannot judge these)")
     print(f"  (of the identical, {order_only} returned the same rows in a "
           f"different ORDER -- not a value finding)")
+
+    for i, why, sql in unmodelled:
+        print(f"\n  [UNMODELLED {why}] stmt {i} -- to_duckdb_dialect models "
+              f"db.listagg() only, so this statement is skipped rather than "
+              f"judged. Extend the re-emitter to cover it.")
+        print(f"      {' '.join(sql.split())[:180]}")
 
     for e in errors:
         print(f"\n  [{e[1]} {e[2]}] stmt {e[0]}: {e[3]}")
@@ -370,6 +432,9 @@ def compare(entry, limit_report):
                 print(f"        row {ri} [{c}]  SF={cx!r}  DD={cy!r}")
         print(f"      SQL: {' '.join(d['sql'].split())[:240]}")
 
+    # UNMODELLED does not fail the run -- it is a gap in this tool, not a
+    # finding about the product -- but it is printed every time so it cannot
+    # be mistaken for coverage.
     return 1 if (diffs or errors) else 0
 
 

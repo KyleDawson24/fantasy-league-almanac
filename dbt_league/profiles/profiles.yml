@@ -83,12 +83,37 @@ dbt_league:
 
     # Measurement-only target. Identical to `duckdb` plus DuckDB's own
     # profiling, so the release metric can be the ENGINE's peak rather than
-    # a sampled one: `system_peak_buffer_memory` is what `memory_limit`
-    # actually caps, and no external sampler can see the buffer pool -- RSS
-    # is not it. Both counters are SYSTEM-level and CUMULATIVE for the
-    # connection (verified: a trivial query after a heavy one still reports
-    # the heavy one's peak), so the last profile a run writes holds the
-    # whole-run peak.
+    # a sampled one: no external sampler can see the buffer pool -- RSS is
+    # not it.
+    #
+    # READ THIS BEFORE QUOTING A NUMBER OFF THE PROFILE FILE. This block
+    # used to claim the counters were "SYSTEM-level and CUMULATIVE for the
+    # connection ... so the last profile a run writes holds the whole-run
+    # peak". Half of that is right and the conclusion is wrong (measured
+    # 2026-07-31, by running a heavy query then a trivial one on the same
+    # cursor, and then the trivial one on a SECOND cursor):
+    #
+    #   * cumulative WITHIN a cursor -- a trivial query after a heavy one
+    #     does still report the heavy one's peak, which is what the original
+    #     check saw;
+    #   * but scoped PER CURSOR, not per database instance, despite the
+    #     SYSTEM_ prefix. A second cursor on the SAME instance reads 0.000
+    #     GiB while the first still reads its peak.
+    #
+    # dbt-duckdb gives each dbt thread its own cursor, so every node
+    # restarts the counter from zero and the file a finished run leaves
+    # behind holds the LAST NODE's peak -- which is how a trailing not_null
+    # test came to report 0.01 GiB for a model that had just been OOMing.
+    # For a whole-run figure the profile must be SAMPLED while the run is
+    # alive and the maximum kept: tools/duckdb_peak_sampler.py, which wraps
+    # the dbt invocation and also points DBT_DUCKDB_PROFILE_OUT at the file
+    # it polls, so the two ends cannot drift apart.
+    #
+    # And `system_peak_buffer_memory` does not measure what its name
+    # suggests: it reads 2.0x `memory_limit` at both 6 GB and 4 GB, i.e. a
+    # multiple of what the engine was ALLOWED rather than what it NEEDED.
+    # `system_peak_temp_dir_size` behaves correctly and inversely and is the
+    # counter worth trending.
     #
     # A separate target because there is no value of `enable_profiling`
     # that means "off", and normal runs should not pay for a JSON write per

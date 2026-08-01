@@ -45,8 +45,27 @@ select
     r.mlb_status,
     r.own_pct,
     r.start_pct,
+    -- The cast is PORTABILITY, not rounding (MLB-10, measured 2026-07-31).
+    -- own_pct and start_pct are DECIMAL(38,0) on both engines, but the two
+    -- disagree about what dividing two decimals PRODUCES: Snowflake yields
+    -- NUMBER(38,6), DuckDB yields DOUBLE. So one engine quantises this
+    -- ratio to 1e-6 and the other does not, from identical source text with
+    -- no cast in it -- a divergence no dialect table lists, because both
+    -- engines accept the SQL and neither is wrong.
+    --
+    -- It survives all the way to the rendered almanac: est_start_share is
+    -- the estimated era's fractional active_weight, so CBS 2018's
+    -- SUM(active_weight) was 26915.300372 against DuckDB's
+    -- 26915.299906511180, and cells sitting on a rounding boundary flipped
+    -- (an ERA of 3.38 vs 3.37, a strikeout count of 200 vs 201).
+    --
+    -- Spelling Snowflake's own result type explicitly gives both engines
+    -- the same one. On Snowflake it is an IDENTITY -- measured over all
+    -- 9,932 rows with own_pct > 0, 0 moved -- so no golden can move; on
+    -- DuckDB it closes 9,906 of 9,906 divergences.
     case when r.own_pct > 0
-         then least(r.start_pct / r.own_pct, 1.0) end as est_start_share,
+         then least(cast(r.start_pct / r.own_pct as decimal(38, 6)),
+                    1.0) end as est_start_share,
     r.roster_status,
     r.roster_pos,
     r.eligible_pos,

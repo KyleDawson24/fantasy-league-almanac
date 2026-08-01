@@ -408,6 +408,33 @@ _ORANGE = {'red': 0.988, 'green': 0.898, 'blue': 0.804}   # #fce5cd
 # Inline twin of the dbt cbs_name_key macro (macros/cbs_name_key.sql) --
 # KEEP IN SYNC. Used once, to bridge the stint machine's name_key grain
 # to player_key for the RosterDays column.
+#
+# THE TWIN HAS DRIFTED, deliberately and measurably (MLB-10, 2026-07-31).
+# The dbt macro was fixed in session 3 to route its regexes through
+# `re_literal` (per-engine escaping) and to pass the 'g' occurrence flag.
+# Neither fix can reach here, because this SQL is assembled in Python. Two
+# constructs below are therefore still Snowflake-only:
+#
+#   '\\s' / '\\1' -- backslashes are unescaped by Snowflake's string parser
+#                    and not by DuckDB's, so the two engines run different
+#                    regexes off one source text.
+#   ' +'          -- Snowflake replaces EVERY match; DuckDB replaces only
+#                    the first without a 'g' flag, which Snowflake rejects
+#                    (its 4th argument is a position, not flags).
+#
+# BOTH ARE DEAD FOR THIS INPUT and were measured that way, not assumed:
+# player_name here comes from the MLB spine ('First Last'), so the packed
+# POS+TEAM pattern and the 'Last, First' flip never match on either engine,
+# and no name carries a double space. Over all 3,086 distinct CBS player
+# names the two engines now agree on 3,086 keys.
+#
+# DO NOT "fix" the patterns alone. Measured: swapping '\\s' for the
+# backslash-free '[[:space:]]' makes the pattern MATCH on DuckDB, and the
+# replacement '\\1' then emits the literal text \1 into the key. That turns
+# a silent no-op into a corrupted value -- strictly worse. The replacement
+# backreference has no backslash-free spelling on either engine, so closing
+# this properly means per-engine emission (a db.py dialect function), which
+# is real work with no live symptom to justify it yet.
 def _name_key_sql(col):
     return (
         "trim(regexp_replace("
@@ -423,6 +450,29 @@ def _name_key_sql(col):
         "' (jr|sr|ii|iii|iv)$', ''"
         "))"
     )
+
+
+def _person_name_sql(col):
+    """Chop a trailing ' (Batter)' / ' (Pitcher)' before the name key.
+
+    Two-way split assets carry the person's tenure -- see get_roster_days.
+
+    WHY A CHARACTER CLASS AND NOT '\\\\(' (MLB-10, measured 2026-07-31).
+    A SQL string literal is read by the ENGINE'S STRING PARSER before the
+    regex engine ever sees it, and the two engines disagree there:
+    Snowflake unescapes backslashes, DuckDB does not. So the old literal
+    ' \\\\(.*\\\\)$' was the regex ' \\(.*\\)$' on Snowflake and
+    ' \\\\(.*\\\\)$' on DuckDB -- which matches nothing, so the strip
+    silently no-opped and both Ohtani assets went back to the 0 roster
+    days this function exists to fix.
+
+    '[(]' needs no backslash, so no parser can disagree about it. Measured
+    on both engines over the strip cases AND the must-not-strip ones
+    ('Jose (Joey) Bats', 'Weird (Name'): identical output, six for six.
+    Snowflake's behaviour is unchanged -- '[(]' and '\\(' are the same
+    regex -- which is what keeps the goldens still.
+    """
+    return f"regexp_replace({col}, ' [(].*[)]$', '')"
 
 
 # ---------------------------------------------------------------------------
@@ -2332,7 +2382,7 @@ def get_roster_days(entity_id, season_year=None):
     parenthetical before the name key; both split assets then carry the
     person's tenure, which is the honest per-asset answer. The captured
     (2026) side already joins by the pseudo-ids and needs no change."""
-    person_name = "regexp_replace(p.player_name, ' \\\\(.*\\\\)$', '')"
+    person_name = _person_name_sql("p.player_name")
     name_key_expr = _name_key_sql(person_name)
     stint_season = (f" AND season_year = {int(season_year)}"
                     if season_year is not None else '')
@@ -2373,7 +2423,7 @@ def get_roster_days_by_season(entity_id):
     Individual Seasons block's Roster Days column (Kyle 2026-07-17).
     Same person-keyed stint join (two-way split assets carry the
     person's tenure) + captured 2026 dates."""
-    person_name = "regexp_replace(p.player_name, ' \\\\(.*\\\\)$', '')"
+    person_name = _person_name_sql("p.player_name")
     name_key_expr = _name_key_sql(person_name)
     rows = query_snowflake(f"""
         WITH players AS (

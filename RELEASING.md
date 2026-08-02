@@ -29,8 +29,11 @@ lands), not on a calendar. Hard backstop: if `[Unreleased]` exceeds
       manifest + pytest collection, and `RELEASE PLAN.md` gets re-cut in
       the same pass so the plan describes the release actually being cut
       (that recurring step is what retires the standing "re-cut owed"
-      debt). Never hand-count either one — the ticket that asked for the
-      script had itself gone stale by two models. Ceremony only, not CI:
+      debt). **`RELEASE PLAN.md` is a local, untracked planning doc — it
+      is deliberately not in the repository, so a fresh clone will not
+      have it and does not need it.** Never hand-count either one — the
+      ticket that asked for the script had itself gone stale by two
+      models. Ceremony only, not CI:
       these are allowed to lag mid-cycle, and a check that goes red
       between releases is one people learn to ignore.
 - [ ] Curate `CHANGELOG.md`: move `[Unreleased]` content under a new
@@ -39,10 +42,23 @@ lands), not on a calendar. Hard backstop: if `[Unreleased]` exceeds
 - [ ] Version rationale sanity check: MAJOR = breaking/platform-shift
       milestone, MINOR = additive features (ESPN byte-neutral), PATCH =
       fixes only.
+- [ ] Write `RELEASE NOTES vX.Y.Z.md` at the repo root, and move the
+      previous release's notes file into `docs/releases/`. **The root
+      carries exactly one notes file — the current release.** Build it
+      from the commit range, not from `[Unreleased]`: that section only
+      holds what each session remembered to add.
 - [ ] Commit (first-person message, no AI attribution), then
       `git tag vX.Y.Z`.
 - [ ] **Ask before pushing** (standing rule), then push `main` + tags
       to `origin` (the public portfolio repo).
+- [ ] **Publish the GitHub Release** —
+      `gh release create vX.Y.Z --notes-file "RELEASE NOTES vX.Y.Z.md"`.
+      This step is not optional and it is easy to lose: v1.6.0 was tagged
+      and published on GitHub while no notes file ever landed in the
+      repo, because this document did not carry the step and `CLAUDE.md`
+      assumed it did. The tag, the notes file and the GitHub Release are
+      one action in three places; if you do two of them, the third is a
+      bug someone finds months later.
 
 ## Post-cut
 
@@ -61,4 +77,5 @@ lands), not on a calendar. Hard backstop: if `[Unreleased]` exceeds
 
 - [ ] League-facing: share/refresh the relevant Sheet or board post.
 - [ ] Public-facing (2.0+): LinkedIn / Reddit per the launch checklist
-      in `RELEASE PLAN.md`.
+      in the maintainer's local `RELEASE PLAN.md` (untracked — see the
+      note in "The cut" above).

@@ -49,12 +49,13 @@ given name, and a four-letter abbrev:
 
   PHRASE  anything with a space in it -- full names, team names -- plus
           the map's slugs and phone numbers. Case-insensitive, and
-          bounded at both ends so "Dan Walker" stops matching inside
-          "Jordan Walker". This is the class that BLOCKS a push.
+          bounded at both ends so "Ana Vale" stops matching inside
+          "Joana Vale". This is the class that BLOCKS a push.
   WORD    one-word names: given names, surnames, initials ("L.J.").
           Bounded, and matched only in name-shaped casing -- the stored
-          spelling, Title, or UPPER. Never a blanket lowercase, or "Don"
-          fires on every "don't" in the repo.
+          spelling, Title, or UPPER. Never a blanket lowercase, or a
+          one-word name fires on every contraction built from it
+          ("Shan" on "shan't").
   ABBREV  the four-letter franchise abbrevs. Bounded and exactly cased.
 
 Severity is not uniform, and that is deliberate. A one-word name cannot
@@ -127,9 +128,9 @@ def _bounded(haystack, start, end):
     has to work.
 
     The apostrophe clause is the difference between a possessive and a
-    contraction. "Bob's Blue Sox" names Bob; "Don't optimize" does not
-    name Don, and there are enough don'ts in a repo full of handoff notes
-    to bury a real finding under them.
+    contraction. "Ana's Blue Sox" names Ana; "Shan't we" does not name
+    Shan, and a repo full of handoff notes has enough contractions whose
+    stem is somebody's name to bury a real finding under them.
     """
     if start > 0 and haystack[start - 1].isalnum():
         return False
@@ -166,9 +167,10 @@ class Token:
         else:
             # Name-shaped spellings only, derived from the stored one --
             # never a blanket lowercase. A one-word name that is also an
-            # ordinary English word is the whole problem here: matching
-            # "Don" case-insensitively fires on every "don't" in the repo,
-            # and "Blank" on every blank cell. Nobody reads a report like
+            # ordinary English word is the whole problem here: matched
+            # case-insensitively, an owner whose name is also a verb
+            # fires on every sentence using it, and one whose name is
+            # "Blank" on every blank cell. Nobody reads a report like
             # that, and a report nobody reads is the failure mode this
             # rebuild exists to end. Casing is the only signal available
             # that separates a person from a word, so it is the one used.

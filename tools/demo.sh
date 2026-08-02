@@ -52,6 +52,32 @@ say "output    : $OUT_DIR"
 [ -n "$LEAGUE" ] && say "league    : $LEAGUE"
 
 # ---------------------------------------------------------------------------
+# 0. Preflight the imports, before spending twenty minutes on a build that
+#    cannot be rendered afterwards.
+#
+#    gspread is here for an unsatisfying reason worth stating plainly: the
+#    render path imports it at module scope in several places even though a
+#    --no-sheets run never calls the Sheets API. Two of those uses are real
+#    at render time (gspread.utils.rowcol_to_a1, building in-sheet formula
+#    text), the rest are sink concerns that a lazy import would defer. Until
+#    that is untangled, a TSV-only demo still needs the Google Sheets client
+#    installed. It needs no Google ACCOUNT and makes no network call.
+# ---------------------------------------------------------------------------
+missing=""
+for mod in duckdb gspread; do
+  "$PY_BIN" -c "import $mod" 2>/dev/null || missing="$missing $mod"
+done
+if [ -n "$missing" ]; then
+  say "missing Python package(s):$missing"
+  say "  $PY_BIN -m pip install$missing"
+  say ""
+  say "duckdb reads the local warehouse. gspread is imported by the render"
+  say "path even with --no-sheets -- no Google account or network needed,"
+  say "but the package has to be importable."
+  exit 1
+fi
+
+# ---------------------------------------------------------------------------
 # 1. The warehouse.
 # ---------------------------------------------------------------------------
 if [ "$FORCE_BUILD" = "1" ] || [ ! -f "$DUCKDB_PATH" ]; then

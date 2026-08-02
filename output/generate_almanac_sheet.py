@@ -57,7 +57,15 @@ def main():
              'preview runs (and the pinned byte-diff anchor) stay '
              'network-free; the Sheets write always includes the tab.',
     )
+    parser.add_argument(
+        '--duckdb', nargs='?', const=True, default=None, metavar='PATH',
+        help='Read from a local DuckDB file instead of Snowflake. PATH '
+             'defaults to DBT_DUCKDB_PATH, then to the location the dbt '
+             'profile writes. No Snowflake account or driver is needed.',
+    )
     args = parser.parse_args()
+    if args.duckdb:
+        db.use_duckdb(None if args.duckdb is True else args.duckdb)
     db.set_league(args.league)
 
     # Format dispatch by DATA PRESENCE (the format-modularity rule): a

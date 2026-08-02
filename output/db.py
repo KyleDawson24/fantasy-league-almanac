@@ -5,13 +5,15 @@ had their own copy of SNOWFLAKE_CONFIG + query_snowflake) and the
 script-top boilerplate (utf-8 stdout reconfig + load_dotenv) duplicated
 across both output scripts.
 
-Four things live here:
+Five things live here:
   - init()             one-call script startup: utf-8 stdout + load_dotenv
                        + warm the Snowflake config. Output scripts call
                        this once at start.
-  - query_snowflake()  the only Snowflake entry point. Lazily opens a
+  - query_snowflake()  the only database entry point. Lazily opens a
                        single connection on first call and reuses it for
                        the lifetime of the process. atexit cleanup.
+  - use_duckdb()       point that entry point at a local DuckDB file
+                       instead of Snowflake (MLB-10 phase 5).
   - set_league() /     the process-wide target league (MLB-57). Every
     league_predicate() league-scoped mart query filters on
                        league_predicate(); scripts with a --league flag
@@ -34,6 +36,19 @@ Library modules (records.py, league_notes.py) only need
 `from db import query_snowflake` — the connection opens lazily on first
 query whether or not init() was called. init() is a script-only entry
 point for the stdout reconfig.
+
+TWO BACKENDS (MLB-10 phase 5). `query_snowflake()` keeps its name -- 131
+call sites across 10 modules use it and renaming them is a separate
+change -- but it dispatches on the selected backend. Snowflake stays the
+default and its path is untouched, because it is what the live weekly run
+uses. `use_duckdb()` swaps in a local DuckDB file, which is what makes a
+clone with no Snowflake account able to render the almanac at all.
+
+Note that `import snowflake.connector` is DELIBERATELY LAZY. At module
+scope it made the connector a hard import dependency of the whole output
+layer, so a DuckDB-only clone could not import `db` -- let alone render --
+without installing a driver it would never open. That import is now
+inside the Snowflake connect path, which is the only place that needs it.
 """
 
 import atexit
@@ -42,7 +57,6 @@ import re
 import sys
 from pathlib import Path
 
-import snowflake.connector
 from dotenv import load_dotenv
 
 # League registry import: repo root on sys.path so the shared config/
@@ -126,6 +140,14 @@ def init():
     if _SNOWFLAKE_CONFIG is None:
         load_dotenv()
         _SNOWFLAKE_CONFIG = _build_config()
+        # Backend selection reads the environment only AFTER load_dotenv(),
+        # so a checkout can carry ALMANAC_DB_BACKEND=duckdb in .env and every
+        # output script picks it up without a flag. Scripts with an explicit
+        # --duckdb call use_duckdb() themselves; this is the default for the
+        # ones that have no flag. Building the Snowflake config either way is
+        # free -- it is env lookups, and it imports no driver.
+        if os.getenv('ALMANAC_DB_BACKEND', '').strip().lower() == 'duckdb':
+            use_duckdb()
 
 
 def _get_conn():
@@ -136,9 +158,147 @@ def _get_conn():
         if _SNOWFLAKE_CONFIG is None:
             load_dotenv()
             _SNOWFLAKE_CONFIG = _build_config()
+        import snowflake.connector  # lazy: see the module docstring
         _conn = snowflake.connector.connect(**_SNOWFLAKE_CONFIG)
         atexit.register(close)
     return _conn
+
+
+# ---------------------------------------------------------------------------
+# DuckDB backend (MLB-10 phase 5). The dialect section further down decides
+# how SQL is SPELLED; this decides where it is SENT, and the two have to
+# agree -- so use_duckdb() sets both.
+#
+# WHY THE SCHEMA NAMES LINE UP FOR FREE: dbt_league/profiles/profiles.yml
+# pins `database: ESPN_FANTASY` / `schema: ANALYTICS` and names the file
+# ESPN_FANTASY.duckdb, because DuckDB takes its catalog name from the file's
+# stem. Models therefore land at ESPN_FANTASY.ANALYTICS.<x> on both engines
+# and not one line of the output layer's SQL moves. The catalog is read back
+# off the file's stem here rather than hard-coded, so pointing
+# DBT_DUCKDB_PATH at another league's database works without an edit.
+# ---------------------------------------------------------------------------
+
+DEFAULT_DUCKDB_PATH = 'data/duckdb/ESPN_FANTASY.duckdb'
+
+_BACKEND = 'snowflake'
+_duck_path = None
+_duck_conn = None
+
+
+def use_duckdb(path=None):
+    """Send every subsequent query to a local DuckDB file, not Snowflake.
+
+    `path` defaults to DBT_DUCKDB_PATH, then to the same location the dbt
+    profile writes. Also pins the SQL dialect to match -- a DuckDB
+    connection fed Snowflake spellings fails at the first LISTAGG, and
+    having one switch rather than two is what keeps that from happening.
+    """
+    global _BACKEND, _duck_path
+    _BACKEND = 'duckdb'
+    _duck_path = path or os.getenv('DBT_DUCKDB_PATH') or DEFAULT_DUCKDB_PATH
+    set_dialect('duckdb')
+
+
+def backend():
+    """'snowflake' (default) or 'duckdb'."""
+    return _BACKEND
+
+
+def _to_qmark(sql):
+    """Rewrite pyformat placeholders to DuckDB's qmark style.
+
+    Only outside string literals, quoted identifiers and comments. A flat
+    str.replace('%s', '?') happens to be safe on today's queries -- no
+    literal '%s' appears inside a quoted string anywhere in output/ -- but
+    it is one ordinary predicate away from being wrong: `like '%save%'`
+    would silently become `like '?ave%'`, a corrupted filter rather than
+    an error. Cheap to do properly, so it is done properly.
+    """
+    out = []
+    i, n = 0, len(sql)
+    while i < n:
+        if sql.startswith("--", i):
+            j = sql.find("\n", i)
+            j = n if j == -1 else j
+        elif sql.startswith("/*", i):
+            j = sql.find("*/", i + 2)
+            j = n if j == -1 else j + 2
+        elif sql[i] == '"':
+            j = sql.find('"', i + 1)
+            j = n if j == -1 else j + 1
+        elif sql[i] == "'":
+            j = i + 1
+            while j < n:
+                if sql[j] != "'":
+                    j += 1
+                elif sql.startswith("''", j):   # the SQL escape for a quote
+                    j += 2
+                else:
+                    j += 1
+                    break
+        elif sql.startswith("%s", i):
+            out.append("?")
+            i += 2
+            continue
+        elif sql.startswith("%%", i):
+            out.append("%")
+            i += 2
+            continue
+        else:
+            out.append(sql[i])
+            i += 1
+            continue
+        out.append(sql[i:j])
+        i = j
+    return "".join(out)
+
+
+def _get_duck_conn():
+    """The process-wide DuckDB connection, opened read-only on first use."""
+    global _duck_conn
+    if _duck_conn is None:
+        # Path first, driver second: the check is free, it needs no import,
+        # and "there is no database here" is the more actionable of the two
+        # errors a first BYO run can hit. It also means this function can be
+        # tested from the Snowflake venv, which has no duckdb and, per
+        # CLAUDE.md, must never acquire one.
+        path = Path(_duck_path or DEFAULT_DUCKDB_PATH)
+        if not path.exists():
+            raise FileNotFoundError(
+                f"no DuckDB database at {path}. Build one with "
+                f"tools/duckdb_run.sh, or point DBT_DUCKDB_PATH at an "
+                f"existing file."
+            )
+        try:
+            import duckdb
+        except ImportError as exc:
+            raise ImportError(
+                "reading a local database needs the duckdb package: "
+                "pip install duckdb"
+            ) from exc
+        # Read-only because the output layer only ever reads, and it means a
+        # render cannot disturb a warehouse a build may be holding.
+        _duck_conn = duckdb.connect(str(path), read_only=True)
+        catalog = path.stem
+        schema = os.getenv('SNOWFLAKE_ANALYTICS_SCHEMA', 'ANALYTICS')
+        _duck_conn.execute(f'USE "{catalog}"."{schema}"')
+        atexit.register(close)
+    return _duck_conn
+
+
+def _duckdb_query(sql, params=None):
+    """query_snowflake()'s DuckDB half. Same contract: list of dicts,
+    column names lowercased -- DuckDB does not uniformly lowercase them
+    either, so this is load-bearing on both engines."""
+    con = _get_duck_conn()
+    if params:
+        cur = con.execute(_to_qmark(sql), list(params))
+    else:
+        # No params means no placeholders to rewrite, so the SQL is passed
+        # through untouched rather than scanned.
+        cur = con.execute(sql)
+    columns = [desc[0].lower() for desc in cur.description]
+    return [dict(zip(columns, row)) for row in cur.fetchall()]
 
 
 def query_snowflake(sql, params=None):
@@ -150,7 +310,12 @@ def query_snowflake(sql, params=None):
 
     Phase 7: replaces the connection-per-call pattern that lived in
     records.py and generate_summary.py prior to consolidation.
+
+    MLB-10: dispatches to DuckDB when use_duckdb() has been called. The
+    name is now a mild misnomer and stays anyway -- 131 call sites.
     """
+    if _BACKEND == 'duckdb':
+        return _duckdb_query(sql, params)
     conn = _get_conn()
     cursor = conn.cursor()
     try:
@@ -162,15 +327,18 @@ def query_snowflake(sql, params=None):
 
 
 def close():
-    """Close the shared Snowflake connection. Idempotent. Registered as
-    atexit on first connection, so callers rarely need this directly."""
-    global _conn
-    if _conn is not None:
-        try:
-            _conn.close()
-        except Exception:
-            pass
-        _conn = None
+    """Close the shared connection, whichever backend opened it.
+    Idempotent. Registered as atexit on first connection, so callers
+    rarely need this directly."""
+    global _conn, _duck_conn
+    for conn in (_conn, _duck_conn):
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+    _conn = None
+    _duck_conn = None
 
 
 # ---------------------------------------------------------------------------

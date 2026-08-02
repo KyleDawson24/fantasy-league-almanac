@@ -424,7 +424,7 @@ nothing in it should be a reflex.
 pytest tests/
 ```
 
-Expected on a fresh clone: **250 passed, 17 deselected**. The
+Expected on a fresh clone: **268 passed, 17 deselected**. The
 warehouse-marked tests are deselected by default via `pytest.ini`; no
 credentials are involved and nothing is written.
 

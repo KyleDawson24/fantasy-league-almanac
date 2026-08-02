@@ -288,9 +288,15 @@ def build_tokens(use_warehouse=True):
     return tokens, census
 
 
-def head_blobs():
+def head_blobs(stats=None):
     """Every tracked file at HEAD, as (path, text). Binary files are
     skipped, the same way `git grep -I` skips them.
+
+    This is NOT a filesystem walk, and the difference is load-bearing:
+    the input is `git ls-tree -r HEAD`, so .venv/, .git/, data/, target/
+    and every parquet artifact are excluded by construction rather than
+    by an exclude list that can rot. What a push publishes is exactly
+    what is scanned. `stats` collects the counts worth printing.
 
     One `git cat-file --batch` process streams all of them; a `git show`
     per path is 277 process spawns on Windows and turns a hook into a
@@ -299,6 +305,9 @@ def head_blobs():
     raw = subprocess.run(["git", "-C", REPO, "ls-tree", "-r", "-z",
                           "--name-only", "HEAD"], capture_output=True).stdout
     paths = [p for p in raw.split(b"\0") if p]
+    if stats is not None:
+        stats["tracked"] = len(paths)
+        stats["scanned"] = stats["skipped_binary"] = stats["bytes"] = 0
     if not paths:
         return
 
@@ -322,17 +331,25 @@ def head_blobs():
             data = out.read(size)
             out.read(1)                            # the trailing newline
             if b"\0" in data:
+                if stats is not None:
+                    stats["skipped_binary"] += 1
                 continue                           # binary
             try:
-                yield path.decode("utf-8"), data.decode("utf-8")
+                text = data.decode("utf-8")
             except UnicodeDecodeError:
+                if stats is not None:
+                    stats["skipped_binary"] += 1
                 continue
+            if stats is not None:
+                stats["scanned"] += 1
+                stats["bytes"] += len(data)
+            yield path.decode("utf-8"), text
     finally:
         out.close()
         proc.wait()
 
 
-def sweep(tokens):
+def sweep(tokens, stats=None):
     """Every (severity, path, line, token, context) the tree still carries."""
     hits = []
     # A franchise abbrev and the given name it came from are the same
@@ -341,7 +358,7 @@ def sweep(tokens):
     # dispositioned to be rather than failing the push on a decision
     # already taken (MLB-95, 07-31).
     abbrevs = {t.text for t in tokens if t.mode == ABBREV}
-    for path, text in head_blobs():
+    for path, text in head_blobs(stats):
         low = text.lower()
         for token in tokens:
             found = token.find(text, low)          # one hit per token per file
@@ -413,7 +430,15 @@ def main(argv=None):
     if not tokens:
         return 0                                   # no sources: silent no-op
 
-    hits = sweep(tokens)
+    stats = {}
+    hits = sweep(tokens, stats)
+    print(f"PII GUARD: scanned {stats.get('scanned', 0)} of "
+          f"{stats.get('tracked', 0)} files tracked at HEAD "
+          f"({stats.get('bytes', 0) / 1e6:.1f}MB, "
+          f"{stats.get('skipped_binary', 0)} binary skipped) for "
+          f"{len(tokens)} strings. Not a filesystem walk -- the file list "
+          f"is git ls-tree, so untracked and ignored trees are out by "
+          f"construction.", file=sys.stderr)
     fatal = [h for h in hits if h[0] == FATAL]
     review = [h for h in hits if h[0] == REVIEW]
     notices = [h for h in hits if h[0] == NOTICE]

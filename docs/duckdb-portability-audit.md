@@ -645,6 +645,88 @@ once is a sample, not a property, and the sentence in `README.md` is a
 public claim -- so the number and its phrasing are Kyle's call, not a
 by-product of the instrument landing.
 
+### The peak-RSS series (2026-08-02)
+
+Same instrument throughout (`attach_rss.py`, the tree walk described
+above), so these are comparable. Both caps are `memory_limit=6GB`
+(= 5.59 GiB), `max_temp_directory_size=6GB`, engine threads pinned to 1.
+
+| # | path | lower bound (`peak_rss_tree`) | upper (`sum_peak_rss`) | bracket | coverage | result |
+|---|---|---|---|---|---|---|
+| 1 | `dbt build` (639 nodes) | 5.977 GiB | 5.980 GiB | 3 MB | 79% | PASS=635 |
+| 2 | **`dbt run` (74 models)** | **5.970 GiB** | **5.971 GiB** | 1 MB | 89% | PASS=74 |
+| 3 | **`dbt run` (74 models)** | **5.973 GiB** | **5.974 GiB** | 1 MB | **~100%** | PASS=74 |
+
+**All three land inside a 10 MB span (5.970-5.980 GiB)** -- across two
+sessions, two different node sets, and three different coverage fractions.
+That is the reading that matters: sample 1 was a sample, and the two
+run-path repeats are the confirmation the [RULED-PM] asked for before the
+README figure could move.
+
+Sample 3 is the strongest of the three. Its sampler attached 0.8s after
+launch and ran 1681s against dbt's own 1669s elapsed, so the observed
+window *contains* the run rather than overlapping it -- there is no
+uncovered opening phase to argue about, which was the standing caveat on
+the first two.
+
+In all three, one process holds essentially all of it -- the dbt worker at
+5.960-5.968 GiB -- and the `dbt.exe` shim that misled session 4 shows up as
+a 0.004-0.005 GiB line item rather than as the whole answer.
+
+**The durable shape, which is the part worth publishing:** peak RSS lands
+at the cap plus roughly **0.38 GiB** of interpreter and dbt overhead.
+DuckDB spends whatever budget it is given, so a "needs N GB free" figure
+is largely a restatement of the cap you choose -- which is exactly why
+`system_peak_buffer_memory`'s 2.0x reading was never going to answer it.
+
+Coverage is honest in both cases and it is the sampler's one real
+weakness: it starts when it starts. Neither figure includes the opening
+staging models, which are cheap views and small tables; both peaks landed
+mid-run in the record marts, well inside the observed window.
+
+### `stg_mlb__player_game` crashes nondeterministically -- and the sampler is NOT the cause
+
+Session 6 recorded a full-chain build dying at `stg_mlb__player_game` (the
+42M-row model) with an access violation, and correctly declined to
+attribute it: that run had changed **two** things at once versus a
+known-good run -- the sampler was attached AND the target was
+`duckdb_profiled`. It named "plain target + sampler" as the cell that
+would separate them, and that cell had never been run.
+
+It has now been run, three times on the plain `duckdb` target:
+
+| attempt (log label) | sampler | node 16 (`stg_mlb__player_game`) |
+|---|---|---|
+| `runpath_run1` | attached | **segfault**, exit 139, ~30s in |
+| `runpath_control_nosampler` | **none at all** | **segfault**, exit 139, ~30s in |
+| `runpath_run2` | attached | **passed** in ~11 min; run completed 74/74 |
+| `runpath_run3` | attached | **passed**; run completed 74/74 in 1669s |
+
+*(Logs under `scratchpad/mlb172/runpath_*.log|.sweep.out|.sweep.err`.)*
+
+**The control settles it: the crash happens with nothing observing the
+build, so neither profiling nor the sampler causes it.** The mechanism was
+never plausible anyway -- `proc_memory()` opens the target with
+`PROCESS_QUERY_LIMITED_INFORMATION`, reads counters and closes the handle
+in a `finally`; there is no route from a read-only query to a fault in the
+process being read.
+
+What the four runs show instead is that the model is **nondeterministically
+fatal on this box** -- it failed 2 of 4 attempts and, when it passed, took
+~694s exactly as the known-good build had. That is not something any single
+run could have revealed, and it is why the 2x2 was the wrong shape: when
+the thing being attributed is stochastic, every cell is one sample of a
+coin flip.
+
+Ruled out as the cause on the failing runs: free disk (140 GB), a memory
+hog (largest unrelated process 1.2 GB), and pagefile exhaustion (27 GB
+allocated, 4.77 GB peak) -- the machine was healthy. Free physical RAM
+was 7.85 and 6.99 GiB before the two failures, against 10.1 GiB before the
+clean pass, which is suggestive -- but it is one observation per cell and
+is **not** offered as the explanation. Worth its own ticket and a proper
+sweep rather than a guess; the cheap first experiment is to hold the cap
+at 6 GB and vary only free RAM.
+
 ### What this retires
 
 - **The three-invocation profile.** Both records marts build inside the

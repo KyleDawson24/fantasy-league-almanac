@@ -39,7 +39,21 @@ Standing conventions for every session in this repo:
   report-back block instead of touching the tracker.
 - CHANGELOG [Unreleased] is a curated staging area. Release ceremony =
   RELEASING.md, and it includes publishing the GitHub Release
-  (gh release create --notes-file "RELEASE NOTES vX.Y.Z.md").
+  (gh release create --notes-file "RELEASE NOTES vX.Y.Z.md"). RELEASING.md
+  now carries that step explicitly -- it did not until MLB-154, which is
+  how v1.6.0 got tagged and published with no notes file in the repo.
+  The root carries exactly ONE notes file (the current release); the
+  previous one moves to docs/releases/ as part of the cut.
+- The repository ROOT is curated (MLB-154, 2026-08-02). Session exhaust
+  never becomes a tracked root file again. Incoming artifacts land in a
+  docs/ home instead: session handoffs, phase journals and progress notes
+  -> docs/archive/ · design documents still in force -> docs/decisions/ ·
+  shipped release notes -> docs/releases/. Working notes that are nobody
+  else's business stay untracked (.gitignore has a root-anchored rider
+  for the recurring names). If a new artifact does not fit one of those
+  homes, ask -- do not default to root. CLAUDE.md itself stays at root:
+  it is not documentation, it is the file Claude Code reads to load these
+  rules, and it is only discovered at the root of the checkout.
 
 ## Kyle's question log (standing instruction, 2026-07-26)
 

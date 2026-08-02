@@ -108,3 +108,50 @@ README-merged-draft*.md
 # case-sensitive checkout cannot sneak the folder back in.
 Screenshots/
 screenshots/
+
+#personal league research stuff for actual fantasy baseball decisions, not project-related
+league-tactical-research/
+
+# MLB-154 root curation (2026-08-02): keep the root curated after the pass.
+# Session exhaust lands in docs/ homes (see CLAUDE.md forward rule) or stays
+# local -- it never becomes a tracked root file again.
+#
+# Every pattern here is ROOT-ANCHORED with a leading slash, so the archive
+# this pass just built (docs/archive/HANDOFF*.md) stays tracked. Without the
+# anchors the rider would swallow the very files it was written to protect.
+#
+# All THREE handoff patterns are load-bearing; none is a duplicate:
+#   /HANDOFF*.md   anchors to start-of-name  -- HANDOFF_OVERNIGHT_DOCS.md
+#   /*HANDOFF*.md  catches a PREFIX          -- "PROJECT HANDOFF.md"
+#   /*Handoff*.md  catches the other case    -- "GitHub Cleanup Handoff.md"
+# gitignore matching is case-SENSITIVE, so the mixed-case pattern does not
+# cover the shouted one and vice versa.
+/HANDOFF*.md
+/*HANDOFF*.md
+/*Handoff*.md
+/REVIEW.md
+# The release PLAN is the maintainer's internal strategy doc (offline
+# decisions, launch checklist, monetization thinking) -- deliberately local,
+# NOT the tracked RELEASING.md ceremony. RELEASING.md used to point the
+# announce step straight at it; that pointer now says it is untracked
+# instead, so a fresh clone is not sent looking for a file it cannot have.
+/RELEASE PLAN.md
+/DOCUMENTATION_GUIDE.md
+/DBT EXPLORATORY SWEEP.md
+/v*.* Refactor Brief.md
+
+# Obsidian vault config -- editor state, both vault roots.
+.obsidian/
+
+# Session working directory (SESSION_STATE.md, in-flight audit drafts,
+# query corpora). Deliberately local: the scratch surface sessions hand
+# each other, never a published artifact.
+scratchpad/
+
+# Word lock files and ticket dumps exported to the repo root.
+~$*
+/*.docx
+
+# Kyle's untracked WIP -- CLAUDE.md already says "ignore it"; this makes
+# the instruction enforceable rather than advisory.
+tests/test_records_report.py

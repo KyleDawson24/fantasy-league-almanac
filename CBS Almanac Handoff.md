@@ -53,7 +53,7 @@ grade says so on the sheet). Historic ACTIVE-lens team pages ride that;
   (standings map is authority); owner-lineage overlay later; curated
   continuity-overrides seed for the traps (Foster's Folly id 13→30
   across 2020; Aching Hippos id 1 → renamed Mesa Javelinas 2023; id 1 sat
-  out 2020 while Scott co-ran a temp team w/ Patrick Lahie). Recorded
+  out 2020 while Sherman co-ran a temp team w/ Preston Larkin). Recorded
   on MLB-64.
 - **TRANSACTIONS PARSED + LANDED 2026-07-12 (98e95f0)**:
   RAW.CBS_UI_TRANSACTIONS = 52,369 player-actions / 24,388 transactions
@@ -151,8 +151,8 @@ grade says so on the sheet). Historic ACTIVE-lens team pages ride that;
   lens; label drops '& FA'). New identity plumbing: CBS owner ids
   minted in the `cbs_team_owners` seed + names on the SHARED
   owner_nicknames seed → the same dim_owner/dim_team_owner chain ESPN
-  uses (multi-owner display = first names comma-joined: "Bob,
-  Sanford"); `cbs_franchises` seed = curated abbrevs for all 34 ids
+  uses (multi-owner display = first names comma-joined: "Barry,
+  Solomon"); `cbs_franchises` seed = curated abbrevs for all 34 ids
   (CBS's own abbrevs are unusable — T2/T3 duplicated, AH/KR stale).
   Union contract now carries H/AB/HBP/SF/L (slash inputs) +
   pro_team/team_abbrev/owner_name on CBS rows. All-Time board columns

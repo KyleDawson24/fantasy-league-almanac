@@ -8,7 +8,7 @@
 --       cbs-jason-d-scott); everyone else is slugged from the name (matching
 --       build_continuity_sheet._slug).
 --   owner_id -> canonical : the owner_alias seed collapses the drift the
---       historian merged (Des/Desmond Foster, Rich/Rexford Landon, Sandy/Sanford).
+--       historian merged (Des/Desmond Foster, Rex/Rexford Landon, Sol/Solomon).
 --
 -- CBS-specific because CBS serves owner NAMES, not ids; it feeds the shared,
 -- platform-general owner chain (stg_cbs__team_owners -> dim_owner).

@@ -31,7 +31,7 @@ group by 1, 2, 3
 union all
 
 -- CBS branch (MLB-72 follow-on). Co-owner display per Kyle's 2026-07-13
--- board spec: FIRST NAMES, comma-joined ("Bob, Sanford") -- CBS is the
+-- board spec: FIRST NAMES, comma-joined ("Barry, Solomon") -- CBS is the
 -- first league with co-owned teams, so this sets the multi-owner
 -- convention; a single owner shows their full preferred name, same as
 -- every ESPN row. Current-era rows only until MLB-64's chain-of-custody

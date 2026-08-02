@@ -12,7 +12,7 @@
 -- owner_id is the stable ESPN member GUID -- the join key dim_owner and
 -- the owner_nicknames seed use. Names here come from the settings fetch
 -- (proper-cased, e.g. "McAvery"), not the box-score owner string, which
--- the extract's format_owners() runs through .title() ("Mcginley").
+-- the extract's format_owners() runs through .title() ("Mcavery").
 
 {{ config(materialized='view') }}
 

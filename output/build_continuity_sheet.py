@@ -211,7 +211,7 @@ def _split_owners(s):
 
 def _surname(name):
     """Last alphabetic token, lowercased -- the stable key for matching an
-    owner across name drift (Des/Desmond Foster, Rich/Rexford Landon)."""
+    owner across name drift (Des/Desmond Foster, Rex/Rexford Landon)."""
     toks = [t for t in re.sub(r"[^A-Za-z ]", ' ', name).split() if len(t) > 1]
     return toks[-1].lower() if toks else name.lower()
 

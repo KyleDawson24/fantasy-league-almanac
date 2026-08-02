@@ -7,15 +7,15 @@ Phase 2.1 is a structural refactor and feature pass. The two mart consolidation 
 ### Summary Output (Current)
 ```
 [u][b]Matchup #3 Recap[/b][/u]
-[b]Best Overall[/b]: 354.9 pts by Intentional Walk to the Bar (Dylan)
+[b]Best Overall[/b]: 354.9 pts by Intentional Walk to the Bar (Dorian)
 Shohei Ohtani: 37.7, JJ Wetherholt: 31.0, Riley O'Brien: 27.9, ...
-[b]Best Hitting[/b]: 212.1 pts by Clase Action Lawsuit (Greg)
+[b]Best Hitting[/b]: 212.1 pts by Clase Action Lawsuit (Grant)
 Jose Ramirez: 44.7, Brayan Rocchio: 27.0, Trent Grisham: 26.1
-[b]Best Pitching[/b]: 195.5 pts by Intentional Walk to the Bar (Dylan)
+[b]Best Pitching[/b]: 195.5 pts by Intentional Walk to the Bar (Dorian)
 Riley O'Brien: 27.9, Parker Messick: 26.1, Shota Imanaga: 24.3
-[b]Worst Overall[/b]: 209.8 pts by Atomic Alpaca Armada (Andrew)
-[b]Worst Hitting[/b]: 110.5 pts by Ghosts of Polo Grounds Past (Bret)
-[b]Worst Pitching[/b]: 54.0 pts by Atomic Alpaca Armada (Andrew)
+[b]Worst Overall[/b]: 209.8 pts by Atomic Alpaca Armada (Adrian)
+[b]Worst Hitting[/b]: 110.5 pts by Ghosts of Polo Grounds Past (Blake)
+[b]Worst Pitching[/b]: 54.0 pts by Atomic Alpaca Armada (Adrian)
 [b]Tough Luck[/b]: (conditional)
 [b]Lucky Bastard[/b]: (conditional)
 [b]A FAIR AND JUST LEAGUE![/b]: (conditional)

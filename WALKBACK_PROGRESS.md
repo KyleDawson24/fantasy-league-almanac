@@ -195,8 +195,8 @@ Kyle took a first pass at the sheet (3 lineage links, 3 owner-alias merges,
         the new `cbs_team_owners` seed, names on the SHARED
         owner_nicknames seed, flowing through the SAME dim_owner →
         dim_team_owner chain ESPN uses. Multi-owner display per Kyle's
-        spec: first names comma-joined ("Bob, Sanford" — Hot Dog
-        Junkies; "Jim, Sam"; "Patrick, Travis"). Current-era only;
+        spec: first names comma-joined ("Barry, Solomon" — Hot Dog
+        Junkies; "Jonah, Spencer"; "Preston, Tobias"). Current-era only;
         history lands with MLB-64.
       * **Franchise registry seed** (`cbs_franchises`, all 34 ids):
         curated abbrevs because CBS's own capture abbrevs are UNUSABLE
@@ -1502,7 +1502,7 @@ It is committed at every checkpoint, so the branch on GitHub mirrors it.
   always carry a loss), in-flight column = the current reconstructed
   rank. Sorted titles then W%. CBS conventions writer-side (navy band,
   trophy fill, per-year auto-gradient, '0.0%' W%). THE DATA EARNS IT:
-  Grant Ashford won the 2025 regular season (Avg 1.0) but Keven
+  Grant Ashford won the 2025 regular season (Avg 1.0) but Kurt
   McKendry swept the bracket and wears the trophy.
 - **All-time detailed standings, BOTH leagues, stacked below (too wide
   for L/R):** ESPN = Table A's twin from mart_team_season_standings

@@ -99,6 +99,11 @@ import tempfile
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MAP = os.path.join(REPO, "archives", "anonymization", "name_map.csv")
 
+# Wall-clock ceiling on any git call. Generous for a ~10MB tree, and the
+# point is not speed -- it is that this runs inside a pre-push hook, so
+# every wait it can do must be a bounded one.
+TIMEOUT = 120
+
 PHRASE, WORD, ABBREV = "phrase", "word", "abbrev"
 # Sorted in report order: what blocks the push comes first.
 FATAL, REVIEW, NOTICE = "1-fatal", "2-review", "3-notice"
@@ -116,6 +121,10 @@ select distinct name from (
 )
 where name is not null and trim(name) <> ''
 """
+
+
+class Failure(Exception):
+    """Something the caller must look at rather than work around."""
 
 
 def _bounded(haystack, start, end):
@@ -298,12 +307,23 @@ def head_blobs(stats=None):
     by an exclude list that can rot. What a push publishes is exactly
     what is scanned. `stats` collects the counts worth printing.
 
-    One `git cat-file --batch` process streams all of them; a `git show`
-    per path is 277 process spawns on Windows and turns a hook into a
+    One `git cat-file --batch` process reads all of them; a `git show`
+    per path is 279 process spawns on Windows and turns a hook into a
     coffee break.
+
+    It is collected with a BOUNDED communicate() rather than streamed,
+    and that is the whole design. Streaming this means the parent must
+    drain stdout while the child is still producing, and when that
+    handshake goes wrong the failure is not a wrong answer -- it is a
+    process that waits forever. This hook blocks a push; a push that
+    never returns is worse than a guard that fails. The tree is ~10MB,
+    which is nothing to hold in memory, so it buys a hard timeout for
+    free. If git cannot produce it in TIMEOUT seconds, the guard says so
+    and fails instead of hanging.
     """
     raw = subprocess.run(["git", "-C", REPO, "ls-tree", "-r", "-z",
-                          "--name-only", "HEAD"], capture_output=True).stdout
+                          "--name-only", "HEAD"],
+                         capture_output=True, timeout=TIMEOUT).stdout
     paths = [p for p in raw.split(b"\0") if p]
     if stats is not None:
         stats["tracked"] = len(paths)
@@ -311,42 +331,53 @@ def head_blobs(stats=None):
     if not paths:
         return
 
-    # The request list goes in via a temp file rather than a pipe. Writing
-    # requests and reading blobs over two pipes means the parent has to
-    # drain stdout while it is still writing stdin, and getting that wrong
-    # is a hang or a broken pipe rather than a wrong answer -- not worth it
-    # for 11KB of input.
+    # Requests go in via a temp file, so stdin is a plain file handle the
+    # child can read at its own pace and there is only one pipe to reason
+    # about instead of two.
     with tempfile.TemporaryFile() as requests:
         requests.write(b"".join(b"HEAD:" + p + b"\n" for p in paths))
         requests.seek(0)
         proc = subprocess.Popen(["git", "-C", REPO, "cat-file", "--batch"],
                                 stdin=requests, stdout=subprocess.PIPE)
-    out = proc.stdout
-    try:
-        for path in paths:
-            header = out.readline()
-            if not header or header.rstrip().endswith(b"missing"):
-                continue
-            size = int(header.split()[-1])
-            data = out.read(size)
-            out.read(1)                            # the trailing newline
-            if b"\0" in data:
-                if stats is not None:
-                    stats["skipped_binary"] += 1
-                continue                           # binary
-            try:
-                text = data.decode("utf-8")
-            except UnicodeDecodeError:
-                if stats is not None:
-                    stats["skipped_binary"] += 1
-                continue
+        try:
+            blob, _ = proc.communicate(timeout=TIMEOUT)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.communicate()
+            raise Failure(
+                f"git cat-file did not return the HEAD tree within "
+                f"{TIMEOUT}s. The guard will not hang your push -- rerun "
+                f"it by hand to see what git is doing.")
+
+    # Responses come back in request order, and a resolved header is
+    # "<sha> <type> <size>" -- it does NOT echo the path back, so the
+    # path has to come from the request list we sent.
+    pos = 0
+    for path in paths:
+        nl = blob.find(b"\n", pos)
+        if nl < 0:
+            break
+        header = blob[pos:nl]
+        pos = nl + 1
+        if header.endswith(b"missing"):
+            continue                               # header only, no body
+        size = int(header.split()[-1])
+        data = blob[pos:pos + size]
+        pos += size + 1                            # + the trailing newline
+        if b"\0" in data:
             if stats is not None:
-                stats["scanned"] += 1
-                stats["bytes"] += len(data)
-            yield path.decode("utf-8"), text
-    finally:
-        out.close()
-        proc.wait()
+                stats["skipped_binary"] += 1
+            continue                               # binary
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError:
+            if stats is not None:
+                stats["skipped_binary"] += 1
+            continue
+        if stats is not None:
+            stats["scanned"] += 1
+            stats["bytes"] += len(data)
+        yield path.decode("utf-8"), text
 
 
 def sweep(tokens, stats=None):
@@ -431,7 +462,11 @@ def main(argv=None):
         return 0                                   # no sources: silent no-op
 
     stats = {}
-    hits = sweep(tokens, stats)
+    try:
+        hits = sweep(tokens, stats)
+    except (Failure, subprocess.TimeoutExpired) as exc:
+        print(f"PII GUARD: {exc}", file=sys.stderr)
+        return 1
     print(f"PII GUARD: scanned {stats.get('scanned', 0)} of "
           f"{stats.get('tracked', 0)} files tracked at HEAD "
           f"({stats.get('bytes', 0) / 1e6:.1f}MB, "

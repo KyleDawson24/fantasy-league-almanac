@@ -235,8 +235,8 @@ dbt seed --full-refresh    # after a seed's columns change
 ```
 
 The weekly cadence is: extract (`python extract/extract.py`) → `dbt build`
-→ the three output scripts. See [HANDOFF.md](../HANDOFF.md) for the full
-operational runbook.
+→ the three output scripts. See [HANDOFF.md](../docs/archive/HANDOFF.md) for
+the full operational runbook.
 
 ## Exposures
 

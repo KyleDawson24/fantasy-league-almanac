@@ -122,7 +122,8 @@ All on `claude/modest-montalcini-3af8c4`, pushed through `e8f46f3`
 
 1. **Track B handoff** (`2b824df`): 2001-02 never-transacted worklist —
    seed `dbt_league/seeds/cbs_early_anchors_backfill.csv` (146 players) +
-   legend `CBS_EARLY_ANCHORS_BACKFILL.md` + a **"2001-02 Backfill" tab on the
+   legend `docs/decisions/CBS_EARLY_ANCHORS_BACKFILL.md` + a **"2001-02
+   Backfill" tab on the
    dev sheet** (gid 1366638907, dropdown-driven) that Kyle is filling.
 2. **Records v3 ESPN mirror** (`5541de0`, `2dd1ec3`): two-scope matrix,
    powder-blue `#f2f7fc` bands, scope labels over their blocks, polarity

@@ -211,7 +211,7 @@ v1.x is polish on the current architecture: a player-entity layer (`dim_player` 
 
 The current shape of the transform layer: **74 dbt models** (32 views, 39 tables, 3 incremental), **18 seeds**, **543 data tests**, **22 sources**, and **4 declared exposures**. These counts are regenerated from the parsed manifest at each release cut; if you are reading them mid-cycle, `dbt parse` and the manifest are the truth.
 
-Most of that needs a warehouse to exercise, but not all of it: with no account and no credentials, `pytest tests/` runs **250 tests green** (17 warehouse-marked tests deselect, and the tests that need private regression corpora skip rather than fail), and `dbt deps && dbt parse` compiles the project.
+Most of that needs a warehouse to exercise, but not all of it: with no account and no credentials, `pytest tests/` runs **268 tests green** (17 warehouse-marked tests deselect, and the tests that need private regression corpora skip rather than fail), and `dbt deps && dbt parse` compiles the project.
 
 - **Modeling that survived a second implementation.** Wide convergence facts at consumer grain; a symmetric active/inactive split ("active is fantasy reality, inactive is MLB reality") that is what makes wasted-production analysis possible at all; a seed-driven UNPIVOT mart where adding a tracked stat is a CSV row rather than a five-file SQL change.
 - **Reproducibility.** Floating-point sums are not associative, and SQL engines do not promise summation order, so rebuilding with no code change could move a rendered cell by one, and oh boy it often did. Sums now run in exact decimal with pinned tie-breaks, and a byte-diff harness pins a known week so any drift fails loudly.
@@ -231,7 +231,8 @@ Most of that needs a warehouse to exercise, but not all of it: with no account a
 - **[docs/platform-adapter-contract.md](docs/platform-adapter-contract.md)** -- the shape a new platform has to land data in.
 - **[docs/PRIVACY.md](docs/PRIVACY.md)** -- whose data is in here, what is synthetic, and what is never committed.
 - **[CHANGELOG.md](CHANGELOG.md)** · **[ROADMAP.md](ROADMAP.md)** -- version history, and what is Now / Next / Later / Decided Against.
-- **Phase X.Y Documentation.md** in the repo root -- the decision log, each with an "options considered → chosen → rationale" section. These were all pre-release/exploratory; their only real purpose is archival.
+- **[docs/archive/](docs/archive/)** -- the phase documentation (`Phase X.Y Documentation.md`), session handoffs and progress journals, each phase doc with an "options considered → chosen → rationale" section. These were all pre-release/exploratory; their only real purpose is archival.
+- **[docs/decisions/](docs/decisions/)** -- the short list of design documents still in force.
 - **[Hosted dbt catalog](https://kyledawson24.github.io/fantasy-league-almanac/)** -- model lineage and column-level docs, regenerated manually (may lag a release or two behind local `main`).
 
 ---

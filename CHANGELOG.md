@@ -5,8 +5,10 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-Each entry links to the corresponding `Phase X.Y Documentation.md` in the
-repository root for the architectural detail behind the change.
+Each entry links to the corresponding `Phase X.Y Documentation.md` in
+`docs/archive/` for the architectural detail behind the change. (Those files
+sat in the repository root until MLB-154 moved them, so entries below name
+them by filename alone.)
 
 ## [Unreleased]
 
@@ -14,6 +16,21 @@ _In progress: the DuckDB engine port (MLB-10), so the project can run
 without a cloud warehouse. Release notes are built from the commit range
 at each cut rather than accumulated here, so this section staying short
 is not a sign the repository is idle._
+
+### Changed
+
+- **The repository root is curated** (MLB-154). It held 40 tracked files,
+  28 of which were session exhaust — handoffs, phase journals, progress
+  notes and three variants of one release-notes file — burying the six
+  documents a stranger actually wants. Those 28 moved to `docs/archive/`
+  (24), `docs/decisions/` (2) and `docs/releases/` (2), each with an
+  index; the root now carries the canon plus infrastructure. Nothing was
+  deleted — the handoff pile is the record of how the project got here,
+  and it reads as evidence once indexed and as clutter while it sits at
+  the front door.
+- `RELEASING.md` carries the **publish-the-GitHub-Release step** it had
+  been missing, which is how v1.6.0 was tagged and published with no
+  notes file ever landing in the repo. That file now exists too.
 
 ## [1.6.0] — 2026-07-30
 

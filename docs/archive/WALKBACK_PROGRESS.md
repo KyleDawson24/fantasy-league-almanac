@@ -471,7 +471,7 @@ Kyle took a first pass at the sheet (3 lineage links, 3 owner-alias merges,
       fillable seed `dbt_league/seeds/cbs_early_anchors_backfill.csv` (146
       never-transacted producers >100 pts, 66/2001 + 80/2002, tiered
       star>300 / tail, `active_status` pre-set A since never-transacted ⟹
-      never-reserved) + legend `CBS_EARLY_ANCHORS_BACKFILL.md` (abbrev ↔ era
+      never-reserved) + legend `docs/decisions/CBS_EARLY_ANCHORS_BACKFILL.md` (abbrev ↔ era
       team name; names changed, abbrev is the stable key). The name match
       needed the cbs_name_key FLIP (log stores "Bonds, Barry" vs record book
       "Barry Bonds") — without it the list was a bogus 272/309. Two build-

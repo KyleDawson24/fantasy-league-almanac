@@ -18,7 +18,8 @@
 --                  appearances (rookies, returners) -- CBS's own label isn't
 --                  served historically, so this is the estimator. Graded
 --                  against the 2026 captured eligible_positions (see the
---                  eligibility grading note in WALKBACK_PROGRESS.md).
+--                  eligibility grading note in
+--                  docs/archive/WALKBACK_PROGRESS.md).
 --   prior_year_20  >= 20 games at the position LAST season -> eligible from
 --                  opening day. Pre-league seasons count (the fielding sweep
 --                  carries full careers, so 2001 eligibility reads 2000).

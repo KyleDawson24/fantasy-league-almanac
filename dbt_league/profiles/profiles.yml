@@ -82,9 +82,21 @@ dbt_league:
         preserve_insertion_order: false
 
     # Measurement-only target. Identical to `duckdb` plus DuckDB's own
-    # profiling, so the release metric can be the ENGINE's peak rather than
-    # a sampled one: no external sampler can see the buffer pool -- RSS is
-    # not it.
+    # profiling, so a release metric can be the ENGINE's own peak: no
+    # external sampler can see inside the buffer pool.
+    #
+    # But do not read that as "RSS is the wrong instrument", which is what
+    # this comment used to imply. It depends entirely on the question:
+    #
+    #   "how much did the engine buffer"  -> these counters, and only these.
+    #   "how much FREE RAM does this need" -> the OS's working set, and only
+    #     that. `system_peak_buffer_memory` cannot answer it -- see below,
+    #     it reports 2.0x the cap -- and `system_peak_temp_dir_size` is
+    #     disk, not memory.
+    #
+    # tools/duckdb_peak_sampler.py samples BOTH for that reason, and walks
+    # the process TREE for the second one because dbt.exe is a launcher
+    # shim whose real worker is a grandchild.
     #
     # READ THIS BEFORE QUOTING A NUMBER OFF THE PROFILE FILE. This block
     # used to claim the counters were "SYSTEM-level and CUMULATIVE for the

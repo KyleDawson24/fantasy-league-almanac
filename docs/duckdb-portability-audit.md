@@ -619,6 +619,32 @@ and the obvious one, bisecting `memory_limit`, is exactly what the ruling
 parked. Left pending rather than answered with a number that would
 describe our settings back to us.
 
+**There is a third method, and it is now implemented (2026-08-02).**
+Neither counter, and no bisection: ask the OPERATING SYSTEM what the
+build actually held resident. `tools/duckdb_peak_sampler.py` walks the
+child's process tree each tick and keeps the maximum of Windows' own
+working-set counters. That measures physical residency directly, which is
+the quantity "needs N GB free" is about -- where `peak_buffer` measures
+permission and `peak_temp` measures disk.
+
+It reports a **pair** rather than a number, because the two bound the
+answer from opposite sides: `peak_rss_tree` (max over ticks of a
+simultaneous sum -- a true instant, blind between ticks, so a LOWER
+bound) and `sum_peak_rss` (the per-process high-water marks Windows keeps
+itself -- gap-proof, but not necessarily simultaneous, so an UPPER
+bound). Peaks are attributed by exe and pid, because the standing hazard
+of a tree walk is sweeping in a process that is not the build.
+
+**The tree, not the process.** `dbt.exe` is a launcher shim whose real
+worker is a grandchild; sampling it reads ~10 MB. The venv's own
+`python.exe` behaves the same way, so this is not a dbt quirk -- any
+single-PID memory probe on this box is liable to be reading a launcher.
+
+What this does NOT yet settle is the published wording. A figure measured
+once is a sample, not a property, and the sentence in `README.md` is a
+public claim -- so the number and its phrasing are Kyle's call, not a
+by-product of the instrument landing.
+
 ### What this retires
 
 - **The three-invocation profile.** Both records marts build inside the

@@ -132,3 +132,51 @@ trio). Flags: `missing_departure` / `anchor_reopen_needed` in
 - **COVID franchise-id discontinuities:** franchises that sat out 2020
   returned under new ids (Foster's Folly 13→30, Kimball Drives 22→28) —
   handled by the MLB-64 continuity-overrides design.
+
+---
+
+## 6. ESPN player records carry only a CURRENT MLB club (ESPN side)
+
+**Status:** open — the silent-omission half closed 2026-08-03 (MLB-159);
+the mis-attribution half is gated on ESPN identity resolution.
+
+**The issue.** ESPN's box-score payload stamps each player row with the
+club on ESPN's *player record*, which is whichever club he belongs to when
+the extract runs. The signal is therefore day-accurate **forward** and
+frozen-at-extract **backward**: 2026 is pulled week by week as the season
+happens, so it tracks trades correctly, while 2025 was backfilled in a
+single pass and has every row stamped with the player's 2026 club. ESPN
+history here is only those two seasons, so the defect is bounded to one of
+them — real, but not systemic.
+
+**The evidence.** Two impossible rows, found against a hand-built
+validation pivot and code-confirmed the same day: Tyler Anderson labelled
+`FA` for all 24 of his 2025 starts — a free agent does not face twenty-odd
+batters every sixth day, and those were Angels innings — and Sonny Gray's
+2025 batters-faced credited to Boston, a club he did not join until the
+following offseason. The whole `FA` bucket reads as a roll-call of the
+2025-26 offseason free-agent class, which is the extract date showing
+through rather than a coincidence.
+
+**Disposition.** Two defects fall out of one cause, and only one is
+closed:
+
+- **Silent omission — CLOSED.** The roster-affinity chart filtered
+  `pro_team <> 'FA'`, so production belonging to anyone who happened to be
+  a free agent *on extract day* was dropped from the chart rather than
+  mis-filed. Measured in the chart's own unit (active-slot plate
+  appearances + batters faced): **23,749 of 202,547 in 2025, or 11.7%**,
+  against 30 of 129,456 in 2026 (0.02%). That production now renders in a
+  visible `Unattributed` band. The label is deliberate — the honest claim
+  is that the club is unknown, not that these players were free agents
+  when they played.
+- **Mis-attribution — OPEN.** Gray's Cardinals innings still sit under
+  Boston. Correcting it requires resolving ESPN players to MLBAM ids so
+  the chart can read team-of-game from the MLB Stats gamelog spine, the
+  way the CBS book already does. That bridge does not exist:
+  `dim_player_identity` is CBS-sourced only. Tracked as MLB-159 Exit 1,
+  riding the MLB-129 person-grain work.
+
+Note that the chart *looked* wrong before this change and now looks
+tidy — the `FA` rows were the tell. The band is what remains of that
+tell, which is why its wording matters.

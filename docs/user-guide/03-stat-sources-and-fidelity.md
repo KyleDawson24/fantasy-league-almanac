@@ -34,6 +34,25 @@ provide direct lineup and scoring history rather than a reconstruction.
 One important exception is transaction history, which ESPN exposes only
 for the current season.
 
+A second exception is the MLB club attached to each player. ESPN's player
+records carry only his *current* club, not the one he played for on a
+given day, so a season collected as it happens tracks trades correctly
+while a season loaded after the fact does not. Of the two ESPN seasons
+published here, 2026 was collected live and 2025 was loaded in one pass
+afterwards. Lineups, stats and scoring for 2025 are unaffected -- they
+come from the box scores directly -- but the club label on them is the
+one the player held at collection time.
+
+The roster-affinity chart on Advanced Standings is the only surface that
+depends on that label, and it does two things about it. Production it
+cannot place is shown in a row labelled **Unattributed** -- about 12% of
+2025, and effectively none of 2026 -- rather than being dropped, which is
+what previously happened. And production it places *wrongly* is still
+there: a player traded after the 2025 season is credited to the club he
+moved to. Read the 2025 half of that chart as directional. The
+equivalent CBS chart does not have this problem; it resolves each club
+from the game itself.
+
 **The published CBS league's 2001-2026 history** draws on three different
 sources, because no single source available during implementation covers
 the full history:

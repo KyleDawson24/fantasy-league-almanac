@@ -16,7 +16,7 @@ Treats your fantasy league like it was a real league. Real product, real user ba
 
 Resolving that lineage is what lets a single row credit the Hardball Hackers with five titles and a 4.7 average finish over a quarter-century, instead of scattering them across three unrelated rows.
 
-The honesty note is the other half. Only 2026 was captured live. For our ESPN league, 2025 data still existed at full fidelity. For CBS, we needed some clever reconstruction.
+The honesty note is the other half. Only 2026 was captured live. For our ESPN league, 2025 lineups and scoring still existed at full fidelity -- with one exception worth stating, because it is the kind of thing that hides: ESPN records only a player's *current* MLB club, so a season loaded after the fact cannot say which club he was actually playing for. The roster-affinity chart is the one surface that depends on that, and it now shows the 11.7% of 2025 it cannot place as a labelled Unattributed band rather than dropping it. For CBS, we needed some clever reconstruction.
 
 2004-2020 is estimated from start-share rates and runs 5-13% low, always under rather than over. (Actual sit/start data is not available from that era so is estimated by site-wide numbers. It is a foreseeable selection bias that the league with 25 years of history made, on average, better start/sit decisions than the average random CBS subscriber)
 

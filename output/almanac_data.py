@@ -2416,8 +2416,11 @@ def get_wasted_hall_of_shame(limit=25):
         week's active production magnitude. For a single-discipline player
         that puts 100% on his one side, which is every player in the league
         but one; the proration only ever engages for a genuine two-way
-        week. Measured exposure: 37.4 of 13,140.6 career negative-active
-        points, one player (Ohtani). Chosen over inventing a day-grain
+        week. Measured exposure is therefore the negative points on weeks
+        carrying BOTH kinds of production: 17.1 of 13,140.6 career
+        negative-active points, over 6 player-weeks, all Ohtani. (The
+        other 13,123.5 split exactly, 0 or 1, with nothing to decide.)
+        Chosen over inventing a day-grain
         re-definition because it partitions the canonical total EXACTLY,
         which is what lets the caller assert the boards reconcile.
 

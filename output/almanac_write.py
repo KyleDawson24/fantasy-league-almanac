@@ -2108,13 +2108,18 @@ def _apply_records_tab_dimensions(spreadsheet, worksheet):
     # MLB-164: every column past G now serves TWO blocks -- the record
     # matrix's all-time panel (H Holder, I Owner, J Value, K Period,
     # L Details) and the Hall of Shame's two boards (H-K Pitchers,
-    # L-O Hitters). Widths are chosen so neither reads badly:
-    #   K  260  Pitchers' Breakdown needs it; the matrix's Period label
-    #           is short and simply sits in a roomier cell.
-    #   L  170  Hitters' Player. The matrix's Details cell shrinks here
-    #           from 400, but matrix rows stop at L, so it now overflows
-    #           across the empty M-O -- more usable runway than before,
-    #           not less.
+    # L-O Hitters).
+    #
+    # These are cbs_almanac_sheets._RECORDS_WIDTHS, value for value (Kyle
+    # 2026-08-03). The books' records tabs are the same shape past G, so
+    # they get the same geometry rather than two hand-tuned sets that
+    # drift. CBS is the proof the tight ones work: its own matrix already
+    # runs a 50px Value column at J.
+    #
+    # The one ESPN-specific consequence: L drops 400 -> 150, which is the
+    # matrix's Details cell. Matrix rows are 12 wide and stop at L, so it
+    # overflows across the empty M-O for ~725px of runway -- more than the
+    # 400 it had before, not less.
     requests = [
         _column_width_request(sheet_id, 0, 1, 175),
         _column_width_request(sheet_id, 1, 2, 150),   # B: Holder / Player
@@ -2122,13 +2127,13 @@ def _apply_records_tab_dimensions(spreadsheet, worksheet):
         _column_width_request(sheet_id, 5, 6, 400),   # F: Details / Stat Line
         _column_width_request(sheet_id, 6, 7, 25),    # G: buffer between panels
         _column_width_request(sheet_id, 7, 8, 150),   # H: Holder / Pitchers
-        _column_width_request(sheet_id, 8, 9, 110),   # I: Owner / Benched Most By
-        _column_width_request(sheet_id, 9, 10, 95),   # J: Value / Wasted Points
-        _column_width_request(sheet_id, 10, 11, 260),  # K: Period / Breakdown
-        _column_width_request(sheet_id, 11, 12, 170),  # L: Details / Hitters
-        _column_width_request(sheet_id, 12, 13, 110),  # M: Benched Most By
-        _column_width_request(sheet_id, 13, 14, 95),   # N: Wasted Points
-        _column_width_request(sheet_id, 14, 15, 260),  # O: Breakdown
+        _column_width_request(sheet_id, 8, 9, 125),   # I: Owner / Benched Most By
+        _column_width_request(sheet_id, 9, 10, 50),   # J: Value / Wasted Points
+        _column_width_request(sheet_id, 10, 11, 400),  # K: Period / Breakdown
+        _column_width_request(sheet_id, 11, 12, 150),  # L: Details / Hitters
+        _column_width_request(sheet_id, 12, 13, 125),  # M: Benched Most By
+        _column_width_request(sheet_id, 13, 14, 50),   # N: Wasted Points
+        _column_width_request(sheet_id, 14, 15, 400),  # O: Breakdown
     ]
     _sheets_batch_update(spreadsheet, f'format dimensions {worksheet.title}', requests)
 

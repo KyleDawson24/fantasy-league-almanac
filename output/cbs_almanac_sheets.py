@@ -3977,10 +3977,12 @@ def build_standings_rows(context, arc, finishes, active_franchises,
         # MLB-169, mirroring ESPN's captions -- see almanac_logic's
         # lens_blocks for the full rationale. Two notes on the wording:
         #
-        #  * 'inactive' replaces this book's 'reserves'. It is the user
-        #    guide's platform-general term for bench-or-reserve-incl-IL,
-        #    so the same caption now works on both books -- an MLB-160
-        #    convergence, not a CBS-specific rewrite.
+        #  * 'bench/IL' replaces this book's 'reserves', so the same
+        #    caption now works on both books -- an MLB-160 convergence,
+        #    not a CBS-specific rewrite. It is deliberately NOT the
+        #    guide's canonical 'Inactive' (Kyle 2026-08-03); see
+        #    almanac_logic's lens_blocks for why that is conformance
+        #    rather than a lapse from it. Do not change it back.
         #  * 'franchise' stays where ESPN says 'team'. This book calls
         #    them franchises everywhere else on the tab; converging that
         #    noun is a separate decision, not this ticket's.
@@ -3992,7 +3994,7 @@ def build_standings_rows(context, arc, finishes, active_franchises,
             "your lineup. Lost = production in another franchise's lineup)")
         _emit_lens_table(
             'rostered',
-            'Rostered Lens - all points incl. inactive (Acquired = '
+            'Rostered Lens - all points incl. bench/IL (Acquired = '
             "production on your roster. Lost = production on another "
             "franchise's roster or unrostered)")
 

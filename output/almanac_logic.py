@@ -1377,12 +1377,23 @@ def build_advanced_standings_tab_rows(standings_rows, slot_rows, stat_specs,
         ])
         alltime_acq_by = {r['team_id']: r
                           for r in (acquisition_rows_alltime or ())}
-        # Lens captions in the user guide's vocabulary (MLB-169): a
-        # player-game is Active / Inactive / Unrostered, and 'inactive'
-        # is the guide's own word for bench-or-reserve-incl-IL. Both
+        # Lens captions in the user guide's vocabulary (MLB-169). Both
         # sides of each lens are spelled out -- Acquired was previously
         # left implicit, which is how the two lenses' asymmetry stayed
         # invisible on the sheet.
+        #
+        # 'bench/IL' is DELIBERATE and is not a lapse from guide canon --
+        # do not "conform" it back to 'inactive' (Kyle 2026-08-03). The
+        # guide defines Inactive as "rostered but not in an active lineup
+        # slot: bench or reserve (includes IL slots)", so this is the
+        # guide's own plain-language expansion of the canonical term, not
+        # a competing definition. The reasoning generalizes: a glossary
+        # can afford a precise term because the reader came to learn one;
+        # a cell caption is read mid-scan and has to land without a
+        # lookup. Conforming to canon means not contradicting it, not
+        # using its exact nouns everywhere. The cross-book convergence
+        # that mattered still holds -- CBS said 'reserves' before MLB-169
+        # and now says 'bench/IL' too, so one caption serves both books.
         #
         # Rostered's 'or unrostered' is the HONEST INTERIM label: the
         # Rostered lens really does count a dropped player's unowned days
@@ -1396,7 +1407,7 @@ def build_advanced_standings_tab_rows(standings_rows, slot_rows, stat_specs,
              'Active Lens - started points only (Acquired = production in '
              "your lineup. Lost = production in another team's lineup)"),
             ('rostered',
-             'Rostered Lens - all points incl. inactive (Acquired = '
+             'Rostered Lens - all points incl. bench/IL (Acquired = '
              "production on your roster. Lost = production on another "
              "team's roster or unrostered)"),
         )

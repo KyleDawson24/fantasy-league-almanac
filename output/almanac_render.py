@@ -1062,6 +1062,18 @@ ESPN_PRO_TEAM_NAMES = {
     'Tor': 'Toronto Blue Jays', 'Wsh': 'Washington Nationals',
 }
 
+# The affinity spine's non-club row (MLB-159), kept OUT of the dict above
+# on purpose: that dict is a club dictionary -- real platform vocabulary,
+# thirty entries, one per MLB franchise -- and a sentinel sitting in it
+# would make every reader of it handle a member that is not a team.
+#
+# The wording is load-bearing. This production was previously dropped for
+# carrying ESPN's 'FA' stamp, and labelling the band 'FA' would replace a
+# silent error with a stated falsehood ("these players were free agents
+# when they played" -- Tyler Anderson's 24 Angels starts say otherwise).
+# The honest claim is that the club is unknown, so the label says that.
+ESPN_UNATTRIBUTED_CLUB = 'Unattributed'
+
 _ACQ_HALF = ['Keeper', 'Draft', 'Pickup', 'Trade', 'Total', '',
              'Release', 'Trade', 'Total', '', 'FA', 'Trade']
 _ACQ_BAND_HALF = ['Points Acquired Via', '', '', '', '', '',

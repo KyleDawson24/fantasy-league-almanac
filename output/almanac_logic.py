@@ -25,6 +25,7 @@ import almanac_render
 import records
 import stat_catalog
 from almanac_data import (
+    AFFINITY_UNATTRIBUTED,
     HITTING_RECORD_LABELS,
     HITTING_RECORD_ORDER,
     PITCHING_STAT_ORDER,
@@ -41,6 +42,7 @@ from almanac_render import (
     ACQUISITION_HEADER,
     ESPN_DIVIDER_COL0,
     ESPN_PRO_TEAM_NAMES,
+    ESPN_UNATTRIBUTED_CLUB,
     col_letter,
     ADVANCED_STANDINGS_TAB,
     HOME_ALLTIME_HEADER,
@@ -1459,8 +1461,17 @@ def build_advanced_standings_tab_rows(standings_rows, slot_rows, stat_specs,
             clubs.add(club)
             season_g[(r['team_id'], club)] = float(r.get('season_wt') or 0)
             alltime_g[(r['team_id'], club)] = float(r.get('alltime_wt') or 0)
-        club_name = {c: ESPN_PRO_TEAM_NAMES.get(c, c) for c in clubs}
-        club_list = sorted(clubs, key=lambda c: club_name[c].lower())
+        # The sentinel row is named at the build site rather than through
+        # ESPN_PRO_TEAM_NAMES, so the club dict stays a pure club dict
+        # (MLB-159), and it is PINNED LAST rather than sorted by spelling:
+        # alphabetical placement would drop 'Unattributed' between Toronto
+        # and Washington, reading as one more club in the sequence.
+        club_name = {c: (ESPN_UNATTRIBUTED_CLUB
+                         if c == AFFINITY_UNATTRIBUTED
+                         else ESPN_PRO_TEAM_NAMES.get(c, c))
+                     for c in clubs}
+        club_list = sorted(clubs, key=lambda c: (c == AFFINITY_UNATTRIBUTED,
+                                                 club_name[c].lower()))
         season_tot = {tid: sum(season_g.get((tid, c), 0.0) for c in club_list)
                       for tid in team_ids}
         alltime_tot = {tid: sum(alltime_g.get((tid, c), 0.0) for c in club_list)
@@ -1493,7 +1504,10 @@ def build_advanced_standings_tab_rows(standings_rows, slot_rows, stat_specs,
             "Share of each team's active-lineup involvement -- defined as "
             "plate appearances + batters faced -- with each MLB club "
             "(pure GP would underweight pitchers). Bold indicates highest "
-            "value for given MLB team."
+            "value for given MLB team. Unattributed is involvement whose "
+            "MLB club is unknown -- not free-agent time: ESPN's player "
+            "records carry only a CURRENT club, so 2025 cannot place "
+            "anyone who has changed clubs since."
         ])
         rows.append(['', '', 'MLB Team', '', *abbrevs, *aff_pad, *abbrevs])
         for club in club_list:

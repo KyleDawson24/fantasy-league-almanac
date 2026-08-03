@@ -1372,6 +1372,15 @@ def _replace_advanced_standings_tab(spreadsheet, rows, stat_specs):
         # paints numeric cells over it), whole-percent centered display,
         # RIGHT-aligned abbrev headers, and a bold on each MLB club's
         # biggest devotee per block (ties all bold).
+        #
+        # MLB-159 decided, not overlooked: the Unattributed spine row takes
+        # this bold (and the block gradient) like any other row, so whoever
+        # leaned hardest on unknown-club production gets marked. Kept
+        # deliberately -- the marking means "row maximum", which is a true
+        # and useful statement about that row, and the band doubles as a
+        # data-quality readout. Suppressing it would mean teaching this
+        # pass to recognise a data-layer sentinel purely for cosmetics, and
+        # would leave one unexplained gap in an otherwise uniform column.
         for aff in affinity:
             hdr, end, n_t = aff['hdr'], aff['end'], aff['n_t']
             for start_col in (aff['left0'], aff['right0']):

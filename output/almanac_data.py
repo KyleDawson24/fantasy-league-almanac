@@ -35,6 +35,16 @@ from formatters import TOP_SCORER_STAT_DISPLAY
 import records
 
 
+# Affinity-chart club sentinel (MLB-159). ESPN records only a player's
+# CURRENT club, so involvement from a backfilled season carries no usable
+# club-of-game for anyone who has since moved -- it used to be dropped from
+# the chart, and now buckets here. Deliberately NOT an ESPN abbrev (those
+# are short and mixed-case: 'Ari', 'ChC', 'KC'), so it cannot collide with
+# a real club, and if it ever reached a surface unmapped it would read as
+# an obvious sentinel rather than as a team. The display name lives with
+# the render vocabulary; see ESPN_UNATTRIBUTED_CLUB in almanac_render.
+AFFINITY_UNATTRIBUTED = 'UNATTRIBUTED'
+
 RATE_RECORD_SPECS = [
     {
         'section': 'Team Hitting Records',
@@ -1137,16 +1147,41 @@ def get_team_affinity_weights(season_year):
     chart substrate, weighted by PA + BF (Kyle 2026-07-17 round 10:
     pure games-played underweights pitchers ~5:1). PA = AB+BB+HBP+SF,
     BF = outs+H+BB+HBP allowed, both straight off the daily fact.
-    ESPN's MLB-team signal is the per-scoring-period pro_team snapshot
-    (abbrev strings), day-accurate across trades. Bench/IL and
-    free-agent box rows stay out; playoff weeks count (affinity is a
-    roster-identity lens, not a standings metric)."""
+
+    The club signal is `pro_team`, which originates as ESPN's CURRENT-club
+    stamp on the player record inside the box-score payload. It is
+    therefore day-accurate FORWARD and frozen-at-extract BACKWARD
+    (MLB-159): a season extracted week by week as it happens really does
+    track trades, while a season backfilled in one pass gets every row
+    stamped with the club the player belonged to on extract day. ESPN
+    history here is two seasons -- 2026 is live-extracted and correct,
+    2025 was backfilled and is frozen. (The docstring this replaces called
+    the snapshot "day-accurate across trades": true of the data it was
+    written against, false the moment 2025 was loaded after the fact.)
+
+    Rows stamped 'FA' -- free agent ON EXTRACT DAY, which says nothing
+    about who a player pitched or hit for when the games happened -- were
+    filtered out entirely, silently deleting 11.7% of 2025's active-slot
+    weight from the chart. They now bucket to AFFINITY_UNATTRIBUTED and
+    render as a visible band. This makes the chart honest, NOT correct:
+    production is still credited to the extract-day club, and fixing that
+    needs ESPN -> MLBAM identity resolution the warehouse does not have
+    (MLB-159 Exit 1, post-2.0, rides MLB-129).
+
+    Note the two different FAs. `lineup_slot = 'FA'` means nobody had him
+    rostered that day and stays excluded; `pro_team = 'FA'` is the
+    extract-day stamp above. Bench/IL and free-agent-SLOT rows stay out;
+    playoff weeks count (affinity is a roster-identity lens, not a
+    standings metric)."""
     involvement = ('(COALESCE(ab, 0) + COALESCE(b_bb, 0) + COALESCE(hbp, 0)'
                    ' + COALESCE(sf, 0) + COALESCE(outs, 0)'
                    ' + COALESCE(p_h, 0) + COALESCE(p_bb, 0)'
                    ' + COALESCE(hbp_p, 0))')
     return query_snowflake(f"""
-        SELECT team_id, pro_team,
+        SELECT team_id,
+               CASE WHEN pro_team IS NULL OR pro_team = 'FA'
+                    THEN '{AFFINITY_UNATTRIBUTED}'
+                    ELSE pro_team END AS pro_team,
                ROUND(CAST(SUM(CAST(CASE WHEN season_year = %s
                               THEN {involvement}
                                    * COALESCE(active_weight, 0)
@@ -1156,8 +1191,7 @@ def get_team_affinity_weights(season_year):
         FROM fct_player_daily_performance
         WHERE {league_predicate()}
           AND lineup_slot NOT IN ('BE', 'IL', 'FA')
-          AND pro_team IS NOT NULL AND pro_team <> 'FA'
-        GROUP BY team_id, pro_team
+        GROUP BY 1, 2
     """, (season_year,))
 
 

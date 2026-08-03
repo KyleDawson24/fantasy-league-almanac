@@ -16,6 +16,7 @@ import math
 import os
 import re
 import time
+from collections import defaultdict
 
 import gspread
 
@@ -1805,6 +1806,7 @@ def _replace_records_tab(spreadsheet, rows):
         formats.extend(_fresh_record_formats(rows))
         formats.extend(_records_score_value_formats(rows))
         formats.extend(_records_hall_formats(rows))
+        formats.extend(_records_link_formats(rows))
         _batch_format(worksheet, formats)
     except Exception as exc:
         print(f"[almanac] formatting skipped for {RECORDS_TAB}: {exc}")
@@ -2007,6 +2009,68 @@ def _records_hall_formats(rows):
             'range': f'E{first_data_row}:E{len(rows)}',
             'format': {'horizontalAlignment': 'CENTER'},
         })
+    return formats
+
+
+# Google Sheets' own link colour (#1155CC). Hard-coded because we are
+# re-asserting the styling the platform would have applied on its own.
+_LINK_TEXT_FORMAT = {
+    'foregroundColor': {'red': 0.067, 'green': 0.333, 'blue': 0.8},
+    'underline': True,
+}
+
+
+def _records_link_formats(rows):
+    """Restore link styling to every =HYPERLINK cell on the Records tab.
+
+    Sheets auto-styles a HYPERLINK result blue-and-underlined ONLY while
+    the cell has no explicit textFormat of its own. This tab opens by
+    painting `A:O` with a blanket textFormat, and the field mask replaces
+    textFormat WHOLESALE -- so foregroundColor and underline reset, and
+    every bref link on the tab renders as plain black text. The CBS book
+    does not hit this because its writer masks each format spec to just
+    the keys that spec sets, so nothing ever blankets its link cells.
+
+    Found by comparing the two books side by side, not by the goldens:
+    the TSV corpus holds the identical =HYPERLINK formula either way.
+    This is the tab-wide fix, so the record matrix's holder and boxscore
+    cells get their styling back too, not just the Halls' player names.
+
+    Runs last so it wins the cells it claims. The one thing it overwrites
+    is the italic on a fresh-record holder cell; the rest of that row's
+    side keeps the italic and the highlight background is a separate
+    top-level key, so the cue survives.
+
+    Consecutive link rows in a column are coalesced into one range. Every
+    link cell as its own entry would put ~400 of them in a single batch;
+    the columns are mostly solid runs, so this collapses to a handful.
+    """
+    link_rows = defaultdict(list)
+    for row_number, row in enumerate(rows, 1):
+        for column, value in enumerate(row, 1):
+            if str(value or '').startswith('=HYPERLINK('):
+                link_rows[column].append(row_number)
+
+    formats = []
+    for column in sorted(link_rows):
+        letter = col_letter(column)
+        start = previous = None
+        for row_number in link_rows[column]:
+            if start is None:
+                start = previous = row_number
+            elif row_number == previous + 1:
+                previous = row_number
+            else:
+                formats.append({
+                    'range': f'{letter}{start}:{letter}{previous}',
+                    'format': {'textFormat': dict(_LINK_TEXT_FORMAT)},
+                })
+                start = previous = row_number
+        if start is not None:
+            formats.append({
+                'range': f'{letter}{start}:{letter}{previous}',
+                'format': {'textFormat': dict(_LINK_TEXT_FORMAT)},
+            })
     return formats
 
 

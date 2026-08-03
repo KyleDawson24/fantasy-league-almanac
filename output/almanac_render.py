@@ -289,8 +289,11 @@ def format_hall_of_fame_cells(entry, rank):
         rank,
         _bref_player_cell(entry),
         entry.get('team_abbrev') or entry.get('team_name') or '',
-        # Whole points (Kyle 2026-08-03): a decimal is noise at four figures.
-        _round_half_up(float(entry.get('active_points') or 0)),
+        # Whole points (Kyle 2026-08-03): over a span of a season or more,
+        # the decimal is noise. Same ,.0f as the CBS book -- USER_ENTERED
+        # parses the grouped string straight back to a number, so the cell
+        # stays numeric and right-aligned.
+        f"{float(entry.get('active_points') or 0):,.0f}",
         int(entry.get('service_years') or 0),
         ' || '.join(part for part in (
             _hall_slash_line(entry),
@@ -314,23 +317,49 @@ def format_hall_of_shame_cells(entry, discipline):
     formatted for both boards with different numbers -- that is the point
     of the split, not a duplicate.
 
-    'Benched Most By' is blank when the whole total is unrostered: nobody
-    sat him, so naming a franchise would invent a benching. The breakdown
+    'Benched Most By' carries how much that franchise sat, as CBS's does --
+    "AAA (233)". It is blank when the whole total is unrostered: nobody sat
+    him, so naming a franchise would invent a benching, and the breakdown
     says so by putting the number under 'unrostered'.
+
+    Points are whole here (Kyle 2026-08-03): across a span of a season or
+    more, the decimal is noise. Same ,.0f as the CBS book.
+
+    The trailing '% of career wasted' is wasted over everything the player
+    produced in this discipline -- active plus what was left unused. Kyle
+    2026-08-03 overrides the earlier ruling that kept the percentage keyed
+    to unrostered+benched only: the full three-term numerator can exceed
+    100% for someone who gave back more than he ever banked, and that is a
+    true number worth printing rather than a case to design around. It is
+    labelled 'wasted' rather than CBS's old 'unused' precisely so the label
+    matches what is in the numerator.
     """
+    def _pts(key):
+        return float(entry.get(f'{key}_{discipline}') or 0)
+
+    wasted = hall_of_shame_wasted(entry, discipline)
+    produced = _pts('active') + _pts('unrostered') + _pts('benched')
+    bench_team = entry.get(f'bench_team_{discipline}') or ''
+    bench_points = entry.get(f'bench_points_{discipline}')
+    breakdown = [
+        f"{_pts(key):,.0f} {label}"
+        for key, label in (
+            ('unrostered', 'unrostered'),
+            ('benched', 'bench/IL'),
+            ('negative', 'negative'),
+            ('active', 'active'),
+        )
+    ]
+    # A non-positive denominator has no readable percentage -- it happens
+    # only for a player whose production in this discipline nets to zero
+    # or below, where "x% of career" would be meaningless or sign-flipped.
+    if produced > 0:
+        breakdown.append(f"{wasted / produced * 100:,.0f}% of career wasted")
     return [
         _bref_player_cell(entry),
-        entry.get(f'bench_team_{discipline}') or '',
-        _one_decimal(hall_of_shame_wasted(entry, discipline)),
-        ' · '.join(
-            f"{float(entry.get(f'{key}_{discipline}') or 0):.1f} {label}"
-            for key, label in (
-                ('unrostered', 'unrostered'),
-                ('benched', 'bench/IL'),
-                ('negative', 'negative'),
-                ('active', 'active'),
-            )
-        ),
+        f"{bench_team} ({float(bench_points):,.0f})" if bench_team else '',
+        f"{wasted:,.0f}",
+        ' · '.join(breakdown),
     ]
 
 # Row-5 column headers, one side. Kyle 2026-07-17 restructure: a Total

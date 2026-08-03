@@ -2523,8 +2523,11 @@ def get_wasted_hall_of_shame(limit=25):
             GROUP BY player_id, team_id
         ),
 
+        -- The abbrev AND how much it sat, so the cell can read "AAA (233)"
+        -- the way CBS's does. Without the number, "benched most by" says
+        -- who without saying whether it was 8 points or 800.
         bench_pitching AS (
-            SELECT b.player_id, l.team_abbrev
+            SELECT b.player_id, l.team_abbrev, b.pitching_benched AS pts
             FROM bench_by b
             JOIN labels l ON l.team_id = b.team_id
             WHERE b.pitching_benched > 0
@@ -2535,7 +2538,7 @@ def get_wasted_hall_of_shame(limit=25):
         ),
 
         bench_hitting AS (
-            SELECT b.player_id, l.team_abbrev
+            SELECT b.player_id, l.team_abbrev, b.hitting_benched AS pts
             FROM bench_by b
             JOIN labels l ON l.team_id = b.team_id
             WHERE b.hitting_benched > 0
@@ -2558,7 +2561,9 @@ def get_wasted_hall_of_shame(limit=25):
             COALESCE(a.active_pitching, 0)         AS active_pitching,
             COALESCE(a.active_hitting, 0)          AS active_hitting,
             bp.team_abbrev                         AS bench_team_pitching,
-            bh.team_abbrev                         AS bench_team_hitting
+            bh.team_abbrev                         AS bench_team_hitting,
+            bp.pts                                 AS bench_points_pitching,
+            bh.pts                                 AS bench_points_hitting
         FROM inactive_parts i
         FULL OUTER JOIN active_parts a ON a.player_id = i.player_id
         LEFT JOIN bench_pitching bp ON bp.player_id = COALESCE(i.player_id, a.player_id)

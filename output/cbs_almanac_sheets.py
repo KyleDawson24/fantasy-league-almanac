@@ -1876,13 +1876,17 @@ def get_cbs_records_data():
             shame_ab, shame_pts = max(e['bench_by'].items(), key=lambda kv: kv[1])
             if shame_pts > 0:
                 shame = f"{shame_ab} ({int(round(shame_pts)):,})"
-        # MLB-135: the percentage stays keyed to UNUSED production
-        # (unrostered + benched), not to `wasted`. Negative-active is
-        # production destroyed rather than production left unused, and
-        # folding it in would print ">100% of career unused" for players
-        # who gave back more than they ever banked -- a true number under a
-        # false label. The negative term is shown as its own term instead.
-        pct = ((unrostered + benched) / total * 100) if total else 0.0
+        # Kyle 2026-08-03 REVERSES MLB-135's ruling here, deliberately.
+        # That ruling kept the percentage keyed to UNUSED production
+        # (unrostered + benched) because folding in negative-active could
+        # print ">100% of career unused" -- a true number under a false
+        # label. The fix Kyle chose is the label, not the numerator: this
+        # is now the full three-term `wasted` over career production, and
+        # it says "wasted". A player who gave back more than he banked
+        # genuinely wasted more than 100% of his career, and printing that
+        # is the honest outcome rather than one to design around.
+        # Matched on the ESPN book so one sentence describes both.
+        pct = (wasted / total * 100) if total else 0.0
         nm = pname.get(pk, (None, None))
         hos_list.append({
             'display_name': nm[0] or e['name'], 'player_name': nm[1],
@@ -1891,7 +1895,7 @@ def get_cbs_records_data():
                         f"{int(round(benched)):,} benched · "
                         f"{int(round(neg_active)):,} negative · "
                         f"{int(round(e['act'])):,} active · "
-                        f"{pct:.0f}% of career unused")})
+                        f"{pct:.0f}% of career wasted")})
     hos_list.sort(key=lambda e: -e['wasted'])
     data['_hos'] = {   # Pitchers | Hitters, each top 25 by wasted
         'pitchers': [e for e in hos_list if e['is_pitcher']][:25],

@@ -1348,6 +1348,90 @@ class TestAdvancedStandingsRows:
         assert nyy == ['', '', 'New York Yankees', '', 0.25, '',
                        *aff_pad, 0.4, '']
 
+    def test_affinity_unattributed_bucket_sorts_last_and_counts(self):
+        """MLB-159: the sentinel bucket renders as a named row, is PINNED
+        below every real club, and sits INSIDE the denominator.
+
+        The fixture is built so a regression on any of the three is
+        visible. 'Unattributed' sorts BEFORE 'Washington Nationals'
+        alphabetically, so a plain name sort would put the band second
+        rather than last -- the pin is what this catches. And AAA's
+        Atlanta share is 0.75 if the bucket is excluded from the column
+        total (the pre-MLB-159 behaviour) versus 0.6 if it is counted, so
+        restoring the old filter cannot leave this test green.
+        """
+        standings = [_standings_team(team_id=1, abbrev='AAA'),
+                     _standings_team(team_id=2, abbrev='BBB')]
+        affinity = [
+            {'team_id': 1, 'pro_team': 'Atl',
+             'season_wt': 30.0, 'alltime_wt': 60.0},
+            {'team_id': 1, 'pro_team': 'Wsh',
+             'season_wt': 10.0, 'alltime_wt': 20.0},
+            # What the query emits for rows ESPN stamped 'FA' or NULL --
+            # free agent ON EXTRACT DAY, club-when-played unknown.
+            {'team_id': 1, 'pro_team': almanac_data.AFFINITY_UNATTRIBUTED,
+             'season_wt': 10.0, 'alltime_wt': 20.0},
+            # BBB has none, so its column must be untouched: shares are
+            # per column, and one team's unknowns cannot move another's.
+            {'team_id': 2, 'pro_team': 'Atl',
+             'season_wt': 5.0, 'alltime_wt': 25.0},
+        ]
+
+        rows = almanac_sheets.build_advanced_standings_tab_rows(
+            standings, [], _STANDINGS_SPECS, 2026, affinity_rows=affinity,
+        )
+
+        aff_pad = [''] * 15
+        hdr = rows.index(['', '', 'MLB Team', '', 'AAA', 'BBB', *aff_pad,
+                          'AAA', 'BBB'])
+        spine = [r[2] for r in rows[hdr + 1:] if len(r) > 2 and r[2]]
+
+        # Named, not left as the raw sentinel and not rendered as 'FA'.
+        assert 'Unattributed' in spine
+        assert almanac_data.AFFINITY_UNATTRIBUTED not in spine
+        assert 'FA' not in spine
+        # Pinned last, though it sorts before Washington by name.
+        assert spine == ['Atlanta Braves', 'Washington Nationals',
+                         'Unattributed']
+
+        band = rows[hdr + 3]
+        atl = rows[hdr + 1]
+        # In the denominator: AAA all-time is 60 + 20 + 20, so Atlanta is
+        # 0.6 rather than the 0.75 it would be with the bucket dropped.
+        assert atl == ['', '', 'Atlanta Braves', '', 0.6, 1.0,
+                       *aff_pad, 0.6, 1.0]
+        assert band == ['', '', 'Unattributed', '', 0.2, '',
+                        *aff_pad, 0.2, '']
+
+    def test_affinity_query_buckets_extract_day_free_agents(self, monkeypatch):
+        """MLB-159: the club filter is gone and both stamps route to the
+        sentinel -- while the LINEUP-SLOT 'FA' exclusion stays.
+
+        Those two FAs mean different things: pro_team 'FA' is ESPN's
+        extract-day stamp (the bug), lineup_slot 'FA' means nobody had the
+        player rostered that day (a real exclusion the chart depends on).
+        Dropping the wrong one lets unrostered production into the chart,
+        so both halves are pinned here.
+        """
+        calls = []
+
+        def fake_query(sql, params=None):
+            calls.append((sql, params))
+            return []
+
+        monkeypatch.setattr(almanac_data, 'query_snowflake', fake_query)
+
+        almanac_sheets.get_team_affinity_weights(2026)
+
+        sql = calls[0][0]
+        assert "pro_team <> 'FA'" not in sql
+        assert "pro_team IS NOT NULL" not in sql
+        assert "pro_team IS NULL OR pro_team = 'FA'" in sql
+        assert almanac_data.AFFINITY_UNATTRIBUTED in sql
+        # The other FA -- unrostered days -- stays excluded.
+        assert "lineup_slot NOT IN ('BE', 'IL', 'FA')" in sql
+        assert calls[0][1] == (2026,)
+
     def test_rank_chart_block_leads_the_tab(self):
         import almanac_write
 

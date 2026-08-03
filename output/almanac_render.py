@@ -240,7 +240,7 @@ RECORDS_HALL_OF_FAME_CAPTION = (
 )
 RECORDS_HALL_OF_SHAME_CAPTION = (
     'top {n} careers each side, by wasted points of that type '
-    '(unrostered + bench/IL + negative)'
+    '(unrostered + benched + negative)'
 )
 
 
@@ -345,7 +345,14 @@ def format_hall_of_shame_cells(entry, discipline):
         f"{_pts(key):,.0f} {label}"
         for key, label in (
             ('unrostered', 'unrostered'),
-            ('benched', 'bench/IL'),
+            # 'benched', not 'bench/IL' (Kyle 2026-08-03) -- the two books'
+            # breakdown lines now read identically. This is NOT a reversal
+            # of MLB-169: that ruling was about the ACQUISITION LENS
+            # captions on Advanced Standings, which keep 'bench/IL' because
+            # a caption read mid-scan needs the concrete words. Here the
+            # term sits inside a breakdown whose other three parts are
+            # already one word each, and it has a CBS twin to match.
+            ('benched', 'benched'),
             ('negative', 'negative'),
             ('active', 'active'),
         )

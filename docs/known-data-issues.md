@@ -141,22 +141,48 @@ trio). Flags: `missing_departure` / `anchor_reopen_needed` in
 the mis-attribution half is gated on ESPN identity resolution.
 
 **The issue.** ESPN's box-score payload stamps each player row with the
-club on ESPN's *player record*, which is whichever club he belongs to when
-the extract runs. The signal is therefore day-accurate **forward** and
-frozen-at-extract **backward**: 2026 is pulled week by week as the season
-happens, so it tracks trades correctly, while 2025 was backfilled in a
-single pass and has every row stamped with the player's 2026 club. ESPN
-history here is only those two seasons, so the defect is bounded to one of
-them — real, but not systemic.
+club on ESPN's *player record* — whichever club he belongs to when the
+extract runs — and it applies that stamp **per matchup period**, not per
+game. Two consequences follow, at very different scales.
+
+**Forward, it is period-accurate rather than day-accurate.** A live season
+tracks club changes to within a scoring week, but the week a player moves
+is stamped entirely with his *new* club, so games he played for the old
+one are credited to the new one. In 2026, 66 of 1,208 player-seasons
+change club and the 75 transition periods carry 161 units of active-slot
+weight — **0.12%** of the season.
+
+**Backward, a season pulled in one pass gets a single stamp for the whole
+year** — the club as of that pull, which is not necessarily the player's
+club today. In 2025, **0 of 1,236 player-seasons carry more than one
+club**, against 66 in the live season: not one in-season trade is
+represented, league-wide. Every mid-season move that year is mis-filed.
+
+ESPN history here is only those two seasons, so the serious defect is
+bounded to one of them — real, but not systemic.
 
 **The evidence.** Two impossible rows, found against a hand-built
 validation pivot and code-confirmed the same day: Tyler Anderson labelled
 `FA` for all 24 of his 2025 starts — a free agent does not face twenty-odd
 batters every sixth day, and those were Angels innings — and Sonny Gray's
 2025 batters-faced credited to Boston, a club he did not join until the
-following offseason. The whole `FA` bucket reads as a roll-call of the
-2025-26 offseason free-agent class, which is the extract date showing
-through rather than a coincidence.
+following offseason. The `FA` bucket is players who were between contracts
+when the snapshot was taken, which is the extract moment showing through
+rather than a coincidence.
+
+The period-level stamping was then pinned exactly against Baseball
+Reference. Curtis Mead moved to Boston late in 2026 and has **1 game, 2
+plate appearances** there; the warehouse credits Boston with **20**. The
+missing 18 are the games he played for Washington during the *same
+matchup period* as the move, relabelled wholesale. The other side
+reconciles to the plate appearance: Baseball Reference has him at 327 PA
+for Washington, the warehouse at 309 — a difference of exactly 18.
+
+Mead is also the counter-example worth keeping attached: his club changes
+are otherwise represented **correctly**, because they happened during the
+live season. A spot check that comes back clean is not evidence the column
+is sound — it may only mean the player moved in the season that gets
+tracked.
 
 **Disposition.** Two defects fall out of one cause, and only one is
 closed:
@@ -170,12 +196,21 @@ closed:
   visible `Unattributed` band. The label is deliberate — the honest claim
   is that the club is unknown, not that these players were free agents
   when they played.
-- **Mis-attribution — OPEN.** Gray's Cardinals innings still sit under
-  Boston. Correcting it requires resolving ESPN players to MLBAM ids so
-  the chart can read team-of-game from the MLB Stats gamelog spine, the
-  way the CBS book already does. That bridge does not exist:
-  `dim_player_identity` is CBS-sourced only. Tracked as MLB-159 Exit 1,
-  riding the MLB-129 person-grain work.
+- **Mis-attribution — OPEN, and NOT precisely measurable.** Gray's
+  Cardinals innings still sit under Boston. Correcting it requires
+  resolving ESPN players to MLBAM ids so the chart can read team-of-game
+  from the MLB Stats gamelog spine, the way the CBS book already does.
+  That bridge does not exist: `dim_player_identity` is CBS-sourced only.
+  Tracked as MLB-159 Exit 1, riding the MLB-129 person-grain work.
+
+  The only cheap proxy — 2025 weight whose stamp differs from that
+  player's 2026 stamp — gives **13.5%** (27,338 of 202,547), and it must
+  be quoted as a **floor, never an estimate**. It can only see players who
+  appear in both seasons *and* whose stamp moved, so a player mislabelled
+  *consistently* is invisible to it. **Gray is not in the 13.5%**: he
+  reads `Bos` in both years while having pitched 2025 in St. Louis. The
+  metric systematically excludes exactly the cases that are stably wrong,
+  which are the ones that matter most.
 
 Note that the chart *looked* wrong before this change and now looks
 tidy — the `FA` rows were the tell. The band is what remains of that

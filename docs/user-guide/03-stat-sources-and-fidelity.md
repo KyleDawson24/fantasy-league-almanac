@@ -36,20 +36,29 @@ for the current season.
 
 A second exception is the MLB club attached to each player. ESPN's player
 records carry only his *current* club, not the one he played for on a
-given day, so a season collected as it happens tracks trades correctly
-while a season loaded after the fact does not. Of the two ESPN seasons
-published here, 2026 was collected live and 2025 was loaded in one pass
-afterwards. Lineups, stats and scoring for 2025 are unaffected -- they
-come from the box scores directly -- but the club label on them is the
-one the player held at collection time.
+given day, and that label is applied per scoring week rather than per
+game. Of the two ESPN seasons published here, 2026 was collected live and
+2025 was loaded in one pass afterwards, and they are wrong in different
+ways and at very different scales.
+
+For the live season the label follows club changes to within a week, but
+the week a player moves is labelled entirely with his new club -- so a
+handful of games get credited to the club he was joining rather than the
+one he was leaving. That affects about a tenth of a percent of the
+season. For the loaded season there is a single label for the whole year,
+so no mid-season move is represented at all. Lineups, stats and scoring
+for 2025 are unaffected -- those come from the box scores directly -- but
+the club label on them is the one the player held at collection time.
 
 The roster-affinity chart on Advanced Standings is the only surface that
 depends on that label, and it does two things about it. Production it
 cannot place is shown in a row labelled **Unattributed** -- about 12% of
 2025, and effectively none of 2026 -- rather than being dropped, which is
 what previously happened. And production it places *wrongly* is still
-there: a player traded after the 2025 season is credited to the club he
-moved to. Read the 2025 half of that chart as directional. The
+there: anyone whose club changed between playing the games and the data
+being collected is credited to the later club, and no 2025 mid-season
+move appears at all. Read the 2025 half of that chart as directional --
+its shape is informative, its individual club totals are not. The
 equivalent CBS chart does not have this problem; it resolves each club
 from the game itself.
 

@@ -1148,25 +1148,42 @@ def get_team_affinity_weights(season_year):
     pure games-played underweights pitchers ~5:1). PA = AB+BB+HBP+SF,
     BF = outs+H+BB+HBP allowed, both straight off the daily fact.
 
-    The club signal is `pro_team`, which originates as ESPN's CURRENT-club
-    stamp on the player record inside the box-score payload. It is
-    therefore day-accurate FORWARD and frozen-at-extract BACKWARD
-    (MLB-159): a season extracted week by week as it happens really does
-    track trades, while a season backfilled in one pass gets every row
-    stamped with the club the player belonged to on extract day. ESPN
-    history here is two seasons -- 2026 is live-extracted and correct,
-    2025 was backfilled and is frozen. (The docstring this replaces called
-    the snapshot "day-accurate across trades": true of the data it was
-    written against, false the moment 2025 was loaded after the fact.)
+    The club signal is `pro_team`: ESPN's CURRENT-club stamp on the player
+    record inside the box-score payload, applied PER MATCHUP PERIOD from
+    whatever the profile said when that period was pulled. Both halves of
+    that sentence are load-bearing (MLB-159).
+
+    FORWARD it is period-accurate, NOT day-accurate. A live season tracks
+    club changes to within a scoring week, and the week a player moves is
+    stamped wholly with his NEW club -- so games he played for the old one
+    are credited to the new one. Measured 2026: 66 of 1,208 player-seasons
+    change club, and the 75 transition periods carry 161 units of
+    active-slot weight, 0.12% of the season. Small, bounded, real.
+
+    BACKWARD a season pulled in one pass gets ONE stamp for the whole
+    year: the club as of that pull, which is not necessarily the player's
+    club today. Measured 2025: 0 of 1,236 player-seasons carry more than
+    one club, against 66 in the live season. Every mid-season move that
+    year is therefore mis-filed, invisibly.
+
+    Two rewrites of this docstring have now over-claimed in the same
+    direction, so the wording is deliberately careful. The original said
+    the snapshot was "day-accurate across trades" -- the per-scoring-period
+    part was right and the day part was not. Its replacement called 2026
+    "live-extracted and correct", which the Mead reconciliation disproved:
+    18 of his 20 Boston-labelled PA were Washington games in the week of
+    the move (Baseball Reference has him at 1 game, 2 PA for Boston).
+    Neither season is CORRECT; they are wrong at different scales.
 
     Rows stamped 'FA' -- free agent ON EXTRACT DAY, which says nothing
     about who a player pitched or hit for when the games happened -- were
     filtered out entirely, silently deleting 11.7% of 2025's active-slot
     weight from the chart. They now bucket to AFFINITY_UNATTRIBUTED and
     render as a visible band. This makes the chart honest, NOT correct:
-    production is still credited to the extract-day club, and fixing that
-    needs ESPN -> MLBAM identity resolution the warehouse does not have
-    (MLB-159 Exit 1, post-2.0, rides MLB-129).
+    every other row is still credited to whatever club the stamp names
+    rather than the club of the game, and fixing that needs ESPN -> MLBAM
+    identity resolution the warehouse does not have (MLB-159 Exit 1,
+    post-2.0, rides MLB-129).
 
     Note the two different FAs. `lineup_slot = 'FA'` means nobody had him
     rostered that day and stays excluded; `pro_team = 'FA'` is the

@@ -53,6 +53,50 @@ TRADES_BLOCK_LABEL = 'Trading Block'
 TRADE_RECORD_LABEL = 'Trade Record'
 
 
+# ---------------------------------------------------------------------
+# The house "explainer" text style (MLB-170).
+#
+# Every explainer / caption / footnote-class surface on BOTH books takes
+# its text style from here: acquisition lens captions, banner scope
+# captions, section notes, provenance notes, glossary footnote text. One
+# decision in one place, so "wrong font on an explainer" stops being a
+# thing that can be filed.
+#
+# Kyle 07-30, latest-wins: the token is size 9. That supersedes MLB-142,
+# which had standardized banner scope captions at 10 -- those normalize
+# DOWN to 9 here, and the records tab's 9 was right all along.
+#
+# DEVIATIONS: a surface that genuinely must differ passes an override AND
+# carries a comment at the call site saying why. An undocumented
+# deviation is a bug, not a style choice.
+#
+# On bold=False: both writers mask formats as
+# `userEnteredFormat(textFormat)` -- TOP-LEVEL keys only -- so supplying
+# textFormat replaces it wholesale and every sub-field left out resets to
+# its default. bold=False is therefore belt-and-braces rather than
+# load-bearing, but it keeps the intent legible at call sites that style
+# a row which would otherwise read as a header.
+EXPLAINER_FONT_SIZE = 9
+
+
+def explainer_text_format(**overrides):
+    """The house explainer `textFormat` mapping; kwargs override/extend.
+
+    Returns the INNER textFormat dict, so callers wrap it themselves:
+
+        {'range': ..., 'format': {'textFormat': explainer_text_format()}}
+
+    Pass overrides both for documented deviations and for the extra keys
+    a surface needs -- e.g. ``foregroundColor=`` on captions sitting on
+    the navy band. Because the field mask replaces textFormat wholesale,
+    anything the surface needs must be IN this dict: a foregroundColor
+    set by an earlier format entry on the same cell will NOT survive.
+    (A sibling ``backgroundColor`` will -- that is its own top-level key.)
+    """
+    return {'bold': False, 'italic': True,
+            'fontSize': EXPLAINER_FONT_SIZE, **overrides}
+
+
 # MLB-103 Trading Block header -- the ticket's column spec plus the season
 # Total / Active points columns from the 2026-07-20 dev-render feedback.
 TRADES_HEADER = ['Fantasy Team', 'MLB', 'Pos Eligibility', 'Player Name',
@@ -1435,9 +1479,19 @@ def team_tab_format_specs(rows):
     # Google's "Dark Gray 4" -- the header-note text color (Kyle's
     # gold-standard mock, 2026-07-17).
     dark_gray_4 = {'red': 0.263, 'green': 0.263, 'blue': 0.263}
+    # DOCUMENTED DEVIATION from the size-9 explainer token (MLB-170,
+    # confirmed by Kyle 08-02). These notes -- the A3 scoring line, the
+    # H1:H3 points glossary, the R1/S1:S3 Lineup Data block -- are
+    # explainer-class by content, but they live in the header strip
+    # beside the title rather than in the body, and Kyle mocked them at 8
+    # in dark gray on 2026-07-17 specifically so they sit quieter than
+    # body captions. The token's supersession note only ever ruled on the
+    # MLB-142 tens; nobody ruled on these. Kept at 8, derived from the
+    # token rather than hardcoded, so it stays a NAMED deviation -- flip
+    # the fontSize override out and this block rejoins the default.
     note_format = {
-        'textFormat': {'bold': False, 'italic': True, 'fontSize': 8,
-                       'foregroundColor': dark_gray_4},
+        'textFormat': explainer_text_format(fontSize=8,
+                                            foregroundColor=dark_gray_4),
     }
     formats = [
         {

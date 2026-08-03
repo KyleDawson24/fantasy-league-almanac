@@ -65,6 +65,7 @@ from almanac_render import (
     ESPN_DIVIDER_COL0,
     HOME_TAB,
     RECORDS_TAB,
+    explainer_text_format,
     TRADE_AVAILABILITY_LABELS,
     TRADES_TAB,
     RECORDS_MATRIX_DETAIL_HEADER,
@@ -309,7 +310,11 @@ def _replace_home_tab(spreadsheet, rows):
                     'backgroundColor': {'red': 0.90, 'green': 0.94, 'blue': 0.98},
                 },
             },
-            {  # the A3 'Updated ...' stamp (MLB-141)
+            {  # the A3 'Updated ...' stamp (MLB-141). Deliberately NOT
+               # the explainer token (MLB-170): this is a render-time
+               # metadata stamp sitting with the A2 callout band, not an
+               # explainer, and it keeps that band's size. Left at 10 on
+               # purpose -- don't "fix" it into the token.
                 'range': 'A3',
                 'format': {'textFormat': {'italic': True, 'fontSize': 10}},
             },
@@ -506,10 +511,13 @@ def _draft_label_formats(rows, last_col):
     for row_number, row in enumerate(rows, 1):
         first = row[0] if row else ''
         second = row[1] if len(row) > 1 else ''
-        # Helper-note row (Delta at A, keeper at F).
+        # Helper-note row (Delta at A, keeper at F) -- footnote-class, so
+        # the house explainer token (MLB-170). Was italic at the sheet
+        # default while its CBS twin rendered at 9; that split is exactly
+        # what the token exists to close.
         if isinstance(first, str) and first.startswith('Δ ='):
             formats.append({'range': f'A{row_number}:F{row_number}',
-                            'format': {'textFormat': {'italic': True}}})
+                            'format': {'textFormat': explainer_text_format()}})
         # Leaderboard band + column headers (value B-F, buffer G, busts H-L).
         if second == 'Best Value Picks':
             for rng in (f'B{row_number}:F{row_number}', f'H{row_number}:L{row_number}'):
@@ -530,9 +538,11 @@ def _draft_label_formats(rows, last_col):
                                        or first.startswith('All-Time Draft Board')):
             formats.append({'range': f'A{row_number}:{last_col}{row_number}',
                             'format': {'textFormat': {'bold': True, 'fontSize': 12}}})
+        # The 'Team-agnostic ...' board note: same footnote class, same
+        # token. Its CBS counterpart already renders at 9.
         if isinstance(first, str) and first.startswith('Team-agnostic'):
             formats.append({'range': f'A{row_number}:{last_col}{row_number}',
-                            'format': {'textFormat': {'italic': True}}})
+                            'format': {'textFormat': explainer_text_format()}})
         # Navy 'Top Pick' super-header band (the merge is applied separately).
         if first == '' and second == 'Top Pick':
             formats.append({'range': f'A{row_number}:{last_col}{row_number}',
@@ -1201,28 +1211,28 @@ def _replace_advanced_standings_tab(spreadsheet, rows, stat_specs):
                 (i + 1, c) for c in scope_cols if len(row) > c and row[c])
             if title in ('Production by Acquisition Channel',
                          'Roster Affinity by MLB Team'):
-                # The explainer-style caption directly underneath
-                # (MLB-142: size 10, like the team tabs' provenance notes).
+                # The explainer-style caption directly underneath. Was a
+                # local size-10 (MLB-142); now the house token (MLB-170).
                 formats.append({
                     'range': f'A{i + 2}:{last_col}{i + 2}',
-                    'format': {'textFormat': {'italic': True,
-                                              'fontSize': 10}},
+                    'format': {'textFormat': explainer_text_format()},
                 })
         if band_specs:
             band_col = _a1_col(max(w for _, w in band_specs))
             for i, _w in band_specs:
                 formats.append({'range': f'A{i + 1}:{band_col}{i + 1}',
                                 'format': dict(navy_fmt)})
-            # Scope captions render italic, not bold, still white on the
-            # navy band. textFormat-only and appended after the band fill,
-            # so the caption cell keeps the band's background.
+            # Scope captions take the house explainer token, still white
+            # on the navy band. textFormat-only and appended after the
+            # band fill, so the caption cell keeps the band's background
+            # (a separate top-level key, so the mask leaves it alone).
+            # The white has to ride INSIDE the token call -- foregroundColor
+            # lives in textFormat, which the mask replaces wholesale.
             for r1, c in scope_cells:
                 formats.append({
                     'range': f'{_a1_col(c + 1)}{r1}',
-                    'format': {'textFormat': {
-                        'bold': False, 'italic': True, 'fontSize': 10,
-                        'foregroundColor': {'red': 1, 'green': 1,
-                                            'blue': 1}}},
+                    'format': {'textFormat': explainer_text_format(
+                        foregroundColor={'red': 1, 'green': 1, 'blue': 1})},
                 })
         header_indices = [h for h, _ in a_tables]
         header_indices += [h for h, _ in slot_grids]
@@ -1266,16 +1276,14 @@ def _replace_advanced_standings_tab(spreadsheet, rows, stat_specs):
             })
         # The per-lens explainer sits two rows above each acquisition
         # header (label, band, header) and takes the house explainer
-        # caption -- size 10 italic, NOT bold (MLB-161). Anchored off the
-        # header bounds rather than the text, so a reworded lens label
-        # keeps its styling. bold:False is explicit: this is a partial
-        # textFormat merge, so an inherited bold would otherwise survive.
+        # token -- italic, NOT bold (MLB-161, MLB-170). Anchored off the
+        # header bounds rather than the text, which is what let MLB-169
+        # reword the lens captions without touching styling.
         for hdr, _end in _acquisition_table_bounds(rows):
             if hdr >= 2:
                 formats.append({
                     'range': f'A{hdr - 1}:{last_col}{hdr - 1}',
-                    'format': {'textFormat': {'bold': False, 'italic': True,
-                                              'fontSize': 10}},
+                    'format': {'textFormat': explainer_text_format()},
                 })
         # The acquisition group-band rows bold + center over their merges;
         # every indented sub-label row ('<season> to date' / 'All-Time'
@@ -1308,7 +1316,7 @@ def _replace_advanced_standings_tab(spreadsheet, rows, stat_specs):
             end_r = fin['end']
             formats.append({
                 'range': f'{first_col}{note_r}:{last_fin_col}{note_r}',
-                'format': {'textFormat': {'italic': True, 'fontSize': 9}},
+                'format': {'textFormat': explainer_text_format()},
             })
             formats.append({
                 'range': f'{first_col}{hdr_r}:{last_fin_col}{hdr_r}',
@@ -1561,7 +1569,7 @@ def _replace_trades_tab(spreadsheet, rows):
         formats = [
             {'range': 'A1', 'format': {'textFormat': {'bold': True, 'fontSize': 13}}},
             {'range': 'A2:A3',
-             'format': {'textFormat': {'italic': True, 'fontSize': 9}}},
+             'format': {'textFormat': explainer_text_format()}},
         ]
         header_band = {
             'textFormat': {
@@ -1758,10 +1766,11 @@ def _replace_records_tab(spreadsheet, rows):
                 },
             },
             {
-                # Row 3: formatting legend (italic + small, matching the note row).
+                # Row 3: formatting legend (footnote-class, matching the
+                # note row) -- the house explainer token (MLB-170).
                 'range': 'A3:L3',
                 'format': {
-                    'textFormat': {'italic': True, 'fontSize': 9},
+                    'textFormat': explainer_text_format(),
                     'backgroundColor': {'red': 0.95, 'green': 0.97, 'blue': 0.99},
                 },
             },

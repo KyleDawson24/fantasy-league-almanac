@@ -86,6 +86,7 @@ from almanac_render import (
     _bref_link,
     _bref_player_cell,
     draft_initial_text,
+    explainer_text_format,
     _hitting_rate,
     _pitching_rate,
     format_all_league_team_row,
@@ -3068,7 +3069,10 @@ def build_home_rows(context, nav_targets=None):
         # Points (K) and the deviation total (O) round to whole numbers.
         {'range': 'K:K', 'format': {'numberFormat': {'type': 'NUMBER', 'pattern': '0'}}},
         {'range': 'O:O', 'format': {'numberFormat': {'type': 'NUMBER', 'pattern': '0'}}},
-        # The A3 'Updated ...' stamp (MLB-141).
+        # The A3 'Updated ...' stamp (MLB-141). Deliberately NOT the
+        # explainer token (MLB-170) -- render-time metadata sitting with
+        # the A2 callout band, so it keeps that band's size. Mirrors
+        # ESPN's Home tab exactly. Don't "fix" it into the token.
         {'range': 'A3', 'format': {'textFormat': {'italic': True,
                                                   'fontSize': 10}}},
     ]
@@ -3214,9 +3218,7 @@ def build_records_rows(context, catalog, data):
         _band()
         if note:
             formats.append({'range': f'I{len(rows)}',
-                            'format': {'textFormat': {'bold': False,
-                                                      'italic': True,
-                                                      'fontSize': 9}}})
+                            'format': {'textFormat': explainer_text_format()}})
 
     def _header():
         rows.append(list(HDR))
@@ -3314,8 +3316,7 @@ def build_records_rows(context, catalog, data):
                      '"active", not the slot).', '', ''])
         _band()
         formats.append({'range': f'I{len(rows)}',
-                        'format': {'textFormat': {'bold': False, 'italic': True,
-                                                  'fontSize': 9}}})
+                        'format': {'textFormat': explainer_text_format()}})
         _header()
         for s in slots:
             rows.append([s['label'],
@@ -3432,12 +3433,14 @@ def build_standings_rows(context, arc, finishes, active_franchises,
         formats.append({'range': f'A{len(rows)}:{width}{len(rows)}',
                         'format': {'textFormat': {'bold': True, 'foregroundColor': _WHITE},
                                    'backgroundColor': _NAVY}})
+        # Scope captions on the navy band: house explainer token (MLB-170,
+        # down from MLB-142's 10). The white rides inside the token call --
+        # foregroundColor lives in textFormat, which the field mask
+        # replaces wholesale.
         for col0, _text in scopes or ():
             formats.append({'range': f'{_col(col0 + 1)}{len(rows)}',
-                            'format': {'textFormat': {'bold': False,
-                                                      'italic': True,
-                                                      'fontSize': 10,
-                                                      'foregroundColor': _WHITE}}})
+                            'format': {'textFormat': explainer_text_format(
+                                foregroundColor=_WHITE)}})
 
     def _header(cells, width='AA'):
         rows.append(cells)
@@ -3445,9 +3448,12 @@ def build_standings_rows(context, arc, finishes, active_franchises,
                         'format': {'textFormat': {'bold': True}}})
 
     def _note(text, width='AA'):
+        # Every explainer on this tab funnels through here -- section
+        # notes AND the per-lens acquisition captions. House token
+        # (MLB-170, down from 10).
         rows.append([text])
         formats.append({'range': f'A{len(rows)}:{width}{len(rows)}',
-                        'format': {'textFormat': {'italic': True, 'fontSize': 10}}})
+                        'format': {'textFormat': explainer_text_format()}})
 
     latest = [r for r in arc if r['is_latest_period']]
 
@@ -3917,10 +3923,10 @@ def build_standings_rows(context, arc, finishes, active_franchises,
             # Kyle's round-7 shape: ONE table per lens, season half left /
             # all-time half right on the ACTIVE-franchise spine (formers
             # filtered by construction), group bands over each half.
-            # House explainer caption -- size 10 italic, NOT bold
-            # (MLB-161). This row was bolded like a header; it reads as
-            # one, but it is a caption, so it goes through _note like
-            # every other explainer on the book.
+            # House explainer caption (MLB-161, now the MLB-170 token).
+            # This row was bolded like a header; it reads as one, but it
+            # is a caption, so it goes through _note like every other
+            # explainer on the book.
             _note(label, width=acq_last_col)
             bands = [''] * acq_width
             for base in (1, 2 + n_half):
@@ -4210,7 +4216,7 @@ def build_draft_recap_rows(season_year, franchise_map, value_lens='calc_total',
         if note:
             rows.append([note])
             formats.append({'range': f'A{len(rows)}:{_DRAFT_LAST_COL}{len(rows)}',
-                            'format': {'textFormat': {'italic': True, 'fontSize': 9}}})
+                            'format': {'textFormat': explainer_text_format()}})
 
     def _board_headers(header_cols, cells_label=None):
         # Navy 'Top Pick' super-header (merged B:D), plus an optional label
@@ -4250,7 +4256,7 @@ def build_draft_recap_rows(season_year, franchise_map, value_lens='calc_total',
                                'backgroundColor': _PALE_BLUE}})
     rows.append([_BSB_DRAFT_CAVEAT])
     formats.append({'range': f'A3:{_DRAFT_LAST_COL}3',
-                    'format': {'textFormat': {'italic': True, 'fontSize': 9}}})
+                    'format': {'textFormat': explainer_text_format()}})
 
     # ---- Section 1: the current season, ESPN-shaped ----------------------
     year_picks = [p for p in picks
@@ -4365,7 +4371,7 @@ def build_draft_recap_rows(season_year, franchise_map, value_lens='calc_total',
             + [''] * 10 + [f'Coverage: {coverage}', '', _BSB_DRAFT_CAVEAT])
     rows.append(note)
     formats.append({'range': f'A{len(rows)}:{_DRAFT_LAST_COL}{len(rows)}',
-                    'format': {'textFormat': {'italic': True, 'fontSize': 9}}})
+                    'format': {'textFormat': explainer_text_format()}})
     alltime_header_row = _board_headers(
         ['Rd', 'Year', 'Team', 'Player', 'Max', 'Med',
          *[str(s) for s in range(1, 17)]],

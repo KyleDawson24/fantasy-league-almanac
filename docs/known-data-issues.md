@@ -118,8 +118,12 @@ trio). Flags: `missing_departure` / `anchor_reopen_needed` in
 ## 5. Era coverage floors (structural, graded honestly)
 
 - **2001–2002:** no roster-report pages exist, so no year-end anchors —
-  membership rides the transaction log alone and the reconciliation
-  grades those seasons at ~80% error rather than pretending otherwise.
+  membership rides the transaction log alone. Team-level reconciliation
+  grades those seasons at ~12-15% error, the same range as 2004-2020 —
+  the real cost is coverage, not accuracy: never-transacted players
+  (held all season, so invisible to a log-only walk-back) currently
+  leave roughly a quarter to a third of true production unassigned,
+  parked in the placeholder franchise rather than pretending otherwise.
 - **2004–2020:** CBS logged no lineup moves, so daily active state
   rides the Start%/Own% conditional estimator (`estimated_startshare`
   provenance) — roughly unbiased 2005–2010, undershooting ~8–13% from

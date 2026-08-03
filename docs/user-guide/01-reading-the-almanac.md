@@ -1,19 +1,5 @@
 # Reading the almanac
 
-Status: **DRAFT** -- not yet published. Written for a league member first
-and a curious outside reader second.
-
-The almanac is a Google Sheets workbook, rebuilt from scratch every time
-the pipeline runs. Nothing in it is hand-maintained, so nothing in it
-goes stale in the way a manually-updated spreadsheet does. There is one
-workbook per league.
-
-Two leagues are published from the same codebase, and they do not have
-identical tabs. That is deliberate: one is a head-to-head league where
-teams play each other week by week, the other is a season-long points
-league with no matchups at all. A tab that cannot mean anything in a
-format is not rendered as an empty shell.
-
 ## The tabs
 
 ### Home
@@ -105,7 +91,6 @@ The head-to-head league titles these tabs with the team abbreviation; the points
 fidelity](03-stat-sources-and-fidelity.md).
 
 ## Two things worth knowing before arguing with a number
-**Every points column has two versions.** One is what the platform actually awarded; the other is what the same performance would score under this season's rules. They disagree on purpose. Anything that compares across seasons leans on the second: pricing every year with one rulebook is the closest to equal footing the numbers can get. [The points
-lenses](02-points-lenses.md) explains which is which and when to trust each.
+**Every points column has two versions.** One is what the platform actually awarded; the other is what the same performance would score under this season's rules. They disagree on purpose. Anything that compares across seasons leans on the second: pricing every year with one rulebook is the closest to equal footing the numbers can get. [The points lenses](02-points-lenses.md) explains which is which and when to trust each.
 
 **The older the season, the more of it is reconstructed.** Years post "implementation" are captured directly, and more recent years maintain record fidelity that allow for very accurate reconstructions. Older years are rebuilt from transaction logs, and the earliest are estimated using REAL team-specific roster data, but aggregate guesses at start/sit decisions. The almanac labels this per era rather than hiding it -- see [Stat sources and fidelity](03-stat-sources-and-fidelity.md).

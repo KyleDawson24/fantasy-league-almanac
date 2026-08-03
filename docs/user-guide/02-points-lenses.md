@@ -1,11 +1,5 @@
 # The points lenses
 
-Status: **DRAFT** -- not yet published.
-
-Almost every points number in the almanac exists in two versions, and
-they disagree. That is not a bug, and neither one is "the wrong number."
-They answer different questions.
-
 ## Platform Points vs calculated points
 
 **Platform points** are what the fantasy platform itself gave you. 

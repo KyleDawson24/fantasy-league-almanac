@@ -1,33 +1,47 @@
 # Stat sources and walk-back fidelity
+This page documents the sources and reconstruction quality of the two
+almanacs this project currently publishes: one for an ESPN head-to-head
+league and one for a CBS season-points league. The differences below are
+not inherent to those scoring formats. They reflect the data each
+platform exposes, the records retained by these particular leagues, and
+when collection began.
 
-Status: **DRAFT** -- not yet published.
+The published ESPN league's lineup and scoring history is short and
+recorded directly. The published CBS league's history runs back to 2001,
+and most of it was never recorded in a form anyone intended to be read
+again. This page is about how much of each era is *known* versus
+*reconstructed*, because the CBS almanac shows both and labels which is
+which.
 
-The head-to-head league's history is short and fully recorded. The points
-league's history runs back to 2001, and most of it was never recorded in
-a form anyone intended to be read again. This page is about how much of
-each era is *known* versus *reconstructed*, because the almanac shows
-both and labels which is which.
-
-If you only read one thing: **the further back you go, the more the
-numbers are a careful reconstruction rather than a transcript.** The
-workbook says so per era, on the team pages and on the points league's
+If you only read one thing: **in the CBS history, the further back you
+go, the more the numbers are a careful reconstruction rather than a
+transcript.** The workbook says so per era, on the team pages and on its
 Home tab.
+
+Nothing here promises the same coverage for an unseen league. A new
+league has to be assessed against the history its platform exposes and
+the records that survive: full historical lineups can provide direct
+history; transactions and roster anchors can support reconstruction;
+season totals alone support only coarser estimates. Scoring format by
+itself does not determine fidelity.
 
 ## Where the numbers come from
 
-**The head-to-head league** reads the fantasy platform's own feeds: per-week
-box scores with full lineups and stat breakdowns, the scoring settings,
-roster settings, ownership, and the draft. This is direct and complete
-for the seasons covered. Transaction history is only reachable for the
-current season -- older seasons are not exposed by the platform.
+**The published ESPN league** reads ESPN's own feeds: per-week box scores
+with full lineups and stat breakdowns, the scoring settings, roster
+settings, ownership, and the draft. For the seasons covered, those feeds
+provide direct lineup and scoring history rather than a reconstruction.
+One important exception is transaction history, which ESPN exposes only
+for the current season.
 
-**The points league** is assembled from three different sources, because
-no single one is sufficient:
+**The published CBS league's 2001-2026 history** draws on three different
+sources, because no single source available during implementation covers
+the full history:
 
-1. **The platform's API**, for current-season rosters, standings, config,
-   and season-level stat totals. Note what is *not* here: the platform
-   publishes no per-game fantasy points at all, and its player-stat
-   endpoint turned out to cover only free agents -- meaning the players
+1. **CBS's API**, for current-season rosters, standings, config, and
+   season-level stat totals. In the endpoints verified for this league,
+   CBS publishes no per-game fantasy points, and its historical
+   player-stat endpoint covered only free agents -- meaning the players
    actually on rosters were the ones missing. That discovery is why the
    third source exists.
 2. **The league's own web pages, scraped**, for the history the API does
@@ -36,19 +50,19 @@ no single one is sufficient:
    drafts back to 2009.
 3. **The public MLB Stats API**, for the actual baseball: full career game
    logs for every player involved, independent of any fantasy platform.
-   This is the universal layer -- real games, real stat lines -- which
-   the fantasy layer is then mapped onto.
+   This is the platform-independent layer -- real games, real stat lines
+   -- which the fantasy layer is then mapped onto.
 
-Splitting it that way means the *baseball* is never in doubt. What has to
-be reconstructed is the *fantasy* state around it: who owned whom, and
-who was in the lineup on a given day.
+The MLB feed supplies the underlying *baseball* statistics. The primary
+reconstruction uncertainty is in the *fantasy* state around them: who
+owned whom, and who was in the lineup on a given day.
 
 ## What "walk-back" means
 
-Drafts were never logged in the points league's early years. So a
-season's opening rosters exist in no transaction record anywhere -- the
-log tells you that someone was traded in May, but not who started the
-year on the roster.
+The surviving records for the CBS league's early years do not include
+drafts, so a season's opening rosters exist in no transaction record
+available to the project -- the log tells you that someone was traded in
+May, but not who started the year on the roster.
 
 The walk-back reconstructs roster membership day by day, working from
 two kinds of evidence: the transaction log's move history, and year-end
@@ -66,14 +80,14 @@ carries a report card that compares its reconstructed season totals
 against the league's official published final standings, for every season
 it covers. The error figures below come from that comparison.
 
-## Fidelity by era
+## Fidelity of the CBS history by era
 
 | Era | How it is known | Typical error vs official |
 |---|---|---|
 | 2026 onward | Captured live, daily | -- |
 | 2021-2025 | Reconstructed day by day from the transaction log | about 2-4% |
 | 2004-2020 | Estimated from year-end start-share rates | about 5-13% |
-| 2001-2003 | Reconstructed from the transaction log, without roster anchors | 2001-02 around 80% |
+| 2001-2003 | Reconstructed from the transaction log, without roster anchors | 2001-02 about 12-15% |
 
 A few things this table implies that are worth stating outright:
 
@@ -90,27 +104,33 @@ player was traded mid-season, the rate describing how often he was
 started is the rate he finished the year with, wherever he finished it.
 For a mid-season stint, that borrows a number earned somewhere else.
 
-**2001 and 2002 are the weakest years in the book.** There are no
-year-end roster pages for them, which removes the anchors the
-reconstruction leans on everywhere else. Treat those two seasons as
-directional. Production that can be tied to the league but not to any
-team is parked in a clearly-labelled placeholder franchise rather than
-being silently assigned to somebody.
+**2001 and 2002 are the weakest years in the book, but not for the
+reason the error column alone suggests.** There are no year-end roster
+pages for them, which removes the anchors the reconstruction leans on
+everywhere else. That mainly costs *coverage*, not accuracy: a player
+who was drafted and held all season -- never added, dropped, traded, or
+reserved -- never touches the transaction log, so the walk-back has no
+way to know whose roster he was on. Those are disproportionately the
+stars, since nobody drops or trades their best players. Production that
+can be tied to the league but not to any team is parked in a
+clearly-labelled placeholder franchise rather than being silently
+assigned to somebody -- currently about a quarter of 2001's reconstructed
+production and over a third of 2002's. Treat those two seasons as
+directional until that gap closes.
 
-## Known gaps and open questions
+## Known gaps and open questions in the CBS history
 
 **Pre-season trades are structurally invisible.** The transaction report
 the history is scraped from does not include them. In the one season
 where a second independent source was available for comparison, 746 of
 748 moves matched -- and one of the two misses was a pre-season trade.
 
-**One scoring category disagrees with itself.** The platform's
-season-level figure for one pitching category is off by up to three
-either way from its own per-game data. The pipeline derives that category
-from the per-game numbers instead and confines the platform's own figure
-to reconciliation. There is a documented case where the derived number is
-more accurate than the platform's published total, because the platform's
-feed was missing the underlying events.
+**One scoring category disagrees with itself.** CBS's season-level figure
+for one pitching category is off by up to three either way from its own
+per-game data. The pipeline derives that category from the per-game
+numbers instead and confines CBS's own figure to reconciliation. There is
+a documented case where the derived number is more accurate than CBS's
+published total, because its feed was missing the underlying events.
 
 **Unresolved:** official standings for 2021-2023 show team pitching
 running roughly 8-11% below the reconstruction, while hitting tracks
@@ -123,14 +143,14 @@ pitching totals as settled.
 never logged, and a few players whose last logged event was a departure
 despite appearing in the year-end snapshot.
 
-## Why the record book uses re-priced points
+## Why the CBS record book uses re-priced points
 
-Because the platform's own historical player archive covers only free
-agents, it silently omits exactly the players you would most expect to
-see in a record book -- the stars, who were rostered. A record book built
-on that archive would have been quietly, badly wrong. Records therefore
-run on stats re-priced from the universal MLB data, where every player is
-present. See [The points lenses](02-points-lenses.md).
+Because the CBS historical player archive available to this project
+covers only free agents, it silently omits exactly the players you would
+most expect to see in a record book -- the stars, who were rostered. A
+record book built on that archive would have been quietly, badly wrong.
+Records therefore run on stats re-priced from the MLB data, where every
+player is present. See [The points lenses](02-points-lenses.md).
 
 Two population caveats remain and are worth knowing: the earliest era
 misses players who passed through without ever appearing in an anchor

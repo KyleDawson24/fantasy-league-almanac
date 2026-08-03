@@ -32,9 +32,10 @@ volume a rate stat needs to qualify (a one-inning relief appearance
 should not own the ERA record) and explains the italic and highlight
 marks used in the table.
 
-The points league's Records tab also carries a **Franchise Hall of Fame**
-and a **Wasted Hall of Shame**. The head-to-head league does not show the
-futility block yet.
+Both leagues' Records tabs also carry a **Franchise Hall of Fame** -- the
+best careers anyone spent with a single franchise -- and, beside it, a
+**Wasted Hall of Shame**: the careers that left the most production
+unused, pitchers and hitters ranked on separate boards.
 
 ### Advanced Standings
 Myriad views of historic performances and points-by-source breakdowns. 

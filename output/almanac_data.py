@@ -2388,117 +2388,209 @@ def get_franchise_hall_of_fame(limit=25):
     """)
 
 
-def get_wasted_hall_of_shame(scope='all_time'):
-    """The worst wasted player-WEEKS, ranked, with their three terms broken out.
+def get_wasted_hall_of_shame(limit=25):
+    """Career wasted points per player, SPLIT BY PRODUCTION TYPE, for the
+    two Hall of Shame boards (pitching waste | hitting waste).
 
-    The ranking and the wasted TOTAL both come from mart_stat_leaderboard's
-    player grain (entity_grain='player', performance_status='inactive'),
-    which MLB-135 built as the canonical three-term sum -- unrostered +
-    benched + negative-active, one row per player-week, zero-waste rows
-    already filtered. Nothing is re-derived here: the parts are attached
-    only so the block can SHOW the decomposition, and the caller asserts
-    they still add up to the mart's number.
+    NOT built from mart_stat_leaderboard. That mart is rank-capped at 10 per
+    scope, so summing its rows to player grain would yield "the total of each
+    player's ten worst weeks" -- a number that looks plausible, is wrong, and
+    reconciles against nothing. This computes the same canonical three-term
+    sum the mart's player_wasted_inactive_parts CTE performs, but aggregated
+    to player BEFORE any ranking and with no cap.
 
-    Grain note, and the one real divergence from CBS: CBS's Hall of Shame
-    ranks CAREERS because that book is a season-long points league with two
-    decades of history. This one ranks player-WEEKS because the mart holds
-    them at week grain and because ESPN is a weekly head-to-head league --
-    every other record on this tab is a single-week mark, so a week-grained
-    Hall is the ESPN-native expression of the same idea, not a compromise.
-    Depth follows the mart's own rank <= 10 cutoff (raising it would mean
-    editing a model both books read).
+    The split is by production type, not by player (Kyle 2026-08-03): a
+    player's career waste is divided into its pitching share and its hitting
+    share, each board ranks its own share independently, and a two-way player
+    legitimately appears on BOTH with different totals. That is the correct
+    output, not an edge case.
 
-    A week the player spent entirely on the wire carries no team_id at all,
-    and naming one would invent a benching that never happened -- those rows
-    render blank. Where there IS a team, it is labelled through the same
-    canonical MAX_BY(team_abbrev, season_year) rule the Hall of Fame uses,
-    so one franchise-identity rule covers the whole tab: without it the mart's
-    per-week abbrev prints 2025's '####' holding-pen token for team 7 in one
-    block while the other block calls the same franchise 'AAA'.
+    Why the split partitions exactly, term by term:
+      * unrostered and bench/IL come off the inactive fact, where
+        calculated_hitting_pts + calculated_pitching_pts reconstructs
+        calculated_points on every row (verified: 0 mismatches in 18,935).
+      * negative-active does NOT split at the source. It is a per-DAY net
+        measure -- the magnitude of a day whose whole-player total went
+        negative -- so it has no hitting or pitching half to read. It is
+        allocated here in proportion to each discipline's share of that
+        week's active production magnitude. For a single-discipline player
+        that puts 100% on his one side, which is every player in the league
+        but one; the proration only ever engages for a genuine two-way
+        week. Measured exposure: 37.4 of 13,140.6 career negative-active
+        points, one player (Ohtani). Chosen over inventing a day-grain
+        re-definition because it partitions the canonical total EXACTLY,
+        which is what lets the caller assert the boards reconcile.
+
+    ⚠️ A two-way player's PITCHING side is understated at the source --
+    ESPN's deployed-slot convention drops roughly half of Ohtani's real
+    pitching days (MLB-174). Not corrected here and not caveated on the
+    sheet; it is upstream of this block.
     """
     return query_snowflake(f"""
         WITH labels AS (
             SELECT
                 team_id,
-                MAX_BY(team_abbrev, season_year) AS team_abbrev,
-                MAX_BY(team_name, season_year)   AS team_name
+                MAX_BY(team_abbrev, season_year) AS team_abbrev
             FROM fct_player_season_performance
             WHERE {league_predicate()}
               AND team_id IS NOT NULL
             GROUP BY team_id
         ),
 
-        ranked AS (
-            SELECT
-                rank, season_year, matchup_period,
-                player_id, player_name, display_name,
-                team_id, team_name, team_abbrev,
-                owner_display AS owner_name,
-                stat_value
-            FROM mart_stat_leaderboard
-            WHERE record_scope       = %s
-              AND entity_grain       = 'player'
-              AND performance_status = 'inactive'
-              AND stat_name          = 'WASTED_POINTS'
-              AND record_direction   = 'most'
-              AND {league_predicate()}
-        ),
-
-        -- The two inactive terms, split by bucket, exactly as the mart's
-        -- player_wasted_inactive_parts CTE splits them. DECIMAL-summed so
-        -- the parts are order-independent like the mart's stable_sum.
+        -- Terms 1 and 2, split by discipline straight off the fact.
         inactive_parts AS (
             SELECT
-                season_year, matchup_period, player_id,
+                player_id,
+                -- The inactive fact carries player_name only; the mart's
+                -- own CTE reads it the same way and lets display_name fall
+                -- back to it.
+                MAX(player_name)  AS player_name,
                 ROUND(CAST(SUM(CAST(CASE WHEN wasted_bucket = 'FA'
-                          THEN calculated_points ELSE 0 END
-                      AS DECIMAL(18, 6))) AS DOUBLE), 6) AS unrostered_points,
+                        THEN calculated_pitching_pts ELSE 0 END
+                    AS DECIMAL(18, 6))) AS DOUBLE), 6) AS unrostered_pitching,
+                ROUND(CAST(SUM(CAST(CASE WHEN wasted_bucket = 'FA'
+                        THEN calculated_hitting_pts ELSE 0 END
+                    AS DECIMAL(18, 6))) AS DOUBLE), 6) AS unrostered_hitting,
                 ROUND(CAST(SUM(CAST(CASE WHEN wasted_bucket = 'ROSTERED_INACTIVE'
-                          THEN calculated_points ELSE 0 END
-                      AS DECIMAL(18, 6))) AS DOUBLE), 6) AS benched_points
+                        THEN calculated_pitching_pts ELSE 0 END
+                    AS DECIMAL(18, 6))) AS DOUBLE), 6) AS benched_pitching,
+                ROUND(CAST(SUM(CAST(CASE WHEN wasted_bucket = 'ROSTERED_INACTIVE'
+                        THEN calculated_hitting_pts ELSE 0 END
+                    AS DECIMAL(18, 6))) AS DOUBLE), 6) AS benched_hitting
             FROM fct_player_weekly_inactive_performance
-            WHERE is_abnormal = false
-              AND {league_predicate()}
-            GROUP BY season_year, matchup_period, player_id
+            WHERE {league_predicate()}
+              AND is_abnormal = false
+            GROUP BY player_id
         ),
 
-        -- The third term, plus what the player DID bank that week, which
-        -- is what makes the percentage readable.
+        -- Term 3, prorated per week by discipline magnitude before summing.
+        active_weeks AS (
+            SELECT
+                player_id,
+                player_name,
+                negative_points,
+                calculated_pitching_pts,
+                calculated_hitting_pts,
+                ABS(COALESCE(calculated_pitching_pts, 0))
+                    + ABS(COALESCE(calculated_hitting_pts, 0)) AS magnitude
+            FROM fct_player_weekly_active_performance
+            WHERE {league_predicate()}
+              AND is_abnormal = false
+        ),
+
         active_parts AS (
             SELECT
-                season_year, matchup_period, player_id,
-                ROUND(CAST(SUM(CAST(negative_points AS DECIMAL(18, 6)))
-                      AS DOUBLE), 6) AS negative_active_points,
-                ROUND(CAST(SUM(CAST(calculated_points AS DECIMAL(18, 6)))
-                      AS DOUBLE), 6) AS active_points
-            FROM fct_player_weekly_active_performance
-            WHERE is_abnormal = false
-              AND {league_predicate()}
-            GROUP BY season_year, matchup_period, player_id
+                player_id,
+                MAX(player_name) AS player_name,
+                -- A week with production splits by magnitude share. A week
+                -- with NO production either way cannot have given points
+                -- back, so its share is 0/0 -- pinned to hitting so the
+                -- proration always sums back to negative_points instead of
+                -- silently dropping the row's contribution.
+                ROUND(CAST(SUM(CAST(negative_points * CASE WHEN magnitude = 0 THEN 0
+                        ELSE ABS(COALESCE(calculated_pitching_pts, 0)) / magnitude END
+                    AS DECIMAL(18, 6))) AS DOUBLE), 6) AS negative_pitching,
+                ROUND(CAST(SUM(CAST(negative_points * CASE WHEN magnitude = 0 THEN 1
+                        ELSE ABS(COALESCE(calculated_hitting_pts, 0)) / magnitude END
+                    AS DECIMAL(18, 6))) AS DOUBLE), 6) AS negative_hitting,
+                ROUND(CAST(SUM(CAST(calculated_pitching_pts AS DECIMAL(18, 6)))
+                    AS DOUBLE), 6) AS active_pitching,
+                ROUND(CAST(SUM(CAST(calculated_hitting_pts AS DECIMAL(18, 6)))
+                    AS DOUBLE), 6) AS active_hitting
+            FROM active_weeks
+            GROUP BY player_id
+        ),
+
+        -- "Benched Most By": the franchise that sat the most of this
+        -- player's production, per discipline. Unrostered weeks have no
+        -- team by construction, so only the ROSTERED_INACTIVE half votes.
+        bench_by AS (
+            SELECT
+                player_id,
+                team_id,
+                ROUND(CAST(SUM(CAST(calculated_pitching_pts AS DECIMAL(18, 6)))
+                    AS DOUBLE), 6) AS pitching_benched,
+                ROUND(CAST(SUM(CAST(calculated_hitting_pts AS DECIMAL(18, 6)))
+                    AS DOUBLE), 6) AS hitting_benched
+            FROM fct_player_weekly_inactive_performance
+            WHERE {league_predicate()}
+              AND is_abnormal = false
+              AND wasted_bucket = 'ROSTERED_INACTIVE'
+              AND team_id IS NOT NULL
+            GROUP BY player_id, team_id
+        ),
+
+        bench_pitching AS (
+            SELECT b.player_id, l.team_abbrev
+            FROM bench_by b
+            JOIN labels l ON l.team_id = b.team_id
+            WHERE b.pitching_benched > 0
+            QUALIFY ROW_NUMBER() OVER (
+                PARTITION BY b.player_id
+                ORDER BY b.pitching_benched DESC, b.team_id
+            ) = 1
+        ),
+
+        bench_hitting AS (
+            SELECT b.player_id, l.team_abbrev
+            FROM bench_by b
+            JOIN labels l ON l.team_id = b.team_id
+            WHERE b.hitting_benched > 0
+            QUALIFY ROW_NUMBER() OVER (
+                PARTITION BY b.player_id
+                ORDER BY b.hitting_benched DESC, b.team_id
+            ) = 1
         )
 
         SELECT
-            r.rank, r.season_year, r.matchup_period,
-            r.player_id, r.player_name, r.display_name,
-            r.team_id, r.owner_name, r.stat_value,
-            COALESCE(lb.team_abbrev, r.team_abbrev) AS team_abbrev,
-            COALESCE(lb.team_name, r.team_name)     AS team_name,
-            COALESCE(i.unrostered_points, 0)      AS unrostered_points,
-            COALESCE(i.benched_points, 0)         AS benched_points,
-            COALESCE(a.negative_active_points, 0) AS negative_active_points,
-            COALESCE(a.active_points, 0)          AS active_points
-        FROM ranked r
-        LEFT JOIN labels lb ON lb.team_id = r.team_id
-        LEFT JOIN inactive_parts i
-            ON  i.season_year    = r.season_year
-            AND i.matchup_period = r.matchup_period
-            AND i.player_id      = r.player_id
-        LEFT JOIN active_parts a
-            ON  a.season_year    = r.season_year
-            AND a.matchup_period = r.matchup_period
-            AND a.player_id      = r.player_id
-        ORDER BY r.rank
-    """, (scope,))
+            COALESCE(i.player_id, a.player_id)     AS player_id,
+            COALESCE(i.player_name, a.player_name)  AS player_name,
+            COALESCE(i.player_name, a.player_name)  AS display_name,
+            COALESCE(i.unrostered_pitching, 0)     AS unrostered_pitching,
+            COALESCE(i.unrostered_hitting, 0)      AS unrostered_hitting,
+            COALESCE(i.benched_pitching, 0)        AS benched_pitching,
+            COALESCE(i.benched_hitting, 0)         AS benched_hitting,
+            COALESCE(a.negative_pitching, 0)       AS negative_pitching,
+            COALESCE(a.negative_hitting, 0)        AS negative_hitting,
+            COALESCE(a.active_pitching, 0)         AS active_pitching,
+            COALESCE(a.active_hitting, 0)          AS active_hitting,
+            bp.team_abbrev                         AS bench_team_pitching,
+            bh.team_abbrev                         AS bench_team_hitting
+        FROM inactive_parts i
+        FULL OUTER JOIN active_parts a ON a.player_id = i.player_id
+        LEFT JOIN bench_pitching bp ON bp.player_id = COALESCE(i.player_id, a.player_id)
+        LEFT JOIN bench_hitting  bh ON bh.player_id = COALESCE(i.player_id, a.player_id)
+        ORDER BY COALESCE(i.player_id, a.player_id)
+    """)
+
+
+def get_wasted_career_total():
+    """League-wide career wasted total from the UNCAPPED source, as the
+    reconciliation target for the two Hall of Shame boards.
+
+    One query, and it is the invariant that catches a bad join or a
+    double-count in the discipline split -- the two boards' full (not
+    top-N) totals must add up to this.
+    """
+    rows = query_snowflake(f"""
+        WITH inactive_total AS (
+            SELECT ROUND(CAST(SUM(CAST(calculated_points AS DECIMAL(18, 6)))
+                AS DOUBLE), 6) AS pts
+            FROM fct_player_weekly_inactive_performance
+            WHERE {league_predicate()} AND is_abnormal = false
+        ),
+        negative_total AS (
+            SELECT ROUND(CAST(SUM(CAST(negative_points AS DECIMAL(18, 6)))
+                AS DOUBLE), 6) AS pts
+            FROM fct_player_weekly_active_performance
+            WHERE {league_predicate()} AND is_abnormal = false
+        )
+        SELECT i.pts AS inactive_points,
+               n.pts AS negative_points,
+               i.pts + n.pts AS total_wasted
+        FROM inactive_total i CROSS JOIN negative_total n
+    """)
+    return rows[0] if rows else {}
 
 
 

@@ -69,9 +69,11 @@ from almanac_render import (
     explainer_text_format,
     TRADE_AVAILABILITY_LABELS,
     TRADES_TAB,
+    RECORDS_HALL_BREAKDOWN_COLS,
     RECORDS_HALL_DETAIL_HEADER,
     RECORDS_HALL_OF_FAME_CAPTION_COL,
     RECORDS_HALL_OF_SHAME_CAPTION_COL,
+    RECORDS_TAB_WIDTH,
     RECORDS_MATRIX_DETAIL_HEADER,
     RECORDS_MATRIX_WIDTH,
     _is_records_hall_banner,
@@ -130,7 +132,7 @@ def write_almanac(sheet_id, season_year=None, matchup_period=None):
         league_id=league_id,
         schedule_lookup=schedule_lookup,
         hall_of_fame=almanac_data.get_franchise_hall_of_fame(),
-        hall_of_shame=almanac_data.get_wasted_hall_of_shame('all_time'),
+        hall_of_shame=almanac_data.get_wasted_hall_of_shame(),
     )
     team_week_stat_specs = get_team_week_stat_specs()
     team_week_rows = get_team_weeks(team_week_stat_specs)
@@ -1726,17 +1728,22 @@ def _replace_records_tab(spreadsheet, rows):
     """Clear/create Records and write the curated record-book tab."""
     try:
         worksheet = spreadsheet.worksheet(RECORDS_TAB)
-        # MLB-164: the tab GREW by the Halls block, so a grid created by an
-        # earlier render can now be too short for the values write. The
-        # preview path writes TSVs and never hits this, which means the
-        # goldens would stay green while the live write failed -- same
-        # reasoning as the Advanced Standings resize above.
-        if worksheet.row_count < len(rows) + 10:
+        # MLB-164: the tab GREW by the Halls block -- taller by ~50 rows,
+        # and WIDER, from the matrix's 12 columns to 15 once the Hall of
+        # Shame's two boards sit side by side. A grid created by an earlier
+        # render is too small on both axes, and the preview path writes
+        # TSVs and never touches a grid, so the goldens would stay green
+        # while the live write failed. Same reasoning as the Advanced
+        # Standings resize above -- and note it has to be BOTH axes: the
+        # row-only guard this replaces would have passed the taller block
+        # straight into a column overflow.
+        if (worksheet.row_count < len(rows) + 10
+                or worksheet.col_count < RECORDS_TAB_WIDTH):
             _sheets_call(
                 f'resize {RECORDS_TAB}',
                 lambda ws=worksheet: ws.resize(
-                    rows=len(rows) + 10,
-                    cols=max(ws.col_count, RECORDS_MATRIX_WIDTH)),
+                    rows=max(ws.row_count, len(rows) + 10),
+                    cols=max(ws.col_count, RECORDS_TAB_WIDTH)),
             )
     except gspread.WorksheetNotFound:
         worksheet = _sheets_call(
@@ -1744,7 +1751,7 @@ def _replace_records_tab(spreadsheet, rows):
             lambda: spreadsheet.add_worksheet(
                 title=RECORDS_TAB,
                 rows=max(len(rows) + 10, 50),
-                cols=RECORDS_MATRIX_WIDTH,
+                cols=RECORDS_TAB_WIDTH,
             ),
         )
 
@@ -1766,7 +1773,7 @@ def _replace_records_tab(spreadsheet, rows):
         _merge_records_scope_headers(spreadsheet, worksheet, rows)
         formats = [
             {
-                'range': 'A:L',
+                'range': 'A:O',
                 'format': {
                     'textFormat': {'bold': False, 'italic': False},
                     'backgroundColor': {'red': 1, 'green': 1, 'blue': 1},
@@ -1774,11 +1781,11 @@ def _replace_records_tab(spreadsheet, rows):
                 },
             },
             {
-                'range': 'A1:L1',
+                'range': 'A1:O1',
                 'format': {'textFormat': {'bold': True, 'fontSize': 14}},
             },
             {
-                'range': 'A2:L2',
+                'range': 'A2:O2',
                 'format': {
                     'textFormat': {'italic': True},
                     'backgroundColor': {'red': 0.95, 'green': 0.97, 'blue': 0.99},
@@ -1787,7 +1794,7 @@ def _replace_records_tab(spreadsheet, rows):
             {
                 # Row 3: formatting legend (footnote-class, matching the
                 # note row) -- the house explainer token (MLB-170).
-                'range': 'A3:L3',
+                'range': 'A3:O3',
                 'format': {
                     'textFormat': explainer_text_format(),
                     'backgroundColor': {'red': 0.95, 'green': 0.97, 'blue': 0.99},
@@ -1811,7 +1818,7 @@ def _records_header_formats(rows):
     for row_number, row in enumerate(rows, 1):
         if _is_records_scope_header(row) or row == RECORDS_MATRIX_DETAIL_HEADER:
             formats.append({
-                'range': f'A{row_number}:L{row_number}',
+                'range': f'A{row_number}:O{row_number}',
                 'format': {
                     'textFormat': {'bold': True},
                     'backgroundColor': {'red': 0.95, 'green': 0.97, 'blue': 0.99},
@@ -1842,6 +1849,13 @@ def _fresh_record_formats(rows):
     latest_period = records.format_week_label(season_year, matchup_period, schedule_lookup)
 
     for row_number, row in enumerate(rows, 1):
+        # MLB-164: the Halls end the matrix. Their rows are WIDER than a
+        # matrix row, so the length guard below waves them through, and
+        # then cols 5 and 11 -- Years of Service and a Breakdown string --
+        # get read as though they were period labels. Stop here instead;
+        # nothing below the banner is a record row.
+        if _is_records_hall_banner(row):
+            break
         if len(row) < RECORDS_MATRIX_WIDTH:
             continue
         current_period = row[4]
@@ -1911,12 +1925,11 @@ def _records_score_value_formats(rows):
             continue
         # MLB-164: the Halls end the matrix. Without this the last matrix
         # section stays 'active' all the way down the tab and its D/J
-        # one-decimal rule lands on Hall columns it was never written for
-        # (D is fine by luck, J is a team abbrev). The section is scoped by
-        # its header, so it has to be closed by the next block's header too.
+        # one-decimal rule lands on Hall columns it was never written for.
+        # The section is scoped by its header, so it has to be closed by
+        # the next block's header too.
         if _is_records_hall_banner(row):
-            active_section = ''
-            continue
+            break
         if len(row) < RECORDS_MATRIX_WIDTH:
             continue
         if active_section == 'Score Records' or active_section == 'Lineup Slot Records':
@@ -1945,10 +1958,11 @@ def _records_hall_formats(rows):
     invisible text the goldens would never catch; here it is simply correct.
     """
     formats = []
+    first_data_row = None
     for row_number, row in enumerate(rows, 1):
         if _is_records_hall_banner(row):
             formats.append({
-                'range': f'A{row_number}:L{row_number}',
+                'range': f'A{row_number}:O{row_number}',
                 'format': {
                     'textFormat': {'bold': True},
                     'backgroundColor': {'red': 0.95, 'green': 0.97, 'blue': 0.99},
@@ -1966,12 +1980,33 @@ def _records_hall_formats(rows):
                 })
         elif row == RECORDS_HALL_DETAIL_HEADER:
             formats.append({
-                'range': f'A{row_number}:L{row_number}',
+                'range': f'A{row_number}:O{row_number}',
                 'format': {
                     'textFormat': {'bold': True},
                     'backgroundColor': {'red': 0.95, 'green': 0.97, 'blue': 0.99},
                 },
             })
+            first_data_row = row_number + 1
+
+    # Breakdown columns small and centered, the CBS treatment. These
+    # strings are long and both sit left of a populated neighbour, so
+    # unlike every other long cell on this tab they cannot overflow their
+    # way out of trouble.
+    if first_data_row and len(rows) >= first_data_row:
+        for column in RECORDS_HALL_BREAKDOWN_COLS:
+            letter = col_letter(column + 1)
+            formats.append({
+                'range': f'{letter}{first_data_row}:{letter}{len(rows)}',
+                'format': {
+                    'horizontalAlignment': 'CENTER',
+                    'textFormat': {'fontSize': 8},
+                },
+            })
+        # Years of Service is a bare count; center it like CBS does.
+        formats.append({
+            'range': f'E{first_data_row}:E{len(rows)}',
+            'format': {'horizontalAlignment': 'CENTER'},
+        })
     return formats
 
 
@@ -2070,13 +2105,30 @@ def _replace_team_tab(spreadsheet, title, rows):
 
 def _apply_records_tab_dimensions(spreadsheet, worksheet):
     sheet_id = worksheet.id
+    # MLB-164: every column past G now serves TWO blocks -- the record
+    # matrix's all-time panel (H Holder, I Owner, J Value, K Period,
+    # L Details) and the Hall of Shame's two boards (H-K Pitchers,
+    # L-O Hitters). Widths are chosen so neither reads badly:
+    #   K  260  Pitchers' Breakdown needs it; the matrix's Period label
+    #           is short and simply sits in a roomier cell.
+    #   L  170  Hitters' Player. The matrix's Details cell shrinks here
+    #           from 400, but matrix rows stop at L, so it now overflows
+    #           across the empty M-O -- more usable runway than before,
+    #           not less.
     requests = [
         _column_width_request(sheet_id, 0, 1, 175),
-        _column_width_request(sheet_id, 1, 2, 150),   # B: Holder
-        _column_width_request(sheet_id, 2, 3, 125),   # C: Owner
-        _column_width_request(sheet_id, 5, 6, 400),
-        _column_width_request(sheet_id, 6, 7, 25),     # G: buffer between panels
-        _column_width_request(sheet_id, 11, 12, 400),
+        _column_width_request(sheet_id, 1, 2, 150),   # B: Holder / Player
+        _column_width_request(sheet_id, 2, 3, 125),   # C: Owner / Franchise
+        _column_width_request(sheet_id, 5, 6, 400),   # F: Details / Stat Line
+        _column_width_request(sheet_id, 6, 7, 25),    # G: buffer between panels
+        _column_width_request(sheet_id, 7, 8, 150),   # H: Holder / Pitchers
+        _column_width_request(sheet_id, 8, 9, 110),   # I: Owner / Benched Most By
+        _column_width_request(sheet_id, 9, 10, 95),   # J: Value / Wasted Points
+        _column_width_request(sheet_id, 10, 11, 260),  # K: Period / Breakdown
+        _column_width_request(sheet_id, 11, 12, 170),  # L: Details / Hitters
+        _column_width_request(sheet_id, 12, 13, 110),  # M: Benched Most By
+        _column_width_request(sheet_id, 13, 14, 95),   # N: Wasted Points
+        _column_width_request(sheet_id, 14, 15, 260),  # O: Breakdown
     ]
     _sheets_batch_update(spreadsheet, f'format dimensions {worksheet.title}', requests)
 

@@ -56,6 +56,8 @@ from almanac_render import (
     RECORDS_HALL_OF_FAME_CAPTION_COL,
     RECORDS_HALL_OF_SHAME_CAPTION,
     RECORDS_HALL_OF_SHAME_CAPTION_COL,
+    RECORDS_TAB_WIDTH,
+    hall_of_shame_wasted,
     RECORDS_HEADER,
     RECORDS_MATRIX_DETAIL_HEADER,
     RECORDS_MATRIX_WIDTH,
@@ -1685,10 +1687,7 @@ def build_records_tab_rows(all_time_records, current_season_records, league_id=N
             rows.extend(section_rows)
             rows.append([])
 
-    hall_rows = _records_hall_rows(
-        hall_of_fame, hall_of_shame,
-        league_id=league_id, schedule_lookup=schedule_lookup,
-    )
+    hall_rows = _records_hall_rows(hall_of_fame, hall_of_shame)
     if hall_rows:
         # The last matrix section already left a blank row behind it; keep
         # that as the separator rather than stacking a second one.
@@ -1701,56 +1700,68 @@ def build_records_tab_rows(all_time_records, current_season_records, league_id=N
     return rows
 
 
-def _records_hall_rows(hall_of_fame, hall_of_shame, league_id=None,
-                       schedule_lookup=None):
+def _records_hall_rows(hall_of_fame, hall_of_shame, hall_depth=25):
     """The Franchise Hall of Fame | Wasted Hall of Shame block (MLB-164).
 
     Additive: the team-grain 'Most Wasted Points' line already in Score
-    Records stays exactly where it is. It answers a different question --
-    which TEAM left the most on the bench in one week -- and this block
-    answers which PLAYER-week was wasted worst, at a grain where the
-    unrostered term is actually attributable. Two surfaces, two grains,
-    both correct.
+    Records stays exactly where it is. It answers which TEAM left the most
+    on the bench in one week; this block answers whose CAREER wasted the
+    most, at the grain where the unrostered term is attributable at all.
+    Two surfaces, two questions, both correct.
 
-    The two Halls are independent lists rendered side by side, so the
-    block runs as deep as the longer one and the shorter one's cells go
-    blank -- the CBS treatment. Depths differ on purpose: the Hall of
-    Fame is cut in the fetch, while the Hall of Shame inherits
-    mart_stat_leaderboard's own rank <= 10, a cutoff shared with every
-    other leaderboard consumer (and with the CBS book) and therefore not
-    this ticket's to move.
+    Three lists, one block, side by side (A-F | H-K | L-O): careers with
+    one franchise, then wasted PITCHING careers, then wasted HITTING
+    careers. The block runs as deep as the longest and shorter lists blank
+    out -- the CBS treatment.
+
+    The two waste boards are split by PRODUCTION TYPE, not by player, so
+    the same person can hold a rank on both with different totals. The
+    fetch hands back one row per player carrying both halves; ranking each
+    half independently is what produces the two boards.
     """
     hall_of_fame = list(hall_of_fame or ())
-    hall_of_shame = list(hall_of_shame or ())
-    if not hall_of_fame and not hall_of_shame:
+    shame_source = list(hall_of_shame or ())
+    if not hall_of_fame and not shame_source:
         return []
 
-    schedule_lookup = schedule_lookup or records.load_schedule_lookup()
+    def _board(discipline):
+        # Points decide; the player_id tail only settles exact ties, and it
+        # settles them the same way forever. Without it Python's stable sort
+        # falls back to the warehouse's row order, which has no guarantee and
+        # changes on rebuild -- two level players would swap between renders
+        # and one could fall off the cut entirely (MLB-128).
+        ranked = sorted(
+            (e for e in shame_source
+             if hall_of_shame_wasted(e, discipline) > 0),
+            key=lambda e: (-hall_of_shame_wasted(e, discipline),
+                           e.get('player_id') or 0),
+        )
+        return ranked[:hall_depth]
+
+    pitchers = _board('pitching')
+    hitters = _board('hitting')
+
     banner = list(RECORDS_HALL_BANNER)
     banner[RECORDS_HALL_OF_FAME_CAPTION_COL] = (
         RECORDS_HALL_OF_FAME_CAPTION.format(n=len(hall_of_fame)))
     banner[RECORDS_HALL_OF_SHAME_CAPTION_COL] = (
-        RECORDS_HALL_OF_SHAME_CAPTION.format(n=len(hall_of_shame)))
+        RECORDS_HALL_OF_SHAME_CAPTION.format(n=max(len(pitchers), len(hitters))))
 
     # No leading blank row here -- the caller owns the separator, because
     # only it can see whether the matrix already left one behind.
     rows = [banner, list(RECORDS_HALL_DETAIL_HEADER)]
-    for index in range(max(len(hall_of_fame), len(hall_of_shame))):
-        left = ['', '', '', '', '', '']
+    depth = max(len(hall_of_fame), len(pitchers), len(hitters))
+    for index in range(depth):
+        fame = ['', '', '', '', '', '']
         if index < len(hall_of_fame):
-            left = format_hall_of_fame_cells(hall_of_fame[index], index + 1)
-        right = ['', '', '', '', '']
-        if index < len(hall_of_shame):
-            entry = hall_of_shame[index]
-            right = format_hall_of_shame_cells(
-                entry,
-                league_id=league_id,
-                week_label=records.format_week_label(
-                    entry.get('season_year'), entry.get('matchup_period'),
-                    schedule_lookup,
-                ),
-            )
-        rows.append([*left, '', *right])
+            fame = format_hall_of_fame_cells(hall_of_fame[index], index + 1)
+        pitching = ['', '', '', '']
+        if index < len(pitchers):
+            pitching = format_hall_of_shame_cells(pitchers[index], 'pitching')
+        hitting = ['', '', '', '']
+        if index < len(hitters):
+            hitting = format_hall_of_shame_cells(hitters[index], 'hitting')
+        rows.append([*fame, '', *pitching, *hitting])
     return rows
 
 

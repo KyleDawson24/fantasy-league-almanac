@@ -3968,14 +3968,27 @@ def build_standings_rows(context, arc, finishes, active_franchises,
                                        {'type': 'NUMBER', 'pattern': '0'}}})
             rows.append([])
 
+        # MLB-169, mirroring ESPN's captions -- see almanac_logic's
+        # lens_blocks for the full rationale. Two notes on the wording:
+        #
+        #  * 'inactive' replaces this book's 'reserves'. It is the user
+        #    guide's platform-general term for bench-or-reserve-incl-IL,
+        #    so the same caption now works on both books -- an MLB-160
+        #    convergence, not a CBS-specific rewrite.
+        #  * 'franchise' stays where ESPN says 'team'. This book calls
+        #    them franchises everywhere else on the tab; converging that
+        #    noun is a separate decision, not this ticket's.
+        #
+        # 'or unrostered' is the honest interim label pending MLB-180.
         _emit_lens_table(
             'active',
-            'Active Lens - started points only '
-            '(Lost = production started by other franchises)')
+            'Active Lens - started points only (Acquired = production in '
+            "your lineup. Lost = production in another franchise's lineup)")
         _emit_lens_table(
             'rostered',
-            'Rostered Lens - all points incl. reserves '
-            '(Lost = other franchises AND unowned)')
+            'Rostered Lens - all points incl. inactive (Acquired = '
+            "production on your roster. Lost = production on another "
+            "franchise's roster or unrostered)")
 
     # ---- MLB affinity (season left, all-time right; shared MLB spine)
     if affinity_rows:

@@ -1369,11 +1369,28 @@ def build_advanced_standings_tab_rows(standings_rows, slot_rows, stat_specs,
         ])
         alltime_acq_by = {r['team_id']: r
                           for r in (acquisition_rows_alltime or ())}
+        # Lens captions in the user guide's vocabulary (MLB-169): a
+        # player-game is Active / Inactive / Unrostered, and 'inactive'
+        # is the guide's own word for bench-or-reserve-incl-IL. Both
+        # sides of each lens are spelled out -- Acquired was previously
+        # left implicit, which is how the two lenses' asymmetry stayed
+        # invisible on the sheet.
+        #
+        # Rostered's 'or unrostered' is the HONEST INTERIM label: the
+        # Rostered lens really does count a dropped player's unowned days
+        # against you (mart_team_acquisition_channels' lost CTE applies
+        # no team filter on the rostered side). Kyle ruled it shouldn't;
+        # that correction is MLB-180 and moves a number, so it is not in
+        # this pass. Until it lands, the caption describes what the
+        # column actually does. Drop 'or unrostered' when MLB-180 ships.
         lens_blocks = (
             ('active',
-             'Active Lens - started points only (Lost = production for other teams)'),
+             'Active Lens - started points only (Acquired = production in '
+             "your lineup. Lost = production in another team's lineup)"),
             ('rostered',
-             'Rostered Lens - all points incl. bench/IL (Lost = other teams AND unowned)'),
+             'Rostered Lens - all points incl. inactive (Acquired = '
+             "production on your roster. Lost = production on another "
+             "team's roster or unrostered)"),
         )
         for lens, label in lens_blocks:
             total_key = f'acquired_{lens}_pts'

@@ -65,11 +65,16 @@ from almanac_render import (
     ESPN_DIVIDER_COL0,
     HOME_TAB,
     RECORDS_TAB,
+    col_letter,
     explainer_text_format,
     TRADE_AVAILABILITY_LABELS,
     TRADES_TAB,
+    RECORDS_HALL_DETAIL_HEADER,
+    RECORDS_HALL_OF_FAME_CAPTION_COL,
+    RECORDS_HALL_OF_SHAME_CAPTION_COL,
     RECORDS_MATRIX_DETAIL_HEADER,
     RECORDS_MATRIX_WIDTH,
+    _is_records_hall_banner,
     TEAM_HISTORY_DETAIL_HEADER,
     TEAM_HISTORY_HITTER_HEADER,
     TEAM_HISTORY_PITCHER_HEADER,
@@ -124,6 +129,8 @@ def write_almanac(sheet_id, season_year=None, matchup_period=None):
         current_season_records=get_almanac_records('current_season'),
         league_id=league_id,
         schedule_lookup=schedule_lookup,
+        hall_of_fame=almanac_data.get_franchise_hall_of_fame(),
+        hall_of_shame=almanac_data.get_wasted_hall_of_shame('all_time'),
     )
     team_week_stat_specs = get_team_week_stat_specs()
     team_week_rows = get_team_weeks(team_week_stat_specs)
@@ -1719,6 +1726,18 @@ def _replace_records_tab(spreadsheet, rows):
     """Clear/create Records and write the curated record-book tab."""
     try:
         worksheet = spreadsheet.worksheet(RECORDS_TAB)
+        # MLB-164: the tab GREW by the Halls block, so a grid created by an
+        # earlier render can now be too short for the values write. The
+        # preview path writes TSVs and never hits this, which means the
+        # goldens would stay green while the live write failed -- same
+        # reasoning as the Advanced Standings resize above.
+        if worksheet.row_count < len(rows) + 10:
+            _sheets_call(
+                f'resize {RECORDS_TAB}',
+                lambda ws=worksheet: ws.resize(
+                    rows=len(rows) + 10,
+                    cols=max(ws.col_count, RECORDS_MATRIX_WIDTH)),
+            )
     except gspread.WorksheetNotFound:
         worksheet = _sheets_call(
             f'create {RECORDS_TAB}',
@@ -1778,6 +1797,7 @@ def _replace_records_tab(spreadsheet, rows):
         formats.extend(_records_header_formats(rows))
         formats.extend(_fresh_record_formats(rows))
         formats.extend(_records_score_value_formats(rows))
+        formats.extend(_records_hall_formats(rows))
         _batch_format(worksheet, formats)
     except Exception as exc:
         print(f"[almanac] formatting skipped for {RECORDS_TAB}: {exc}")
@@ -1889,6 +1909,14 @@ def _records_score_value_formats(rows):
         if _is_records_scope_header(row):
             active_section = row[0]
             continue
+        # MLB-164: the Halls end the matrix. Without this the last matrix
+        # section stays 'active' all the way down the tab and its D/J
+        # one-decimal rule lands on Hall columns it was never written for
+        # (D is fine by luck, J is a team abbrev). The section is scoped by
+        # its header, so it has to be closed by the next block's header too.
+        if _is_records_hall_banner(row):
+            active_section = ''
+            continue
         if len(row) < RECORDS_MATRIX_WIDTH:
             continue
         if active_section == 'Score Records' or active_section == 'Lineup Slot Records':
@@ -1902,6 +1930,48 @@ def _records_score_value_formats(rows):
                     'format': {'numberFormat': {'type': 'NUMBER', 'pattern': '0.0'}},
                 },
             ])
+    return formats
+
+
+def _records_hall_formats(rows):
+    """Banner + header formats for the MLB-164 Halls block.
+
+    Colour check, done deliberately rather than assumed: the banner band is
+    the tab's pale header blue, so the captions' default black stays legible
+    and none of them needs a foregroundColor override. That matters because
+    textFormat is replaced WHOLESALE by the field mask -- foregroundColor
+    lives inside it, so an explainer token applied over a coloured banner
+    silently resets the text to black. On a navy band that would be
+    invisible text the goldens would never catch; here it is simply correct.
+    """
+    formats = []
+    for row_number, row in enumerate(rows, 1):
+        if _is_records_hall_banner(row):
+            formats.append({
+                'range': f'A{row_number}:L{row_number}',
+                'format': {
+                    'textFormat': {'bold': True},
+                    'backgroundColor': {'red': 0.95, 'green': 0.97, 'blue': 0.99},
+                },
+            })
+            # Captions ride the banner in the house explainer token
+            # (MLB-170). Applied AFTER the band so the wholesale
+            # textFormat replacement leaves them italic/size-9, not bold.
+            for column in (RECORDS_HALL_OF_FAME_CAPTION_COL,
+                           RECORDS_HALL_OF_SHAME_CAPTION_COL):
+                cell = f'{col_letter(column + 1)}{row_number}'
+                formats.append({
+                    'range': f'{cell}:{cell}',
+                    'format': {'textFormat': explainer_text_format()},
+                })
+        elif row == RECORDS_HALL_DETAIL_HEADER:
+            formats.append({
+                'range': f'A{row_number}:L{row_number}',
+                'format': {
+                    'textFormat': {'bold': True},
+                    'backgroundColor': {'red': 0.95, 'green': 0.97, 'blue': 0.99},
+                },
+            })
     return formats
 
 

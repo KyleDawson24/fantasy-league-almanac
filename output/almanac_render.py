@@ -197,6 +197,135 @@ RECORDS_MATRIX_DETAIL_HEADER = [
 ]
 
 
+# ---------------------------------------------------------------------
+# MLB-164: the two Halls, appended below the record matrix.
+#
+# Layout mirrors CBS: Franchise Hall of Fame on the left, the buffer
+# column between, Wasted Hall of Shame on the right. It fits the tab's
+# existing 12-column frame exactly (6 + 1 + 5), and lands on column
+# widths that already suit it -- G is the 25px panel buffer, and F and L
+# are the 400px detail columns, which is where each Hall's long text
+# column goes. No dimension changes needed.
+#
+# Both blocks are ALL-TIME only, as on CBS: they are history blocks, not
+# a current-vs-all-time matrix.
+RECORDS_HALL_BANNER = [
+    'Franchise Hall of Fame', '', '', '', '', '',
+    '',
+    'Wasted Hall of Shame', '', '', '', '',
+]
+
+
+# The scope captions ride the banner row beside each label -- the
+# bold-banner-plus-explainer-token idiom MLB-170 settled (the same shape
+# as the Advanced Standings _section captions).
+#
+# Column choice is about overflow, not taste. Each label sits in a cell
+# narrower than its own text and overflows rightward (the tab sets
+# OVERFLOW_CELL across A:L), so the cell immediately after a label must
+# stay EMPTY or the label gets clipped: hence C rather than B on the
+# left, and J rather than I on the right.
+RECORDS_HALL_OF_FAME_CAPTION_COL = 2
+RECORDS_HALL_OF_SHAME_CAPTION_COL = 9
+RECORDS_HALL_OF_FAME_CAPTION = (
+    'top {n} careers with one franchise, by points scored in the lineup'
+)
+RECORDS_HALL_OF_SHAME_CAPTION = (
+    'top {n} player-weeks by wasted points (unrostered + bench/IL + negative)'
+)
+
+
+RECORDS_HALL_DETAIL_HEADER = [
+    'Rank', 'Player', 'Franchise', 'Active Points', 'Years of Service',
+    'Slash | Stat Line (While Active for Listed Team)',
+    '',
+    'Player', 'Fantasy Team', 'Week', 'Wasted Points', 'Breakdown',
+]
+
+
+def _is_records_hall_banner(row):
+    """True for the Halls' banner row -- the marker the write layer uses to
+    stop the Score Records number format bleeding down the tab."""
+    return (
+        len(row) == RECORDS_MATRIX_WIDTH
+        and str(row[0] or '').startswith('Franchise Hall of Fame')
+        and str(row[7] or '').startswith('Wasted Hall of Shame')
+    )
+
+
+def _hall_slash_line(row):
+    """Career slash for a Hall of Fame row, through the shared All-League
+    helper so the Hall reads identically to the Home tab and the per-team
+    pages: hitters get AVG/OBP/SLG, pitchers W-L-Sv/ERA/WHIP.
+
+    Discipline is decided by outs vs at-bats -- the CBS Hall's test, and
+    the only one available here, since a career row spans many lineup
+    slots and has no single one to key off. Two-way players resolve to
+    whichever side they did more of; Ohtani's line reads as a hitter's
+    because that is where the bulk of his plate time is."""
+    pitcher = float(row.get('outs') or 0) > float(row.get('ab') or 0)
+    return _all_league_slash_line({**row, 'slot_label': 'SP' if pitcher else 'DH'})
+
+
+def format_hall_of_fame_cells(entry, rank):
+    """Left six cells of one Hall of Fame row."""
+    return [
+        rank,
+        _bref_player_cell(entry),
+        entry.get('team_abbrev') or entry.get('team_name') or '',
+        _one_decimal(entry.get('active_points')),
+        int(entry.get('service_years') or 0),
+        ' || '.join(part for part in (
+            _hall_slash_line(entry),
+            format_top_scorer_stats_line(entry),
+        ) if part),
+    ]
+
+
+def format_hall_of_shame_cells(entry, league_id=None, week_label=''):
+    """Right five cells of one Hall of Shame row.
+
+    The Fantasy Team cell is blank for a week the player spent entirely
+    unrostered -- there is no team to blame, and the Breakdown says so by
+    putting the whole number under 'unrostered'. That also means the week
+    cell has no boxscore to link to, so it stays plain text.
+
+    The breakdown prints the three canonical terms plus what the player
+    actually banked that week. It deliberately does NOT carry CBS's
+    '% of career unused': that is a career framing, and at week grain it
+    would divide by a one-week denominator -- noisy where the player
+    barely played, and undefined for a week he was never active at all.
+    """
+    # All-time block, so the week carries its season -- the same
+    # "{period}: {season}" convention the matrix's all-time side uses.
+    # Without it a 2025 'Week 2' sits beside a 2026 'Week 12' with nothing
+    # to tell them apart.
+    season = entry.get('season_year')
+    if week_label and season:
+        week_label = f'{week_label}: {season}'
+    return [
+        _bref_player_cell(entry),
+        entry.get('team_abbrev') or '',
+        _period_boxscore_formula(
+            week_label, league_id, season,
+            entry.get('matchup_period'), entry.get('team_id'),
+        ),
+        _one_decimal(entry.get('stat_value')),
+        # Explicit .1f rather than _one_decimal: the parts arrive as a mix
+        # of ints (a COALESCEd zero) and floats, and round() preserves that,
+        # so the column would read '0 unrostered · 41.6 bench/IL'.
+        ' · '.join(
+            f"{float(entry.get(key) or 0):.1f} {label}"
+            for key, label in (
+                ('unrostered_points', 'unrostered'),
+                ('benched_points', 'bench/IL'),
+                ('negative_active_points', 'negative'),
+                ('active_points', 'active'),
+            )
+        ),
+    ]
+
+
 # Row-5 column headers, one side. Kyle 2026-07-17 restructure: a Total
 # column between Games and Active (= Active + Inactive under the tab's
 # filters), 'Active Points'/'Bench/IL Points' renamed Active/Inactive

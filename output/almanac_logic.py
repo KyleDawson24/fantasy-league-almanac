@@ -50,10 +50,18 @@ from almanac_render import (
     DRAFT_ALLTIME_CELLS_LABEL,
     DRAFT_TAB,
     DRAFT_VALUE_HEADER,
+    RECORDS_HALL_BANNER,
+    RECORDS_HALL_DETAIL_HEADER,
+    RECORDS_HALL_OF_FAME_CAPTION,
+    RECORDS_HALL_OF_FAME_CAPTION_COL,
+    RECORDS_HALL_OF_SHAME_CAPTION,
+    RECORDS_HALL_OF_SHAME_CAPTION_COL,
     RECORDS_HEADER,
     RECORDS_MATRIX_DETAIL_HEADER,
     RECORDS_MATRIX_WIDTH,
     RECORDS_TAB,
+    format_hall_of_fame_cells,
+    format_hall_of_shame_cells,
     TEAM_HISTORY_DETAIL_HEADER,
     TEAM_HISTORY_ALLTIME_DETAIL_HEADER,
     TEAM_HISTORY_BEST_SEASON_BANNER,
@@ -1593,8 +1601,13 @@ def build_team_weeks_tab_rows(team_week_rows, stat_specs, league_id=None,
 
 
 def build_records_tab_rows(all_time_records, current_season_records, league_id=None,
-                           display_map=None, schedule_lookup=None, record_specs=None):
-    """Build the almanac Records tab as a side-by-side record book."""
+                           display_map=None, schedule_lookup=None, record_specs=None,
+                           hall_of_fame=None, hall_of_shame=None):
+    """Build the almanac Records tab as a side-by-side record book.
+
+    MLB-164: the two Halls are appended below the matrix when their rows are
+    supplied. They are optional so a caller that only wants the record matrix
+    (and the tests that inject synthetic records) is unaffected."""
     display_map = display_map or stat_catalog.get_display_map()
     schedule_lookup = schedule_lookup or records.load_schedule_lookup()
     record_specs = record_specs or [
@@ -1661,8 +1674,72 @@ def build_records_tab_rows(all_time_records, current_season_records, league_id=N
             rows.extend(section_rows)
             rows.append([])
 
+    hall_rows = _records_hall_rows(
+        hall_of_fame, hall_of_shame,
+        league_id=league_id, schedule_lookup=schedule_lookup,
+    )
+    if hall_rows:
+        # The last matrix section already left a blank row behind it; keep
+        # that as the separator rather than stacking a second one.
+        if rows and rows[-1] != []:
+            rows.append([])
+        rows.extend(hall_rows)
+
     if rows and rows[-1] == []:
         rows.pop()
+    return rows
+
+
+def _records_hall_rows(hall_of_fame, hall_of_shame, league_id=None,
+                       schedule_lookup=None):
+    """The Franchise Hall of Fame | Wasted Hall of Shame block (MLB-164).
+
+    Additive: the team-grain 'Most Wasted Points' line already in Score
+    Records stays exactly where it is. It answers a different question --
+    which TEAM left the most on the bench in one week -- and this block
+    answers which PLAYER-week was wasted worst, at a grain where the
+    unrostered term is actually attributable. Two surfaces, two grains,
+    both correct.
+
+    The two Halls are independent lists rendered side by side, so the
+    block runs as deep as the longer one and the shorter one's cells go
+    blank -- the CBS treatment. Depths differ on purpose: the Hall of
+    Fame is cut in the fetch, while the Hall of Shame inherits
+    mart_stat_leaderboard's own rank <= 10, a cutoff shared with every
+    other leaderboard consumer (and with the CBS book) and therefore not
+    this ticket's to move.
+    """
+    hall_of_fame = list(hall_of_fame or ())
+    hall_of_shame = list(hall_of_shame or ())
+    if not hall_of_fame and not hall_of_shame:
+        return []
+
+    schedule_lookup = schedule_lookup or records.load_schedule_lookup()
+    banner = list(RECORDS_HALL_BANNER)
+    banner[RECORDS_HALL_OF_FAME_CAPTION_COL] = (
+        RECORDS_HALL_OF_FAME_CAPTION.format(n=len(hall_of_fame)))
+    banner[RECORDS_HALL_OF_SHAME_CAPTION_COL] = (
+        RECORDS_HALL_OF_SHAME_CAPTION.format(n=len(hall_of_shame)))
+
+    # No leading blank row here -- the caller owns the separator, because
+    # only it can see whether the matrix already left one behind.
+    rows = [banner, list(RECORDS_HALL_DETAIL_HEADER)]
+    for index in range(max(len(hall_of_fame), len(hall_of_shame))):
+        left = ['', '', '', '', '', '']
+        if index < len(hall_of_fame):
+            left = format_hall_of_fame_cells(hall_of_fame[index], index + 1)
+        right = ['', '', '', '', '']
+        if index < len(hall_of_shame):
+            entry = hall_of_shame[index]
+            right = format_hall_of_shame_cells(
+                entry,
+                league_id=league_id,
+                week_label=records.format_week_label(
+                    entry.get('season_year'), entry.get('matchup_period'),
+                    schedule_lookup,
+                ),
+            )
+        rows.append([*left, '', *right])
     return rows
 
 

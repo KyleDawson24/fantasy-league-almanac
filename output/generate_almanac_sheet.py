@@ -89,6 +89,8 @@ def main():
         almanac_sheets.get_almanac_records('all_time'),
         almanac_sheets.get_almanac_records('current_season'),
         league_id=league_id,
+        hall_of_fame=almanac_sheets.get_franchise_hall_of_fame(),
+        hall_of_shame=almanac_sheets.get_wasted_hall_of_shame('all_time'),
     )
     team_week_stat_specs = almanac_sheets.get_team_week_stat_specs()
     team_weeks_rows = almanac_sheets.build_team_weeks_tab_rows(

@@ -31,6 +31,7 @@ from datetime import datetime
 import requests
 
 from db import league_predicate, listagg, query_snowflake
+from formatters import TOP_SCORER_STAT_DISPLAY
 import records
 
 
@@ -2293,6 +2294,211 @@ def get_wasted_points_records(scope):
     for row in rows:
         row['contributors'] = []
     return rows
+
+
+# ---------------------------------------------------------------------------
+# MLB-164: the two Halls. ESPN's answer to the CBS book's Franchise Hall of
+# Fame and Wasted Hall of Shame -- an MLB-160 D-class missing-surface
+# asymmetry. Both are ALL-TIME only, as on CBS: they are career/history
+# blocks, not a current-vs-all-time matrix, so they sit below the record
+# matrix rather than inside it.
+# ---------------------------------------------------------------------------
+
+
+def get_franchise_hall_of_fame(limit=25):
+    """Top player-x-franchise careers by ACTIVE points -- a player's run
+    WITH one team, not his whole league career.
+
+    Substrate is fct_player_season_performance, the same career brick the
+    per-team history tabs read (get_team_roster_history_stats' active_
+    totals), so a Hall row equals that team page's number for the same
+    player. Deliberately NOT is_abnormal-filtered: the Records matrix
+    filters short weeks because a PEAK mark from a 10-day week isn't
+    comparable to one from a 7-day week, but a career total has no such
+    problem -- every player-franchise pair is summed over the same
+    calendar, and dropping weeks would just under-report the run.
+
+    Franchise identity is team_id, labelled with MAX_BY(team_abbrev,
+    season_year) -- the house all-time convention (get_team_standings_
+    alltime, and the per-team tabs group the same way). That folds 2025's
+    '####' sentinel team 7 into its current label rather than printing the
+    holding-pen token, which is why CBS's explicit '####' skip has no
+    counterpart here: on ESPN the canonical-label rule already resolves it.
+
+    MLB-128: 6dp + ORDER BY the grain. These totals are re-rounded for
+    display, so rounding to 1dp here would be a double round, and the
+    tie-break spelled out below only settles exact ties -- points decide
+    everything else. Without it Python's stable sort falls back to the
+    warehouse's row order, which has no guarantee and changes on rebuild,
+    so two level players would swap between renders and one could fall off
+    the [:limit] cut entirely.
+    """
+    # Stat columns are driven off the shared top-scorer display map rather
+    # than hand-listed, so the Hall's stat line can never quietly fall
+    # behind a stat the rest of the book already surfaces. Both the count
+    # and its *_pts sibling are carried: format_top_scorer_stats_line ranks
+    # by POINT CONTRIBUTION, not raw magnitude, and the rate helpers read
+    # the counts (ab/h/b_bb/hbp/sf/tb, outs/er/p_h/p_bb -- all present in
+    # the map already). Names are house constants, but they are being
+    # interpolated into SQL, so they get the same guard as the standings
+    # stat columns.
+    stat_keys = sorted(TOP_SCORER_STAT_DISPLAY)
+    for column in stat_keys:
+        if not re.match(r'^[a-z][a-z0-9_]*$', column):
+            raise ValueError(f"Unsafe stat column name: {column!r}")
+    stat_select = ',\n                '.join(
+        f'SUM({c}) AS {c}, SUM({c}_pts) AS {c}_pts' for c in stat_keys)
+    return query_snowflake(f"""
+        WITH totals AS (
+            SELECT
+                player_id,
+                team_id,
+                MAX(player_name)  AS player_name,
+                MAX(display_name) AS display_name,
+                COUNT(DISTINCT season_year) AS service_years,
+                ROUND(CAST(SUM(CAST(calculated_points AS DECIMAL(18, 6)))
+                      AS DOUBLE), 6) AS active_points,
+                {stat_select}
+            FROM fct_player_season_performance
+            WHERE {league_predicate()}
+              AND performance_status = 'active'
+              AND team_id IS NOT NULL
+            GROUP BY player_id, team_id
+        ),
+
+        -- Canonical franchise label: the most recent season's abbrev for
+        -- that team_id, so a renamed franchise reads under one banner.
+        labels AS (
+            SELECT
+                team_id,
+                MAX_BY(team_abbrev, season_year) AS team_abbrev,
+                MAX_BY(team_name, season_year)   AS team_name
+            FROM fct_player_season_performance
+            WHERE {league_predicate()}
+              AND team_id IS NOT NULL
+            GROUP BY team_id
+        )
+
+        SELECT t.*, l.team_abbrev, l.team_name
+        FROM totals t
+        JOIN labels l ON l.team_id = t.team_id
+        WHERE t.active_points > 0
+        ORDER BY t.active_points DESC, t.player_id, t.team_id
+        LIMIT {int(limit)}
+    """)
+
+
+def get_wasted_hall_of_shame(scope='all_time'):
+    """The worst wasted player-WEEKS, ranked, with their three terms broken out.
+
+    The ranking and the wasted TOTAL both come from mart_stat_leaderboard's
+    player grain (entity_grain='player', performance_status='inactive'),
+    which MLB-135 built as the canonical three-term sum -- unrostered +
+    benched + negative-active, one row per player-week, zero-waste rows
+    already filtered. Nothing is re-derived here: the parts are attached
+    only so the block can SHOW the decomposition, and the caller asserts
+    they still add up to the mart's number.
+
+    Grain note, and the one real divergence from CBS: CBS's Hall of Shame
+    ranks CAREERS because that book is a season-long points league with two
+    decades of history. This one ranks player-WEEKS because the mart holds
+    them at week grain and because ESPN is a weekly head-to-head league --
+    every other record on this tab is a single-week mark, so a week-grained
+    Hall is the ESPN-native expression of the same idea, not a compromise.
+    Depth follows the mart's own rank <= 10 cutoff (raising it would mean
+    editing a model both books read).
+
+    A week the player spent entirely on the wire carries no team_id at all,
+    and naming one would invent a benching that never happened -- those rows
+    render blank. Where there IS a team, it is labelled through the same
+    canonical MAX_BY(team_abbrev, season_year) rule the Hall of Fame uses,
+    so one franchise-identity rule covers the whole tab: without it the mart's
+    per-week abbrev prints 2025's '####' holding-pen token for team 7 in one
+    block while the other block calls the same franchise 'AAA'.
+    """
+    return query_snowflake(f"""
+        WITH labels AS (
+            SELECT
+                team_id,
+                MAX_BY(team_abbrev, season_year) AS team_abbrev,
+                MAX_BY(team_name, season_year)   AS team_name
+            FROM fct_player_season_performance
+            WHERE {league_predicate()}
+              AND team_id IS NOT NULL
+            GROUP BY team_id
+        ),
+
+        ranked AS (
+            SELECT
+                rank, season_year, matchup_period,
+                player_id, player_name, display_name,
+                team_id, team_name, team_abbrev,
+                owner_display AS owner_name,
+                stat_value
+            FROM mart_stat_leaderboard
+            WHERE record_scope       = %s
+              AND entity_grain       = 'player'
+              AND performance_status = 'inactive'
+              AND stat_name          = 'WASTED_POINTS'
+              AND record_direction   = 'most'
+              AND {league_predicate()}
+        ),
+
+        -- The two inactive terms, split by bucket, exactly as the mart's
+        -- player_wasted_inactive_parts CTE splits them. DECIMAL-summed so
+        -- the parts are order-independent like the mart's stable_sum.
+        inactive_parts AS (
+            SELECT
+                season_year, matchup_period, player_id,
+                ROUND(CAST(SUM(CAST(CASE WHEN wasted_bucket = 'FA'
+                          THEN calculated_points ELSE 0 END
+                      AS DECIMAL(18, 6))) AS DOUBLE), 6) AS unrostered_points,
+                ROUND(CAST(SUM(CAST(CASE WHEN wasted_bucket = 'ROSTERED_INACTIVE'
+                          THEN calculated_points ELSE 0 END
+                      AS DECIMAL(18, 6))) AS DOUBLE), 6) AS benched_points
+            FROM fct_player_weekly_inactive_performance
+            WHERE is_abnormal = false
+              AND {league_predicate()}
+            GROUP BY season_year, matchup_period, player_id
+        ),
+
+        -- The third term, plus what the player DID bank that week, which
+        -- is what makes the percentage readable.
+        active_parts AS (
+            SELECT
+                season_year, matchup_period, player_id,
+                ROUND(CAST(SUM(CAST(negative_points AS DECIMAL(18, 6)))
+                      AS DOUBLE), 6) AS negative_active_points,
+                ROUND(CAST(SUM(CAST(calculated_points AS DECIMAL(18, 6)))
+                      AS DOUBLE), 6) AS active_points
+            FROM fct_player_weekly_active_performance
+            WHERE is_abnormal = false
+              AND {league_predicate()}
+            GROUP BY season_year, matchup_period, player_id
+        )
+
+        SELECT
+            r.rank, r.season_year, r.matchup_period,
+            r.player_id, r.player_name, r.display_name,
+            r.team_id, r.owner_name, r.stat_value,
+            COALESCE(lb.team_abbrev, r.team_abbrev) AS team_abbrev,
+            COALESCE(lb.team_name, r.team_name)     AS team_name,
+            COALESCE(i.unrostered_points, 0)      AS unrostered_points,
+            COALESCE(i.benched_points, 0)         AS benched_points,
+            COALESCE(a.negative_active_points, 0) AS negative_active_points,
+            COALESCE(a.active_points, 0)          AS active_points
+        FROM ranked r
+        LEFT JOIN labels lb ON lb.team_id = r.team_id
+        LEFT JOIN inactive_parts i
+            ON  i.season_year    = r.season_year
+            AND i.matchup_period = r.matchup_period
+            AND i.player_id      = r.player_id
+        LEFT JOIN active_parts a
+            ON  a.season_year    = r.season_year
+            AND a.matchup_period = r.matchup_period
+            AND a.player_id      = r.player_id
+        ORDER BY r.rank
+    """, (scope,))
 
 
 

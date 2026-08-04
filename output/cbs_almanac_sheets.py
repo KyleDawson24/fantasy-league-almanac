@@ -104,6 +104,20 @@ HOME_TAB = 'Home'
 RECORDS_TAB = 'Records'
 STANDINGS_TAB = 'Advanced Standings'
 DRAFT_TAB = 'Draft Recap'
+# ESPN's Matchup History at the grain this league actually plays (MLB-163):
+# a season-long points league has no matchups, so the row is a team-SEASON
+# and W-L becomes Outscored / Outscored By. Rides at the END of the book,
+# after the team tabs (Kyle 2026-08-05) -- appendix, not dashboard.
+SEASON_HISTORY_TAB = 'Season History'
+
+# The league-wide tabs, i.e. "everything that is not a team page". The
+# writer decides freeze depth, column widths and whether to unmerge by
+# asking whether a title is in here, so a new league-wide tab that is
+# left out silently gets TEAM-tab treatment -- a 5-row freeze and the
+# team widths -- and still renders. Add new tabs here, not to three
+# separate negated tuples.
+_LEAGUE_WIDE_TABS = (HOME_TAB, RECORDS_TAB, STANDINGS_TAB, DRAFT_TAB,
+                     SEASON_HISTORY_TAB)
 
 # The league's active-lineup shape, verbatim from the captured rules
 # (roster.positions): 19 active = C/1B/2B/3B/SS + OF*3 + DH + U + P*9.
@@ -541,10 +555,22 @@ def get_historic_finishes():
     per (season, franchise), champions flagged, with per-season names
     (names drift; franchise_id is the spine). division_name rides along
     so the builder can crown division champions (best league rank within
-    the division that season)."""
+    the division that season).
+
+    THE AWARDED-LENS SEAM (MLB-148 / MLB-163). Every column here is what
+    CBS itself published on its year-end standings page -- the platform's
+    awarded values, not the walk-back's reconstruction. Season History
+    reads this and nothing else, which is the whole point: at season
+    grain the awarded number IS the canonical outcome, and the
+    reconstructed default disagrees with it on 307 of 395 team-seasons
+    (it would hand 15 of 25 championships to the wrong team, and it
+    would render perfectly while doing it). The batting/pitching split
+    and points_behind joined the select for that tab; the Standings tab
+    reads this same list by key and ignores the additions."""
     return query_snowflake(
         f"SELECT season_year, franchise_id, team_name, division_name,"
-        f"       standings_rank, is_champion, total_points, teams_in_season"
+        f"       standings_rank, is_champion, batting_points, pitching_points,"
+        f"       total_points, points_behind, teams_in_season"
         f" FROM stg_cbs__ui_standings"
         f" WHERE {league_predicate()}"
         f" ORDER BY season_year, standings_rank"
@@ -3038,6 +3064,11 @@ def build_home_rows(context, nav_targets=None):
                            for t in team_titles[i:i + 2])])
     left.append([home_nav_link(DRAFT_TAB, DRAFT_TAB, nav_targets),
                  'Every recorded draft: 2026 recap + all-time pick value.'])
+    # Last in the nav because it is last in the book (Kyle 2026-08-05).
+    left.append([home_nav_link(SEASON_HISTORY_TAB, SEASON_HISTORY_TAB,
+                               nav_targets),
+                 'Every team-season since '
+                 f'{context["first_season"]}, as awarded.'])
     left.append([])
     left.append(['Points Glossary & Documentation'])
     left.extend([term, definition] for term, definition in _CBS_GLOSSARY)
@@ -4465,6 +4496,173 @@ def build_draft_recap_rows(season_year, franchise_map, value_lens='calc_total',
     return rows, formats
 
 
+# ---------------------------------------------------------------------------
+# Season History (MLB-163)
+# ---------------------------------------------------------------------------
+
+_SEASON_HISTORY_HEADER = [
+    'Season', 'Franchise', 'Team That Season', 'Finish', 'Teams',
+    'Batting Points', 'Pitching Points', 'Total Points', 'Behind Leader',
+    'Outscored', 'Outscored By', 'Ties',
+    'Lg Avg Bat', 'Lg Avg Pitch', 'Lg Avg Total',
+]
+_SEASON_HISTORY_LAST_COL = 'O'
+
+
+def season_outscored_counts(season_rows):
+    """One season's rows -> [(outscored, outscored_by, ties)] positionally.
+
+    The W-L analog for a league that never plays a matchup (Kyle, ruled
+    2026-07-31): `Outscored` is how many teams this one finished ahead of
+    on season points, `Outscored By` how many finished ahead of it, and an
+    exact tie counts in NEITHER. So the winner of a 16-team season reads
+    15-0, and the invariant is
+
+        outscored + outscored_by + ties = N - 1
+
+    -- never `outscored + outscored_by = N - 1`, which a real tie would
+    trip. 2024 is that tie: Mesa Joses and Betty White Sox both finished
+    on 9156, and CBS itself awarded them joint rank 3 (the next team is
+    rank 5). Each reads 13-2 with one tie; 13 + 2 = 15 only after the tie
+    is added back.
+
+    Two properties the ruling asked for, both structural rather than
+    defended by a test alone:
+
+      - EXACT comparison. The values are the platform's own awarded
+        season totals, read straight from one column -- there is no
+        summation here, so there is nothing for float error to enter
+        through and no tolerance to justify. `==` on the stored value is
+        the comparison, and it is the strictest one available.
+      - ORDER-INDEPENDENT. Each team is counted against the whole field
+        rather than against its neighbours in some sort, so the answer
+        does not inherit the order rows arrived in. Feeding this the same
+        season shuffled returns the same counts.
+
+    A None total raises rather than silently counting as a loss: the
+    source column is not-null across all 395 team-seasons, and a
+    miscount here would be invisible on the rendered tab.
+    """
+    totals = [r['total_points'] for r in season_rows]
+    counts = []
+    for row in season_rows:
+        mine = row['total_points']
+        counts.append((
+            sum(1 for t in totals if t < mine),
+            sum(1 for t in totals if t > mine),
+            sum(1 for t in totals if t == mine) - 1,   # less self
+        ))
+    return counts
+
+
+def build_season_history_rows(context, finishes, franchise_map):
+    """Season History: (rows, formats).
+
+    ESPN's Matchup History, re-grained. That tab is one row per team per
+    MATCHUP; this league scores season-long and has no matchups, so the
+    row is one team-SEASON and the W-L pair becomes Outscored / Outscored
+    By (MLB-163; an F-class adaptation for the MLB-160 ledger -- the
+    analog exists, the grain differs by necessity).
+
+    EVERY NUMBER ON THIS TAB IS AWARDED, NOT RECONSTRUCTED. Kyle ruled
+    the primacy question on 2026-08-01: reconstructed everywhere except
+    where it decides a canonical outcome, and "which team had the most
+    points in their season" is exactly that. So the points columns are
+    CBS's own year-end published totals via `get_historic_finishes`, and
+    the reconstructed lens the rest of the book runs on never touches
+    this tab. The two disagree enough to matter -- see that function.
+
+    Two divergences from the ESPN analog, both forced by the grain:
+      - No Sort Key column. ESPN needs one because its Matchup cell is a
+        =HYPERLINK the sheet cannot sort by; Season is a plain number.
+      - No stat line. The platform only ever published season TOTALS for
+        this league (per-day platform points do not exist for historic
+        seasons), so the awarded lens has points and nothing else. A
+        reconstructed stat line could be rendered here and would be the
+        precise mistake the ruling forbids.
+
+    Closed seasons only. The in-flight season is not on this tab because
+    it has no canonical outcome yet -- its Outscored count changes
+    daily -- and because the awarded source stops at the last completed
+    year. The current race lives on Advanced Standings, which carries it
+    as its own column and counts it toward nothing, the same convention.
+    """
+    rows, formats = [], []
+    fmap = franchise_map or {}
+
+    def _canon_name(fid, fallback):
+        meta = fmap.get(int(fid)) or {}
+        return meta.get('name') or fallback
+
+    by_season = {}
+    for r in finishes:
+        by_season.setdefault(int(r['season_year']), []).append(r)
+    seasons = sorted(by_season, reverse=True)     # newest first, as ESPN's
+    era = f'{min(by_season)}–{max(by_season)}' if by_season else ''
+
+    rows.append([SEASON_HISTORY_TAB])
+    formats.append({'range': f'A1:{_SEASON_HISTORY_LAST_COL}1',
+                    'format': {'textFormat': {'bold': True, 'fontSize': 14}}})
+    rows.append([f'Every finished season, {era}, as the league itself '
+                 f'published it.'])
+    formats.append({'range': f'A2:{_SEASON_HISTORY_LAST_COL}2',
+                    'format': {'textFormat': {'italic': True},
+                               'backgroundColor': _PALE_BLUE}})
+    # House explainer token (MLB-170): italic, size 9, never bold.
+    rows.append(['Outscored = teams this one finished ahead of on points; '
+                 'Outscored By = teams ahead of it. An exact tie counts in '
+                 'neither, so the two plus Ties always make one less than '
+                 'Teams. Points are the platform\'s awarded season totals, '
+                 'not the calculated lens used elsewhere in this book.'])
+    formats.append({'range': f'A3:{_SEASON_HISTORY_LAST_COL}3',
+                    'format': {'textFormat': explainer_text_format()}})
+    rows.append([])
+
+    rows.append(list(_SEASON_HISTORY_HEADER))
+    header_row = len(rows)
+    formats.append({'range': f'A{header_row}:{_SEASON_HISTORY_LAST_COL}{header_row}',
+                    'format': {'textFormat': {'bold': True,
+                                              'foregroundColor': _WHITE},
+                               'backgroundColor': _NAVY}})
+
+    first_data = header_row + 1
+    for year in seasons:
+        season_rows = by_season[year]
+        counts = season_outscored_counts(season_rows)
+        n = len(season_rows)
+        avg_bat = sum(r['batting_points'] for r in season_rows) / n
+        avg_pit = sum(r['pitching_points'] for r in season_rows) / n
+        avg_tot = sum(r['total_points'] for r in season_rows) / n
+        # Rank order within the season, ties keeping the platform's own
+        # joint rank -- the tiebreak is franchise_id purely so the row
+        # order is stable between rebuilds (MLB-128's habit).
+        order = sorted(range(n),
+                       key=lambda i: (int(season_rows[i]['standings_rank']),
+                                      int(season_rows[i]['franchise_id'])))
+        for i in order:
+            r = season_rows[i]
+            outscored, outscored_by, ties = counts[i]
+            finish = int(r['standings_rank'])
+            rows.append([
+                year,
+                _canon_name(r['franchise_id'], r['team_name']),
+                r['team_name'],
+                f'🏆 {finish}' if r['is_champion'] else finish,
+                int(r['teams_in_season']),
+                _whole(r['batting_points']), _whole(r['pitching_points']),
+                _whole(r['total_points']), _whole(r['points_behind']),
+                outscored, outscored_by, ties,
+                _whole(avg_bat), _whole(avg_pit), _whole(avg_tot),
+            ])
+    last_data = len(rows)
+
+    # Everything right of the two name columns is a number: center it,
+    # header included, the finishes-matrix convention.
+    formats.append({'range': f'D{header_row}:{_SEASON_HISTORY_LAST_COL}{last_data}',
+                    'format': {'horizontalAlignment': 'CENTER'}})
+    return rows, formats
+
+
 def build_all_tabs(nav_targets=None):
     """Assemble every tab: [(title, rows, formats)], Home first, then
     Records, Standings, and one page per active franchise in current-
@@ -4578,13 +4776,21 @@ def build_all_tabs(nav_targets=None):
     draft = build_draft_recap_rows(
         season, _fmap,
         season_clocks={r['season_year']: r['days'] for r in get_season_gameplay_days()})
+    # Awarded lens end to end -- the same finishes rows the Standings tab
+    # crowns champions from, which are CBS's own published season totals.
+    season_history = build_season_history_rows(context, finishes, _fmap)
 
     # Third element: the team-tab title set -- the writer bulk-writes those
     # tabs RAW (zero-padded rate strings survive) + reapplies '=' formulas,
     # exactly like the ESPN team tabs.
     team_titles = {title for title, _, _ in team_tabs}
+    # Season History rides LAST, after the team tabs (Kyle 2026-08-05):
+    # it reads as an appendix, not a dashboard. This list IS the CBS
+    # book's tab order -- unlike the ESPN writer there is no separate
+    # sort pass, so position here is position in the workbook.
     return ([(HOME_TAB, *home), (RECORDS_TAB, *records),
              (STANDINGS_TAB, *standings), (DRAFT_TAB, *draft)] + team_tabs
+            + [(SEASON_HISTORY_TAB, *season_history)]
             ), link_map, team_titles
 
 
@@ -4764,7 +4970,7 @@ def _write_tab(spreadsheet, title, rows, formats, value_input_option='RAW',
     # exactly the cells that land off-anchor (the ESPN Trades tab's
     # vanishing dates, 2026-07-29). Unmerge BEFORE the values write on
     # any tab that merges; the style pass re-merges after.
-    if (title not in (HOME_TAB, RECORDS_TAB, STANDINGS_TAB, DRAFT_TAB)
+    if (title not in _LEAGUE_WIDE_TABS
             or any(spec.get('merge') for spec in formats or ())):
         _sheets_call(
             f'unmerge {title}',
@@ -4957,6 +5163,13 @@ _TEAM_WIDTHS = [(0, 1, 25), (1, 2, 75), (3, 4, 40), (4, 5, 50), (5, 6, 50),
 # 16-column board (2026 teams / all-time slots).
 _DRAFT_WIDTHS = [(0, 1, 25), (1, 3, 40), (3, 4, 125), (4, 5, 75),
                  (5, 6, 40), (6, 22, 100)]
+# Season History: A Season narrow, B/C the two name columns (canonical +
+# as-captured, both need room for full CBS team names), D-O the numbers.
+# The three Lg Avg columns sit last and repeat per season, so they get the
+# same narrow treatment as the counts.
+_SEASON_HISTORY_WIDTHS = [(0, 1, 60), (1, 2, 165), (2, 3, 165), (3, 4, 55),
+                          (4, 5, 55), (5, 8, 95), (8, 9, 95), (9, 12, 80),
+                          (12, 15, 85)]
 
 
 def _tab_style_requests(sheet_gid, title, formats):
@@ -4967,7 +5180,7 @@ def _tab_style_requests(sheet_gid, title, formats):
     header band, the builder's cell formats, and column widths."""
     # Team tabs freeze through the column-header band (5, like ESPN's
     # worksheet.freeze(rows=5)); the dashboard tabs keep the 2-row band.
-    is_team_tab = title not in (HOME_TAB, RECORDS_TAB, STANDINGS_TAB, DRAFT_TAB)
+    is_team_tab = title not in _LEAGUE_WIDE_TABS
     requests = [{
         'repeatCell': {
             'range': {'sheetId': sheet_gid},   # whole sheet
@@ -5101,6 +5314,8 @@ def _tab_style_requests(sheet_gid, title, formats):
         widths = _STANDINGS_WIDTHS
     elif title == DRAFT_TAB:
         widths = _DRAFT_WIDTHS
+    elif title == SEASON_HISTORY_TAB:
+        widths = _SEASON_HISTORY_WIDTHS
     else:
         widths = _TEAM_WIDTHS
     requests.extend({

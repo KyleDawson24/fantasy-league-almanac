@@ -450,7 +450,19 @@ ESPN tab that first line is week-17 data drift — not the flip:**
 | `baseline_records_report.txt` | `Hits: 89 … Week 10` → `90 … Week 17` | **known-stale** — the exact drift handoff §5 names |
 | `Home.tsv` | `leagueId=1156117086` → `leagueId=0` | **ANOMALY — see below** |
 
-**So the flip's own diffs cannot be attributed byte-wise tonight: they are
+**The CBS book gives the cleanest evidence in the whole gate.** Every CBS
+diff is 2026 stat accrual — game counts, points, and the coverage
+percentages in the tab headers ("captured live (18%)" → "(19%)",
+"reconstructed from the transaction log (72%)" → "(71%)"). And in every
+diffed line **the club column is byte-identical**: William Contreras still
+MIL, Bryce Harper still PHI, Ben Rice still NYY, Jonathan India still KC,
+Brandon Lowe still PIT. Only the numbers beside them moved.
+
+That is byte-level confirmation of the design claim "CBS rows untouched" —
+stronger than the code-reading argument, because it is measured on the
+rendered output of all 14 franchise tabs.
+
+**So the flip's own ESPN diffs cannot be attributed byte-wise tonight: they are
 buried underneath two weeks of drift.** The fixture is anchored ~Jul 27 and
 week 17 has since landed, so the first diff on every file fires before the
 affinity chart is ever reached. This is not a new problem and not caused by

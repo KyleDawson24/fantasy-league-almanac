@@ -17,12 +17,30 @@ from datetime import date, datetime
 from pathlib import Path
 
 import pytest
+from dotenv import load_dotenv
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
 # extract.py reads LEAGUE_ID at import time. Present in Kyle's .env, absent
 # in a fresh clone -- setdefault covers the clone without overriding a real
 # value. Nothing under test consumes it.
+#
+# load_dotenv() FIRST, and that is not belt-and-braces. The setdefault below
+# protects a "real value" that is never present at this point: pytest does
+# not call load_dotenv(), so LEAGUE_ID is unset in the pytest process no
+# matter what .env says, and setdefault therefore always fired. That value
+# then leaked out of this module and into the whole session, because
+# collection imports every test module and test_almanac_byte_diff spawns its
+# render with env=dict(os.environ, ...). The child's own load_dotenv() could
+# not undo it -- load_dotenv does not override an existing variable -- so
+# every ESPN box-score hyperlink in that render came out as leagueId=0
+# against a fixture holding the real id.
+#
+# The teeth: the documented re-anchor command is
+# `REGENERATE_BASELINES=1 pytest tests/ -m warehouse`, i.e. exactly the
+# invocation that leaks. Re-anchoring through it would have written
+# leagueId=0 into the golden corpus permanently.
+load_dotenv()
 os.environ.setdefault("LEAGUE_ID", "0")
 
 _spec = importlib.util.spec_from_file_location(

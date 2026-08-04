@@ -133,36 +133,73 @@ rule — credit production to the club of the game — and differ only in
 resolution: ESPN attributes at player-DAY grain (one `clubOfGame` scalar per
 entry), CBS at player-GAME grain.
 
-**Genuine two-club days DO exist here** — the Youngblood class is real in 26
-seasons. 10 player-days in the MLB spine carry two clubs:
+### The two-club days: SUSPENDED GAMES, not Youngbloods
 
-| date | mlbam | clubs | shape |
-|---|---|---|---|
-| 2008-04-28 | 115135 | White Sox \| Reds | genuine (2 game_pks) |
-| 2009-05-05 | 460579 | Pirates \| Nationals | genuine |
-| 2019-05-19 | 518617 | Royals \| Athletics | genuine |
-| 2021-04-11 | 595879 | Cubs \| Mets | genuine |
-| 2021-07-21 | 543339 | Padres \| Nationals | genuine (also hitting+pitching) |
-| 2021-07-21 | 624585 | Braves \| Royals | genuine |
-| 2021-07-21 | 545350 | Cubs \| Padres | genuine |
-| 2021-07-21 | 594807 | Braves \| Marlins | genuine |
-| 2024-06-26 | 694388 | Astros \| Blue Jays | genuine |
-| 2024-06-26 | 643376 | Red Sox \| Blue Jays | **ARTIFACT — one game_pk** |
+**CORRECTION (Kyle, 08-04).** An earlier draft of this section called these
+"9 real Youngbloods". That was wrong, and wrong in a way worth recording:
+a Youngblood — hits for two clubs in two cities on one day, Joel Youngblood
+1982-08-04 — is a once-ever event that predates this league. Nine of them in
+one league's player pool is not credible on its face, and the claim came
+from verifying a *structural shape* (two `game_pk`s, two `team_id`s) and
+then labelling it with a term that means something far stronger.
 
-**5 of the 10 carry real CBS chart weight** and are credited to both clubs
-correctly.
+**There are ZERO Youngbloods here.** Enumerated with names:
 
-### Flagged, not fixed: one spine defect
+| date | player | real club that day | second club | traded there |
+|---|---|---|---|---|
+| 2008-04-28 | Ken Griffey Jr. | Reds | White Sox | Jul 31 |
+| 2009-05-05 | Nyjer Morgan | Pirates | Nationals | Jun 30 |
+| 2019-05-19 | Jake Diekman | Royals | Athletics | Jul 27 |
+| 2021-04-11 | Javier Báez | Cubs | Mets | Jul 30 |
+| 2021-07-21 | Daniel Hudson | Nationals | Padres | Jul 30 |
+| 2021-07-21 | Jake Marisnick | Cubs | Padres | Jul 30 |
+| 2021-07-21 | Adam Duvall | Marlins | Braves | Jul 30 |
+| 2021-07-21 | Jorge Soler | Royals | Braves | Jul 30 |
+| 2024-06-26 | Joey Loperfido | Astros | Blue Jays | Jul 2024 |
+| 2024-06-26 | Danny Jansen | Blue Jays | Red Sox | Jul 2024 |
 
-`mlbam 643376` on 2024-06-26 appears under **both** Toronto (141) and Boston
-(111) inside a single `game_pk` (746942) — listed as his own opponent, 20
-stat rows each side. That is a data defect in `stg_mlb__player_game`, not a
-two-club day.
+In every row the second club is the one the player was traded to **later
+that season**, so he cannot have played for it on that date.
 
-**It is inert today**: measured `active_weight = 0`, so it carries no chart
-weight on either book. Not fixed here — it is outside the flip's scope and
-fixing it would move CBS goldens for an unrelated cause. Worth its own
-ticket.
+**The mechanism is suspended games.** A suspended game keeps its ORIGINAL
+date; when it resumes weeks later, players acquired in the interim appear in
+a game dated before they joined. Soler's log proves it — game_index 86 =
+07-21 Royals, 87 = 07-21 Braves, then 88-92 = 07-23 through 07-27 **still
+for Kansas City**. And the Braves and Padres each carry TWO `game_pk`s on
+2021-07-21 (633224 and 633250). Padres @ Braves was suspended that day,
+which is why four of these cluster on one date: all four changed clubs at
+the same deadline.
+
+### Danny Jansen is the real one, and the earlier draft had it backwards
+
+`mlbam 643376` shows two clubs inside a SINGLE `game_pk` (746942), listed as
+his own opponent. The earlier draft called that "a data defect". It is not:
+the 2024-06-26 Blue Jays-Red Sox game was suspended with Jansen at bat for
+Toronto, he was traded to Boston, and when it resumed on 08-26 he played for
+Boston. **He is the only player in MLB history to appear for both teams in
+the same game.** The shape that looked most like corruption was the one
+genuine curiosity.
+
+### What this does and does not threaten
+
+**Club attribution is CORRECT in all ten.** Soler really did play that game
+for Atlanta, so the affinity chart credits the right club. There is no club
+defect here, and the CBS chart's per-game attribution handles it properly.
+
+**The DATE is what is wrong, and that is the real exposure.** Production
+from a resumed game is filed on the suspension date, so
+`fct_cbs_player_game_attribution` joins it to whoever rostered the player on
+the earlier date rather than the date he actually produced.
+
+**These ten are only the VISIBLE subset.** Any suspended-and-resumed game
+mis-dates its production, trade or no trade; the club change is merely what
+made these detectable. That general class is **not sized here**.
+
+Impact on what is visible: 5 of the 10 carry CBS chart weight, ~8 units of
+`active_weight` across 26 seasons — negligible, and no club is misattributed.
+The ESPN side sources club per scoring period rather than from the MLB
+spine, so it likely files these on the resumption date instead; **not
+verified**.
 
 ---
 
@@ -569,9 +606,12 @@ the diff attribution forced the question.
 4. **The Best Individual Seasons Team column** (§4): its comment justifies
    showing YEAR because "pro_team is only season-accurate on the CBS side".
    Now stale for ESPN, still true for CBS. Product call, not a defect.
-5. **The spine defect** (§3): `mlbam 643376` on 2024-06-26 recorded for both
-   Toronto and Boston in one `game_pk`. Zero weight today, so inert. Own
-   ticket?
+5. **Suspended-game dating** (§3, corrected): production from a resumed game
+   is filed on the SUSPENSION date, so it attributes to whoever rostered the
+   player then rather than when he actually produced. Club attribution is
+   unaffected. The ten two-club rows are only the visible subset — the
+   general class is unsized. Worth a ticket to size it? (Jansen is NOT a
+   defect; he is the one real same-game-both-teams case in MLB history.)
 6. **DuckDB data-level parity** needs a RAW refresh first (§7) — the local
    file predates the backfill.
 

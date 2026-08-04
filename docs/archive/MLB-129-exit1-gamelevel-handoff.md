@@ -2,8 +2,10 @@
 
 **Branch:** `exit1/game-level` (cut from `spike/mlb-129` @ e5bcb2a, PM-confirmed)
 **Run:** 2026-08-03, single session · **Commit:** 6133381
-**Scope held:** guard + additive field + backfill + verification. No chart, no
-mart, no render, no push. The affinity-chart flip remains wave-end ceremony.
+**Scope held:** guard + additive field + backfill + verification, then a
+Kyle-authorised dev render (§6) and two enumerations (§6, §7). No model, no
+sheet, no golden, no push — the render computes from RAW into a mock and
+lands nothing. The affinity-chart flip remains wave-end ceremony.
 
 ---
 
@@ -18,8 +20,14 @@ key per player entry and assigns nothing else. 194,946 keys added across all 326
 RAW rows; **zero** other differences against a pre-backfill clone.
 
 **Three checks came back numerically different from the kickoff's figures.** All
-three are explained, and I did not fix-forward past any of them — that needs
-your GO per the tripwire.
+three are expectation-calibration rather than data defects, and §3 shows the
+working for each. None was fixed-forward past; Kyle ruled on them after
+reading the evidence.
+
+**And the premise behind one of them turned out to be wrong in a useful
+direction.** The "24 units of two-club slivers" are not two-club at all. Real-
+vs-real is **empty across both seasons** (0 of 94, weight gate off), which
+re-rules what the attribution rule actually is — §7.
 
 ---
 
@@ -130,6 +138,11 @@ Attributing a player's production to the club of the game that produced it is
 the defensible rule. **I did not change anything to make this check pass** — it
 is reported as measured.
 
+**Resolved in §7.** The zero-`appliedTotal` split is not a game at all: it is
+the person-level stamp's shadow, an empty-`stats` split for the club ESPN's
+person record has already drifted to. All 13 are that one shape, and the
+backfill is right in all 13.
+
 ---
 
 ## 4. The guard, demonstrated
@@ -214,7 +227,157 @@ failures, unmoved," which is what was measured.
 
 ---
 
-## 6. Exact commands run
+## 6. The chart, dev-rendered post-flip (scope extension, Kyle 08-03)
+
+Computed directly from RAW at `get_team_affinity_weights`' exact grain and
+fed to a mock of the chart block — no model, no sheet, no golden. 2025 and
+2026 blocks, each paired with all-time. Rendered locally rather than
+published: the columns are real team abbrevs.
+
+### Measurement 1 — the Unattributed band goes to zero
+
+| scope | total weight | band post-flip | | band today |
+|---|---|---|---|---|
+| 2025 | 202,547 | **0.0** | 0.0000% | 23,749 (11.73%) |
+| 2026 | 129,456 | **0.0** | 0.0000% | 30 (0.02%) |
+| all-time | 332,003 | **0.0** | 0.0000% | 23,779 (7.16%) |
+
+Exactly zero, not a trace. The "today" column reproduces this document's own
+11.73% / 0.02% figures to the unit, which is what says the computation is
+sitting at the right grain rather than merely producing a plausible number.
+
+**The band does not shrink — it disappears.** `UNATTRIBUTED` never enters the
+club list, so no row is emitted: each block carries exactly 30 rows, one per
+MLB club. Two display consequences ride on the flip. The shipped explainer's
+closing sentence about Unattributed becomes dead text, and the reserved
+vocabulary needs somewhere to live if a future season reintroduces an
+unattributable unit — the word must not quietly come to mean something else.
+
+### Measurement 2 — the unrostered corner
+
+**The chart's own scope is clean.** 55,557 active-slot production rows
+carrying all 332,003 weight: 0 with no blob entry, 0 with a null club.
+
+**The deficiency is real but confined to FA-slot rows:** 476 player-days,
+60 players, 2,186 involvement units, all 2026. RAW source is
+`RAW.BOX_SCORES.raw_json:free_agents[]`, the kona anti-join population. They
+carry **zero** chart weight (`active_weight` is 0 on FA slots).
+
+Two sub-causes, both measured:
+
+| player | ESPN id | 2025 rows / null | 2026 rows / null | served by today's kona |
+|---|---|---|---|---|
+| Andrew Morris | 5007765 | — | 22 / **0** | yes, 65 periods |
+| Andrew Morris | 5266690 | — | 14 / **14** | **no** |
+| Paxton Schultz | 4313208 | 13 / 0 | 27 / **27** | 2025 only |
+| Jake Woodford | 35284 | 22 / 0 | 16 / **16** | 2025 only |
+
+1. **Stale duplicate ESPN ids** — the collision class the spike enumerated.
+2. **Players no longer in today's 2026 kona universe** — same id, same
+   endpoint, same `limit:1500 sortPercOwned`; today's response returns them
+   for 2025 periods and not 2026.
+
+**This deficiency decays.** The backfill can only attribute players ESPN
+still returns for that period, so the gap between a period being lived and
+being backfilled is itself the loss function. Same species as MLB-188.
+
+Sizing, for whoever takes the ticket: the fix is plumbing, not research. The
+MLB-129 crosswalk resolves ESPN id → MLBAM at 100% coverage and the MLB
+gamelog spine carries club-of-game per player-day. The crosswalk turned out
+not to be needed for Exit 1; this is what it *is* for.
+
+---
+
+## 7. The two-club units — enumerated, and the rule they re-ruled
+
+### Real-vs-real is empty
+
+Every player-period in 2025+2026 whose splits name more than one club, scanned
+**with the weight gate off**:
+
+| | count |
+|---|---|
+| >1 club on ANY split (the spike's definition) | **94** |
+| — of which carry active-slot weight | 2 (**24 units**) |
+| — at zero weight, i.e. invisible behind the gate | 92 |
+| **>1 club among splits carrying any stats** | **0** |
+| **>1 club among splits carrying PA or BF** | **0** |
+
+Shapes across all 94: `(0 producing, 2 stat-less)` 65 · `(1, 1)` 29 ·
+`(2, …)` **0**. Nothing hides at zero weight, and nothing is a two-club day.
+
+### The 24 units, in full
+
+Both 2026, both a single ESPN id, no duplicates.
+
+**David Peterson** — id `40921` · sp 89 → **2026-06-21** · weight **20.0**
+
+| split | club | PA | BF | appliedTotal | stat keys | gameId |
+|---|---|---|---|---|---|---|
+| producing | **NYM** | 0 | **20** | −0.96 | 44 | 401815842 |
+| stat-less | ChC | 0 | 0 | 0.0 | **0 — `{}`** | 401815848 |
+
+`OUTS 12, P_H 6, P_BB 2, ER 4, K 5`. Stored `clubOfGame` = **NYM**; the
+person-level stamp says `ChC`. All 20 units are NYM's.
+
+**Curtis Mead** — id `42360` · sp 119 → **2026-07-21** · weight **4.0**
+
+| split | club | PA | BF | appliedTotal | stat keys | gameId |
+|---|---|---|---|---|---|---|
+| producing | **Wsh** | **4** | 0 | −2.6 | 42 | 401816212 |
+| stat-less | Bos | 0 | 0 | 0.0 | **0 — `{}`** | 401816201 |
+
+Stored `clubOfGame` = **Wsh**; the stamp says `Bos`. All 4 units are Wsh's.
+20 + 4 = 24.
+
+Both verified against the MLB spine: Peterson `mlbam 656849`, Mets vs
+Phillies, 12 outs / 6 H / 5 K / 4 ER; Mead, Nationals vs Rockies, 4 AB / 0 H.
+In both, **the phantom club was idle that date** — 28 teams have spine rows on
+2026-06-21 (Cubs and Blue Jays off), and Boston has none on 2026-07-21.
+
+### Mechanism — the phantom shadow
+
+Not duplicate ids: 0 of 94 candidates appear under more than one ESPN id, and
+the collision class's 25 units sit entirely on Andrew Morris id `5007765` as
+ordinary weight across 28 periods, with the duplicate `5266690` and the other
+four collision ids at 0 each. Morris never appears among the 94. **The 24/25
+adjacency is coincidence** — worth recording, because it is exactly the kind
+of near-match that invites a false causal story.
+
+Not same-day two-club play, which no candidate exhibits and which the idle
+clubs rule out. Not a suspended-game or stat-filing artifact either: nothing
+is credited to an earlier date under a later club, because the phantom split
+carries no stats at all.
+
+What it is: **person-record drift reaching split level.** ESPN moves the
+person record to the incoming club during a transition window and emits a
+split for that club carrying an empty `stats` object — 123 of 159 stat-less
+splits name a club that did play (the "roster-days, not games" artifact), 36
+name a club that did not play at all. In both weighted cases the person-level
+stamp names the *same* club as the phantom split, which is the tell: the
+phantom is the stamp's shadow, one layer down.
+
+**The production filter is what launders it.** Requiring a non-empty `stats`
+object removes the shadow before any attribution rule sees it — and that is
+also the whole of §3c: the spike's sweep had no such filter, so its majority
+rule ranked a phantom equal to a real game and payload order decided. All 13
+disagreements are that, and the backfill is right in all 13.
+
+### The re-ruling
+
+- **The producing-splits filter is the operative attribution rule.** It, not
+  the tie-break, is what decides these rows, and it resolves both weighted
+  cases to the club that actually played.
+- **Majority-by-production is a dormant fallback.** It has never arbitrated
+  between two real clubs, because that class is **unobserved across two full
+  seasons** (0 of 94, gate off). It stays in place, correctly specified, for
+  a case that has not yet happened.
+- Anyone tempted to re-tune the tie-break should note it is not load-bearing
+  today. The thing doing the work is the filter above it.
+
+---
+
+## 8. Exact commands run
 
 ```bash
 # Day 1 — guard + lift (committed as 6133381)
@@ -254,7 +417,7 @@ only the added key.
 
 ---
 
-## 7. Confidence, with the failure modes named
+## 9. Confidence, with the failure modes named
 
 **High that the field is right.** Mead reconciles to Baseball Reference on both
 sides of his move without being tuned to (2 and 327). The 2025 deadline
@@ -286,14 +449,31 @@ goldens could not move.
 
 ---
 
-## 8. Open, and needing your call
+## 10. Open, and needing your call
 
-1. **Fix-forward or stop?** Per the tripwire I stopped rather than reconciling
-   the three ⚠️ rows. I believe all three are expectation-calibration, not
-   data defects, and §3 shows the working — but that ruling is yours.
-2. **The stale goldens** need a re-anchor decision, independent of this work.
-3. **The MLB-131 inventory comment** is owed: these RAW payloads are
+**Ruled and closed during the session:**
+
+- The three ⚠️ rows: read as expectation-calibration, not data defects.
+- The Exit-1 route, the guard's freshness exemption, and byte-for-byte
+  preservation of the person-level stamps (Kyle, 08-03).
+- The attribution rule, re-ruled off §7's enumeration: producing-splits
+  filter operative, majority-by-production dormant.
+
+**Still open:**
+
+1. **The stale goldens** need a re-anchor decision, independent of this work.
+   They were failing before this session and are unmoved by it (§5).
+2. **The MLB-131 inventory comment** is owed: these RAW payloads are
    temporally irreplaceable and cannot be re-fetched from ESPN, ever. The PM
    posts it; I have not written to Linear.
-4. **The `platform_player_id` vs `name_key` shape call** from the spike is
+3. **The 476 unclubbable FA player-days** (§6) are a ticket by Kyle's ruling
+   — "you can't hit a double in the MLB without being on an MLB team". Route
+   them through the MLB-129 crosswalk. Note the population grows the longer
+   a period waits to be backfilled.
+4. **The band's vocabulary after the flip** (§6): `Unattributed` renders no
+   row at all, and the explainer sentence describing it becomes dead text.
+   The word is reserved (MLB-159) and must not drift to a new meaning.
+5. **The `platform_player_id` vs `name_key` shape call** from the spike is
    still open and untouched here.
+6. **The chart flip itself** remains wave-end ceremony. §6 is the dev render
+   the display ruling was taken from.

@@ -422,7 +422,7 @@ reached, since no DuckDB build was run.
 | `dbt parse` | **clean**, both targets |
 | `dbt build --target dev` | **PASS=635, ERROR=0, SKIP=0** (543 data tests) |
 | pure suite | **296 passed** (282 inherited + 14 new pins), 0 failed |
-| byte-diff, both books | **4 failed, 13 passed** — the SAME four as before this work |
+| byte-diff, both books | **4 failed, 13 passed** — the SAME four as before this work (re-run clean after the env fix: still 4/13, 7m49s) |
 | DuckDB parity | compile-level clean; data-level blocked on a stale local copy |
 
 **No golden was re-anchored.** `REGENERATE_BASELINES` was explicitly cleared
@@ -448,7 +448,13 @@ ESPN tab that first line is week-17 data drift — not the flip:**
 | `Matchup-History.tsv` | 641 → 655 lines, Week 16 → Week 17 | **known-stale** (14 new rows = one week × 14 teams) |
 | `Records.tsv` | 96 → 124 lines, best team total 401.3 → 413.4 | **known-stale** |
 | `baseline_records_report.txt` | `Hits: 89 … Week 10` → `90 … Week 17` | **known-stale** — the exact drift handoff §5 names |
-| `Home.tsv` | `leagueId=1156117086` → `leagueId=0` | **ANOMALY — see below** |
+| `Home.tsv` | *(first run)* `leagueId=1156117086` → `leagueId=0` | **test env leak — found and fixed, see below** |
+| `Home.tsv` | *(clean re-run)* line 32, Cal Raleigh 645 → 649 pts | **known-stale** |
+
+After the env fix the ESPN run carries **zero** occurrences of `leagueId=0`,
+`Records.tsv` shows the correct id on both sides, and `Home.tsv`'s first diff
+moves from line 6 to line 32 — i.e. every remaining first-diff in both books
+is week-17 data drift.
 
 **The CBS book gives the cleanest evidence in the whole gate.** Every CBS
 diff is 2026 stat accrual — game counts, points, and the coverage
@@ -546,3 +552,38 @@ then re-run from a clean environment for the attribution above.
 **Not flip-related** — nothing in this wave touches league identity or link
 construction. It is an inherited test-infra defect, surfaced only because
 the diff attribution forced the question.
+
+---
+
+## 8. What needs your call
+
+1. **The golden re-anchor, and its ORDER.** The fixtures are anchored ~Jul
+   27 and week 17 has landed, so every first-diff is drift and the flip's
+   own changes are invisible underneath it. Re-anchor first, then the
+   byte-diff becomes readable. **Re-anchor only from the fixed branch** —
+   the `leagueId=0` leak is fixed here and nowhere else.
+2. **The explainer wording** (§5a) — three drafts, yours to voice-pass. The
+   first is applied so the dev sheets aren't showing a false sentence.
+3. **`known-data-issues.md`** — three drafted entries (§5b), not applied.
+   They are shipped-doc prose, so the voice is yours.
+4. **The Best Individual Seasons Team column** (§4): its comment justifies
+   showing YEAR because "pro_team is only season-accurate on the CBS side".
+   Now stale for ESPN, still true for CBS. Product call, not a defect.
+5. **The spine defect** (§3): `mlbam 643376` on 2024-06-26 recorded for both
+   Toronto and Boston in one `game_pk`. Zero weight today, so inert. Own
+   ticket?
+6. **DuckDB data-level parity** needs a RAW refresh first (§7) — the local
+   file predates the backfill.
+
+**Not done, and deliberately:** no push, no Linear write, no golden
+re-anchored, no shipped-sheet write, no `--prod` anywhere, RAW read-only,
+the MLB-188 guard and the `_BAK` snapshot untouched.
+
+### One scope call I made without you
+
+I fixed the `LEAGUE_ID` leak (§7) rather than only reporting it. The
+reasoning: correct per-file diff attribution was a deliverable of this
+session and was impossible while the leak was in place, and the next action
+on the list — the re-anchor — would have written `leagueId=0` into the
+corpus permanently. It is one self-contained commit and trivially
+revertible if you disagree.

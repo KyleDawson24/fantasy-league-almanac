@@ -631,10 +631,6 @@ def _home_left_rows(all_time_rows, team_titles, nav_targets, align_alltime_to=No
         'All-time & current-season record book.',
     ])
     rows.append([
-        home_nav_link('Matchup History', TEAM_WEEKS_TAB, nav_targets),
-        'Team-by-team week scoring archive.',
-    ])
-    rows.append([
         home_nav_link('Advanced Standings', ADVANCED_STANDINGS_TAB, nav_targets),
         'Standings + points by lineup slot.',
     ])
@@ -649,6 +645,13 @@ def _home_left_rows(all_time_rows, team_titles, nav_targets, align_alltime_to=No
     # by the Advanced Standings tab linked above.
     rows.append([home_nav_link('Draft Recap', DRAFT_TAB, nav_targets),
                  'Draft board + best-value / bust picks.'])
+    # Last in the nav because it is last in the book (Kyle 2026-08-05):
+    # Matchup History moved past the team block to sit as an appendix,
+    # alongside its CBS analog (MLB-163).
+    rows.append([
+        home_nav_link('Matchup History', TEAM_WEEKS_TAB, nav_targets),
+        'Team-by-team week scoring archive.',
+    ])
 
     rows.append([])
     rows.append(['Points Glossary'])

@@ -234,12 +234,16 @@ def write_almanac(sheet_id, season_year=None, matchup_period=None):
 
     # Draft Recap sits directly before the first team tab (MLB-162): the
     # league-wide tabs run together, then the per-team ones, instead of
-    # the draft trailing the whole roster block. Tab order is a book
-    # property only -- the byte-diff harness compares preview TSVs by
-    # filename, so moving a tab is golden-invisible by construction.
+    # the draft trailing the whole roster block. Matchup History then
+    # rides PAST the team block, at the very end (Kyle 2026-08-05) -- it
+    # is an appendix, the same position its CBS analog takes (MLB-163).
+    # Tab order is a book property only -- the byte-diff harness compares
+    # preview TSVs by filename, so moving a tab is golden-invisible by
+    # construction.
     _sort_almanac_tabs(spreadsheet, [
-        HOME_TAB, RECORDS_TAB, TEAM_WEEKS_TAB, ADVANCED_STANDINGS_TAB,
+        HOME_TAB, RECORDS_TAB, ADVANCED_STANDINGS_TAB,
         TRADES_TAB, DRAFT_TAB, *[title for title, _ in team_pages],
+        TEAM_WEEKS_TAB,
     ])
 
     print(

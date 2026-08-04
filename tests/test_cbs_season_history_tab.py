@@ -213,6 +213,91 @@ class TestLayout:
         rows, _ = _build([])
         assert _data_rows(rows) == []
 
+    def test_an_empty_tab_emits_no_gradients_or_record_marks(self):
+        """No data rows means no range to scale -- a gradient over an
+        empty span is a malformed request, not a no-op."""
+        _rows, formats = _build([])
+        assert not [f for f in formats if 'gradient' in f]
+
+
+class TestHighlighting:
+    """Kyle's ruling, 2026-08-05: Matchup History's rules verbatim --
+    three-stop polarity scale, scaled all-time, gold on the all-time
+    records, and NOTHING on Ties."""
+
+    def _gradient_cols(self, formats):
+        return {f['range'][0] for f in formats if 'gradient' in f}
+
+    def test_ties_column_gets_no_gradient(self):
+        """The explicit ruling: a tie is neither good nor bad."""
+        _rows, formats = _build(_clean_season(4))
+        assert 'L' not in self._gradient_cols(formats)
+
+    def test_graded_columns_are_exactly_the_polarity_ones(self):
+        _rows, formats = _build(_clean_season(4))
+        assert self._gradient_cols(formats) == {
+            'F', 'G', 'H', 'I', 'J', 'K', 'M', 'N', 'O'}
+
+    def test_every_gradient_has_three_stops(self):
+        _rows, formats = _build(_clean_season(4))
+        for spec in (f for f in formats if 'gradient' in f):
+            assert set(spec['gradient']) == {'minpoint', 'midpoint', 'maxpoint'}
+
+    def test_fewer_is_better_columns_are_reversed(self):
+        """Outscored By and Behind Leader read best at zero, so green sits
+        at the MINIMUM for them and at the maximum everywhere else."""
+        _rows, formats = _build(_clean_season(4))
+        grad = {f['range'][0]: f['gradient'] for f in formats if 'gradient' in f}
+        green = cbs._SCALE_GREEN
+        for col in ('I', 'K'):
+            assert grad[col]['minpoint']['color'] == green
+        for col in ('F', 'G', 'H', 'J'):
+            assert grad[col]['maxpoint']['color'] == green
+
+    def test_gradients_span_every_season_not_one(self):
+        """All-time scaling: one rule per column over the whole tab."""
+        finishes = (_clean_season(3)
+                    + [_row(i, f'Old {i}', i, 800.0 - i, teams=3, season=2001)
+                       for i in range(1, 4)])
+        rows, formats = _build(finishes)
+        spec = next(f for f in formats
+                    if 'gradient' in f and f['range'].startswith('H'))
+        assert spec['range'] == f'H6:H{len(rows)}'
+
+    def _marks(self, formats, col):
+        return [f for f in formats
+                if f.get('range', '').startswith(f'{col}')
+                and f.get('format', {}).get('textFormat', {}).get('bold')]
+
+    def test_sole_record_holder_gets_gold_and_bold(self):
+        rows, formats = _build(_clean_season(4))
+        marks = self._marks(formats, 'H')
+        assert len(marks) == 1
+        assert marks[0]['format']['textFormat'] == {
+            'bold': True, 'foregroundColor': cbs._RECORD_GOLD}
+        # ...and it lands on the row actually holding the max.
+        top = marks[0]['range'].split(':')[0]
+        assert rows[int(top[1:]) - 1][7] == 999
+
+    def test_shared_record_bolds_every_holder_but_golds_none(self):
+        """Outscored tops out at N-1 in every season, so the mark is
+        shared -- bold, no gold. Kyle: 'a lot of ties there, but fine'."""
+        finishes = (_clean_season(4)
+                    + [_row(i, f'Old {i}', i, 800.0 - i, teams=4, season=2001)
+                       for i in range(1, 5)])
+        _rows, formats = _build(finishes)
+        marks = self._marks(formats, 'J')
+        assert len(marks) == 2
+        for mark in marks:
+            assert mark['format']['textFormat'] == {'bold': True}
+
+    def test_no_record_mark_on_the_fewer_is_better_columns(self):
+        """Their best value is 0 and every champion holds it -- a record
+        25 rows wide is not a record, so those columns are grade-only."""
+        _rows, formats = _build(_clean_season(4))
+        assert not self._marks(formats, 'I')
+        assert not self._marks(formats, 'K')
+
 
 @pytest.mark.warehouse
 class TestAwardedLensReconciliation:

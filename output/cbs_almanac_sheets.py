@@ -369,6 +369,11 @@ def _finish_gradient():
     }
 
 
+# The ESPN writer's record gold (_apply_team_weeks_record_formats), so a
+# record mark reads identically in both books.
+_RECORD_GOLD = {'red': 0.72, 'green': 0.48, 'blue': 0.00}
+
+
 def _points_gradient():
     """The ESPN writer's red -> white -> green scale (min / median / max),
     per value column of the slot-points grids -- CBS mirrors ESPN's
@@ -4660,6 +4665,54 @@ def build_season_history_rows(context, finishes, franchise_map):
     # header included, the finishes-matrix convention.
     formats.append({'range': f'D{header_row}:{_SEASON_HISTORY_LAST_COL}{last_data}',
                     'format': {'horizontalAlignment': 'CENTER'}})
+    if last_data <= header_row:
+        return rows, formats
+
+    # ---- highlighting (Kyle, ruled from the first render 2026-08-05)
+    # Matchup History's rules, verbatim: three-stop polarity color scale
+    # (min / median / max) and gold on the all-time records. Scaled
+    # ALL-TIME -- one rule per column over all 25 seasons, not per season
+    # -- which is what makes a column comparable down its own length.
+    #
+    # Ties gets NO gradient, by ruling: a tie is neither good nor bad, so
+    # there is no polarity to grade. It is the one numeric column here
+    # that is genuinely polarity-free.
+    span = f'{first_data}:{{col}}{last_data}'
+    for col, gradient in (
+        ('F', _points_gradient()),        # batting points  -- more is better
+        ('G', _points_gradient()),        # pitching points
+        ('H', _points_gradient()),        # total points
+        ('I', _points_gradient_low()),    # behind leader   -- 0 is the leader
+        ('J', _points_gradient()),        # outscored
+        ('K', _points_gradient_low()),    # outscored by    -- 0 beat everyone
+        ('M', _points_gradient()),        # lg avg bat      -- reads as era drift
+        ('N', _points_gradient()),        # lg avg pitch
+        ('O', _points_gradient()),        # lg avg total
+    ):
+        formats.append({'range': f'{col}{span.format(col=col)}',
+                        'gradient': gradient})
+
+    # Gold on the all-time records, over the four columns where "most" is
+    # the record. Outscored By and Behind Leader are deliberately left out
+    # even though their best value is a minimum: that minimum is 0, every
+    # champion holds it, and a record 25 rows wide is not a record.
+    #
+    # ESPN's rule for the mark itself, kept: BOLD always, gold only when a
+    # single row holds the value. Outscored tops out at 15 and is shared by
+    # nearly every champion, so it bolds a column and golds nothing --
+    # which is the rule working, not failing (Kyle: "there'll be a lot of
+    # ties there, but that's fine").
+    for col, idx in (('F', 5), ('G', 6), ('H', 7), ('J', 9)):
+        best = max(r[idx] for r in rows[first_data - 1:])
+        holders = [i for i, r in enumerate(rows[first_data - 1:])
+                   if r[idx] == best]
+        text_format = {'bold': True}
+        if len(holders) == 1:
+            text_format['foregroundColor'] = _RECORD_GOLD
+        for i in holders:
+            cell = f'{col}{first_data + i}'
+            formats.append({'range': f'{cell}:{cell}',
+                            'format': {'textFormat': text_format}})
     return rows, formats
 
 

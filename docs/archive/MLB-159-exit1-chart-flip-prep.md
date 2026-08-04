@@ -311,4 +311,78 @@ voice-pass:
 
 ---
 
-*(sections 6–7 appended as the session proceeds)*
+## 6. Dev build and renders
+
+**`dbt build --target dev` (full 77-model chain): PASS=635, WARN=0,
+ERROR=0, SKIP=0**, 543 data tests green, 3m57s. The `dev` target is
+`ESPN_FANTASY.ANALYTICS` — the normal working schema; the dev/shipped
+distinction in this project is on the SHEETS, and `--prod` is never passed
+below.
+
+**Preview (no sheet write) confirms the chart.** 19 tabs rendered; the
+affinity block on `Advanced-Standings` carries **exactly 30 club rows and no
+Unattributed row**. The single "Unattributed" string left in the book is the
+explainer sentence itself.
+
+**Both books rendered end-to-end to their DEV sheets** at branch HEAD —
+`espn-main` (default target) and `cbs-bsb` — via
+`output/generate_almanac_sheet.py`, no `--prod` anywhere.
+
+### Screenshots — NOT captured, and why
+
+**I could not screenshot the dev sheets.** They are private Google Sheets,
+so reaching them needs your logged-in Chrome session, and no Chrome instance
+is connected to this session (`list_connected_browsers` → empty). The
+sandboxed browser would land on a Google login page rather than the sheet.
+
+Rather than guess, the substitute below is built from the **actual rendered
+rows** so you can review the content now, and the dev sheets themselves are
+written and waiting for your eyeball. If you want true screenshots, they
+take about a minute once Chrome is connected.
+
+---
+
+## 7. The gate
+
+### DuckDB parity — compile-level clean, data-level BLOCKED on a stale copy
+
+**The local DuckDB file predates the backfill, and this matters.**
+`data/duckdb/ESPN_FANTASY.duckdb` is dated 08-02; the `clubOfGame` backfill
+ran 08-03. Measured directly against that file:
+
+| | entries | `clubOfGame` present | `proTeam` present |
+|---|---|---|---|
+| 2025 home lineup | 44,725 | **0** | 44,725 |
+| 2026 home lineup | 25,959 | **0** | 25,959 |
+
+Its 2026 row count is stale too (25,959 against Snowflake's 27,384). So
+building the flipped models there would produce **all-NULL `pro_team` on
+every ESPN row** — a stale-copy artifact that would look exactly like a
+catastrophic flip defect. Worth knowing before anyone runs it and panics.
+
+**A real data-level A/B needs a RAW refresh first**, which is local-only and
+safe but heavy (~2 GB):
+
+```bash
+py tools/dump_snowflake_raw_to_parquet.py
+py tools/load_parquet_to_duckdb.py
+tools/duckdb_run.sh
+```
+
+**What IS verified, and it covers the actual risk:**
+
+1. **Compile-level parity.** Both targets compile the changed models. The
+   JSON extraction correctly diverges through the existing `json_text`
+   macro — DuckDB `(p.value->>'clubOfGame')::string`, Snowflake
+   `p.value:clubOfGame::string` — on all three unions. `latest_by` emits
+   **byte-identical** SQL on both engines, which is by design: after the
+   guard the engines do not disagree.
+2. **Semantic parity of the one construct at risk**, verified live on both
+   engines rather than inferred — aggregate form, window form, all-null
+   groups, and ties. That table is in §1, and it is the check that matters,
+   because the UNGUARDED spelling is the one that diverges.
+
+The `stg_mlb__player_game` segfault flake (exit 139, MLB-179) was not
+reached, since no DuckDB build was run.
+
+*(the byte-diff table lands here when the run finishes)*

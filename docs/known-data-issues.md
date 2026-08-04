@@ -152,6 +152,17 @@ one are credited to the new one. In 2026, 66 of 1,208 player-seasons
 change club and the 75 transition periods carry 161 units of active-slot
 weight — **0.12%** of the season.
 
+Even that overstates how fresh the live season's stamps are, and the
+correction is worth carrying because it is easy to assume otherwise: a
+period is not stamped when it happens, it is stamped by the **last**
+lookback pass that touched it. The weekly run re-extracts every completed
+period inside its 21-day window, last write wins, so each 2026 period
+carries the clubs of a date **0–28 days after it ended** (measured
+2026-08-04 across all 17 periods; matchup period 1 ended 04-05 and was
+last written 05-03). The 0.19% of 2026 weight where the stored club
+disagrees with the club-of-game field is trades that happened inside that
+window.
+
 **Backward, a season pulled in one pass gets a single stamp for the whole
 year** — the club as of that pull, which is not necessarily the player's
 club today. In 2025, **0 of 1,236 player-seasons carry more than one
@@ -196,22 +207,65 @@ closed:
   visible `Unattributed` band. The label is deliberate — the honest claim
   is that the club is unknown, not that these players were free agents
   when they played.
-- **Mis-attribution — OPEN, and NOT precisely measurable.** Gray's
-  Cardinals innings still sit under Boston. Correcting it requires
-  resolving ESPN players to MLBAM ids so the chart can read team-of-game
-  from the MLB Stats gamelog spine, the way the CBS book already does.
-  That bridge does not exist: `dim_player_identity` is CBS-sourced only.
-  Tracked as MLB-159 Exit 1, riding the MLB-129 person-grain work.
+- **Mis-attribution — OPEN in the data, but now measured, and the fix is
+  cheaper than it looked.** Gray's Cardinals innings still sit under
+  Boston. What changed on 2026-08-03 (MLB-129 spike) is that ESPN turns
+  out to send the right answer already: `proTeamId` sits on each
+  per-scoring-period split — the club of *that game* — inside the loop
+  `fetch_all_player_stats` already walks. No identity crosswalk, and no
+  `scoring_period → date` derivation, is required to read it.
 
-  The only cheap proxy — 2025 weight whose stamp differs from that
-  player's 2026 stamp — gives **13.5%** (27,338 of 202,547), and it must
-  be quoted as a **floor, never an estimate**. It can only see players who
-  appear in both seasons *and* whose stamp moved, so a player mislabelled
-  *consistently* is invisible to it. **Gray is not in the 13.5%**: he
-  reads `Bos` in both years while having pitched 2025 in St. Louis. The
-  metric systematically excludes exactly the cases that are stably wrong,
-  which are the ones that matter most.
+  Against that field, the defect is no longer a floor and a shrug:
+  **45,059 of 202,547 units of 2025 active-slot weight — 22.25% — are
+  filed under the wrong club.** The `Unattributed` band above is 11.73%
+  of the season; the other ~10.5% is silent mis-attribution. Coverage of
+  the new field is 100% on both seasons.
+
+  The superseded proxy — 2025 weight whose stamp differs from that
+  player's 2026 stamp — gave **13.5%** (27,338 of 202,547) and was
+  correctly quoted as a floor. It is worth recording *why* it was one: it
+  can only see players who appear in both seasons *and* whose stamp
+  moved, so a player mislabelled **consistently** is invisible to it.
+  **Gray was not in the 13.5%** — he reads `Bos` in both years while
+  having pitched 2025 in St. Louis. The metric systematically excluded
+  exactly the cases that are stably wrong. The measured 22.25% is 1.6× it.
+
+  `extract.py` captures the field as `clubOfGame` as of 2026-08-04, but
+  **no RAW row carries it yet** — it arrives on 2025 and 2026 only when
+  the backfill runs, and the affinity chart does not read it until the
+  wave-end flip. Until both happen, everything above describes the data
+  as it currently stands.
 
 Note that the chart *looked* wrong before this change and now looks
 tidy — the `FA` rows were the tell. The band is what remains of that
 tell, which is why its wording matters.
+
+**The hazard this creates (MLB-188).** Because the stamp is whatever ESPN
+reports at fetch time, **re-extracting an already-loaded matchup period
+overwrites its stored per-day clubs with the clubs of the day you re-ran
+it**, and ESPN cannot serve the originals again. There is no earlier copy
+in RAW to restore from — 2025 is the proof, not the warning: all 195 of
+its rows were written in one ten-minute pass and carry one date's clubs.
+Any ordinary reason to re-pull — a gap fill, a corrupted week, a schema
+migration — silently converts a live-captured season into a second 2025.
+
+Two things make this survivable, and the distinction matters:
+
+- Re-running **dbt** is always safe. RAW is immutable input and the models
+  are deterministic; nothing downstream can destroy a stamp.
+- Re-running the **extract** against a settled period is the destructive
+  act. `extract.py` refuses it: a period that already holds rows and ended
+  more than `LIVE_CAPTURE_WINDOW_DAYS` (21) ago fails the whole invocation
+  loudly, naming every offending period, and proceeds only behind
+  `--overwrite-day-accurate-history`. Periods inside that window are
+  exempt — the weekly run revisits them on purpose, which is how the
+  stamps get captured at all, and a guard the routine path had to bypass
+  would be bypassed permanently within a fortnight.
+
+To add a **new field** to settled periods, use `--backfill-club-of-game`,
+which updates rows in place, assigns only the new key, and preserves
+`loaded_at` — the only surviving evidence of when each period was stamped.
+
+**These RAW payloads are temporally irreplaceable** and should be backed
+up accordingly (MLB-131). Every other input in this warehouse can be
+re-fetched from its source; this one cannot.

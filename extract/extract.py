@@ -18,6 +18,13 @@ Usage:
   py extract/extract.py --include-settings           -> recent box scores + league settings
   py extract/extract.py --settings-only              -> league settings only, no box scores
   py extract/extract.py --settings-only --year 2025  -> league settings for 2025 only
+  py extract/extract.py --year 2025 --all --backfill-club-of-game
+                                                     -> add club-of-game to 2025 in place
+
+Re-extracting a matchup period that has already been loaded and has settled
+(ended more than LIVE_CAPTURE_WINDOW_DAYS ago) destroys its per-day club
+history and is refused — see `settled_loaded_periods` (MLB-188). To put a new
+field on settled periods, use --backfill-club-of-game, which updates in place.
 """
 
 import argparse
@@ -101,6 +108,24 @@ _log_stats_map_collisions()
 DEFAULT_POSITION_MAP = getattr(espn_baseball_constant, "DEFAULT_POSITION_MAP", {})
 LINEUP_SLOT_MAP = getattr(espn_baseball_constant, "POSITION_MAP", {})
 PRO_TEAM_MAP = getattr(espn_baseball_constant, "PRO_TEAM_MAP", {})
+
+# ---------------------------------------------------------------------------
+# The live-capture window (MLB-188)
+# ---------------------------------------------------------------------------
+# How far back the default weekly run reaches, and — the same number, on
+# purpose — how long a loaded matchup period stays eligible for a rewrite.
+#
+# ESPN serves CURRENT club on the player record, so the per-day `proTeam`
+# stamp a period carries is only ever as accurate as the date it was last
+# written. Inside this window a rewrite is the point: it is how the stamps
+# get captured at all, and it catches scoring adjustments. Outside it, a
+# rewrite replaces a period's clubs with the clubs of today, and ESPN cannot
+# serve the originals back — see the guard on `settled_loaded_periods`.
+#
+# Both readers take the number from here. A second hardcoded 21 that drifts
+# from this one would silently widen or narrow the guard (MLB-175's scar:
+# the twin that was right until it wasn't).
+LIVE_CAPTURE_WINDOW_DAYS = 21
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -222,8 +247,15 @@ def fetch_all_player_stats(year, scoring_period):
         "games_played":  int                            # count of non-empty splits
         "name":          str                            # for FA row construction
         "pro_team":      str                            # MLB team abbreviation
+        "club_of_game":  str | None                     # club he played FOR
         "default_position_id": int                      # for diagnostics
     }
+
+    `pro_team` and `club_of_game` answer different questions and disagree
+    on any player who changed clubs. `pro_team` is ESPN's person record —
+    the club he belongs to at the moment of the fetch, so it decays as the
+    fetch date moves away from the period. `club_of_game` comes off the
+    period's own splits and does not decay. None means Unattributed.
 
     Each player carries a stats[] array; filter to (statSplitTypeId == 5
     AND scoringPeriodId == target) for per-period splits. Single games
@@ -268,6 +300,9 @@ def fetch_all_player_stats(year, scoring_period):
         agg_breakdown = {}
         agg_points = 0.0
         games = 0
+        # Insertion order is ESPN's payload order — _resolve_club_of_game
+        # depends on that to break ties the same way every run.
+        club_splits = {}
         for split in player.get("stats", []) or []:
             if split.get("statSplitTypeId") != 5:
                 continue
@@ -277,6 +312,17 @@ def fetch_all_player_stats(year, scoring_period):
             if not raw_stats:
                 # Stat-less split (player exists on this date but didn't play).
                 continue
+
+            # MLB-129/MLB-159: proTeamId on the SPLIT is the club the player
+            # played that game for. It is period-accurate and stays accurate
+            # no matter when the extract runs, which is what makes it
+            # different in kind from `pro_team` below. Loop already had it in
+            # hand and stepped over it; 22.25% of 2025's active-slot weight
+            # is misfiled as a result.
+            split_pro_team_id = split.get("proTeamId")
+            if split_pro_team_id:
+                club = PRO_TEAM_MAP.get(split_pro_team_id, str(split_pro_team_id))
+                club_splits[club] = club_splits.get(club, 0) + 1
             for stat_id_str, val in raw_stats.items():
                 if val is None:
                     continue
@@ -310,10 +356,38 @@ def fetch_all_player_stats(year, scoring_period):
                 "games_played": games,
                 "name": player.get("fullName"),
                 "pro_team": PRO_TEAM_MAP.get(player.get("proTeamId"), "FA"),
+                "club_of_game": _resolve_club_of_game(club_splits),
                 "default_position_id": player.get("defaultPositionId"),
                 "eligible_slots": eligible_slots,
             }
     return by_player
+
+
+def _resolve_club_of_game(club_splits):
+    """
+    Collapse one scoring period's per-game club stamps to a single club.
+
+    `club_splits` maps club abbreviation -> number of that period's splits
+    played for it, in ESPN's payload order. Almost always one entry; two
+    only when a player changed clubs on a day he played for both, which
+    the MLB-129 spike measured at 24 of 332,003 weight units (0.007%).
+
+    Most splits wins. Ties go to the club that appears first in the
+    payload — written as a strict `>` over an insertion-ordered dict so
+    the tie-break is a stated rule rather than an artifact of whichever
+    key `max()` happens to reach first (MLB-128's lesson about ties that
+    are only stable by luck). This reproduces the spike's rule exactly,
+    which is what lets the Day-2 cross-check compare the two.
+
+    Returns None when no split carried a club. None means Unattributed —
+    club unknown — which is deliberately NOT the string 'FA'. MLB-159
+    reserves those as separate words and they must not merge.
+    """
+    best_club, best_splits = None, 0
+    for club, splits in club_splits.items():
+        if splits > best_splits:
+            best_club, best_splits = club, splits
+    return best_club
 
 
 # ---------------------------------------------------------------------------
@@ -419,6 +493,11 @@ def serialize_box_scores(league, scoring_period, matchup_period):
                 # play — large majority of fallbacks are legitimate empty
                 # rows where wrapper also has empty stats.
                 raw = all_player_stats.get(player.playerId)
+                # Club-of-game lives on kona's splits, so the wrapper
+                # fallback below cannot supply it. Those rows stay
+                # Unattributed rather than borrowing the person-level club,
+                # which would reintroduce the exact defect this field fixes.
+                club_of_game = raw["club_of_game"] if raw is not None else None
                 if raw is not None:
                     breakdown = raw["breakdown"]
                     points = raw["points"]
@@ -450,6 +529,7 @@ def serialize_box_scores(league, scoring_period, matchup_period):
                     "position": player.position,
                     "lineupSlot": player.lineupSlot,
                     "proTeam": player.proTeam,
+                    "clubOfGame": club_of_game,
                     "points": points,
                     "breakdown": breakdown,
                     "games_played": games_played,
@@ -474,6 +554,7 @@ def serialize_box_scores(league, scoring_period, matchup_period):
             "position": DEFAULT_POSITION_MAP.get(raw["default_position_id"], "UNK"),
             "lineupSlot": "FA",
             "proTeam": raw["pro_team"],
+            "clubOfGame": raw["club_of_game"],
             "points": raw["points"],
             "breakdown": raw["breakdown"],
             "games_played": raw["games_played"],
@@ -509,6 +590,103 @@ def ensure_league_key_column(cursor, table):
     )
 
 
+def settled_loaded_periods(conn, year, league_key, periods, today=None):
+    """
+    MLB-188 guard. Of `periods`, return the ones a re-extract would damage:
+    already loaded, and ended longer than LIVE_CAPTURE_WINDOW_DAYS ago.
+
+    Returns [(matchup_period, end_date, last_loaded_at)] sorted by period.
+    Empty means the requested set is safe to extract.
+
+    Two ways a period is NOT damageable, and both matter:
+
+      * it has no rows yet — a first extract invents no history, so a
+        genuinely new period never trips the guard; and
+      * it ended inside the live-capture window — the weekly run revisits
+        those on purpose, which is the mechanism that captures the day-of
+        stamps in the first place and picks up scoring adjustments. A guard
+        the routine path had to bypass would teach everyone to bypass it,
+        and the flag would be permanently on by the second week.
+
+    Fails closed: a period with no schedule row has no knowable age, so it
+    counts as settled rather than being waved through.
+    """
+    today = today or date.today()
+    cutoff = today - timedelta(days=LIVE_CAPTURE_WINDOW_DAYS)
+
+    _, matchups = load_schedule(year)
+    end_by_period = {mp: end for mp, _start, end in matchups}
+
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            """
+            SELECT matchup_period, MAX(loaded_at)
+            FROM BOX_SCORES
+            WHERE season_year = %s
+              AND (league_key = %s OR league_key IS NULL)
+            GROUP BY matchup_period
+            """,
+            (year, league_key),
+        )
+        last_loaded = {int(mp): ts for mp, ts in cursor.fetchall()}
+    except snowflake.connector.errors.ProgrammingError:
+        # No BOX_SCORES table yet: nothing has ever been loaded, so nothing
+        # can be overwritten. The loader creates it moments from now.
+        return []
+    finally:
+        cursor.close()
+
+    settled = []
+    for mp in periods:
+        if mp not in last_loaded:
+            continue
+        end_date = end_by_period.get(mp)
+        if end_date is not None and end_date >= cutoff:
+            continue
+        settled.append((mp, end_date, last_loaded[mp]))
+    return sorted(settled)
+
+
+def refuse_settled_overwrite(settled, year, flag):
+    """Build the MLB-188 refusal. Names every offender, the flag, and the
+    snapshot — a refusal that does not say how to proceed just gets pattern-
+    matched into `--force` by the next person in a hurry."""
+    lines = [
+        "",
+        "=" * 72,
+        f"REFUSING TO EXTRACT -- {len(settled)} settled matchup period(s) in {year}",
+        "=" * 72,
+        "",
+        "These periods already hold RAW rows and ended more than "
+        f"{LIVE_CAPTURE_WINDOW_DAYS} days ago:",
+        "",
+        f"  {'period':>7}  {'ended':<12} {'last loaded':<20}",
+    ]
+    for mp, end_date, loaded_at in settled:
+        ended = str(end_date) if end_date else "UNKNOWN (no schedule row)"
+        lines.append(f"  {mp:>7}  {ended:<12} {str(loaded_at)[:19]:<20}")
+    lines += [
+        "",
+        "Re-extracting them overwrites each player's stored per-day club with",
+        "whatever club ESPN reports TODAY. ESPN serves only current club, so",
+        "the originals cannot be fetched again -- from ESPN or from here.",
+        "",
+        "Nothing was written. Nothing was deleted.",
+        "",
+        "If you want the club-of-game field on these periods, that is not this",
+        "command -- use --backfill-club-of-game, which updates in place, adds",
+        "only the new field, and leaves every stored value untouched.",
+        "",
+        "If you truly mean to overwrite the history:",
+        f"  1. snapshot RAW first  (CREATE TABLE ..._bak CLONE BOX_SCORES)",
+        f"  2. re-run with {flag}",
+        "",
+        "=" * 72,
+    ]
+    return "\n".join(lines)
+
+
 def load_box_scores_to_snowflake(conn, records, matchup_period, year, league_key):
     """
     Insert raw box score JSON records into Snowflake.
@@ -537,6 +715,20 @@ def load_box_scores_to_snowflake(conn, records, matchup_period, year, league_key
         # would wipe another's rows at the same (year, MP) coordinates. The
         # IS NULL arm self-heals rows that predate the league_key migration
         # (all such rows belong to the default ESPN league).
+        #
+        # !! MLB-188 -- THIS DELETE IS THE IRREVERSIBLE ONE. The rows it drops
+        # carry each player's `proTeam` as ESPN reported it on the day this
+        # period was last written. ESPN serves only CURRENT club, so the
+        # INSERT below refills them with the clubs of today: run this against
+        # a period that has settled and its per-day club history is gone, from
+        # here and from ESPN both. 2025 is what that looks like — all 195 rows
+        # written in one ten-minute pass, every row stamped with one date's
+        # clubs. There is no backup inside this warehouse to restore from.
+        # `settled_loaded_periods` is the gate that keeps this from being
+        # reachable by accident; do not call this loader around it. Re-running
+        # *dbt* is always safe — RAW is the only thing that cannot be rebuilt.
+        # Adding a field to a settled period is a job for
+        # --backfill-club-of-game, which updates in place and deletes nothing.
         cursor.execute(
             """
             DELETE FROM BOX_SCORES
@@ -590,7 +782,90 @@ def extract_matchup_period(conn, league, matchup_period, year, league_key):
     load_box_scores_to_snowflake(conn, records, matchup_period, year, league_key)
 
 
-def get_recent_matchup_periods(year, lookback_days=21):
+def _iter_player_entries(blob):
+    """Every player dict in a stored box-score blob, rostered and FA alike."""
+    for matchup in blob.get("matchups") or []:
+        for side in ("home_lineup", "away_lineup"):
+            for entry in matchup.get(side) or []:
+                yield entry
+    for entry in blob.get("free_agents") or []:
+        yield entry
+
+
+def backfill_club_of_game(conn, year, league_key, periods):
+    """
+    Add `clubOfGame` to periods that are already loaded, and change nothing
+    else about them.
+
+    This exists because the obvious way to get a new field onto old rows —
+    re-run the extract — is the one thing MLB-188 forbids: the loader's
+    delete-then-insert would refill every stored `proTeam` with today's
+    clubs. Both seasons' stamps are wanted exactly as they are. 2026's are
+    the only near-contemporaneous capture that will ever exist; 2025's are
+    the record of what a one-pass backfill produced, which is evidence, not
+    garbage. The shipped affinity chart also still reads `proTeam` until the
+    wave-end flip, so anything that moved it would move the goldens too.
+
+    So: read each stored row, set ONE new key on each player, write the row
+    back with UPDATE. No DELETE. No other key is assigned, so preservation
+    holds by construction rather than by a diff run afterwards — and
+    `loaded_at` survives, which matters because it is the only remaining
+    evidence of when each period's `proTeam` was actually stamped.
+
+    Idempotent: re-running rewrites the same key with the same value, so a
+    half-finished run is resumed simply by running it again.
+    """
+    cursor = conn.cursor()
+    try:
+        for mp in periods:
+            cursor.execute(
+                """
+                SELECT scoring_period, raw_json
+                FROM BOX_SCORES
+                WHERE season_year = %s AND matchup_period = %s
+                  AND (league_key = %s OR league_key IS NULL)
+                ORDER BY scoring_period
+                """,
+                (year, mp, league_key),
+            )
+            rows = cursor.fetchall()
+            if not rows:
+                print(f"  Matchup period {mp}: no stored rows — skipped.")
+                continue
+
+            print(f"  Matchup period {mp}: {len(rows)} scoring period(s)")
+            for scoring_period, raw_json in rows:
+                blob = json.loads(raw_json)
+                player_stats = fetch_all_player_stats(year, int(scoring_period))
+
+                entries = 0
+                attributed = 0
+                for entry in _iter_player_entries(blob):
+                    stats = player_stats.get(entry.get("playerId"))
+                    club = stats["club_of_game"] if stats else None
+                    entry["clubOfGame"] = club
+                    entries += 1
+                    if club:
+                        attributed += 1
+
+                cursor.execute(
+                    """
+                    UPDATE BOX_SCORES
+                    SET raw_json = PARSE_JSON(%s)
+                    WHERE season_year = %s AND matchup_period = %s
+                      AND scoring_period = %s
+                      AND (league_key = %s OR league_key IS NULL)
+                    """,
+                    (json.dumps(blob), year, mp, int(scoring_period), league_key),
+                )
+                print(f"    sp={scoring_period}: {attributed}/{entries} players "
+                      f"attributed to a club of game")
+            conn.commit()
+    finally:
+        cursor.close()
+
+
+def get_recent_matchup_periods(year, lookback_days=LIVE_CAPTURE_WINDOW_DAYS):
     """
     Return matchup periods for the given year whose end date falls within
     the last `lookback_days` days (inclusive of today).
@@ -1053,6 +1328,23 @@ if __name__ == "__main__":
         help="Extract the transaction log only (skip box scores and settings)",
     )
     parser.add_argument(
+        "--backfill-club-of-game", action="store_true",
+        help="Add the club-of-game field to periods that are already loaded, "
+             "updating in place. Adds one field and changes nothing else — "
+             "this is the safe way to enrich settled periods, and it does not "
+             "need the overwrite flag because it deletes nothing (MLB-129).",
+    )
+    parser.add_argument(
+        "--overwrite-day-accurate-history", action="store_true",
+        help="DESTRUCTIVE. Permit re-extracting matchup periods that are "
+             "already loaded and ended more than "
+             f"{LIVE_CAPTURE_WINDOW_DAYS} days ago. Their stored per-day club "
+             "stamps are replaced with the clubs ESPN reports today and cannot "
+             "be recovered from ESPN. Snapshot RAW before using this. To add a "
+             "new field to old periods you want --backfill-club-of-game "
+             "instead (MLB-188).",
+    )
+    parser.add_argument(
         "--league", default=None, metavar="LEAGUE_KEY",
         help="League registry key to extract (config/leagues.yml). "
              "Default: the registry's default_league (the ESPN league).",
@@ -1119,6 +1411,28 @@ if __name__ == "__main__":
                         import sys
                         sys.exit(0)
                 print(f"\nExtracting recent matchup periods for {year}: {periods}")
+
+            if args.backfill_club_of_game:
+                # Enrichment, not extraction: updates in place, deletes
+                # nothing, so it is not what the guard below is guarding.
+                print(f"\nBackfilling club-of-game for {year}: {periods}")
+                backfill_club_of_game(conn, year, league_key, periods)
+                print("\nDone.")
+                sys.exit(0)
+
+            # MLB-188: decide on the whole requested set before touching any
+            # of it. A per-period check would half-finish — three periods
+            # overwritten, the fourth refused — which is a worse state to be
+            # handed than a clean refusal.
+            if not args.overwrite_day_accurate_history:
+                settled = settled_loaded_periods(conn, year, league_key, periods)
+                if settled:
+                    raise SystemExit(refuse_settled_overwrite(
+                        settled, year, "--overwrite-day-accurate-history"))
+            elif periods:
+                print("\n!! --overwrite-day-accurate-history: stored per-day club "
+                      "stamps for already-loaded settled periods will be "
+                      "replaced with today's clubs and cannot be recovered.")
 
             league = connect_espn(year)
 

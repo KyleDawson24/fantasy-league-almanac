@@ -582,6 +582,51 @@ def get_historic_finishes():
     )
 
 
+def get_season_history_stats():
+    """Team-season stat totals for Season History, active-weighted -- the
+    same `_rec_agg` substrate the Records tab runs on, at season+team
+    grain.
+
+    THE LENS SPLIT ON THIS TAB IS DELIBERATE (Kyle 2026-08-05). The points
+    columns are AWARDED (what CBS published); these stat columns are
+    RECONSTRUCTED, because no platform ever published a team-season stat
+    line for this league -- the year-end standings page carried points and
+    nothing else. That does not conflict with the MLB-148 ruling: the
+    ruling's exception is scoped to canonical outcomes -- who won, who
+    scored most -- and those stay awarded here. A stat line is context,
+    and context runs on the reconstruction like the rest of the book.
+
+    Fidelity varies by era and the tab does not hide it: 2001-2003 are
+    day-level reconstruction (the pre-2004 seasons have NO start-share
+    table, which is exactly why they got the real day-by-day treatment
+    rather than the shortcut), 2004-2020 are ~90% start-share estimate,
+    2021+ are day-level again. The stat LINES themselves are never
+    reconstructed at all -- they are real MLB game logs; the uncertainty
+    is only in the fantasy state around them (who rostered whom, who was
+    started).
+
+    The sentinel franchise is fenced, same as the Records tab: it holds
+    the 2001-2002 never-transacted stars at 100% and would otherwise
+    landslide every team total in those two seasons."""
+    rows = _rec_agg('season_year, team_id')
+    return [r for r in rows
+            if _rec_fnum(r.get('team_id')) != _CBS_SENTINEL_FID]
+
+
+def get_season_owners():
+    """(season_year, franchise_id) -> owner label, from the MLB-64 owner
+    history. PER-SEASON, unlike `_franchise_owner_labels`'s latest-owner
+    rollup: on a tab whose whole point is the historic record, showing
+    today's owner beside a 2003 season would misattribute it. Co-owners
+    join with ' & ' (a comma reads as 'Last, First')."""
+    rows = query_snowflake(
+        f"SELECT season_year, team_id, owner_display"
+        f" FROM dim_team_owner WHERE {league_predicate()}")
+    return {(int(r['season_year']), int(r['team_id'])):
+            (r['owner_display'] or '').replace(', ', ' & ')
+            for r in rows if r.get('owner_display')}
+
+
 def get_acquisition_channels(season_year):
     """Season production by acquisition channel, both lenses -- the CBS
     twin of ESPN's mart_team_acquisition_channels (MLB-17 shape), built
@@ -4505,13 +4550,41 @@ def build_draft_recap_rows(season_year, franchise_map, value_lens='calc_total',
 # Season History (MLB-163)
 # ---------------------------------------------------------------------------
 
-_SEASON_HISTORY_HEADER = [
-    'Season', 'Franchise', 'Team That Season', 'Finish', 'Teams',
-    'Batting Points', 'Pitching Points', 'Total Points', 'Behind Leader',
-    'Outscored', 'Outscored By', 'Ties',
-    'Lg Avg Bat', 'Lg Avg Pitch', 'Lg Avg Total',
-]
-_SEASON_HISTORY_LAST_COL = 'O'
+# Season History's stat blocks, in the book's own box-score order rather
+# than alphabetical (_HIT_ORDER / _PIT_ORDER + _NEG_ORDER are the Records
+# tab's orders, reused so a stat sits in the same place in both). Ten a
+# side, which is exactly the league's scored set -- the tab shows what the
+# league SCORES, so a league that scores different categories renders
+# different columns from the same code.
+_SEASON_HISTORY_HIT_STATS = list(_HIT_ORDER)
+_SEASON_HISTORY_PIT_STATS = list(_PIT_ORDER) + list(_NEG_ORDER)
+# ER / Hits Allowed / Walks Allowed: more is worse, so their gradients run
+# the other way (dim_stat.polarity says so; pinned here so the layout does
+# not silently invert if the dim changes).
+_SEASON_HISTORY_NEG_STATS = set(_NEG_ORDER)
+
+
+def _season_history_header():
+    """The full column list. Buffers are '' by design -- the ESPN Matchup
+    History idiom for separating stat blocks from score blocks."""
+    return (['Season', 'Franchise', 'Owner(s)', 'Finish', 'Margin', '']
+            + [_STAT_LINE_LABELS.get(s, s) for s in _SEASON_HISTORY_HIT_STATS]
+            + ['']
+            + [_STAT_LINE_LABELS.get(s, s) for s in _SEASON_HISTORY_PIT_STATS]
+            + ['', 'Hitting Points', 'Pitching Points', 'Total Points', '']
+            + ['Outscored', 'Outscored By', 'Ties', '']
+            + ['League Avg Hitting', 'League Avg Pitching', 'League Avg Total'])
+
+
+# Column offsets, derived once so the format pass and the builder cannot
+# drift apart. 0-based into the row list.
+_SH_MARGIN = 4
+_SH_HIT0 = 6
+_SH_PIT0 = _SH_HIT0 + len(_SEASON_HISTORY_HIT_STATS) + 1
+_SH_PTS0 = _SH_PIT0 + len(_SEASON_HISTORY_PIT_STATS) + 1
+_SH_COUNTS0 = _SH_PTS0 + 4
+_SH_AVG0 = _SH_COUNTS0 + 4
+_SEASON_HISTORY_WIDTH = _SH_AVG0 + 3
 
 
 def season_outscored_counts(season_rows):
@@ -4560,44 +4633,113 @@ def season_outscored_counts(season_rows):
     return counts
 
 
-def build_season_history_rows(context, finishes, franchise_map):
+def build_season_history_rows(context, finishes, franchise_map,
+                              team_stats=None, owners=None):
     """Season History: (rows, formats).
 
     ESPN's Matchup History, re-grained. That tab is one row per team per
     MATCHUP; this league scores season-long and has no matchups, so the
     row is one team-SEASON and the W-L pair becomes Outscored / Outscored
     By (MLB-163; an F-class adaptation for the MLB-160 ledger -- the
-    analog exists, the grain differs by necessity).
+    analog exists, the grain differs by necessity). Layout follows the
+    ESPN tab's shape: identity, then the hitting block, the pitching
+    block, the points trio, the counts, the league averages, each block
+    separated by a blank buffer column.
 
-    EVERY NUMBER ON THIS TAB IS AWARDED, NOT RECONSTRUCTED. Kyle ruled
-    the primacy question on 2026-08-01: reconstructed everywhere except
-    where it decides a canonical outcome, and "which team had the most
-    points in their season" is exactly that. So the points columns are
-    CBS's own year-end published totals via `get_historic_finishes`, and
-    the reconstructed lens the rest of the book runs on never touches
-    this tab. The two disagree enough to matter -- see that function.
+    TWO LENSES, DELIBERATELY (Kyle 2026-08-05):
 
-    Two divergences from the ESPN analog, both forced by the grain:
-      - No Sort Key column. ESPN needs one because its Matchup cell is a
-        =HYPERLINK the sheet cannot sort by; Season is a plain number.
-      - No stat line. The platform only ever published season TOTALS for
-        this league (per-day platform points do not exist for historic
-        seasons), so the awarded lens has points and nothing else. A
-        reconstructed stat line could be rendered here and would be the
-        precise mistake the ruling forbids.
+      - The POINTS and the counts derived from them -- Hitting / Pitching
+        / Total Points, Margin, Outscored, Outscored By, Ties, and the
+        league averages -- are AWARDED. Kyle ruled the primacy question on
+        2026-08-01: reconstructed everywhere except where it decides a
+        canonical outcome, and "which team had the most points in their
+        season" is exactly that. These come from CBS's own year-end
+        standings via `get_historic_finishes` and reconcile to it exactly.
+      - The STAT columns are RECONSTRUCTED, because no platform ever
+        published a team-season stat line here. That is not a breach of
+        the ruling: its exception is scoped to canonical outcomes, and a
+        stat line is context. See `get_season_history_stats` for the
+        fidelity tiers -- and note the stat lines themselves are real MLB
+        game logs, never reconstructed; only the fantasy state around
+        them is inferred.
+
+    Margin is the awarded `points_behind` re-signed: winner total minus
+    this team's, so the champion reads 0 and everyone else is negative
+    (Kyle's spec). It carries a two-stop red-to-white scale rather than
+    the three-stop polarity one, because it has no positive half.
+
+    One divergence from the ESPN analog: no Sort Key column. ESPN needs
+    one because its Matchup cell is a =HYPERLINK the sheet cannot sort
+    by; Season here is a plain number and sorts itself.
 
     Closed seasons only. The in-flight season is not on this tab because
     it has no canonical outcome yet -- its Outscored count changes
     daily -- and because the awarded source stops at the last completed
     year. The current race lives on Advanced Standings, which carries it
     as its own column and counts it toward nothing, the same convention.
+    (Pacing an in-flight season with an asterisk is Kyle's logged
+    alternative, not built.)
     """
     rows, formats = [], []
     fmap = franchise_map or {}
+    owners = owners or {}
+    last_col = _col(_SEASON_HISTORY_WIDTH)
+    stats_by_key = {(int(r['season_year']), int(r['team_id'])): r
+                    for r in (team_stats or ())
+                    if r.get('team_id') is not None}
 
     def _canon_name(fid, fallback):
         meta = fmap.get(int(fid)) or {}
         return meta.get('name') or fallback
+
+    def _season_labels(season_rows):
+        """Franchise labels for one season, disambiguated.
+
+        Normally the canonical name (MLB-64), so a franchise reads the
+        same down the column across renames and re-ids. But CBS has pairs
+        of genuinely DISTINCT franchises that share one canonical name --
+        14 and 17 are both 'Bent Slides', and both were in the league
+        2004-2008 -- which rendered two identically-labelled rows in the
+        same season with no way to tell them apart.
+
+        The fallback is the season's OWN published name, which is real
+        data rather than a guess: in 2005 that reads 'Bent Slides' (14)
+        and 'Hit-and-Rum' (17). Deliberately NOT resolved by inventing a
+        lineage row or a suffix -- which canonical name each fork should
+        carry is an open historian call (the 14/17 + 26/31/32 question),
+        and this tab should not be the thing that decides it."""
+        labels = {}
+        for r in season_rows:
+            fid = int(r['franchise_id'])
+            labels[fid] = _canon_name(fid, r['team_name'])
+        clashed = {name for name in labels.values()
+                   if list(labels.values()).count(name) > 1}
+        if clashed:
+            for r in season_rows:
+                fid = int(r['franchise_id'])
+                if labels[fid] in clashed:
+                    labels[fid] = r['team_name']
+        return labels
+
+    def _stat_cells(year, fid):
+        """One team-season's stat block, in the book's box-score order.
+        A season with no attributed rows renders blank rather than zero --
+        a zero would read as 'they hit no home runs'."""
+        agg = stats_by_key.get((year, fid))
+        out = []
+        for stat in (_SEASON_HISTORY_HIT_STATS + [None]
+                     + _SEASON_HISTORY_PIT_STATS):
+            if stat is None:
+                out.append('')                       # the block buffer
+                continue
+            if agg is None:
+                out.append('')
+                continue
+            value = _rec_fnum(agg.get(stat.lower()))
+            # OUTS rides as IP in baseball notation, the book's convention
+            # everywhere else (7 outs -> 2.1, never 2.333).
+            out.append(fmt_ip(value) if stat == 'OUTS' else _whole(value))
+        return out
 
     by_season = {}
     for r in finishes:
@@ -4606,26 +4748,27 @@ def build_season_history_rows(context, finishes, franchise_map):
     era = f'{min(by_season)}–{max(by_season)}' if by_season else ''
 
     rows.append([SEASON_HISTORY_TAB])
-    formats.append({'range': f'A1:{_SEASON_HISTORY_LAST_COL}1',
+    formats.append({'range': f'A1:{last_col}1',
                     'format': {'textFormat': {'bold': True, 'fontSize': 14}}})
-    rows.append([f'Every finished season, {era}, as the league itself '
-                 f'published it.'])
-    formats.append({'range': f'A2:{_SEASON_HISTORY_LAST_COL}2',
+    rows.append([f'Every finished season, {era}, one row per team.'])
+    formats.append({'range': f'A2:{last_col}2',
                     'format': {'textFormat': {'italic': True},
                                'backgroundColor': _PALE_BLUE}})
     # House explainer token (MLB-170): italic, size 9, never bold.
     rows.append(['Outscored = teams this one finished ahead of on points; '
-                 'Outscored By = teams ahead of it. An exact tie counts in '
-                 'neither, so the two plus Ties always make one less than '
-                 'Teams. Points are the platform\'s awarded season totals, '
-                 'not the calculated lens used elsewhere in this book.'])
-    formats.append({'range': f'A3:{_SEASON_HISTORY_LAST_COL}3',
+                 'Outscored By = teams ahead of it; an exact tie counts in '
+                 'neither, so the three always total one less than the teams '
+                 'that season. Margin is points behind the winner. Points are '
+                 'the league\'s own awarded season totals; the stat columns '
+                 'are reconstructed from daily rosters, and are least certain '
+                 'in 2004–2020 where lineups are estimated from start share.'])
+    formats.append({'range': f'A3:{last_col}3',
                     'format': {'textFormat': explainer_text_format()}})
     rows.append([])
 
-    rows.append(list(_SEASON_HISTORY_HEADER))
+    rows.append(_season_history_header())
     header_row = len(rows)
-    formats.append({'range': f'A{header_row}:{_SEASON_HISTORY_LAST_COL}{header_row}',
+    formats.append({'range': f'A{header_row}:{last_col}{header_row}',
                     'format': {'textFormat': {'bold': True,
                                               'foregroundColor': _WHITE},
                                'backgroundColor': _NAVY}})
@@ -4644,71 +4787,101 @@ def build_season_history_rows(context, finishes, franchise_map):
         order = sorted(range(n),
                        key=lambda i: (int(season_rows[i]['standings_rank']),
                                       int(season_rows[i]['franchise_id'])))
+        labels = _season_labels(season_rows)
         for i in order:
             r = season_rows[i]
+            fid = int(r['franchise_id'])
             outscored, outscored_by, ties = counts[i]
             finish = int(r['standings_rank'])
-            rows.append([
-                year,
-                _canon_name(r['franchise_id'], r['team_name']),
-                r['team_name'],
-                f'🏆 {finish}' if r['is_champion'] else finish,
-                int(r['teams_in_season']),
-                _whole(r['batting_points']), _whole(r['pitching_points']),
-                _whole(r['total_points']), _whole(r['points_behind']),
-                outscored, outscored_by, ties,
-                _whole(avg_bat), _whole(avg_pit), _whole(avg_tot),
-            ])
+            rows.append(
+                [year,
+                 labels[fid],
+                 owners.get((year, fid), ''),
+                 f'🏆 {finish}' if r['is_champion'] else finish,
+                 -_whole(r['points_behind']),      # winner total - ours
+                 '']
+                + _stat_cells(year, fid)
+                + ['', _whole(r['batting_points']), _whole(r['pitching_points']),
+                   _whole(r['total_points']), '']
+                + [outscored, outscored_by, ties, '']
+                + [_whole(avg_bat), _whole(avg_pit), _whole(avg_tot)])
     last_data = len(rows)
 
-    # Everything right of the two name columns is a number: center it,
-    # header included, the finishes-matrix convention.
-    formats.append({'range': f'D{header_row}:{_SEASON_HISTORY_LAST_COL}{last_data}',
+    # Everything right of the name columns is a number: center it, header
+    # included, the finishes-matrix convention.
+    formats.append({'range': f'D{header_row}:{last_col}{last_data}',
                     'format': {'horizontalAlignment': 'CENTER'}})
     if last_data <= header_row:
         return rows, formats
 
-    # ---- highlighting (Kyle, ruled from the first render 2026-08-05)
+    # ---- highlighting (Kyle, ruled 2026-08-05 from the first render)
     # Matchup History's rules, verbatim: three-stop polarity color scale
-    # (min / median / max) and gold on the all-time records. Scaled
-    # ALL-TIME -- one rule per column over all 25 seasons, not per season
-    # -- which is what makes a column comparable down its own length.
+    # (min / median / max) and gold on the all-time records.
+    #
+    # Scaled ALL-TIME -- one rule per column across every season, not one
+    # per season or per fidelity era. Kyle's reasoning is that this tab is
+    # the POINTS-LEAGUE format surface rather than a this-league surface,
+    # so the default has to be the one that extends to somebody else's
+    # points league; era-aware scaling would be a league-specific tweak.
     #
     # Ties gets NO gradient, by ruling: a tie is neither good nor bad, so
     # there is no polarity to grade. It is the one numeric column here
     # that is genuinely polarity-free.
-    span = f'{first_data}:{{col}}{last_data}'
-    for col, gradient in (
-        ('F', _points_gradient()),        # batting points  -- more is better
-        ('G', _points_gradient()),        # pitching points
-        ('H', _points_gradient()),        # total points
-        ('I', _points_gradient_low()),    # behind leader   -- 0 is the leader
-        ('J', _points_gradient()),        # outscored
-        ('K', _points_gradient_low()),    # outscored by    -- 0 beat everyone
-        ('M', _points_gradient()),        # lg avg bat      -- reads as era drift
-        ('N', _points_gradient()),        # lg avg pitch
-        ('O', _points_gradient()),        # lg avg total
-    ):
-        formats.append({'range': f'{col}{span.format(col=col)}',
+    def _grade(idx0, gradient):
+        col = _col(idx0 + 1)
+        formats.append({'range': f'{col}{first_data}:{col}{last_data}',
                         'gradient': gradient})
 
-    # Gold on the all-time records, over the four columns where "most" is
-    # the record. Outscored By and Behind Leader are deliberately left out
-    # even though their best value is a minimum: that minimum is 0, every
-    # champion holds it, and a record 25 rows wide is not a record.
+    # Margin: two-stop red -> white (Kyle). Every value is <= 0, so there
+    # is no positive half for a three-stop scale to describe.
+    _grade(_SH_MARGIN, {'minpoint': {'type': 'MIN', 'color': _SCALE_RED},
+                        'maxpoint': {'type': 'MAX', 'color': _WHITE}})
+    for offset, stat in enumerate(_SEASON_HISTORY_HIT_STATS):
+        _grade(_SH_HIT0 + offset, _points_gradient())
+    for offset, stat in enumerate(_SEASON_HISTORY_PIT_STATS):
+        _grade(_SH_PIT0 + offset,
+               _points_gradient_low() if stat in _SEASON_HISTORY_NEG_STATS
+               else _points_gradient())
+    for offset in range(3):                       # the points trio
+        _grade(_SH_PTS0 + offset, _points_gradient())
+    _grade(_SH_COUNTS0, _points_gradient())          # outscored
+    _grade(_SH_COUNTS0 + 1, _points_gradient_low())  # outscored by
+    for offset in range(3):                       # the league averages
+        _grade(_SH_AVG0 + offset, _points_gradient())
+
+    # Gold on the all-time records, over every column where "most" is the
+    # record: both stat blocks (negative pitching stats excluded -- a
+    # record for most earned runs allowed is not a record) plus the points
+    # trio and Outscored. Outscored By and Margin are graded but never
+    # marked: their best value is 0, every champion holds it, and a record
+    # 25 rows wide is not a record.
     #
     # ESPN's rule for the mark itself, kept: BOLD always, gold only when a
     # single row holds the value. Outscored tops out at 15 and is shared by
     # nearly every champion, so it bolds a column and golds nothing --
     # which is the rule working, not failing (Kyle: "there'll be a lot of
     # ties there, but that's fine").
-    for col, idx in (('F', 5), ('G', 6), ('H', 7), ('J', 9)):
-        best = max(r[idx] for r in rows[first_data - 1:])
-        holders = [i for i, r in enumerate(rows[first_data - 1:])
-                   if r[idx] == best]
+    marked = [_SH_HIT0 + i for i in range(len(_SEASON_HISTORY_HIT_STATS))]
+    marked += [_SH_PIT0 + i
+               for i, stat in enumerate(_SEASON_HISTORY_PIT_STATS)
+               if stat not in _SEASON_HISTORY_NEG_STATS]
+    marked += [_SH_PTS0, _SH_PTS0 + 1, _SH_PTS0 + 2, _SH_COUNTS0]
+    body = rows[first_data - 1:]
+    for idx0 in marked:
+        # IP renders as a string ('1433.1'); compare numerically so the
+        # record lands on the true maximum rather than on lexical order.
+        # _rec_fnum reads a blank as 0.0, so an all-blank column (a stat
+        # nobody recorded, or a season with no attribution) falls out here
+        # rather than gilding an empty cell.
+        values = [_rec_fnum(r[idx0]) for r in body]
+        best = max(values)
+        if best == 0:
+            continue
+        holders = [i for i, v in enumerate(values) if v == best]
         text_format = {'bold': True}
         if len(holders) == 1:
             text_format['foregroundColor'] = _RECORD_GOLD
+        col = _col(idx0 + 1)
         for i in holders:
             cell = f'{col}{first_data + i}'
             formats.append({'range': f'{cell}:{cell}',
@@ -4829,9 +5002,12 @@ def build_all_tabs(nav_targets=None):
     draft = build_draft_recap_rows(
         season, _fmap,
         season_clocks={r['season_year']: r['days'] for r in get_season_gameplay_days()})
-    # Awarded lens end to end -- the same finishes rows the Standings tab
-    # crowns champions from, which are CBS's own published season totals.
-    season_history = build_season_history_rows(context, finishes, _fmap)
+    # Awarded points (the same finishes rows the Standings tab crowns
+    # champions from) + the reconstructed stat blocks; see the builder for
+    # why the tab deliberately carries both lenses.
+    season_history = build_season_history_rows(
+        context, finishes, _fmap,
+        team_stats=get_season_history_stats(), owners=get_season_owners())
 
     # Third element: the team-tab title set -- the writer bulk-writes those
     # tabs RAW (zero-padded rate strings survive) + reapplies '=' formulas,
@@ -5216,13 +5392,24 @@ _TEAM_WIDTHS = [(0, 1, 25), (1, 2, 75), (3, 4, 40), (4, 5, 50), (5, 6, 50),
 # 16-column board (2026 teams / all-time slots).
 _DRAFT_WIDTHS = [(0, 1, 25), (1, 3, 40), (3, 4, 125), (4, 5, 75),
                  (5, 6, 40), (6, 22, 100)]
-# Season History: A Season narrow, B/C the two name columns (canonical +
-# as-captured, both need room for full CBS team names), D-O the numbers.
-# The three Lg Avg columns sit last and repeat per season, so they get the
-# same narrow treatment as the counts.
-_SEASON_HISTORY_WIDTHS = [(0, 1, 60), (1, 2, 165), (2, 3, 165), (3, 4, 55),
-                          (4, 5, 55), (5, 8, 95), (8, 9, 95), (9, 12, 80),
-                          (12, 15, 85)]
+# Season History: A Season, B Franchise + C Owner(s) need room for full
+# names, D Finish / E Margin narrow, then the two stat blocks at ESPN's
+# 42px stat width with 12px buffers between blocks, the points trio and
+# the counts, and the three league averages last. Derived from the block
+# offsets so the widths cannot drift out of step with the layout.
+_SEASON_HISTORY_WIDTHS = [
+    (0, 1, 60), (1, 2, 165), (2, 3, 140), (3, 4, 55), (4, 5, 70),
+    (5, 6, 12),                                        # buffer
+    (_SH_HIT0, _SH_PIT0 - 1, 42),
+    (_SH_PIT0 - 1, _SH_PIT0, 12),                      # buffer
+    (_SH_PIT0, _SH_PTS0 - 1, 42),
+    (_SH_PTS0 - 1, _SH_PTS0, 12),                      # buffer
+    (_SH_PTS0, _SH_PTS0 + 3, 95),
+    (_SH_PTS0 + 3, _SH_COUNTS0, 12),                   # buffer
+    (_SH_COUNTS0, _SH_COUNTS0 + 3, 80),
+    (_SH_COUNTS0 + 3, _SH_AVG0, 12),                   # buffer
+    (_SH_AVG0, _SH_AVG0 + 3, 115),
+]
 
 
 def _tab_style_requests(sheet_gid, title, formats):

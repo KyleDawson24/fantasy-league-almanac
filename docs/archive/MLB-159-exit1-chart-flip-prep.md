@@ -328,6 +328,36 @@ explainer sentence itself.
 `espn-main` (default target) and `cbs-bsb` — via
 `output/generate_almanac_sheet.py`, no `--prod` anywhere.
 
+### The flip verified against something outside the warehouse
+
+**Curtis Mead reconciles to Baseball Reference to the unit**, and he was not
+tuned to. Post-flip, at the daily grain:
+
+| club | PA | player-days | scoring periods |
+|---|---|---|---|
+| Washington | **327** | 87 | 7–123 |
+| Detroit | 39 | 12 | 2–16 |
+| Boston | **2** | 1 | 125 only |
+
+Baseball Reference has him at 327 for Washington and 1 game / 2 PA for
+Boston. **Before the flip the warehouse credited Boston with 20** — the 18
+extra were Washington games in the same matchup period as the move,
+relabelled wholesale (`known-data-issues.md` §6 documents that as the
+worked example). Boston is now exactly one day, on the right day.
+
+**And the buried history comes back.** Player-seasons carrying more than one
+club:
+
+| season | before the flip | after |
+|---|---|---|
+| 2025 | **0** of 1,236 | **158** |
+| 2026 | 66 (inflated by 10 FA↔club transitions) | **57** |
+
+2025's zero was the tell that a one-pass backfill had stamped the whole year
+with a single club: not one in-season trade was represented, league-wide.
+2026's 57 matches the handoff's independently-measured club-of-game figure
+exactly.
+
 ### Screenshots — NOT captured, and why
 
 **I could not screenshot the dev sheets.** They are private Google Sheets,

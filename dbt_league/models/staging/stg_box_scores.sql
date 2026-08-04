@@ -50,6 +50,39 @@
 -- This narrow-before-flatten shape is the house pattern for the same
 -- class elsewhere.
 --
+-- pro_team READS clubOfGame, NOT proTeam (MLB-159 Exit 1 / MLB-129).
+--
+-- The two keys answer different questions. `proTeam` is ESPN's stamp on
+-- the PERSON record: the club the player belonged to when that period was
+-- pulled, which for a season pulled in one pass is the club as of that
+-- pull for every day of the year. `clubOfGame` is the club of the GAME
+-- the production came from, reconstructed per player-day from the
+-- period's stat splits and written into RAW by extract.py's backfill.
+--
+-- The attribution rule is the PRODUCING-SPLITS FILTER: only a split
+-- carrying a non-empty `stats` object is club evidence. That is not a
+-- tidy-up, it is the whole mechanism. ESPN moves a person record to the
+-- incoming club during a transition window and emits a split for that
+-- club with an empty `{}` stats object -- person-record drift reaching
+-- split level as a phantom. Requiring production removes the phantom
+-- before any tie-break sees it. (Majority-by-production is retained
+-- upstream as a documented DORMANT fallback for a genuine same-day
+-- two-club day: possible in baseball, and unobserved across both
+-- seasons here -- 0 of 94 candidates carry two PRODUCING clubs.)
+--
+-- NULL means "did not appear that day", and that is the honest answer
+-- rather than a gap: the key is present on 100% of stored player
+-- entries, and the null/non-null split is exactly the played/did-not-play
+-- split (measured: 66,796 played rows carry a club and 0 are null; 77,492
+-- did-not-play rows carry none). Consumers that display the label must
+-- therefore read the latest LABELLED day, not the latest day -- see the
+-- latest_by macro and MLB-168.
+--
+-- The residual null-on-production case is FA-slot rows where ESPN no
+-- longer serves the player (476 player-days, all 2026, zero chart
+-- weight) -- MLB-193, which keeps them NULL deliberately rather than
+-- guessing.
+--
 -- Phase 4 raw shape: {"matchups": [...], "free_agents": [...]}.
 -- Pre-Phase-4 raw shape: bare array of matchup dicts. raw_json:matchups
 -- is NULL on the array shape, so the COALESCE falls through to raw_json
@@ -86,7 +119,7 @@ home_players as (
         {{ json_text('p.value', 'playerId') }}::integer          as player_id,
         {{ json_text('p.value', 'position') }}::string           as position,
         {{ json_text('p.value', 'lineupSlot') }}::string         as lineup_slot,
-        {{ json_text('p.value', 'proTeam') }}::string            as pro_team,
+        {{ json_text('p.value', 'clubOfGame') }}::string          as pro_team,
         {{ json_text('p.value', 'points') }}::double              as points,
         {{ json_get('p.value', 'breakdown') }}                  as breakdown,
         {{ json_get('p.value', 'eligibleSlots') }}              as eligible_slots,
@@ -113,7 +146,7 @@ away_players as (
         {{ json_text('p.value', 'playerId') }}::integer          as player_id,
         {{ json_text('p.value', 'position') }}::string           as position,
         {{ json_text('p.value', 'lineupSlot') }}::string         as lineup_slot,
-        {{ json_text('p.value', 'proTeam') }}::string            as pro_team,
+        {{ json_text('p.value', 'clubOfGame') }}::string          as pro_team,
         {{ json_text('p.value', 'points') }}::double              as points,
         {{ json_get('p.value', 'breakdown') }}                  as breakdown,
         {{ json_get('p.value', 'eligibleSlots') }}              as eligible_slots,
@@ -143,7 +176,7 @@ free_agents as (
         {{ json_text('f.value', 'playerId') }}::integer          as player_id,
         {{ json_text('f.value', 'position') }}::string           as position,
         {{ json_text('f.value', 'lineupSlot') }}::string         as lineup_slot,
-        {{ json_text('f.value', 'proTeam') }}::string            as pro_team,
+        {{ json_text('f.value', 'clubOfGame') }}::string          as pro_team,
         {{ json_text('f.value', 'points') }}::double              as points,
         {{ json_get('f.value', 'breakdown') }}                  as breakdown,
         {{ json_get('f.value', 'eligibleSlots') }}              as eligible_slots,

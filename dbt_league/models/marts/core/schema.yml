@@ -1292,7 +1292,12 @@ models:
       - name: display_name
         description: 'Display helper, not a grain key. Nickname-resolved player name (COALESCE(nickname, player_name)) from int_player_daily.'
       - name: pro_team
-        description: 'Display helper, not a grain key. Player MLB team abbreviation for this matchup.'
+        description: >
+          Display helper, not a grain key. The MLB club this player wore on the
+          LATEST day he actually appeared inside this matchup period -- not a
+          string maximum over the period's days (MLB-168), and not the club his
+          ESPN person record names today (MLB-159 Exit 1). Days he did not appear
+          carry no club and are skipped rather than winning the pick.
       - name: active_pts
         description: >
           SUM of position-category-appropriate CALCULATED points on days the

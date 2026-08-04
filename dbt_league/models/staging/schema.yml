@@ -64,7 +64,21 @@ models:
               arguments:
                 values: ['pitching', 'hitting', 'inactive']
       - name: pro_team
-        description: 'Player MLB team abbreviation as reported by ESPN.'
+        description: >
+          MLB club of the GAME this player-day's production came from, read
+          from RAW's `clubOfGame` (MLB-159 Exit 1). Game-grain, not person-grain:
+          it varies across a season for a traded player, and a mid-season move
+          is attributed on the day it actually happened rather than backdated
+          to whatever club ESPN's person record names today.
+          Attribution rule: the producing-splits filter -- only a split carrying
+          a non-empty stats object counts as club evidence, which excludes the
+          empty transition-window splits ESPN emits when a person record moves.
+          NULL means the player did not appear that day (the null/non-null split
+          is exactly the did-not-play/played split), so consumers displaying the
+          label must take the latest LABELLED day, not the latest day (MLB-168).
+          The predecessor `proTeam` key is still in RAW and still stamped on
+          every extract; it is the person-level observation record and is
+          deliberately preserved, not read here.
       - name: eligible_slots
         description: >
           VARIANT array of every fantasy lineup slot the player is eligible to fill (e.g. ['LF', 'OF', 'DH', 'UTIL', 'BE', 'IL'] for a corner outfielder).

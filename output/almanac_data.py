@@ -1164,48 +1164,65 @@ def get_team_affinity_weights(season_year):
     pure games-played underweights pitchers ~5:1). PA = AB+BB+HBP+SF,
     BF = outs+H+BB+HBP allowed, both straight off the daily fact.
 
-    The club signal is `pro_team`: ESPN's CURRENT-club stamp on the player
-    record inside the box-score payload, applied PER MATCHUP PERIOD from
-    whatever the profile said when that period was pulled. Both halves of
-    that sentence are load-bearing (MLB-159).
+    The club signal is `pro_team`, which since MLB-159 Exit 1 is the club
+    of the GAME the production came from -- read per player-day from RAW's
+    `clubOfGame` rather than from ESPN's person-level stamp. A player
+    traded mid-season is credited to the club he actually played for on
+    each day, on both sides of the move.
 
-    FORWARD it is period-accurate, NOT day-accurate. A live season tracks
-    club changes to within a scoring week, and the week a player moves is
-    stamped wholly with his NEW club -- so games he played for the old one
-    are credited to the new one. Measured 2026: 66 of 1,208 player-seasons
-    change club, and the 75 transition periods carry 161 units of
-    active-slot weight, 0.12% of the season. Small, bounded, real.
+    What that replaced is worth keeping in view, because it is the failure
+    mode to re-check if these numbers ever look too clean. The old signal
+    was the person stamp, applied per matchup period from whatever the
+    profile said when the period was pulled: FORWARD that is
+    period-accurate but not day-accurate (the week a player moves was
+    stamped wholly with his new club), and BACKWARD a season pulled in one
+    pass gets ONE stamp for the whole year (2025 measured 0 of 1,236
+    player-seasons carrying more than one club, against 66 in the live
+    season -- every mid-season move mis-filed, invisibly).
 
-    BACKWARD a season pulled in one pass gets ONE stamp for the whole
-    year: the club as of that pull, which is not necessarily the player's
-    club today. Measured 2025: 0 of 1,236 player-seasons carry more than
-    one club, against 66 in the live season. Every mid-season move that
-    year is therefore mis-filed, invisibly.
+    THE ATTRIBUTION RULE IS THE PRODUCING-SPLITS FILTER. Only a split
+    carrying a non-empty stats object is club evidence. ESPN emits an
+    empty `{}` split for the incoming club during a transition window --
+    person-record drift reaching split level -- and that phantom names a
+    club that frequently did not even play that day. Requiring production
+    removes it before any tie-break sees it. Majority-by-production
+    survives upstream as a documented dormant fallback for a genuine
+    same-day two-club day, which is unobserved across both seasons here
+    (0 of 94 multi-club candidates carry two PRODUCING clubs).
 
-    Two rewrites of this docstring have now over-claimed in the same
-    direction, so the wording is deliberately careful. The original said
-    the snapshot was "day-accurate across trades" -- the per-scoring-period
-    part was right and the day part was not. Its replacement called 2026
-    "live-extracted and correct", which the Mead reconciliation disproved:
-    18 of his 20 Boston-labelled PA were Washington games in the week of
-    the move (Baseball Reference has him at 1 game, 2 PA for Boston).
-    Neither season is CORRECT; they are wrong at different scales.
+    Three rewrites of this docstring have now over-claimed, each in the
+    same direction, so the wording stays deliberately careful. The
+    original called the snapshot "day-accurate across trades" -- the
+    per-scoring-period part was right and the day part was not. Its
+    replacement called 2026 "live-extracted and correct", which the Mead
+    reconciliation disproved (18 of his 20 Boston-labelled PA were
+    Washington games in the week of the move). So this one does not say
+    "correct" either: it says the club is the one the producing split
+    names, which is a rule you can check, and Mead now reconciles to
+    Baseball Reference on both sides of his move (2 PA Boston, 327
+    Washington) without having been tuned to.
 
-    Rows stamped 'FA' -- free agent ON EXTRACT DAY, which says nothing
-    about who a player pitched or hit for when the games happened -- were
-    filtered out entirely, silently deleting 11.7% of 2025's active-slot
-    weight from the chart. They now bucket to AFFINITY_UNATTRIBUTED and
-    render as a visible band. This makes the chart honest, NOT correct:
-    every other row is still credited to whatever club the stamp names
-    rather than the club of the game, and fixing that needs ESPN -> MLBAM
-    identity resolution the warehouse does not have (MLB-159 Exit 1,
-    post-2.0, rides MLB-129).
+    AFFINITY_UNATTRIBUTED is now expected to be EMPTY on this league's
+    data -- measured 0.0 across 2025, 2026 and all-time, against 11.73%
+    and 0.02% before the flip. The band is deliberately still
+    render-capable: zero rows here is a property of THIS data, not deleted
+    code, and for a league backfilled years after its seasons were lived
+    it is a live diagnostic. The `pro_team = 'FA'` arm of that CASE is
+    likewise unreachable now (clubOfGame is one of 30 clubs or NULL, never
+    'FA') and is kept as a tripwire -- it is what stops an FA filter being
+    silently restored, which is the regression that once deleted 11.7% of
+    2025 from the chart. tests/test_almanac_sheets.py pins the text.
 
     Note the two different FAs. `lineup_slot = 'FA'` means nobody had him
-    rostered that day and stays excluded; `pro_team = 'FA'` is the
-    extract-day stamp above. Bench/IL and free-agent-SLOT rows stay out;
-    playoff weeks count (affinity is a roster-identity lens, not a
-    standings metric)."""
+    rostered that day and stays excluded; `pro_team = 'FA'` was the
+    extract-day stamp described above. Bench/IL and free-agent-SLOT rows
+    stay out; playoff weeks count (affinity is a roster-identity lens, not
+    a standings metric).
+
+    The one measured gap is outside this query's scope: 476 FA-slot
+    player-days (all 2026) where ESPN no longer serves the player and the
+    club cannot be reconstructed. They carry zero active weight, so no
+    chart row moves; MLB-193 keeps them NULL rather than guessing."""
     involvement = ('(COALESCE(ab, 0) + COALESCE(b_bb, 0) + COALESCE(hbp, 0)'
                    ' + COALESCE(sf, 0) + COALESCE(outs, 0)'
                    ' + COALESCE(p_h, 0) + COALESCE(p_bb, 0)'

@@ -1500,14 +1500,24 @@ def build_advanced_standings_tab_rows(standings_rows, slot_rows, stat_specs,
         aff_banner[season0] = 'Current Season'
         aff_banner.append('All-Time')
         rows.append(aff_banner)
+        # DRAFT WORDING (MLB-159 Exit 1, awaiting Kyle's voice-pass). The
+        # closing sentence used to read "ESPN's player records carry only
+        # a CURRENT club, so 2025 cannot place anyone who has changed
+        # clubs since" -- true before the flip and dead text after it.
+        # Per the MLB-188 ruling it is REWRITTEN rather than deleted, and
+        # rewritten to be forward-true: it now says what a visible band
+        # would mean for a reader's OWN league, which is the case the
+        # launch post invites feedback on.
         rows.append([
             "Share of each team's active-lineup involvement -- defined as "
             "plate appearances + batters faced -- with each MLB club "
             "(pure GP would underweight pitchers). Bold indicates highest "
             "value for given MLB team. Unattributed is involvement whose "
-            "MLB club is unknown -- not free-agent time: ESPN's player "
-            "records carry only a CURRENT club, so 2025 cannot place "
-            "anyone who has changed clubs since."
+            "MLB club is unknown -- not free-agent time. Every club here "
+            "is the club of the game the production came from, so this "
+            "band stays empty while every game can be placed; a visible "
+            "band means those seasons were reconstructed too late to "
+            "place some of them."
         ])
         rows.append(['', '', 'MLB Team', '', *abbrevs, *aff_pad, *abbrevs])
         for club in club_list:

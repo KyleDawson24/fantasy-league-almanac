@@ -166,4 +166,149 @@ ticket.
 
 ---
 
-*(sections 4–7 appended as the session proceeds)*
+## 4. Consumer enumeration — every reader of `pro_team`
+
+`dbt build --target dev` (full chain, 77 models): **PASS=635, WARN=0,
+ERROR=0, SKIP=0**, 543 data tests green, 3m57s.
+
+| consumer | what it does with the club | behaviour under game-grain variation |
+|---|---|---|
+| `get_team_affinity_weights` (the chart) | buckets NULL/'FA' → Unattributed | **the target.** Unattributed → 0.0 in all three scopes |
+| `almanac_logic` affinity band (MLB-190) | builds club set from the data; sentinel pinned last | **render-capable, correctly empty.** `AFFINITY_UNATTRIBUTED` simply never enters the club set, so no row is emitted — code path intact |
+| `fct_player_position_pts` | collapses day → matchup period | FIXED (§1) |
+| `get_optimal_team_candidates` / `..._season_candidates` | collapse period → career / season | FIXED (§1) |
+| `generate_summary` / `generate_season_report` `player_meta` | row-pick, then read the club off that row | FIXED (§1, window form) |
+| `almanac_render` (6 sites) | `row.get('pro_team') or ''` | NULL-safe by construction |
+| `mart_daily_roster_snapshot` | passthrough | **no aggregation at all** — safe |
+| `fct_player_season_performance` | does not carry the column | no exposure |
+| `almanac_logic:2293` | reuses the Team CELL for overflow text | assigns, never reads — unaffected |
+| `almanac_logic:2372` | Team column doubles as YEAR | assigns, never reads — see the note below |
+| `cbs_almanac_sheets:2541` | `WHERE pro_team IS NOT NULL` | the only filter on the column anywhere; CBS-only |
+| `almanac_data:1459` | `_PRO_TEAM_MAP` on the Trades tab | live-API path, not the warehouse column |
+
+Nothing anywhere JOINs on `pro_team`. The one filter is CBS-only.
+
+**The NULL population is provably unreachable from any team surface.** All
+**647** null-label ESPN rows in `fct_player_position_pts` carry
+`team_id IS NULL` — every one is a free-agent row, and **zero rostered rows
+carry a null label**. They hold inactive points only (max active pts = 0),
+so the `HAVING points > 0` on both optimal-team queries excludes them
+regardless. This is exactly MLB-193's corner (506 player-days, 60 players,
+2,186 involvement units, **0.0 chart weight**), and it stays NULL by ruling.
+
+**Flagged, not changed:** the comment at `almanac_logic:2372` justifies
+showing YEAR instead of Team in Best Individual Seasons with "pro_team is
+only season-accurate on the CBS side". That rationale is now stale for ESPN
+(game-accurate post-flip) but still true for CBS, and the display choice was
+a product call. Left as-is; worth a sentence from you on whether the ESPN
+book should now show the club there.
+
+---
+
+## 5. Doc drafts — for your voice-pass
+
+### (a) The sheet explainer's replacement sentence
+
+The old closing clause is dead text post-flip ("ESPN's player records carry
+only a CURRENT club, so 2025 cannot place anyone who has changed clubs
+since"). Per the MLB-188 ruling it is rewritten, not deleted, and rewritten
+forward-true. **Applied to the code** so tonight's dev renders are coherent
+rather than showing a false sentence — but it is a draft:
+
+> Unattributed is involvement whose MLB club is unknown -- not free-agent
+> time. Every club here is the club of the game the production came from,
+> so this band stays empty while every game can be placed; a visible band
+> means those seasons were reconstructed too late to place some of them.
+
+Two alternates if you want it shorter or more inviting:
+
+> ...not free-agent time. Clubs are the club of the game, so this band is
+> empty here; if your league shows one, those seasons were backfilled after
+> the fact.
+
+> ...not free-agent time. Every club is the club of the game that produced
+> the line. An empty band means every game placed; a visible one is a
+> diagnostic, not a rounding error.
+
+### (b) `known-data-issues.md` — three entries
+
+**(b1) The flip history entry**, replacing §6's "Mis-attribution — OPEN"
+bullet:
+
+> - **Mis-attribution — CLOSED 2026-08-04 (MLB-159 Exit 1).** `pro_team`
+>   now reads the club of the GAME, from the `clubOfGame` field the
+>   MLB-129 spike found already sitting on each per-scoring-period split.
+>   The 45,059 units of 2025 weight filed under the wrong club (22.25% of
+>   the season) and the 23,749-unit `Unattributed` band (11.73%) are both
+>   gone: the band measures **0.0 across 2025, 2026 and all-time**, and
+>   every one of the 30 MLB clubs renders in every scope.
+>
+>   Two things did NOT change and are worth stating so nobody re-opens
+>   them. The person-level `proTeam` stamp is still written on every
+>   extract and still preserved byte-for-byte in RAW — it is the
+>   observation record of what ESPN believed and when, and MLB-188's guard
+>   exists to stop it being overwritten. And the fix is a re-read, not a
+>   re-fetch: the spike pulled 2025's splits a year late and they still
+>   showed every deadline trade on the right day, which is why this route
+>   was ruled canonical over a crosswalk.
+
+**(b2) The MLB-193 entry** — a new subsection under §6:
+
+> **The residual, bounded and decaying.** 476 player-days (60 players, all
+> 2026) produced without a placeable club: ESPN no longer returns them for
+> those periods, so the backfill has nothing to read. They are FA-slot rows
+> carrying **zero** chart weight, so nothing shipped moves — the chart's own
+> scope measures clean, 0 null clubs on rostered rows. Two causes, both
+> measured: stale duplicate ESPN ids, and players who have dropped out of
+> today's kona window. It **decays**: the gap between a period being lived
+> and being backfilled is itself the loss function, so this population
+> grows the longer a period waits. Tracked as MLB-193, post-2.0, routed
+> through the MLB-129 crosswalk and the MLB gamelog spine — a non-decaying
+> source. They stay NULL rather than guessed.
+
+**(b3) The phantom-shadow mechanism** — the paragraph that explains why the
+filter is the rule:
+
+> **Why the attribution rule is "producing splits only".** ESPN's
+> person-record drift does not stop at the person record: it reaches split
+> level. When ESPN moves a player to his incoming club during a transition
+> window it emits a split for that club carrying an empty `{}` stats object
+> — a phantom that frequently names a club which did not play that day at
+> all (36 of 159 stat-less splits name an idle club; the other 123 are the
+> "roster-days, not games" artifact). Requiring a non-empty `stats` object
+> removes the shadow before any tie-break sees it.
+>
+> This is not a tidy-up, it is the whole mechanism, and the evidence is
+> that it is exactly what separated the two independent reconstructions:
+> the spike's sweep had no such filter, so it ranked a phantom equal to a
+> real game and let payload order decide — all 13 of its disagreements with
+> the backfill are that one shape, and the backfill is right in all 13.
+> Majority-by-production survives as a documented DORMANT fallback for a
+> genuine same-day two-club day: possible in baseball, and unobserved
+> across both ESPN seasons here (0 of 94 multi-club candidates carry two
+> producing clubs). Note it is NOT unobservable in general — the CBS book's
+> 26 seasons contain 9 real ones (§3).
+
+### (c) `pro_team` column docs
+
+Applied as code, since these are contracts that must travel with the column
+rather than drift in a separate file — flagging them here for the same
+voice-pass:
+
+- `models/staging/schema.yml` — full game-grain semantics, the attribution
+  rule, what NULL means, and that the `proTeam` stamp is deliberately
+  preserved in RAW as the observation record.
+- `models/intermediate/schema.yml` — the short form, plus "CBS rows carry
+  their own capture and are unaffected".
+- `models/marts/core/schema.yml` (`fct_player_position_pts`) — "the club he
+  wore on the LATEST day he actually appeared inside this matchup period",
+  naming both the MLB-168 and MLB-159 traps it is avoiding.
+- `stg_box_scores.sql` header — the long-form mechanism note.
+- `get_team_affinity_weights` docstring — rewritten. It no longer claims the
+  season is "correct" (the over-claim its two predecessors both made); it
+  states the rule you can check, and records that Mead now reconciles to
+  Baseball Reference on both sides of his move without being tuned to.
+
+---
+
+*(sections 6–7 appended as the session proceeds)*

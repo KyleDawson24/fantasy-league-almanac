@@ -476,7 +476,23 @@ before, 30 clubs rendering in every scope, Mead reconciling to Baseball
 Reference on both sides of his move, and 2025's mid-season trades going from
 0 to 158 player-seasons.
 
-### Open anomaly: `leagueId=0` in the byte-diff render
+### The flip's true diff, computed instead of byte-diffed
+
+Since the goldens cannot show it, the same question is answered directly:
+score every active-slot row under BOTH attributions (RAW still carries both
+keys) and compare at the chart's own grain.
+
+| season | total weight | weight that MOVED club | % | Unattributed before → after |
+|---|---|---|---|---|
+| 2025 | 202,547 | **45,059** | **22.25%** | 23,749 → **0** |
+| 2026 | 129,456 | 272 | 0.21% | 30 → **0** |
+
+**45,059 / 22.25% reproduces `known-data-issues.md` §6's independently
+measured figure to the unit** — the number that section calls "filed under
+the wrong club". That is the declared affinity diff, and it is now a
+measurement rather than a projection.
+
+### RESOLVED: `leagueId=0` was a test env leak, and it had teeth
 
 The byte-diff's ESPN render emitted `leagueId=0` into every ESPN box-score
 hyperlink where the fixture carries the real id. **I could not reproduce it
@@ -492,12 +508,41 @@ outside the test**, and chased it rather than hand-waving:
 | `tests/conftest.py`, `pytest.ini` | no env manipulation |
 | `SUPPRESS_UPDATED_STAMP` | only blanks the Updated stamp (`almanac_logic:569`) |
 
-So it is not the launcher, not the environment, and not the suppression
-switch. The one remaining difference between the passing and failing
-invocations is the explicit `--season-year 2026 --matchup-period 7` anchor,
-which a reproduction run is testing.
+The reproduction run settled it: the byte-diff's **exact** command, anchor
+and all, emits the correct id outside pytest. So the fault was in the pytest
+PROCESS, and the cause is a module-level line in a file the previous session
+added:
 
-**It is almost certainly not flip-related** — nothing in this wave touches
-league identity or link construction — but it is unexplained, so it is
-flagged rather than dismissed, and it is a second reason the ESPN byte-diff
-result should not be read as a clean signal tonight.
+```python
+# tests/test_extract_club_of_game.py
+os.environ.setdefault("LEAGUE_ID", "0")
+```
+
+The chain, verified end to end:
+
+1. pytest never calls `load_dotenv()`, so `LEAGUE_ID` is unset in its
+   process no matter what `.env` holds;
+2. collection imports every test module, so this ran — and the "real value"
+   the `setdefault` was written to protect **is never present at that
+   point**, so it always fired;
+3. `test_almanac_byte_diff` spawns its render with
+   `env=dict(os.environ, ...)`, so the child inherited `"0"`;
+4. the child's own `load_dotenv()` could not undo it — **load_dotenv does
+   not override an existing variable**.
+
+**This had teeth, and that is why it was fixed rather than noted.** The
+documented re-anchor command is
+`REGENERATE_BASELINES=1 pytest tests/ -m warehouse` — precisely the
+invocation that leaks. Re-anchoring through it would have written
+`leagueId=0` into the golden corpus permanently, and every ESPN box-score
+link in the almanac would have pointed at league 0 from then on. The
+re-anchor decision was the very next thing on the list.
+
+Fixed by calling `load_dotenv()` before the `setdefault`, which restores the
+comment's actual intent: a real value wins where one exists, a fresh clone
+still gets its placeholder. Pure suite unchanged at 296. The byte-diff was
+then re-run from a clean environment for the attribution above.
+
+**Not flip-related** — nothing in this wave touches league identity or link
+construction. It is an inherited test-infra defect, surfaced only because
+the diff attribution forced the question.

@@ -149,7 +149,24 @@ aggregated as (
         max(player_id)     as player_id,
         max(player_name)   as player_name,
         max(display_name)  as display_name,
-        max(pro_team)      as pro_team,
+
+        -- pro_team is NOT in that no-op class any more (MLB-168). Once
+        -- the club label is game-accurate, a player traded mid-period
+        -- carries two clubs inside one matchup period, and a string
+        -- maximum would pick between them ALPHABETICALLY. Latest-in-
+        -- scope is the ruled semantics (Kyle, 2026-08-04): the club he
+        -- was on at the end of the window, matching the display-field
+        -- convention fct_player_season_performance already documents.
+        --
+        -- scoring_period is the ordering key rather than game_date
+        -- because game_date is NULL on every ESPN row by construction
+        -- (int_player_daily stamps `cast(null as date)` -- ESPN's day
+        -- is a period index, not a calendar date). scoring_period is
+        -- non-null on BOTH books and chronological within a season:
+        -- ESPN numbers days 1..195, CBS carries the date itself as
+        -- YYYYMMDD. Ordering by game_date here would have returned
+        -- NULL for all 34,738 ESPN groups.
+        {{ latest_by('pro_team', 'scoring_period') }} as pro_team,
 
         -- Two point lenses (active / inactive). Consumers wanting an
         -- "all points" view compute active_pts + inactive_pts at query

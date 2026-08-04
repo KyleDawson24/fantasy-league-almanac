@@ -390,6 +390,45 @@ def league_predicate(alias=None):
     return f"{column} = '{league_key()}'"
 
 
+def latest_by(value, order_by, partition_by=None):
+    """The LATEST NON-NULL `value` in a group, as a SELECT-list fragment.
+
+    Pass `partition_by` to get the WINDOW form instead of the aggregate
+    one -- same guard, same semantics, `OVER (PARTITION BY ...)` appended.
+    That form exists for the row-picking consumers (generate_summary,
+    generate_season_report): they choose one row per player with
+    ROW_NUMBER and read several columns off it, so the club cannot simply
+    be aggregated without also moving position / eligible_slots to a
+    different row. The window form leaves the row choice alone and fixes
+    only the label. Verified to return the same value on both engines in
+    window position as well as aggregate position.
+
+    Mirrors the dbt layer's `latest_by` macro, and exists for the same
+    reason (MLB-168): MAX() over a label column picks the string that
+    sorts last, not the most recent one. That was invisible while
+    MLB-159 froze pro_team to a single value per player, and stops being
+    invisible the moment the club label is game-accurate.
+
+    Nulling the ORDERING expression rather than the value is the whole
+    trick. Snowflake's MAX_BY returns whatever sits on the greatest
+    ordering row, NULL included -- and post-flip a player's pro_team is
+    NULL on every day he did not appear, so the unguarded spelling
+    blanks the label for anyone whose last day in scope was a rest day.
+    A group with no labelled row at all still returns NULL, which is the
+    honest answer.
+
+    Deliberately NOT in the dialect section below: the guarded form was
+    verified to return the same value on both engines (the UNGUARDED one
+    does not -- Snowflake gives NULL where DuckDB skips to the last
+    labelled row, which is exactly the divergence this spelling avoids).
+    """
+    fragment = (f"MAX_BY({value}, CASE WHEN {value} IS NULL "
+                f"THEN NULL ELSE {order_by} END)")
+    if partition_by is not None:
+        fragment += f" OVER (PARTITION BY {partition_by})"
+    return fragment
+
+
 # ---------------------------------------------------------------------------
 # SQL dialect (MLB-10 phase 5). Most of the output layer's SQL is portable
 # between Snowflake and DuckDB, and where it was not, the fix belonged in the

@@ -30,7 +30,7 @@ from datetime import datetime
 
 import requests
 
-from db import league_predicate, listagg, query_snowflake
+from db import latest_by, league_predicate, listagg, query_snowflake
 from formatters import TOP_SCORER_STAT_DISPLAY
 import records
 
@@ -418,7 +418,18 @@ def get_optimal_team_candidates(season_year=None, matchup_period=None,
             MAX(player_id)    AS player_id,
             MAX(player_name)  AS player_name,
             MAX(display_name) AS display_name,
-            MAX(pro_team)     AS pro_team,
+            -- Club label: LATEST in whatever scope the WHERE clause
+            -- pinned, not the alphabetical maximum (MLB-168). This
+            -- group spans every season and period the filters allow,
+            -- so once the club label is game-accurate a traded player
+            -- carries several -- and MAX() would have picked between
+            -- them by collation. The composite sort key is safe
+            -- because matchup_period tops out at 26 on ESPN and is
+            -- NULL on CBS (one season-grain row there, so season_year
+            -- alone orders it).
+            {latest_by('pro_team',
+                       'season_year * 1000 + COALESCE(matchup_period, 0)')}
+                              AS pro_team,
             position,
             ROUND({points_expr}, 1) AS position_pts
         FROM fct_player_position_pts
@@ -450,7 +461,12 @@ def get_optimal_season_candidates(team_id):
             MAX(player_id)    AS player_id,
             MAX(player_name)  AS player_name,
             MAX(display_name) AS display_name,
-            MAX(pro_team)     AS pro_team,
+            -- Season-grain group, so the club label is the latest one
+            -- WITHIN that season (MLB-168). CBS aggregates to a single
+            -- season row with matchup_period NULL, which the COALESCE
+            -- keeps orderable.
+            {latest_by('pro_team', 'COALESCE(matchup_period, 0)')}
+                              AS pro_team,
             position,
             season_year,
             ROUND(CAST(SUM(CAST(weighted_active_pts AS DECIMAL(18, 6))) AS DOUBLE), 1) AS position_pts

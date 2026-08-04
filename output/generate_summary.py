@@ -13,7 +13,7 @@ import json
 # Snowflake config) lives in db.py. init() is idempotent.
 import db
 db.init()
-from db import league_predicate, query_snowflake
+from db import latest_by, league_predicate, query_snowflake
 
 from formatters import (
     format_hitter_stats_line,
@@ -274,7 +274,19 @@ def get_wasted_points(season_year, matchup_period, limit=5):
             -- eligible_slots, display_name) are identical across them.
             SELECT DISTINCT player_id, display_name, pro_team, position, eligible_slots
             FROM (
-                SELECT player_id, display_name, pro_team, position, eligible_slots,
+                SELECT player_id, display_name, position, eligible_slots,
+                       -- pro_team comes off the latest day that HAS a
+                       -- club, not off the latest day (MLB-168/MLB-129).
+                       -- The club label is game-accurate now, so it is
+                       -- NULL on every day a player did not appear --
+                       -- reading it from the rn=1 row would print an
+                       -- empty club for anyone whose last day in the
+                       -- period was a rest day. The row choice below is
+                       -- deliberately left alone so position and
+                       -- eligible_slots keep coming from that same
+                       -- latest row.
+                       {latest_by('pro_team', 'scoring_period',
+                                  'player_id')} AS pro_team,
                        ROW_NUMBER() OVER (
                            PARTITION BY player_id
                            ORDER BY scoring_period DESC

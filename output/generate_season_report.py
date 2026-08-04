@@ -28,7 +28,7 @@ not a manager's shame).
 
 import db
 db.init()
-from db import league_predicate, query_snowflake
+from db import latest_by, league_predicate, query_snowflake
 
 import almanac_data
 import note_files
@@ -367,7 +367,13 @@ def get_season_wasted_players(season_year, limit=5):
         player_meta AS (
             SELECT player_id, display_name, pro_team, position, eligible_slots
             FROM (
-                SELECT player_id, display_name, pro_team, position, eligible_slots,
+                SELECT player_id, display_name, position, eligible_slots,
+                       -- Latest day that HAS a club, not the latest day.
+                       -- See the twin of this note in generate_summary --
+                       -- post-flip pro_team is NULL on days a player did
+                       -- not appear, so the rn=1 row is often unlabelled.
+                       {latest_by('pro_team', 'scoring_period',
+                                  'player_id')} AS pro_team,
                        ROW_NUMBER() OVER (
                            PARTITION BY player_id
                            ORDER BY scoring_period DESC

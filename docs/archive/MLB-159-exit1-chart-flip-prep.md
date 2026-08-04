@@ -415,4 +415,77 @@ tools/duckdb_run.sh
 The `stg_mlb__player_game` segfault flake (exit 139, MLB-179) was not
 reached, since no DuckDB build was run.
 
-*(the byte-diff table lands here when the run finishes)*
+### The gate results
+
+| gate | result |
+|---|---|
+| `dbt parse` | **clean**, both targets |
+| `dbt build --target dev` | **PASS=635, ERROR=0, SKIP=0** (543 data tests) |
+| pure suite | **296 passed** (282 inherited + 14 new pins), 0 failed |
+| byte-diff, both books | **4 failed, 13 passed** — the SAME four as before this work |
+| DuckDB parity | compile-level clean; data-level blocked on a stale local copy |
+
+**No golden was re-anchored.** `REGENERATE_BASELINES` was explicitly cleared
+before the run.
+
+### Per-file diff attribution — and the thing that blocks it
+
+The four failures are the same four the previous session measured *before*
+the backfill (handoff §5: "4 failed, 13 passed... same test names, no
+movement in either direction"). Their names:
+
+`test_almanac_tsv_matches_baseline` · `test_cbs_almanac_tsv_matches_baseline`
+· `test_summary_bbcode_matches_baseline` · `test_records_report_bbcode_matches_baseline`
+
+**The harness reports only the FIRST differing line per file, and on every
+ESPN tab that first line is week-17 data drift — not the flip:**
+
+| file | first diff | attribution |
+|---|---|---|
+| 13 team tabs (AAA, BP, CAL, CHIN, CYCL, FNA, FUBB, GPGP, HANG, HH, LAW, NPNP, SMEL) | "Optimal Lineups, through Jul 26, 2026" → "through Aug 2, 2026" | **known-stale** — a week of data landed |
+| `Advanced-Standings.tsv` | standings order (HANG/WALK swap), win pct .615 → .6 | **known-stale** |
+| `Draft-Recap.tsv` | McGonigle 308.0 → 340.6 | **known-stale** |
+| `Matchup-History.tsv` | 641 → 655 lines, Week 16 → Week 17 | **known-stale** (14 new rows = one week × 14 teams) |
+| `Records.tsv` | 96 → 124 lines, best team total 401.3 → 413.4 | **known-stale** |
+| `baseline_records_report.txt` | `Hits: 89 … Week 10` → `90 … Week 17` | **known-stale** — the exact drift handoff §5 names |
+| `Home.tsv` | `leagueId=1156117086` → `leagueId=0` | **ANOMALY — see below** |
+
+**So the flip's own diffs cannot be attributed byte-wise tonight: they are
+buried underneath two weeks of drift.** The fixture is anchored ~Jul 27 and
+week 17 has since landed, so the first diff on every file fires before the
+affinity chart is ever reached. This is not a new problem and not caused by
+this work — it is the stale-golden condition already awaiting your re-anchor
+decision — but it does mean the ordering matters: **re-anchor first, THEN the
+byte-diff can show what the flip actually changed.**
+
+What stands in for it, and is arguably stronger, is the data-layer
+measurement: Unattributed 0.0 in all three scopes against 11.73%/0.02%
+before, 30 clubs rendering in every scope, Mead reconciling to Baseball
+Reference on both sides of his move, and 2025's mid-season trades going from
+0 to 158 player-seasons.
+
+### Open anomaly: `leagueId=0` in the byte-diff render
+
+The byte-diff's ESPN render emitted `leagueId=0` into every ESPN box-score
+hyperlink where the fixture carries the real id. **I could not reproduce it
+outside the test**, and chased it rather than hand-waving:
+
+| probe | `LEAGUE_ID` seen |
+|---|---|
+| my direct preview's TSVs | **1156117086** (correct) |
+| `db.init()` in-process | 1156117086 |
+| child subprocess with the test's exact `env=dict(os.environ, …)` | 1156117086 |
+| same child under the PowerShell `Start-Process` launcher | 1156117086 |
+| ambient / user / machine env | not set anywhere |
+| `tests/conftest.py`, `pytest.ini` | no env manipulation |
+| `SUPPRESS_UPDATED_STAMP` | only blanks the Updated stamp (`almanac_logic:569`) |
+
+So it is not the launcher, not the environment, and not the suppression
+switch. The one remaining difference between the passing and failing
+invocations is the explicit `--season-year 2026 --matchup-period 7` anchor,
+which a reproduction run is testing.
+
+**It is almost certainly not flip-related** — nothing in this wave touches
+league identity or link construction — but it is unexplained, so it is
+flagged rather than dismissed, and it is a second reason the ESPN byte-diff
+result should not be read as a clean signal tonight.

@@ -15,11 +15,20 @@ Standing conventions for every session in this repo:
 - Do NOT pip install new dbt adapters into .venv (dbt-core is pinned;
   resolver drift breaks the weekly run). Experiments get their own venv.
 - tests/test_records_report.py is Kyle's untracked WIP -- ignore it.
-- Five owner seeds under dbt_league/seeds/ are `skip-worktree`: the file
-  ON DISK is real league data, the file COMMITTED carries synthetic names
-  and real member GUIDs -- no email or phone data is ever committed
-  (MLB-95). The GUIDs are retained deliberately: identity resolution
-  depends on them. Do not describe the committed seeds as "fully
+- Seeds live in THREE directories, and which one a file is in tells you
+  what it is (MLB-114): `dbt_league/seeds/` is reference vocabulary (stat
+  maps, MLB abbrevs -- same for every league, tracked normally, real
+  content); `dbt_league/league_config/` is user config (BLANK templates
+  committed, real league data on disk); `demo/league_config/` is the demo
+  fixture (the anonymized twins, tracked and published). A stranger
+  cloning gets blank templates plus a working fixture.
+- All 13 files under dbt_league/league_config/ are `skip-worktree`: the
+  file ON DISK is real league data, the file COMMITTED is a blank
+  template. Five of the thirteen are additionally TWINNED -- their
+  synthetic-name version is what `demo/league_config/` publishes, carrying
+  synthetic names and real member GUIDs; no email or phone data is ever
+  committed (MLB-95). The GUIDs are retained deliberately: identity
+  resolution depends on them. Do not describe the twins as "fully
   anonymized" -- they are name-anonymized, not identifier-anonymized.
   Reading the working copy and concluding "real names/phones are tracked
   in git" is a FALSE ALARM and a recurring one -- `git ls-files` lists
@@ -31,9 +40,12 @@ Standing conventions for every session in this repo:
   WAREHOUSE cannot find is almost always the twin doing its job, not an
   invented claim -- the warehouse holds real data, the README holds the
   committed twins. Verify anything about franchises, teams or owners BY
-  ID, resolving name -> id through cbs_franchises.csv /
-  owner_nicknames.csv first. Real MLB player names are not twinned and
-  are safe by name. Full mechanics in
+  ID, resolving name -> id first: the REAL side is
+  dbt_league/league_config/{cbs_franchises,owner_nicknames}.csv on disk,
+  the TWIN side is demo/league_config/ (or `git show HEAD:` any
+  league_config path, which now returns a blank template -- so a name
+  lookup against HEAD returns nothing, by design). Real MLB player names
+  are not twinned and are safe by name. Full mechanics in
   archives/anonymization/RESTORE.md (local-only).
 - Linear is written from the Cowork PM thread only. End sessions with a
   report-back block instead of touching the tracker.

@@ -136,6 +136,28 @@ production — MLB reality). Together they cover the full universe; the
 recap's wasted-points callouts and the leaderboard's active/inactive
 partitions fall out of the split rather than being computed ad hoc.
 
+## Two seed roots
+
+The 18 seeds live in two directories, and `seed-paths` reads both:
+
+```
+seeds/          5   reference vocabulary -- stat maps, MLB team abbrevs,
+                    record rules. Same for every league on a platform, so
+                    it ships as real content.
+league_config/ 13   user config -- calendar, franchise/owner registries,
+                    naming overrides. Tracked content is BLANK templates;
+                    per-file documentation is in league_config/README.md.
+```
+
+`DBT_LEAGUE_CONFIG` selects the second one (default `league_config`), which
+is how `tools/demo.sh` builds off `demo/league_config/` -- a tracked
+fixture holding a complete fake league -- without touching a real one.
+
+dbt resolves seeds by filename, not path, so `ref()` is identical either
+way and no model knows the split exists. The corollary is that both roots
+may never carry the same filename, which is exactly why the demo fixture is
+a *replacement* directory rather than an overlay.
+
 ## Seed-driven stat catalog
 
 `seeds/stat_classification.csv` (99 rows) is the single source of truth

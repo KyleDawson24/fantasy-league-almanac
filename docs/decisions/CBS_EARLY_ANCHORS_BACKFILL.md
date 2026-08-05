@@ -14,7 +14,11 @@ it to `RS` if you know a player was stashed on the bench all year.
 
 ## How to fill it
 
-File: `dbt_league/seeds/cbs_early_anchors_backfill.csv`
+File: `dbt_league/league_config/cbs_early_anchors_backfill.csv`
+(moved out of `seeds/` by MLB-114 -- it is league data, not reference
+vocabulary. The tracked copy is a blank template; the filled worklist is
+maintainer-local, and the demo fixture's copy is at
+`demo/league_config/`.)
 
 - Put the team **abbrev** (from the legend below) in `team_abbrev_FILL_ME`.
 - If you did **not** roster a player that year, leave the cell blank or delete the

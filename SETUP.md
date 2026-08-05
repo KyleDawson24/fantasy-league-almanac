@@ -317,7 +317,7 @@ The output scripts' `db.init()` detects which one you've configured:
 when `SNOWFLAKE_PRIVATE_KEY_PATH` is set, it uses key-pair auth;
 otherwise it falls back to password.
 
-Skip the Google Sheets vars for now (see section 9 if you want that
+Skip the Google Sheets vars for now (see section 10 if you want that
 sink later).
 
 **CBS league (optional — only if you archive a second-platform league):**
@@ -358,7 +358,102 @@ unauthenticated, so expiry can't corrupt the archive.
 
 ---
 
-## 7. First run
+## 7. Tell it about your league
+
+Seeds are CSV files dbt loads into the warehouse. This project keeps them
+in two directories, and the difference is the whole point:
+
+```
+dbt_league/seeds/          reference vocabulary -- ships filled in
+dbt_league/league_config/  YOUR league -- ships blank
+```
+
+`seeds/` is stat maps, MLB team abbreviations, and which stats count as
+records. It is identical for every league on a platform, so it arrives
+complete and you should never need to open it.
+
+`league_config/` is everything that differs between leagues: your
+calendar, your franchises, your owners, and the overrides that rename and
+merge things. On a fresh clone every file there is a **blank template** --
+a header row and nothing else. That is deliberate. You are not meant to
+inherit anybody else's league.
+
+**[`dbt_league/league_config/README.md`](dbt_league/league_config/README.md)
+documents every file with a worked example.** Read that one, not this
+section, when you are actually filling them in.
+
+### What you have to fill in, and what you can ignore
+
+Two kinds of file live there, and they behave differently when left blank.
+
+**Required** -- something reads these directly, so blank means the
+surfaces that depend on them come out empty:
+
+- `matchup_schedule.csv` -- your week boundaries per season. **This is the
+  one to start with.** Leave it blank and every weekly surface (recaps,
+  weekly records, standings by week) is empty, because nothing else in the
+  pipeline knows when your weeks began and ended.
+- `cbs_franchises.csv`, `cbs_team_owners.csv`, `team_owner_by_year.csv`,
+  `draft_assembly_plan.csv` -- CBS leagues only. ESPN serves this
+  information through its own API, so an ESPN-only league leaves them
+  blank.
+
+**Optional** -- these only rename, merge, or repoint things. Every one of
+them reaches the pipeline through a left join, so blank means "change
+nothing" and everything still builds:
+
+- `owner_nicknames.csv`, `owner_alias.csv` -- how owners display, and
+  which owner ids are the same person.
+- `franchise_lineage.csv` -- which franchise ids are the same franchise
+  across a renumbering.
+- `player_nicknames.csv`, `player_alias.csv`,
+  `player_identity_overrides.csv`,
+  `player_identity_context_overrides.csv` -- player naming and identity.
+
+So the honest minimum for an ESPN league is **one file**:
+`matchup_schedule.csv`. Everything else can stay blank until something
+displays in a way you want to change.
+
+### Seeing it work before you fill anything in
+
+You do not have to configure a league to see what this project produces.
+`demo/league_config/` is a complete fake league -- a fixture, tracked in
+git, containing no real-league data:
+
+```bash
+tools/demo.sh
+```
+
+That builds and renders off the fixture in its own warehouse
+(`data/duckdb/demo/`) and writes the almanac tabs as TSV. It never reads
+`dbt_league/league_config/`, so it cannot pick up anything of yours, and
+it needs no Snowflake account and no Google credentials.
+
+It does need raw league data to transform, which it does not land for you
+-- so on a clone that has never run an extract it will say so and stop.
+The packaged sample that removes that last step is not built yet.
+
+### Switching between them
+
+Both directories are seed roots for the same models. `DBT_LEAGUE_CONFIG`
+picks which one is live, relative to `dbt_league/`:
+
+```bash
+# your league (the default)
+dbt seed
+
+# the demo fixture
+DBT_LEAGUE_CONFIG=../demo/league_config dbt seed
+```
+
+Models resolve seeds by filename, so nothing else changes -- which is why
+the two directories must always hold the same set of files with the same
+columns. A test enforces that
+(`tests/test_league_config_templates.py`).
+
+---
+
+## 8. First run
 
 You now have everything to run the full pipeline end-to-end.
 
@@ -371,7 +466,8 @@ python extract/extract.py            # Extract recent matchup periods
 cd dbt_league
 dbt deps                              # Install dbt_utils package (first
                                       # run only; idempotent)
-dbt seed                              # Load the 18 seed CSVs
+dbt seed                              # Load the 18 seed CSVs -- 5 reference
+                                      # + 13 from league_config (section 7)
 dbt build                             # Build 74 models + run 543 tests
 
 cd ..
@@ -396,11 +492,11 @@ You should see something like:
 
 If you see errors during extract: refresh ESPN cookies, check
 `LEAGUE_ID`. If you see errors during dbt build: re-check `dbt debug`.
-See section 10 for common gotchas.
+See section 11 for common gotchas.
 
 ---
 
-## 8. Verify the test suite
+## 9. Verify the test suite
 
 ### The three tiers
 
@@ -472,7 +568,7 @@ without a reviewed cause is the bug the harness exists to catch.
 
 ---
 
-## 9. Optional: Google Sheets sink
+## 10. Optional: Google Sheets sink
 
 The records report can also write to a Google Sheet (17-column / 3-tab
 layout for offline analysis). Skip if you only want the BBCode output.
@@ -526,7 +622,7 @@ Subsequent runs write to your Sheet without prompting.
 
 ---
 
-## 10. Common gotchas
+## 11. Common gotchas
 
 **`401 Unauthorized` during extract.** ESPN cookies expired. Refresh
 both `espn_s2` and `SWID` from a fresh browser session.
@@ -534,6 +630,21 @@ both `espn_s2` and `SWID` from a fresh browser session.
 **`dbt debug` fails with auth error.** Wrong account identifier format.
 Use the full `<account>.<region>` (e.g., `abc12345.us-east-1`), not
 just `abc12345`.
+
+**Everything builds green but the weekly surfaces are empty.** Almost
+always a blank `dbt_league/league_config/matchup_schedule.csv`. That seed
+is the only thing that knows when your weeks started and ended, and it
+ships blank on purpose — so an unfilled one is not an error, it is a
+league with no calendar. Nothing fails, because there is nothing wrong;
+there is just no week to report on. Fill it in (section 7) and re-run
+`dbt seed && dbt build`.
+
+The same shape explains a green build with unnamed CBS franchises or no
+CBS owner history: `cbs_franchises.csv`, `cbs_team_owners.csv` and
+`team_owner_by_year.csv` are also read directly rather than as overrides.
+The seeds that genuinely do nothing when blank are the naming and merging
+ones — those are listed as "optional" in section 7 and in
+`dbt_league/league_config/README.md`.
 
 **`dbt seed` succeeds but `dbt run` complains about missing seed
 columns.** Re-run with `--full-refresh`:
@@ -546,7 +657,7 @@ dbt's incremental seed loader can skip on schema mismatches; full
 refresh forces a clean recreate.
 
 **`pytest tests/ -m warehouse` reports a pile of skips.** Expected, not a
-problem. The byte-diff corpora are private (section 8, "Which tests need
+problem. The byte-diff corpora are private (section 9, "Which tests need
 what") so the tests that need them skip in your clone. To anchor them to
 your own league after a successful end-to-end run:
 

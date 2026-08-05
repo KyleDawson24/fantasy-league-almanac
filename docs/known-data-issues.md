@@ -137,8 +137,10 @@ trio). Flags: `missing_departure` / `anchor_reopen_needed` in
 
 ## 6. ESPN player records carry only a CURRENT MLB club (ESPN side)
 
-**Status:** open — the silent-omission half closed 2026-08-03 (MLB-159);
-the mis-attribution half is gated on ESPN identity resolution.
+**Status:** both halves CLOSED 2026-08-04 (MLB-159 Exit 1) — silent
+omission on 08-03, mis-attribution at the wave-end chart flip. What is
+described below as present-tense defect is the history; the closure and
+its bounded residual (MLB-193) are at the end of the section.
 
 **The issue.** ESPN's box-score payload stamps each player row with the
 club on ESPN's *player record* — whichever club he belongs to when the
@@ -207,13 +209,26 @@ closed:
   visible `Unattributed` band. The label is deliberate — the honest claim
   is that the club is unknown, not that these players were free agents
   when they played.
-- **Mis-attribution — OPEN in the data, but now measured, and the fix is
-  cheaper than it looked.** Gray's Cardinals innings still sit under
-  Boston. What changed on 2026-08-03 (MLB-129 spike) is that ESPN turns
-  out to send the right answer already: `proTeamId` sits on each
-  per-scoring-period split — the club of *that game* — inside the loop
-  `fetch_all_player_stats` already walks. No identity crosswalk, and no
-  `scoring_period → date` derivation, is required to read it.
+- **Mis-attribution — CLOSED 2026-08-04 (MLB-159 Exit 1).** `pro_team`
+  now reads the club of the GAME, from the `clubOfGame` field the
+  MLB-129 spike found already sitting on each per-scoring-period split —
+  inside the loop `fetch_all_player_stats` already walks. No identity
+  crosswalk, and no `scoring_period → date` derivation, was required to
+  read it. The 45,059 units of 2025 weight filed under the wrong club
+  (22.25% of the season) and the 23,749-unit `Unattributed` band (11.73%)
+  are both gone: the band measures **0.0 across 2025, 2026 and all-time**,
+  and every one of the 30 MLB clubs renders in every scope.
+
+  Two things did NOT change, and are worth stating so nobody re-opens
+  them. The person-level `proTeam` stamp is still written on every extract
+  and still preserved byte-for-byte in RAW — it is the observation record
+  of what ESPN believed and when, and MLB-188's guard exists to stop it
+  being overwritten. And the fix is a **re-read, not a re-fetch**: the
+  spike pulled 2025's splits a year late and they still showed every
+  deadline trade on the right day, which is why this route was ruled
+  canonical over a crosswalk.
+
+  The scale of what it corrected, as measured before the flip:
 
   Against that field, the defect is no longer a floor and a shrug:
   **45,059 of 202,547 units of 2025 active-slot weight — 22.25% — are
@@ -230,15 +245,61 @@ closed:
   having pitched 2025 in St. Louis. The metric systematically excluded
   exactly the cases that are stably wrong. The measured 22.25% is 1.6× it.
 
-  `extract.py` captures the field as `clubOfGame` as of 2026-08-04, but
-  **no RAW row carries it yet** — it arrives on 2025 and 2026 only when
-  the backfill runs, and the affinity chart does not read it until the
-  wave-end flip. Until both happen, everything above describes the data
-  as it currently stands.
+**Why the attribution rule is "producing splits only".** ESPN's
+person-record drift does not stop at the person record: it reaches split
+level. When ESPN moves a player to his incoming club during a transition
+window it emits a split for that club carrying an empty `{}` stats
+object — a phantom that frequently names a club which did not play that
+day at all (36 of 159 stat-less splits name an idle club; the other 123
+are the "roster-days, not games" artifact). Requiring a non-empty `stats`
+object removes the shadow before any tie-break sees it.
+
+This is not a tidy-up, it is the whole mechanism, and the evidence is
+that it is exactly what separated the two independent reconstructions:
+the spike's sweep had no such filter, so it ranked a phantom equal to a
+real game and let payload order decide — all 13 of its disagreements with
+the backfill are that one shape, and the backfill is right in all 13.
+Majority-by-production survives as a documented **dormant** fallback for a
+genuine same-day two-club day: possible in baseball, and unobserved across
+both ESPN seasons here (0 of 94 multi-club candidates carry two producing
+clubs).
+
+**The residual, bounded and decaying (MLB-193).** 476 player-days (60
+players, all 2026) produced without a placeable club: ESPN no longer
+returns them for those periods, so the backfill has nothing to read. They
+are FA-slot rows carrying **zero** chart weight, so nothing shipped
+moves — the chart's own scope measures clean, 0 null clubs on rostered
+rows. Two causes, both measured: stale duplicate ESPN ids, and players who
+have dropped out of today's kona window. It **decays**: the gap between a
+period being lived and being backfilled is itself the loss function, so
+this population grows the longer a period waits. Tracked as MLB-193,
+post-2.0, routed through the MLB-129 crosswalk and the MLB gamelog spine —
+a non-decaying source. They stay NULL rather than guessed.
+
+**Two-club days in the MLB spine are candidates, not Youngbloods
+(MLB-194).** Ten player-days across the CBS book's 26 seasons show a
+player on two clubs for one date. Every one is a **suspended game**, not a
+same-day two-club appearance: a suspended game keeps its original date, so
+a player acquired between suspension and resumption appears in a game
+dated before he joined — in all ten, the second club is the one he was
+traded to *later that same season*. **The real Youngblood count here is
+zero.** Club attribution is CORRECT in all ten — the player really did
+play that game for that club — so no club is misattributed; what is wrong
+is the **date**, which files production against whoever rostered him on
+the suspension date rather than when he actually produced. Impact on what
+is visible is negligible (5 of the 10 carry chart weight, ~8 units of
+`active_weight` across 26 seasons), but these ten are only the VISIBLE
+subset: any suspended-and-resumed game mis-dates its production, trade or
+no trade, and that general class is **not sized**. The one genuine
+curiosity is Danny Jansen (`mlbam 643376`), who appears for both clubs
+inside a single `game_pk` — he is the only player in MLB history to appear
+for both teams in the same game, which is a real event, not a defect.
 
 Note that the chart *looked* wrong before this change and now looks
-tidy — the `FA` rows were the tell. The band is what remains of that
-tell, which is why its wording matters.
+tidy — the `FA` rows were the tell, and the `Unattributed` band was what
+remained of it. The band now renders no rows at all, and its code path is
+deliberately kept live: for a league whose seasons were backfilled years
+late it is a working diagnostic, which is why its wording still matters.
 
 **The hazard this creates (MLB-188).** Because the stamp is whatever ESPN
 reports at fetch time, **re-extracting an already-loaded matchup period

@@ -53,15 +53,8 @@ Per-stat weekly-average standings, current season & all-time
 
 Points by Acquisition Channel, current season & all-time -- how much of your output came from drafted players versus waiver pickups versus trades
 
-A roster-affinity chart showing which real MLB clubs you lean on.
-### Matchup History (head-to-head league only)
+A roster-affinity chart showing which real MLB clubs you lean on. Every club on it is the club of the *game* the production came from, so a player who was traded mid-season splits across both clubs on the days he actually played for each.
 
-One row for every team-week ever played: 
-![Matchup History: one row per team-week, with per-stat hitting and pitching lines](../img/matchup-history.png)
-
-The per-stat lines, hitting and pitching and total points, the margin, the result, the combined total of both sides, and the league average that week. 
-
-The points league equivalent will eventually show equivalent detail, but at the season level.
 ### Trades (currently ESPN league only)
 The current trading block and a scoresheet of the season's completed trade record.
 
@@ -90,6 +83,31 @@ There is also a Best Individual Seasons block, and a franchise-futility entry th
 
 The head-to-head league titles these tabs with the team abbreviation; the points league uses the full team name, and adds a per-era **Lineup Data** note explaining how much of that era's day-to-day detail is reconstructed rather than recorded. That note matters -- see [Stat sources and
 fidelity](03-stat-sources-and-fidelity.md).
+
+### The history tab, at the end of each book
+
+Each book closes with its own history tab, after the team pages, appendix style. They are the same idea at two different grains: one row for every unit of competition the league has ever played. The head-to-head league plays weeks, so its row is a team-week; the points league never plays a matchup at all, so its row is a team-season.
+
+#### Matchup History (head-to-head league only)
+
+One row for every team-week ever played:
+![Matchup History: one row per team-week, with per-stat hitting and pitching lines](../img/matchup-history.png)
+
+The per-stat lines, hitting and pitching and total points, the margin, the result, the combined total of both sides, and the league average that week.
+
+#### Season History (points league only)
+
+One row for every team-season ever played -- 395 of them across 25 completed seasons, newest first, ranked within each season.
+
+The columns mirror Matchup History's, re-grained: the same hitting and pitching stat blocks in the same order they appear on the Records tab, then Hitting, Pitching and Total Points, the margin, and the league averages for that season. What differs is the result. There is no opponent to beat in a points league, so instead of a W-L record each team carries **Outscored** and **Outscored By** -- how many of that season's other teams it finished above and below -- plus **Ties**.
+
+Those three always sum to one less than the number of teams that season (everyone except yourself). Ties are rare but real: in 2024 two teams finished on exactly the same total and the platform awarded them joint third, so each reads 12 -- 2 with one tie.
+
+Three things worth knowing before you argue with a row:
+
+- **The points columns are what the league actually awarded**, taken from the published year-end standings rather than recomputed. This is the one place that matters most: re-scoring history under today's rulebook changes the rank of 307 of the 395 team-seasons and would hand 15 of the 25 championships to somebody else. The stat blocks beside them *are* reconstructed -- no platform ever published a team-season stat line here -- but the outcome is the league's own.
+- **The current season is not on it.** Only completed seasons appear, so a year in progress never sits next to finished ones as though it were done.
+- **Owner names are blank before 2007**, and the 2001--2002 stat blocks read low against their own points totals. Both are limits of what survives from those years, not statements about those teams -- the earliest seasons are rebuilt from a transaction log, and a change log cannot see a player who never changed hands. The points columns beside them are unaffected. See [Stat sources and fidelity](03-stat-sources-and-fidelity.md).
 
 ## Two things worth knowing before arguing with a number
 **Every points column has two versions.** One is what the platform actually awarded; the other is what the same performance would score under this season's rules. They disagree on purpose. Anything that compares across seasons leans on the second: pricing every year with one rulebook is the closest to equal footing the numbers can get. [The points lenses](02-points-lenses.md) explains which is which and when to trust each.

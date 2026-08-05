@@ -4613,10 +4613,10 @@ def season_outscored_counts(season_rows):
         outscored + outscored_by + ties = N - 1
 
     -- never `outscored + outscored_by = N - 1`, which a real tie would
-    trip. 2024 is that tie: Mesa Javelinas and Baltic White Sox both finished
-    on 9156, and CBS itself awarded them joint rank 3 (the next team is
-    rank 5). Each reads 13-2 with one tie; 13 + 2 = 15 only after the tie
-    is added back.
+    trip. 2024 is that tie: Mesa Javelinas and Baltic White Sox both
+    finished on 9156, and CBS itself awarded them joint rank 3 (the next
+    team is rank 5). Each reads 12-2 with one tie; 12 + 2 = 14, and only
+    the tie makes 15.
 
     Two properties the ruling asked for, both structural rather than
     defended by a test alone:

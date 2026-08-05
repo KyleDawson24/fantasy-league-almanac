@@ -4613,7 +4613,7 @@ def season_outscored_counts(season_rows):
         outscored + outscored_by + ties = N - 1
 
     -- never `outscored + outscored_by = N - 1`, which a real tie would
-    trip. 2024 is that tie: Mesa Joses and Betty White Sox both finished
+    trip. 2024 is that tie: Mesa Javelinas and Baltic White Sox both finished
     on 9156, and CBS itself awarded them joint rank 3 (the next team is
     rank 5). Each reads 13-2 with one tie; 13 + 2 = 15 only after the tie
     is added back.
@@ -4712,12 +4712,12 @@ def build_season_history_rows(context, finishes, franchise_map,
         Normally the canonical name (MLB-64), so a franchise reads the
         same down the column across renames and re-ids. But CBS has pairs
         of genuinely DISTINCT franchises that share one canonical name --
-        14 and 17 are both 'Bent Slides', and both were in the league
+        14 and 17 are both 'Bent Spokes', and both were in the league
         2004-2008 -- which rendered two identically-labelled rows in the
         same season with no way to tell them apart.
 
         The fallback is the season's OWN published name, which is real
-        data rather than a guess: in 2005 that reads 'Bent Slides' (14)
+        data rather than a guess: in 2005 that reads 'Bent Spokes' (14)
         and 'Hit-and-Rum' (17). Deliberately NOT resolved by inventing a
         lineage row or a suffix -- which canonical name each fork should
         carry is an open historian call (the 14/17 + 26/31/32 question),

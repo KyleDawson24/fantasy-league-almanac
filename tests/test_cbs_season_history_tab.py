@@ -37,8 +37,8 @@ def _tied_season():
     platform awards them joint rank 2 with the next team at rank 4."""
     return [
         _row(1, 'Alpha', 1, 9448.0, teams=4),
-        _row(2, 'Mesa Joses', 2, 9156.0, teams=4),
-        _row(3, 'Betty White Sox', 2, 9156.0, teams=4),
+        _row(2, 'Mesa Javelinas', 2, 9156.0, teams=4),
+        _row(3, 'Baltic White Sox', 2, 9156.0, teams=4),
         _row(4, 'Delta', 4, 8025.0, teams=4),
     ]
 
@@ -50,8 +50,8 @@ def _context():
 
 def _fmap():
     return {1: {'canonical_id': 1, 'name': 'Alpha Canonical', 'abbrev': 'ALP'},
-            2: {'canonical_id': 2, 'name': 'Mesa Joses', 'abbrev': 'MJ'},
-            3: {'canonical_id': 3, 'name': 'Betty White Sox', 'abbrev': 'BWS'},
+            2: {'canonical_id': 2, 'name': 'Mesa Javelinas', 'abbrev': 'MJ'},
+            3: {'canonical_id': 3, 'name': 'Baltic White Sox', 'abbrev': 'BWS'},
             4: {'canonical_id': 4, 'name': 'Delta', 'abbrev': 'DEL'}}
 
 
@@ -137,8 +137,8 @@ class TestInvariant:
 class TestTies:
     def test_tie_counts_in_neither_column(self):
         counts = cbs.season_outscored_counts(_tied_season())
-        assert counts[1] == (1, 1, 1)      # Mesa Joses
-        assert counts[2] == (1, 1, 1)      # Betty White Sox
+        assert counts[1] == (1, 1, 1)      # Mesa Javelinas
+        assert counts[2] == (1, 1, 1)      # Baltic White Sox
 
     def test_untied_teams_see_the_tied_pair_normally(self):
         counts = cbs.season_outscored_counts(_tied_season())
@@ -269,26 +269,26 @@ class TestLayout:
 
     def test_two_franchises_sharing_a_canonical_name_fall_back(self):
         """CBS has DISTINCT franchises that share one canonical name (14
-        and 17 are both 'Bent Slides', both in the league 2004-2008).
+        and 17 are both 'Bent Spokes', both in the league 2004-2008).
         Without a fallback the season renders two identical labels."""
-        finishes = [_row(2, 'Bent Slides', 1, 900.0, teams=2),
+        finishes = [_row(2, 'Bent Spokes', 1, 900.0, teams=2),
                     _row(3, 'Hit-and-Rum', 2, 800.0, teams=2)]
-        fmap = {2: {'canonical_id': 2, 'name': 'Bent Slides', 'abbrev': 'BENT'},
-                3: {'canonical_id': 3, 'name': 'Bent Slides', 'abbrev': 'BENT'}}
+        fmap = {2: {'canonical_id': 2, 'name': 'Bent Spokes', 'abbrev': 'BENT'},
+                3: {'canonical_id': 3, 'name': 'Bent Spokes', 'abbrev': 'BENT'}}
         rows, _ = cbs.build_season_history_rows(
             _context(), finishes, fmap, team_stats=_stats(finishes))
         labels = [r[_col0('Franchise')] for r in _data_rows(rows)]
-        assert labels == ['Bent Slides', 'Hit-and-Rum']
+        assert labels == ['Bent Spokes', 'Hit-and-Rum']
 
     def test_the_fallback_only_fires_on_the_clashing_season(self):
         """A franchise that shares a name in one season still reads
         canonically in seasons where the other fork is absent."""
         finishes = [_row(2, 'Old Label', 1, 900.0, teams=1, season=2001)]
-        fmap = {2: {'canonical_id': 2, 'name': 'Bent Slides', 'abbrev': 'BENT'},
-                3: {'canonical_id': 3, 'name': 'Bent Slides', 'abbrev': 'BENT'}}
+        fmap = {2: {'canonical_id': 2, 'name': 'Bent Spokes', 'abbrev': 'BENT'},
+                3: {'canonical_id': 3, 'name': 'Bent Spokes', 'abbrev': 'BENT'}}
         rows, _ = cbs.build_season_history_rows(
             _context(), finishes, fmap, team_stats=_stats(finishes))
-        assert _data_rows(rows)[0][_col0('Franchise')] == 'Bent Slides'
+        assert _data_rows(rows)[0][_col0('Franchise')] == 'Bent Spokes'
 
     def test_margin_is_negative_points_behind(self):
         """Winner total minus this team's, so the champion reads 0 and
@@ -519,7 +519,7 @@ class TestAwardedLensReconciliation:
         then franchise_id.
 
         Deliberately NOT matched on the Franchise label: two distinct
-        franchises can share a canonical name (14/17 'Bent Slides'), so
+        franchises can share a canonical name (14/17 'Bent Spokes'), so
         the builder disambiguates those seasons, and a test that redid
         that resolution would be asserting its own copy of the logic.
         Ordering is a contract the builder states in its docstring."""
@@ -557,7 +557,7 @@ class TestAwardedLensReconciliation:
         assert len(pairs) == 395
 
     def test_no_season_renders_two_identically_labelled_rows(self, rendered):
-        """The 14/17 fork: 'Bent Slides' is the canonical name of two
+        """The 14/17 fork: 'Bent Spokes' is the canonical name of two
         genuinely distinct franchises, both in the league 2004-2008."""
         _rows, data = rendered
         by_season = {}

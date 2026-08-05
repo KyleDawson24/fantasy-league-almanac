@@ -101,7 +101,7 @@ test that redid that resolution would assert its own copy of the logic.
 **`Outscored + Outscored By + Ties = N − 1`** — never
 `Outscored + Outscored By = N − 1`. Kyle called that trap before the
 build existed, and **the data contains it**: 2024 has two teams on
-exactly **9156** — Finger Lake Veronicas and Betty White Sox — and CBS
+exactly **9156** — Firefly Lake Vandals and Baltic White Sox — and CBS
 itself awarded them **joint rank 3**, with the next team at rank 5. Each
 reads **12 – 2 with one tie**; 12 + 2 = 14, and only the tie makes 15.
 
@@ -180,14 +180,14 @@ sentence in the user guide if it bothers anyone.
 ## 5. The 14/17 fork — found while reconciling
 
 Reconciliation failed at 390 rendered keys vs 395 source rows. Cause:
-**"Bent Slides" is the canonical name of two genuinely distinct
+**"Bent Spokes" is the canonical name of two genuinely distinct
 franchises** (14 and 17), and both were in the league **2004–2008**, so
 those five seasons rendered two identically-labelled rows.
 
 | season | ids | published names that year |
 |---|---|---|
-| 2004 | 17 / 14 | Syracuse Stars \| Bent Slides |
-| 2005–2008 | 17 / 14 | Hit-and-Rum \| Bent Slides |
+| 2004 | 17 / 14 | Syracuse Stars \| Bent Spokes |
+| 2005–2008 | 17 / 14 | Hit-and-Rum \| Bent Spokes |
 
 Resolved by falling back to **that season's own published name** for the
 clashing rows — real data, not a guess. Deliberately *not* fixed by

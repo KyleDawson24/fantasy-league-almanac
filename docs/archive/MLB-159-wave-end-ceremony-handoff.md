@@ -211,7 +211,21 @@ guessed") reaching the label surface, and it is 6 cells, not 441.
 | pure suite | **342 passed**, 2 failed — the two known WIP-file tests |
 | byte-diff, both books, vs the kept anchor | **24 passed, exit 0**, with `REGENERATE_BASELINES` cleared |
 | dev renders, both books | written to their dev sheets, no `--prod` anywhere |
-| screenshots | **BLOCKED** — no Chrome connected (`list_connected_browsers` → empty), same as the flip session |
+| screenshots | **CAPTURED** — Kyle connected Chrome at the end of the session; both dev sheets walked live (see below) |
+
+### The launch-screenshot state, verified in the live sheets
+
+Every class that has a visible surface was confirmed on the dev sheets
+themselves, not just in the TSV corpus:
+
+| what | where | what it showed |
+|---|---|---|
+| **the fix** | ESPN `AAA` | Team column fully populated — Rutschman **Bal**, Soroka **Ari**, Crochet **Bos**, and every slot in both the current-season and all-time bands. This is the 441-blank regression, gone |
+| ① tab order | ESPN `Home` | nav ends `... Draft Recap, Matchup History` |
+| ① tab order | CBS `Home` | nav row 17 = `Season History / Every team-season since 2001, as awarded.`; the sheet list shows **Season History last**, after St. Louis Browns |
+| ① the tab | CBS `Season History` | renders: title, *"Every finished season, 2001–2025, one row per team"*, the Outscored/Outscored By/Ties invariant stated in the subtitle, champion trophy marker, three-stop scales across both stat blocks |
+| ④ affinity | ESPN `Advanced Standings` | **30 club rows ending at Washington Nationals (row 150), no Unattributed row**, both Current Season and All-Time bands populated |
+| ⑥ Wasted tweak | ESPN `Records` | breakdown reordered *and* the font-size box reads **7**. Rows 118 and 124 are the proof the sort is by value rather than by a fixed order: `197 unrostered · 15 negative · 0 benched · 13 active` and `200 unrostered · 6 negative · 0 benched · 44 active` — `negative` ahead of `benched` where it is larger, `active` pinned fourth, percentage last |
 
 The byte-diff verification is worth one extra note: run with
 `REGENERATE_BASELINES` explicitly removed, so it *could* fail. Passing

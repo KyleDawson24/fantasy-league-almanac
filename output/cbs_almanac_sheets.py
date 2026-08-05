@@ -1964,14 +1964,26 @@ def get_cbs_records_data():
         # Matched on the ESPN book so one sentence describes both.
         pct = (wasted / total * 100) if total else 0.0
         nm = pname.get(pk, (None, None))
+        # Kyle 2026-08-04: the three WASTED terms order by descending value
+        # so the term that drove the total leads. 'active' is not a wasted
+        # term but the denominator's context, so it stays pinned in fourth,
+        # ahead of the percentage it feeds. Sorted on the underlying value
+        # rather than the rounded display, and `sorted` is stable, so terms
+        # that round alike keep canonical order and the line is
+        # deterministic. Mirrors format_hall_of_shame_cells on the ESPN
+        # book -- one sentence describes both.
+        wasted_terms = (('unrostered', unrostered), ('benched', benched),
+                        ('negative', neg_active))
+        details = ' · '.join(
+            [f"{int(round(value)):,} {label}"
+             for label, value in sorted(wasted_terms, key=lambda lv: -lv[1])]
+            + [f"{int(round(e['act'])):,} active",
+               f"{pct:.0f}% of career wasted"]
+        )
         hos_list.append({
             'display_name': nm[0] or e['name'], 'player_name': nm[1],
             'is_pitcher': pk in disc_pit, 'shame': shame, 'wasted': wasted,
-            'details': (f"{int(round(unrostered)):,} unrostered · "
-                        f"{int(round(benched)):,} benched · "
-                        f"{int(round(neg_active)):,} negative · "
-                        f"{int(round(e['act'])):,} active · "
-                        f"{pct:.0f}% of career wasted")})
+            'details': details})
     hos_list.sort(key=lambda e: -e['wasted'])
     data['_hos'] = {   # Pitchers | Hitters, each top 25 by wasted
         'pitchers': [e for e in hos_list if e['is_pitcher']][:25],
@@ -3458,11 +3470,13 @@ def build_records_rows(context, catalog, data):
                 hit = [_bref_player_cell(e), e.get('shame', ''),
                        _pts(e.get('wasted')), e.get('details', '')]
             rows.append(hf + [''] + pit + hit)
-        # Breakdown cells (K = pitchers, O = hitters): centered, 8pt.
+        # Breakdown cells (K = pitchers, O = hitters): centered, 7pt --
+        # down from 8 (Kyle 2026-08-04), five parts in a fixed-width
+        # column. Kept in step with the ESPN twin.
         for col in ('K', 'O'):
             formats.append({'range': f'{col}{first_data}:{col}{len(rows)}',
                             'format': {'horizontalAlignment': 'CENTER',
-                                       'textFormat': {'fontSize': 8}}})
+                                       'textFormat': {'fontSize': 7}}})
         # Years of Service (col E): just the count, centered.
         formats.append({'range': f'E{first_data}:E{len(rows)}',
                         'format': {'horizontalAlignment': 'CENTER'}})

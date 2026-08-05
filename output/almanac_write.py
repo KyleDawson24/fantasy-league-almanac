@@ -2006,7 +2006,9 @@ def _records_hall_formats(rows):
     # Breakdown columns small and centered, the CBS treatment. These
     # strings are long and both sit left of a populated neighbour, so
     # unlike every other long cell on this tab they cannot overflow their
-    # way out of trouble.
+    # way out of trouble. 7pt, not 8 (Kyle 2026-08-04): the line carries
+    # five parts and the column is fixed-width, so it needs the extra
+    # point back. Kept in step with the CBS twin.
     if first_data_row and len(rows) >= first_data_row:
         for column in RECORDS_HALL_BREAKDOWN_COLS:
             letter = col_letter(column + 1)
@@ -2014,7 +2016,7 @@ def _records_hall_formats(rows):
                 'range': f'{letter}{first_data_row}:{letter}{len(rows)}',
                 'format': {
                     'horizontalAlignment': 'CENTER',
-                    'textFormat': {'fontSize': 8},
+                    'textFormat': {'fontSize': 7},
                 },
             })
         # Years of Service is a bare count; center it like CBS does.

@@ -341,22 +341,30 @@ def format_hall_of_shame_cells(entry, discipline):
     produced = _pts('active') + _pts('unrostered') + _pts('benched')
     bench_team = entry.get(f'bench_team_{discipline}') or ''
     bench_points = entry.get(f'bench_points_{discipline}')
+    # The three WASTED terms, in canonical order. 'benched', not 'bench/IL'
+    # (Kyle 2026-08-03) -- the two books' breakdown lines now read
+    # identically. This is NOT a reversal of MLB-169: that ruling was about
+    # the ACQUISITION LENS captions on Advanced Standings, which keep
+    # 'bench/IL' because a caption read mid-scan needs the concrete words.
+    # Here the term sits inside a breakdown whose other three parts are
+    # already one word each, and it has a CBS twin to match.
+    wasted_terms = (('unrostered', 'unrostered'), ('benched', 'benched'),
+                    ('negative', 'negative'))
+    # Kyle 2026-08-04: the wasted terms order by DESCENDING value, so the
+    # term that actually drove the total leads the line instead of the
+    # reader having to scan three numbers to find it. Only those three
+    # reorder -- 'active' is not a wasted term but the denominator's
+    # context, so it stays pinned in fourth, directly ahead of the
+    # percentage it feeds.
+    #
+    # Sorted on the underlying value rather than the rounded display, and
+    # `sorted` is stable, so two terms that round to the same string keep
+    # canonical order and the line stays deterministic.
     breakdown = [
         f"{_pts(key):,.0f} {label}"
-        for key, label in (
-            ('unrostered', 'unrostered'),
-            # 'benched', not 'bench/IL' (Kyle 2026-08-03) -- the two books'
-            # breakdown lines now read identically. This is NOT a reversal
-            # of MLB-169: that ruling was about the ACQUISITION LENS
-            # captions on Advanced Standings, which keep 'bench/IL' because
-            # a caption read mid-scan needs the concrete words. Here the
-            # term sits inside a breakdown whose other three parts are
-            # already one word each, and it has a CBS twin to match.
-            ('benched', 'benched'),
-            ('negative', 'negative'),
-            ('active', 'active'),
-        )
+        for key, label in sorted(wasted_terms, key=lambda kl: -_pts(kl[0]))
     ]
+    breakdown.append(f"{_pts('active'):,.0f} active")
     # A non-positive denominator has no readable percentage -- it happens
     # only for a player whose production in this discipline nets to zero
     # or below, where "x% of career" would be meaningless or sign-flipped.

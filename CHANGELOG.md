@@ -19,6 +19,29 @@ is not a sign the repository is idle._
 
 ### Changed
 
+- **Seeds split three ways, and a stranger no longer inherits our league**
+  (MLB-114). One directory was doing three unrelated jobs: reference
+  vocabulary, this league's configuration, and — by way of the anonymized
+  twins — the only sample data the project had. Now
+  `dbt_league/seeds/` is reference vocabulary (same for everyone, ships
+  filled in), `dbt_league/league_config/` is user config (**blank
+  templates**, documented file by file with a worked example each), and
+  `demo/league_config/` is an explicitly named demo fixture. `seed-paths`
+  reads both roots and `DBT_LEAGUE_CONFIG` selects the second, so the demo
+  swaps one directory and every model follows; no model changed, because
+  dbt resolves seeds by filename rather than path. `SETUP.md` gains the
+  step that never existed — which files you actually have to fill in, and
+  the honest minimum for an ESPN league, which is one.
+- `owner_nicknames`' `column_types` **stops naming contact columns**. It
+  typed `email`/`phone_number` so a six-column local copy would satisfy
+  dbt-duckdb's supposed all-or-none rule, which put the names of two
+  withheld columns into public config. Tested rather than assumed: a
+  six-column file loads fine against a four-column map, so the keys were
+  buying nothing. The template is now the schema.
+- **The demo builds its own warehouse and refuses the real one.**
+  Rendering reads marts, not seeds, so a fixture pointed at marts built
+  from real config would still have produced a real-name book — which is
+  the sample workbook published read-only.
 - **The repository root is curated** (MLB-154). It held 40 tracked files,
   28 of which were session exhaust — handoffs, phase journals, progress
   notes and three variants of one release-notes file — burying the six

@@ -509,13 +509,30 @@ def get_team_player_season_stats():
         ),
 
         player_context AS (
+            -- pro_team comes off the latest day that HAS a club, not off
+            -- the picked row (MLB-159 Exit 1, swept MLB-168). The label
+            -- is game-accurate now, so it is NULL on every day a player
+            -- did not appear; reading it from the rn=1 row blanks the
+            -- club for anyone whose last rostered day was a rest day.
+            -- The row choice is deliberately left alone so name and
+            -- position keep coming from that same latest row -- only the
+            -- label moves. `season_year * 1000 + scoring_period` is safe
+            -- as one ordering key because this mart is ESPN-only and its
+            -- scoring_period tops out at 195.
             SELECT player_id, player_name, display_name, position, pro_team
-            FROM mart_daily_roster_snapshot
-            WHERE team_id IS NOT NULL AND {league_predicate()}
-            QUALIFY ROW_NUMBER() OVER (
-                PARTITION BY player_id
-                ORDER BY season_year DESC, scoring_period DESC
-            ) = 1
+            FROM (
+                SELECT player_id, player_name, display_name, position,
+                       {latest_by('pro_team',
+                                  'season_year * 1000 + scoring_period',
+                                  'player_id')} AS pro_team,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY player_id
+                           ORDER BY season_year DESC, scoring_period DESC
+                       ) AS rn
+                FROM mart_daily_roster_snapshot
+                WHERE team_id IS NOT NULL AND {league_predicate()}
+            )
+            WHERE rn = 1
         ),
 
         current_player_team AS (
@@ -1683,6 +1700,17 @@ def get_team_roster_history_stats(season_year):
         ),
 
         player_context AS (
+            -- pro_team comes off the latest day that HAS a club, not off
+            -- the picked row (MLB-159 Exit 1, swept MLB-168). This is the
+            -- site that blanked the club on the team tabs: post-flip the
+            -- label is NULL on every day a player did not appear, and
+            -- more than half of all players' latest rostered day in scope
+            -- is a rest day (measured 476/897 all-time, 326/646
+            -- current-season). The row choice is deliberately left alone
+            -- so name/display_name/position keep coming from that same
+            -- latest row -- only the label moves. Partitioned by scope
+            -- too, so the current-season and all-time bands each resolve
+            -- their own latest labelled day.
             SELECT
                 scope,
                 player_id,
@@ -1690,11 +1718,23 @@ def get_team_roster_history_stats(season_year):
                 display_name,
                 position,
                 pro_team
-            FROM scoped_daily
-            QUALIFY ROW_NUMBER() OVER (
-                PARTITION BY scope, player_id
-                ORDER BY season_year DESC, scoring_period DESC
-            ) = 1
+            FROM (
+                SELECT
+                    scope,
+                    player_id,
+                    player_name,
+                    display_name,
+                    position,
+                    {latest_by('pro_team',
+                               'season_year * 1000 + scoring_period',
+                               'scope, player_id')} AS pro_team,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY scope, player_id
+                        ORDER BY season_year DESC, scoring_period DESC
+                    ) AS rn
+                FROM scoped_daily
+            )
+            WHERE rn = 1
         ),
 
         current_player_team AS (
@@ -1992,6 +2032,26 @@ def get_current_team_roster_stats(season_year):
             GROUP BY 1
         ),
 
+        player_club AS (
+            -- The club label must NOT come off the pinned latest day.
+            -- This CTE's rows are one specific scoring_period, and
+            -- post-flip pro_team is NULL on every day a player did not
+            -- appear -- so reading `d.pro_team` blanks the club for
+            -- everyone who happened to be resting on that day. Same
+            -- defect as the two player_context row-picks, reached by a
+            -- different shape (a single-day pin rather than a row-pick),
+            -- which is why the MLB-168 sweep did not catch it.
+            SELECT
+                player_id,
+                {latest_by('pro_team',
+                           'season_year * 1000 + scoring_period')} AS pro_team
+            FROM mart_daily_roster_snapshot
+            WHERE season_year = %s
+              AND team_id IS NOT NULL
+              AND {league_predicate()}
+            GROUP BY player_id
+        ),
+
         current_roster AS (
             SELECT
                 d.season_year,
@@ -2005,7 +2065,7 @@ def get_current_team_roster_stats(season_year):
                 d.player_name,
                 d.display_name,
                 d.position,
-                d.pro_team,
+                pc.pro_team,
                 d.lineup_slot,
                 d.slots_to_fill,
                 d.slot_sort_order
@@ -2013,6 +2073,8 @@ def get_current_team_roster_stats(season_year):
             INNER JOIN latest_day ld
                 ON d.season_year = ld.season_year
                 AND d.scoring_period = ld.scoring_period
+            LEFT JOIN player_club pc
+                ON pc.player_id = d.player_id
             WHERE d.team_id IS NOT NULL
               AND d.lineup_slot <> 'FA'
               AND {league_predicate('d')}
@@ -2092,7 +2154,7 @@ def get_current_team_roster_stats(season_year):
             AND cr.team_id = a.team_id
             AND cr.player_id = a.player_id
         ORDER BY cr.team_name, cr.slot_sort_order, slot_rank
-    """, (season_year, season_year, season_year))
+    """, (season_year, season_year, season_year, season_year))
 
     if not rows:
         raise RuntimeError(f"No current roster rows found for {season_year}.")

@@ -137,6 +137,32 @@ def test_fixture_is_populated():
     )
 
 
+def test_fixture_owner_nicknames_all_have_preferred_name():
+    """Every fixture owner must carry a preferred_name, and this is a
+    disclosure control rather than a cosmetic one.
+
+    ESPN owner names are served by the platform and land in the warehouse
+    from RAW -- they do not come from a seed. dim_owner's display coalesces
+    `preferred_name` FIRST, so a twin row that sets it masks the real name,
+    and a twin row that leaves it blank falls through to whatever RAW holds.
+    With 32 of 33 rows set, the fixture looked anonymized while one owner's
+    real name would have rendered from any warehouse built on real RAW.
+
+    This does not make the fixture safe against real RAW on its own -- the
+    demo builds its own warehouse precisely because seeds cannot mask a
+    source they do not feed (see tools/demo.sh). It closes the gap that
+    made the fixture look like it could.
+    """
+    header, data = _rows(f"{FIXTURE_DIR}/owner_nicknames.csv")
+    idx = header.index("preferred_name")
+    blank = [row.split(",")[0] for row in data if not row.split(",")[idx].strip()]
+    assert not blank, (
+        f"{len(blank)} fixture owner row(s) have no preferred_name. "
+        f"preferred_name is what makes the twin win over the platform-served "
+        f"name, so a blank one is a real name waiting to render."
+    )
+
+
 def test_owner_nicknames_template_is_public_columns_only():
     """The MLB-95 contract, pinned as a test rather than a comment.
 

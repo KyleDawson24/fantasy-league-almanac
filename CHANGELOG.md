@@ -17,6 +17,22 @@ without a cloud warehouse. Release notes are built from the commit range
 at each cut rather than accumulated here, so this section staying short
 is not a sign the repository is idle._
 
+### Upgrading
+
+- **The club-of-game backfill is a required migration step** (MLB-200),
+  and `dbt build` now enforces it. The chain reads `clubOfGame` — the club
+  of the *game* production came from — but old RAW carries no such key: it
+  is written by `extract.py --backfill-club-of-game`, not by the
+  transform. An existing install upgrading across the flip therefore built
+  **every model green** while its historical affinity chart silently went
+  null/Unattributed, with the only warning buried in Known Data Issues.
+  Not hypothetical: the flip-prep work witnessed exactly this on a stale
+  local warehouse and refreshed it by hand, so a known local prerequisite
+  never became a product-wide gate. `assert_club_of_game_migrated` now
+  fails the build until the backfill has run and names the command in the
+  failure; the FA rows ESPN no longer serves stay exempt, since those are
+  deliberately null rather than missing. See SETUP.md §8.
+
 ### Changed
 
 - **Seeds split three ways, and a stranger no longer inherits our league**

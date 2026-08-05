@@ -498,6 +498,41 @@ If you see errors during extract: refresh ESPN cookies, check
 `LEAGUE_ID`. If you see errors during dbt build: re-check `dbt debug`.
 See section 11 for common gotchas.
 
+### Upgrading an existing install: the club-of-game backfill (REQUIRED)
+
+**Skip this if you are setting up for the first time** — a fresh extract
+lands the field already. This is for a warehouse that was loaded before
+the club-of-game flip.
+
+The MLB team credited for a player's production used to come from
+`proTeam`, ESPN's stamp on the *person* record: the club that player
+belonged to when the period was pulled. For a season pulled in one pass,
+that is the same club for every day of the year, so anyone traded
+mid-season had their whole season misfiled under the club they finished
+at. The chain now reads `clubOfGame` — the club of the *game* the
+production came from — which does not decay.
+
+**Old RAW has no `clubOfGame` key at all.** It is written by a backfill
+pass, not by the transform, so an existing warehouse has nothing for the
+models to read. Run it once per already-loaded season:
+
+```bash
+python extract/extract.py --backfill-club-of-game --year 2025
+python extract/extract.py --backfill-club-of-game --year 2026
+```
+
+The backfill only ever ADDS a key. It updates rows in place, deletes
+nothing, and leaves `loaded_at` alone, so it is safe on settled history
+and safe to re-run — a half-finished pass is resumed by running it again.
+
+You do not have to remember to do this. `dbt build` fails with
+`assert_club_of_game_migrated` until you have, and the failure names this
+command. That gate exists because the alternative was worse than an
+error: before it, an un-migrated install built **every model green**
+while its historical affinity chart silently went null/Unattributed. A
+green build that quietly produces a blank chart is the failure mode worth
+spending a test on.
+
 ---
 
 ## 9. Verify the test suite

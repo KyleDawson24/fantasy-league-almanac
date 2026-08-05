@@ -44,6 +44,14 @@
 # Usage:   tools/demo.sh                 # default (ESPN) league
 #          tools/demo.sh cbs-bsb         # a specific league key
 # Tunable: DBT_DUCKDB_PATH OUT_DIR FORCE_BUILD PY_BIN DBT_BIN
+# Escapes: DEMO_ALLOW_REAL_WAREHOUSE=1     render off the real warehouse
+#          DEMO_ALLOW_REAL_LEAGUE_CONFIG=1 seed from real league config
+#          DEMO_ALLOW_UNSTAMPED=1          trust a database with no marker
+#          DEMO_SELF_CHECK=1               resolve, report, and stop
+#          Each one has to be typed. None of them is ever the default, and
+#          none is what happens by accident -- which is the whole lesson of
+#          MLB-198, where the isolation the script advertised was decided by
+#          a variable it never exported.
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -59,9 +67,8 @@ OUT_DIR="${OUT_DIR:-out/almanac_preview}"
 FORCE_BUILD="${FORCE_BUILD:-0}"
 
 # The demo fixture, relative to the dbt project directory (dbt resolves
-# seed-paths from there). Exported so every dbt invocation below -- and
-# duckdb_run.sh's, which this script calls -- reads the same league config.
-export DBT_LEAGUE_CONFIG="${DBT_LEAGUE_CONFIG:-../demo/league_config}"
+# seed-paths from there).
+DEMO_LEAGUE_CONFIG='../demo/league_config'
 
 # A maintainer's venv path is not a default anybody else can use. Fall back to
 # whatever `dbt` is on PATH, which is what a fresh clone will have.
@@ -75,17 +82,60 @@ PY_BIN="${PY_BIN:-$(dirname "$DBT_BIN")/python.exe}"
 say() { printf '[demo] %s\n' "$*"; }
 
 # ---------------------------------------------------------------------------
-# T6 GUARD. The sample workbook this renders is published read-only, so it
-# must be the twin render and nothing else. The check is on the PATH rather
-# than on the output because by the time a real name is in a TSV it has
-# already been written to disk.
+# T6 GUARD (MLB-198). The sample workbook this renders is published read-only,
+# so it must be the twin render and nothing else.
+#
+# WHAT WAS WRONG WITH THE OLD VERSION, because the shape of the mistake is
+# worth keeping. It compared `$DUCKDB_PATH` against the real warehouse and
+# refused on a match -- but `DUCKDB_PATH` was a LOCAL shell variable that the
+# script never exported, while dbt and output/db.py both read the ENV var
+# `DBT_DUCKDB_PATH` and both default to the REAL warehouse when it is unset.
+# So in the normal case -- env unset, which is every clone -- the script
+# announced the demo path and then seeded the fixture and rendered somewhere
+# else entirely. The guard only ever fired when someone explicitly set the
+# env var to the real path, which is the one case that did not need guarding.
+#
+# The lesson, now standing: verifying that a guard REFUSES is not verifying
+# that the work PROPAGATES. This block does both -- it refuses on a match and
+# then exports the path it just cleared, so there is one resolved value and
+# every downstream reader gets it.
+#
+# Comparison is on CANONICAL paths. `./data/duckdb/ESPN_FANTASY.duckdb`, an
+# absolute path, and a symlink pointing at the real warehouse are all the same
+# file and none of them are string-equal to the literal the old check used.
 #
 # Overridable, because "render the demo tabs off my real warehouse" is a
 # legitimate thing a maintainer may want -- but it has to be typed out, so
 # it can never be what happens by accident.
 # ---------------------------------------------------------------------------
-if [ "$DUCKDB_PATH" = "$REAL_WAREHOUSE" ] && [ "${DEMO_ALLOW_REAL_WAREHOUSE:-0}" != "1" ]; then
-  say "refusing to run: DBT_DUCKDB_PATH points at $REAL_WAREHOUSE."
+
+# Resolves symlinks and `..`, works on a path that does not exist yet, and
+# folds case on Windows (where the filesystem does). Fails closed: an empty
+# result stops the run rather than comparing empty strings.
+canon() {
+  "$PY_BIN" -c "import os,sys; print(os.path.normcase(os.path.realpath(os.path.abspath(sys.argv[1]))))" "$1" 2>/dev/null
+}
+# Same, minus the case fold -- what actually gets exported, so the value
+# downstream readers see is an unambiguous absolute path.
+abspath() {
+  "$PY_BIN" -c "import os,sys; print(os.path.realpath(os.path.abspath(sys.argv[1])))" "$1" 2>/dev/null
+}
+
+DUCKDB_CANON="$(canon "$DUCKDB_PATH")"
+REAL_CANON="$(canon "$REAL_WAREHOUSE")"
+if [ -z "$DUCKDB_CANON" ] || [ -z "$REAL_CANON" ]; then
+  say "refusing to run: could not canonicalize the warehouse paths using"
+  say "  $PY_BIN"
+  say "Without canonical paths the real-warehouse check cannot be trusted,"
+  say "and an untrustworthy check is worse than none. Set PY_BIN to a working"
+  say "interpreter."
+  exit 1
+fi
+
+if [ "$DUCKDB_CANON" = "$REAL_CANON" ] && [ "${DEMO_ALLOW_REAL_WAREHOUSE:-0}" != "1" ]; then
+  say "refusing to run: the warehouse path resolves to $REAL_WAREHOUSE."
+  say "  requested : $DUCKDB_PATH"
+  say "  resolves  : $DUCKDB_CANON"
   say ""
   say "That is the maintainer's warehouse -- its marts are built from real"
   say "league config, so a render off it would carry real names into what is"
@@ -97,10 +147,123 @@ if [ "$DUCKDB_PATH" = "$REAL_WAREHOUSE" ] && [ "${DEMO_ALLOW_REAL_WAREHOUSE:-0}"
   exit 1
 fi
 
-say "warehouse   : $DUCKDB_PATH"
+# THE LINE THE OLD GUARD WAS MISSING. dbt's profile and output/db.py both
+# read this and both default to the real warehouse; exporting the cleared
+# path is what makes the guard mean anything.
+DBT_DUCKDB_PATH="$(abspath "$DUCKDB_PATH")"
+export DBT_DUCKDB_PATH
+
+# Same treatment for the league config. The old default-if-unset let an
+# ambient DBT_LEAGUE_CONFIG -- a shell where the maintainer had been running
+# the real chain, say -- silently point the demo's seeds at the real league.
+# Pinned to the fixture unless the override is typed out.
+if [ -n "${DBT_LEAGUE_CONFIG:-}" ] && [ "${DBT_LEAGUE_CONFIG}" != "$DEMO_LEAGUE_CONFIG" ]; then
+  if [ "${DEMO_ALLOW_REAL_LEAGUE_CONFIG:-0}" != "1" ]; then
+    say "refusing to run: DBT_LEAGUE_CONFIG is set to"
+    say "  $DBT_LEAGUE_CONFIG"
+    say "but the demo builds from the fixture at $DEMO_LEAGUE_CONFIG."
+    say ""
+    say "Seeds loaded from anywhere else can carry real league content into"
+    say "what is meant to be the published sample. Unset DBT_LEAGUE_CONFIG,"
+    say "or set DEMO_ALLOW_REAL_LEAGUE_CONFIG=1 to mean it -- and do not"
+    say "publish the result."
+    exit 1
+  fi
+  say "DEMO_ALLOW_REAL_LEAGUE_CONFIG=1 -- seeding from $DBT_LEAGUE_CONFIG"
+else
+  DBT_LEAGUE_CONFIG="$DEMO_LEAGUE_CONFIG"
+fi
+export DBT_LEAGUE_CONFIG
+
+say "warehouse   : $DBT_DUCKDB_PATH"
 say "league cfg  : $DBT_LEAGUE_CONFIG"
 say "output      : $OUT_DIR"
 [ -n "$LEAGUE" ] && say "league      : $LEAGUE"
+
+# ---------------------------------------------------------------------------
+# PROVENANCE (MLB-198). A path is a claim about where a database is, not
+# about what is in it. `data/duckdb/demo/ESPN_FANTASY.duckdb` is a demo
+# warehouse because this script built it from the fixture -- but a copied,
+# moved or hand-built file at that path looks identical from the outside, and
+# "the file already exists" is exactly when this script SKIPS the build and
+# renders whatever it finds. So the demo warehouse carries a marker written
+# at build time, and an existing file is only trusted when it has one.
+#
+# Three states, not two. "Cannot tell" is not "unstamped": duckdb may simply
+# not be installed yet, and the preflight below is where that gets its proper
+# message rather than being reported as a provenance failure.
+# ---------------------------------------------------------------------------
+demo_warehouse_stamp_state() {   # 0 stamped | 1 unstamped | 2 cannot tell
+  "$PY_BIN" -c "
+import sys
+try:
+    import duckdb
+except Exception:
+    sys.exit(2)
+try:
+    c = duckdb.connect(sys.argv[1], read_only=True)
+    n = c.execute(\"select count(*) from DEMO_META.PROVENANCE where marker='tools/demo.sh'\").fetchone()[0]
+except Exception:
+    n = 0
+sys.exit(0 if n else 1)
+" "$1" 2>/dev/null
+}
+
+stamp_demo_warehouse() {
+  "$PY_BIN" -c "
+import sys, duckdb
+c = duckdb.connect(sys.argv[1])
+c.execute('create schema if not exists DEMO_META')
+c.execute('create table if not exists DEMO_META.PROVENANCE '
+          '(marker varchar, league_config varchar, stamped_at timestamp)')
+c.execute('delete from DEMO_META.PROVENANCE')
+c.execute('insert into DEMO_META.PROVENANCE values (?, ?, now())',
+          ['tools/demo.sh', sys.argv[2]])
+c.close()
+" "$1" "$2"
+}
+
+STAMP_STATE='absent'
+if [ -f "$DBT_DUCKDB_PATH" ]; then
+  demo_warehouse_stamp_state "$DBT_DUCKDB_PATH"
+  case $? in
+    0) STAMP_STATE='stamped' ;;
+    2) STAMP_STATE='unknown' ;;
+    *) STAMP_STATE='unstamped' ;;
+  esac
+fi
+
+if [ "$STAMP_STATE" = 'unstamped' ]; then
+  if [ "${DEMO_ALLOW_UNSTAMPED:-0}" != "1" ]; then
+    say "refusing to run: there is a database at"
+    say "  $DBT_DUCKDB_PATH"
+    say "but it carries no demo provenance marker, so this script cannot tell"
+    say "whether its marts were built from the fixture or from real league"
+    say "config. Rendering it could publish real names."
+    say ""
+    say "Delete it and re-run to build a stamped one, or set"
+    say "DEMO_ALLOW_UNSTAMPED=1 if you know what that file is."
+    exit 1
+  fi
+  say "DEMO_ALLOW_UNSTAMPED=1 -- trusting an unmarked database."
+elif [ "$STAMP_STATE" = 'unknown' ]; then
+  say "note: cannot read demo provenance yet (duckdb not importable)."
+fi
+
+# ---------------------------------------------------------------------------
+# SELF-CHECK. Everything above is resolution and refusal; everything below
+# builds or renders. This exit point makes the resolved values observable
+# without a twenty-minute build, which is what tests/test_demo_isolation.py
+# asserts on -- the acceptance for MLB-198 is where the work GOES, and that
+# cannot be tested by watching the script refuse.
+# ---------------------------------------------------------------------------
+if [ "${DEMO_SELF_CHECK:-0}" = "1" ]; then
+  say "selfcheck DBT_DUCKDB_PATH=$DBT_DUCKDB_PATH"
+  say "selfcheck DBT_LEAGUE_CONFIG=$DBT_LEAGUE_CONFIG"
+  say "selfcheck REAL_WAREHOUSE=$(abspath "$REAL_WAREHOUSE")"
+  say "selfcheck STAMP_STATE=$STAMP_STATE"
+  exit 0
+fi
 
 # ---------------------------------------------------------------------------
 # 0. Preflight the imports, before spending twenty minutes on a build that
@@ -129,12 +292,12 @@ if [ -n "$missing" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# 1. The warehouse.
+# 1. The warehouse. Provenance was settled above, before anything was built.
 # ---------------------------------------------------------------------------
-mkdir -p "$(dirname "$DUCKDB_PATH")"
+mkdir -p "$(dirname "$DBT_DUCKDB_PATH")"
 
-if [ "$FORCE_BUILD" = "1" ] || [ ! -f "$DUCKDB_PATH" ]; then
-  if [ ! -f "$DUCKDB_PATH" ]; then
+if [ "$FORCE_BUILD" = "1" ] || [ ! -f "$DBT_DUCKDB_PATH" ]; then
+  if [ ! -f "$DBT_DUCKDB_PATH" ]; then
     say "no warehouse at that path -- building it (this takes a while)."
   else
     say "FORCE_BUILD=1 -- rebuilding."
@@ -153,7 +316,7 @@ try:
 except Exception:
     n = 0
 sys.exit(0 if n else 1)
-" "$DUCKDB_PATH" 2>/dev/null; then
+" "$DBT_DUCKDB_PATH" 2>/dev/null; then
     say "this warehouse has no RAW data, so there is nothing to transform."
     say ""
     say "tools/demo.sh builds and renders; it does not land data. Landing it"
@@ -180,6 +343,11 @@ sys.exit(0 if n else 1)
     say "build did not complete; not rendering a half-built warehouse."
     exit 1
   fi
+
+  # Stamped only after a clean build, so a half-built or failed run never
+  # leaves behind a database that later runs will trust.
+  stamp_demo_warehouse "$DBT_DUCKDB_PATH" "$DBT_LEAGUE_CONFIG"
+  say "stamped the demo warehouse with its build provenance."
 else
   say "warehouse present -- skipping the build (FORCE_BUILD=1 to rebuild)."
 fi
@@ -189,8 +357,11 @@ fi
 # ---------------------------------------------------------------------------
 mkdir -p "$OUT_DIR"
 
+# The path is passed EXPLICITLY as well as exported. The export is what
+# fixes the bug; this is the belt to its braces, because --duckdb with no
+# argument falls back to output/db.py's default, which is the real warehouse.
 RENDER=("$PY_BIN" output/generate_almanac_sheet.py
-        --duckdb --no-sheets --preview-dir "$OUT_DIR")
+        --duckdb "$DBT_DUCKDB_PATH" --no-sheets --preview-dir "$OUT_DIR")
 [ -n "$LEAGUE" ] && RENDER+=(--league "$LEAGUE")
 
 say "rendering..."

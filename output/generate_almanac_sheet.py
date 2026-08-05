@@ -195,12 +195,16 @@ def _run_points_league_almanac(args, parser):
     league's registry sinks (MLB-58). --season-year / --matchup-period
     are H2H concepts and are ignored here (the points almanac's horizon
     comes from the data)."""
-    if args.preview_dir or args.no_sheets:
-        tabs, _, _ = cbs_almanac_sheets.build_all_tabs()
-        preview_tabs = [(title, rows) for title, rows, _ in tabs]
-        if args.preview_dir:
-            _write_preview_dir(preview_tabs, args.preview_dir)
-
+    # Resolve the sink FIRST, then decide what to build (MLB-201).
+    #
+    # This used to build preview tabs under `--preview-dir or --no-sheets`
+    # and then fall back to printing them whenever no sheet id resolved --
+    # so a run with NEITHER flag and no dev sheet configured reached
+    # `_print_preview(preview_tabs)` with preview_tabs unbound and died on
+    # an UnboundLocalError. That is a stranger's literal first render: no
+    # SHEETS_DEV_ID in .env, no flags typed. The two decisions have to
+    # happen in this order, because whether a preview is needed depends on
+    # where the output is going.
     if args.no_sheets:
         sheet_id, target_label = None, None
     else:
@@ -209,6 +213,14 @@ def _run_points_league_almanac(args, parser):
                 args.prod, db.league())
         except RuntimeError as exc:
             parser.error(str(exc))
+
+    # Built whenever the preview path is reachable: explicitly asked for, or
+    # implied because there is no sheet to write to.
+    if args.preview_dir or not sheet_id:
+        tabs, _, _ = cbs_almanac_sheets.build_all_tabs()
+        preview_tabs = [(title, rows) for title, rows, _ in tabs]
+        if args.preview_dir:
+            _write_preview_dir(preview_tabs, args.preview_dir)
 
     if not sheet_id:
         print(

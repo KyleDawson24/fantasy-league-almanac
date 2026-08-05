@@ -49,7 +49,10 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT" || exit 1
 
+# A maintainer's venv path is not a default anybody else can use. Fall back to
+# whatever `dbt` is on PATH, which is what a fresh clone will have.
 DBT_BIN="${DBT_BIN:-C:/Users/kyled/.venvs/mlb10-duckdb/Scripts/dbt.exe}"
+command -v "$DBT_BIN" >/dev/null 2>&1 || DBT_BIN="dbt"
 PROJECT_DIR="${PROJECT_DIR:-dbt_league}"
 PROFILES_DIR="${PROFILES_DIR:-dbt_league/profiles}"
 TARGET_PATH="${TARGET_PATH:-target/duckdb}"

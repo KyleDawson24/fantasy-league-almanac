@@ -9,7 +9,27 @@ profile: 'dbt_league'
 model-paths: ["models"]
 analysis-paths: ["analyses"]
 test-paths: ["tests"]
-seed-paths: ["seeds"]
+# TWO seed roots, because seeds do two unrelated jobs (MLB-114).
+#
+#   seeds/        REFERENCE VOCABULARY -- stat maps, MLB team abbrevs, the
+#                 record-surfacing rules. Universal: identical for every
+#                 league on a given platform, so it ships as real content
+#                 and nobody edits it to run their own league.
+#
+#   league_config/  USER CONFIG -- the calendar, the franchise/owner
+#                 registries, and the override seeds that rename and merge
+#                 things. WHOSE league this is. Tracked content is blank
+#                 templates; a maintainer's real content sits at this path
+#                 under skip-worktree, and the demo fixture is an
+#                 alternative directory selected by the env var.
+#
+# The split is what lets the fixture exist at all: dbt resolves a seed by
+# FILENAME, so two active seed roots may not both carry owner_nicknames.csv.
+# Swapping the whole league_config directory is therefore the only way to
+# point the same models at different league content -- which is exactly the
+# demo/real distinction. ref() is unaffected by which root a seed lives in,
+# so no model changed when these moved.
+seed-paths: ["seeds", "{{ env_var('DBT_LEAGUE_CONFIG', 'league_config') }}"]
 macro-paths: ["macros"]
 snapshot-paths: ["snapshots"]
 
@@ -184,12 +204,15 @@ seeds:
         first_name: varchar
         last_name: varchar
         preferred_name: varchar
-        # The committed seed ends at preferred_name; a local working copy
-        # may carry contact columns that never ship (MLB-95 -- identity
-        # seeds carry no contact data in git, ever). Typed anyway because
-        # engines that enforce all-or-none column_types per seed file
-        # (dbt-duckdb) must see every loaded column typed, and keys for
-        # absent columns are ignored -- so the four-column public seed
-        # and a six-column local copy both load (MLB-134).
-        email: varchar
-        phone_number: varchar
+        # These four columns ARE the seed, everywhere (MLB-114). The blank
+        # template defines the schema, the demo fixture matches it, and the
+        # maintainer's real copy matches it too -- contact details live in a
+        # local sidecar this project never reads, so there is no seed shape
+        # for dbt to know about but not document.
+        #
+        # This map used to carry email/phone_number as well, so that a
+        # six-column local copy would satisfy dbt-duckdb's all-or-none rule.
+        # That put the names of two contact columns in tracked config to
+        # describe a file that must never be committed -- publishing the
+        # shape of the thing being withheld. Making the template the schema
+        # removes the reason those keys existed.

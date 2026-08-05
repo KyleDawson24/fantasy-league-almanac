@@ -70,7 +70,14 @@ data/cbs_raw/
 !config/*.json
 !archive/*.json
 !tests/fixtures/*.json
+# The three seed homes, each of which must ship (MLB-114). `*.csv` above is
+# a blanket ignore, so a seed directory that is not named here is invisible
+# to git no matter what it contains -- a new template added later would be
+# silently unshipped, and the demo fixture would not exist on a clone.
+# These entries are what make "runnable by a stranger" survive.
 !dbt_league/seeds/*.csv
+!dbt_league/league_config/*.csv
+!demo/league_config/*.csv
 output/leagueNoteHeader.txt
 output/leagueNoteFooter.txt
 

@@ -4,8 +4,8 @@
 The portfolio needs screenshots of the almanac that show the anonymized
 owner identities -- the ones a stranger cloning this repo would render --
 not the real league. Anonymization is a repo property, not a run mode:
-the anonymized names live only in the COMMITTED copies of five seeds,
-while Kyle's working tree carries the real data (skip-worktree, MLB-95).
+the anonymized names live only in the published demo fixture, while
+Kyle's working tree carries the real data (skip-worktree, MLB-95/114).
 So every render to date is real-name.
 
 The cheap way to get anonymized screenshots is not to swap seeds and
@@ -19,23 +19,53 @@ deleting a bad copy and making another.
 
 WHERE THE MAPPING COMES FROM
     Derived at runtime, never hardcoded -- this file has to be safe to
-    commit to a public repo. For each of the five seeds, the real side is
-    the file on disk and the anonymized side is `git show HEAD:<path>`
-    (the committed twin). Joining those two on a stable key gives
-    real -> anon for every name form the sheets can render.
+    commit to a public repo. The two sides live in two DIFFERENT
+    directories, and that separation is the whole design (MLB-114):
 
-    The join key is not uniform, which is the one subtlety here:
-      * ESPN owners carry a braced SWID GUID that survived anonymization,
-        so owner_id joins them directly.
-      * CBS owners carry a name-DERIVED slug, so the anonymizer had to
-        rewrite the id too -- owner_id is not stable for them. They are
-        bridged through cbs_team_owners.csv, whose (league_key,
-        franchise_id) key IS stable: that file pairs real owner_id to
-        anon owner_id, and the bridge is cross-checked against row
-        alignment before it is trusted (see _build_owner_crosswalk).
-      * The by-year file joins on (league_key, season_year, franchise_id)
-        and the franchise file on (league_key, franchise_id); both keys
-        are untouched by anonymization.
+      * REAL side -- `dbt_league/league_config/<f>.csv` ON DISK. Those 13
+        files are skip-worktree, so the working copy is the real league
+        data while the COMMITTED bytes are a blank template.
+      * TWIN side -- `demo/league_config/<f>.csv` AS COMMITTED. The demo
+        fixture is the anonymized twin a stranger's clone actually
+        renders; it is tracked normally, so HEAD and disk agree. Reading
+        HEAD anyway pins the mapping to what is published rather than to
+        a locally-dirty fixture.
+
+    This tool used to read both sides out of `dbt_league/seeds/`, where
+    disk was real and HEAD was the twin. The 114 split moved the real
+    side to league_config/ and the twin to demo/, so HEAD of the old path
+    became a bare header row and the tool raised before it could map
+    anything (MLB-202).
+
+    ROWS ARE PAIRED BY STABLE KEY, NEVER BY POSITION. Row position is not
+    a key: it survives only until someone sorts a file or the fixture
+    regenerates in a different order, and a silently mis-paired mapping
+    produces a sheet that looks anonymized and is not. Each file declares
+    the columns anonymization provably does not touch, and the join runs
+    on those:
+
+      * cbs_franchises      (league_key, franchise_id) -- unique.
+      * cbs_team_owners     (league_key, franchise_id) -- NOT unique;
+                            co-owned franchises carry several rows.
+      * team_owner_by_year  (league_key, season_year, franchise_id) --
+                            also not unique, same reason.
+      * owner_nicknames     owner_id, through the crosswalk below.
+      * owner_alias         canonical_owner_id, through the crosswalk.
+
+    Where a key names several rows, the group is resolved by identity
+    evidence rather than by the order the rows happen to sit in -- see
+    _build_owner_crosswalk. Nothing is ever guessed: a group that will
+    not resolve raises.
+
+    The owner id spaces differ by platform, which is the subtlety:
+      * ESPN owners carry a braced SWID GUID that anonymization retains
+        deliberately (identity resolution depends on it), so those ids
+        pair to themselves.
+      * CBS owners carry a name-DERIVED slug, so the scrub had to rewrite
+        the id too. Those are bridged through cbs_team_owners' stable
+        (league_key, franchise_id) key, and the co-owner groups it cannot
+        separate are settled by the private scrub map's real -> fake name
+        record.
 
     A join that does not reconcile raises. A partial mapping would
     produce a sheet that looks anonymized and is not, which is the one
@@ -137,17 +167,39 @@ from config.league_registry import load_registry  # noqa: E402
 _OAUTH_SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
 _TOKEN_PATH = REPO_ROOT / 'output' / '.sheets_oauth_token.json'
 
-# The five skip-worktree seeds (MLB-95). Disk = real, HEAD = anonymized.
-_SEED_DIR = 'dbt_league/seeds'
-SEED_FRANCHISES = f'{_SEED_DIR}/cbs_franchises.csv'
-SEED_TEAM_OWNERS = f'{_SEED_DIR}/cbs_team_owners.csv'
-SEED_ALIAS = f'{_SEED_DIR}/owner_alias.csv'
-SEED_NICKNAMES = f'{_SEED_DIR}/owner_nicknames.csv'
-SEED_BY_YEAR = f'{_SEED_DIR}/team_owner_by_year.csv'
+# The five twinned identity files (MLB-95), re-rooted by the MLB-114
+# split: real data on disk under league_config/, published twins under
+# demo/. Named by basename because the two sides differ only by root.
+_REAL_DIR = 'dbt_league/league_config'
+_TWIN_DIR = 'demo/league_config'
+
+SEED_FRANCHISES = 'cbs_franchises.csv'
+SEED_TEAM_OWNERS = 'cbs_team_owners.csv'
+SEED_ALIAS = 'owner_alias.csv'
+SEED_NICKNAMES = 'owner_nicknames.csv'
+SEED_BY_YEAR = 'team_owner_by_year.csv'
 
 ALL_SEEDS = (
     SEED_FRANCHISES, SEED_TEAM_OWNERS, SEED_ALIAS, SEED_NICKNAMES, SEED_BY_YEAR,
 )
+
+# The columns anonymization provably does not touch, per file. These are
+# the join keys; see the module docstring for why position is not one.
+SEED_KEYS = {
+    SEED_FRANCHISES: ('league_key', 'franchise_id'),
+    SEED_TEAM_OWNERS: ('league_key', 'franchise_id'),
+    SEED_ALIAS: ('league_key',),
+    SEED_NICKNAMES: ('owner_id',),
+    SEED_BY_YEAR: ('league_key', 'season_year', 'franchise_id'),
+}
+
+# A braced SWID GUID. ESPN owner ids are retained verbatim through
+# anonymization on purpose (CLAUDE.md: name-anonymized, NOT identifier-
+# anonymized), so an id of this shape pairs to itself. Nothing else is
+# allowed to self-pair: a name-derived CBS slug that happened to equal
+# some twin slug would otherwise map a real id to itself and, being an
+# identity pair, get dropped from the mapping entirely -- a silent leak.
+_STABLE_ID = re.compile(r'^\{[0-9A-Fa-f]{8}-(?:[0-9A-Fa-f]{4}-){3}[0-9A-Fa-f]{12}\}$')
 
 # The private MLB-95 scrub map: real -> fake for strings the seeds don't
 # carry (ESPN team names live only in the live API). Gitignored, maintainer-
@@ -174,6 +226,10 @@ ANON_TITLE_MARKERS = ('ANON', 'DEMO')
 # available and the cost of covering it is three lines.
 _REDACTIONS = {'email': 'redacted@example.com', 'phone_number': '000-000-0000'}
 
+# Same idea for a legacy owner slug that has no twin to become: a
+# name-derived id with no counterpart is redacted, not passed through.
+_ALIAS_REDACTION = 'cbs-redacted-owner'
+
 # A token this short cannot be matched safely even on word boundaries.
 # Nothing in the current seeds trips it; if that ever changes the skip is
 # printed, never silent.
@@ -185,12 +241,11 @@ _MIN_TOKEN_LEN = 3
 # --------------------------------------------------------------------------
 
 def _git_show(path):
-    """The COMMITTED bytes of a path -- the anonymized twin.
+    """The COMMITTED bytes of a repo-relative path.
 
-    Deliberately `git show HEAD:<path>` and not a working-tree read: for
-    these five seeds the working copy is real league data and only the
-    committed copy is anonymized (the recurring false alarm in CLAUDE.md,
-    inverted -- here we want the committed side on purpose).
+    Used for the TWIN side only. The demo fixture is tracked normally, so
+    this equals the working copy in the healthy case; reading HEAD anyway
+    pins the mapping to what is actually published.
     """
     proc = subprocess.run(
         ['git', 'show', f'HEAD:{path}'],
@@ -210,38 +265,115 @@ def _parse_csv(text):
     return list(csv.DictReader(io.StringIO(text)))
 
 
-def _load_pair(path):
-    """Return (real_rows, anon_rows) for one seed, validated as pairable."""
-    disk = (REPO_ROOT / path)
-    if not disk.is_file():
-        raise RuntimeError(f"Seed {path} not found on disk at {disk}.")
-    real = _parse_csv(disk.read_text(encoding='utf-8-sig'))
-    anon = _parse_csv(_git_show(path))
-    if len(real) != len(anon):
-        raise RuntimeError(
-            f"Seed {path}: working tree has {len(real)} rows but HEAD has "
-            f"{len(anon)}. The pair cannot be joined row-wise; the "
-            f"anonymized twin is out of date with the real seed."
-        )
-    return real, anon
+def _load_pair(name):
+    """Return (real_rows, twin_rows) for one identity file.
 
-
-def _assert_stable(path, real, anon, cols):
-    """Fail unless the named columns are identical index-for-index.
-
-    These are the columns anonymization must never touch (ids, seasons,
-    league keys). Verifying them is what earns the right to pair the rows
-    at all -- if a supposedly stable key drifted, every mapping derived
-    from this file would be silently wrong.
+    Real = the maintainer's working copy under league_config/ (skip-
+    worktree; blank at HEAD). Twin = the committed demo fixture. Row
+    COUNTS are not required to match -- the join is by key -- but a twin
+    that came back empty means the roots are wrong again, which is worth
+    saying in those words rather than as a confusing key-miss later.
     """
-    for i, (r, a) in enumerate(zip(real, anon)):
+    disk = REPO_ROOT / _REAL_DIR / name
+    if not disk.is_file():
+        raise RuntimeError(
+            f"{_REAL_DIR}/{name} not found on disk at {disk}. The real side "
+            f"of the mapping is the maintainer's working copy; a clone that "
+            f"only has the blank template cannot anonymize a sheet."
+        )
+    real = _parse_csv(disk.read_text(encoding='utf-8-sig'))
+    twin = _parse_csv(_git_show(f'{_TWIN_DIR}/{name}'))
+    if real and not twin:
+        raise RuntimeError(
+            f"{_TWIN_DIR}/{name} is empty at HEAD but {_REAL_DIR}/{name} has "
+            f"{len(real)} rows. The published twin is missing, so no mapping "
+            f"can be derived -- check that the demo fixture is committed."
+        )
+    return real, twin
+
+
+def _ref(value):
+    """A short, stable, NON-reversible handle for a real identifier.
+
+    Diagnostics in this file are read by a human and may be pasted into a
+    ticket, so they must never carry a real identifier -- and a CBS owner
+    id is a name-derived slug, which means printing any slice of one
+    prints part of a surname. A digest keeps the useful property (the same
+    owner reads the same across two messages) and drops the leak.
+    """
+    import hashlib
+    return hashlib.sha1((value or '').encode('utf-8')).hexdigest()[:8]
+
+
+def _key_of(row, cols):
+    return tuple((row.get(c) or '').strip() for c in cols)
+
+
+def _group_by_key(rows, cols):
+    grouped = defaultdict(list)
+    for row in rows:
+        grouped[_key_of(row, cols)].append(row)
+    return grouped
+
+
+def _pair_by_key(name, real, twin, resolver=None):
+    """Align real rows to twin rows on the file's stable key.
+
+    Returns a list of (real_row, twin_row). Groups of one pair directly.
+    Larger groups -- co-owned franchises, mostly -- are handed to
+    `resolver`, which pairs them on identity evidence; without one, or if
+    it cannot separate them, this raises rather than falling back to row
+    order. That fallback is the bug this function exists to remove.
+    """
+    cols = SEED_KEYS[name]
+    gr, gt = _group_by_key(real, cols), _group_by_key(twin, cols)
+
+    missing = sorted(set(gr) - set(gt))
+    if missing:
+        raise RuntimeError(
+            f"{_REAL_DIR}/{name}: {len(missing)} key(s) present in the real "
+            f"file have no row in {_TWIN_DIR}/{name} (first: "
+            f"{'/'.join(missing[0])}). The twin is out of date with the real "
+            f"file; refusing to derive a partial mapping."
+        )
+
+    paired = []
+    for key, r_rows in gr.items():
+        t_rows = gt[key]
+        if len(r_rows) != len(t_rows):
+            raise RuntimeError(
+                f"{name}: key {'/'.join(key)} has {len(r_rows)} real row(s) "
+                f"but {len(t_rows)} twin row(s). The pair cannot be aligned."
+            )
+        if len(r_rows) == 1:
+            paired.append((r_rows[0], t_rows[0]))
+            continue
+        if resolver is None:
+            raise RuntimeError(
+                f"{name}: key {'/'.join(key)} names {len(r_rows)} rows and "
+                f"this file has no way to tell them apart. Row order is not "
+                f"a key; refusing to guess which row is whose."
+            )
+        paired.extend(resolver(name, key, r_rows, t_rows))
+    return paired
+
+
+def _assert_stable(name, paired, cols):
+    """Fail unless the named columns agree within every paired row.
+
+    The key columns agree by construction; this checks the OTHER columns
+    that anonymization must not touch (seasons, league keys carried
+    alongside a different key). A drift here means the twin is not a twin.
+    """
+    for r, a in paired:
         for c in cols:
             if (r.get(c) or '') != (a.get(c) or ''):
                 raise RuntimeError(
-                    f"Seed {path} row {i + 2}: column {c!r} differs between "
-                    f"the working tree and HEAD, but it is supposed to be a "
-                    f"stable join key. Refusing to derive a mapping from an "
-                    f"unreconciled pair."
+                    f"{name}: column {c!r} differs between the real file and "
+                    f"the published twin for key "
+                    f"{'/'.join(_key_of(r, SEED_KEYS[name]))}, but it is "
+                    f"supposed to be stable. Refusing to derive a mapping "
+                    f"from an unreconciled pair."
                 )
 
 
@@ -249,66 +381,167 @@ def _assert_stable(path, real, anon, cols):
 # Mapping derivation
 # --------------------------------------------------------------------------
 
+def _owner_name(row):
+    """The 'First Last' form a nickname row carries, for the name bridge."""
+    first = (row.get('first_name') or '').strip()
+    last = (row.get('last_name') or '').strip()
+    return f'{first} {last}'.strip()
+
+
 def _build_owner_crosswalk(verbose=True):
-    """real owner_id -> anon owner_id, for every owner in the league.
+    """real owner_id -> twin owner_id, for every owner in the league.
 
-    Two populations, two mechanisms:
-      * Braced SWID GUIDs (ESPN) survived anonymization untouched, so they
-        map to themselves.
-      * CBS slugs are name-derived and were rewritten, so they come from
-        cbs_team_owners.csv, where (league_key, franchise_id) is stable and
-        pairs the two id spaces directly.
+    Four sources, applied in descending order of authority. Each one must
+    agree with whatever the earlier ones already established; a
+    contradiction raises rather than picking a winner.
 
-    The bridge is then cross-checked against plain row alignment in
-    owner_nicknames. Two independent derivations agreeing is what makes
-    this trustworthy rather than a guess; a disagreement raises.
+      (a) Retained GUIDs. ESPN owner ids survive anonymization verbatim by
+          design, so they pair to themselves. Only ids of that exact shape
+          are allowed to self-pair -- see _STABLE_ID.
+      (b) Unambiguous franchise keys. A (league_key, franchise_id) group
+          holding one row per side pairs those two rows outright.
+      (c) The private scrub map. Co-owned franchises put several owners
+          under one key, and the map's real -> fake name record is the
+          authority on which is which. Maintainer-only and gitignored,
+          exactly like the real seeds this tool already requires.
+      (d) Elimination. If a group has one real and one twin id left
+          unclaimed after (a)-(c), that pairing is forced -- determined by
+          what is left over, not by where the rows sit.
+
+    Anything still unresolved raises. A missing owner would leave a real
+    name unmapped, and an unmapped real name is the leak this whole file
+    exists to prevent.
     """
-    tow_real, tow_anon = _load_pair(SEED_TEAM_OWNERS)
-    _assert_stable(SEED_TEAM_OWNERS, tow_real, tow_anon, ['league_key', 'franchise_id'])
+    tow_real, tow_twin = _load_pair(SEED_TEAM_OWNERS)
+    nick_real, nick_twin = _load_pair(SEED_NICKNAMES)
 
-    crosswalk = {}
-    for r, a in zip(tow_real, tow_anon):
-        rid, aid = (r.get('owner_id') or '').strip(), (a.get('owner_id') or '').strip()
-        if not rid:
-            continue
-        if rid in crosswalk and crosswalk[rid] != aid:
-            raise RuntimeError(
-                f"{SEED_TEAM_OWNERS}: real owner_id {rid[:8]}... maps to two "
-                f"different anonymized ids. The bridge is ambiguous."
-            )
+    twin_ids = {(r.get('owner_id') or '').strip() for r in nick_twin}
+    twin_ids |= {(r.get('owner_id') or '').strip() for r in tow_twin}
+
+    crosswalk, sources = {}, Counter()
+
+    def record(rid, aid, source):
+        if not rid or not aid:
+            return
+        prior = crosswalk.get(rid)
+        if prior is not None:
+            if prior != aid:
+                raise RuntimeError(
+                    f"owner {_ref(rid)} pairs to two different twin ids "
+                    f"depending on the source ({source} disagrees with what "
+                    f"was already established). The seeds disagree about who "
+                    f"is who; refusing to guess."
+                )
+            return
         crosswalk[rid] = aid
+        sources[source] += 1
 
-    nick_real, nick_anon = _load_pair(SEED_NICKNAMES)
-    stable = disagreements = bridged = unbridged = 0
-    for r, a in zip(nick_real, nick_anon):
-        rid, aid = (r.get('owner_id') or '').strip(), (a.get('owner_id') or '').strip()
-        if rid == aid:
-            crosswalk.setdefault(rid, aid)
-            stable += 1
-        elif rid in crosswalk:
-            # Row alignment says rid->aid; the bridge already has an
-            # opinion. They must agree.
-            if crosswalk[rid] != aid:
-                disagreements += 1
-            bridged += 1
+    # (a) Retained GUIDs pair to themselves.
+    for row in list(nick_real) + list(tow_real):
+        rid = (row.get('owner_id') or '').strip()
+        if not _STABLE_ID.match(rid):
+            continue
+        if rid not in twin_ids:
+            raise RuntimeError(
+                f"owner {_ref(rid)} is a retained GUID on the real side "
+                f"but appears nowhere on the twin side. The published fixture "
+                f"is out of date with the real league config."
+            )
+        record(rid, rid, 'retained GUID')
+
+    # (b) Franchise keys that name exactly one row per side.
+    cols = SEED_KEYS[SEED_TEAM_OWNERS]
+    gr, gt = _group_by_key(tow_real, cols), _group_by_key(tow_twin, cols)
+    missing = sorted(set(gr) - set(gt))
+    if missing:
+        raise RuntimeError(
+            f"{SEED_TEAM_OWNERS}: {len(missing)} franchise key(s) have no row "
+            f"in the published twin (first: {'/'.join(missing[0])})."
+        )
+    shared = []
+    for key, r_rows in gr.items():
+        t_rows = gt[key]
+        if len(r_rows) != len(t_rows):
+            raise RuntimeError(
+                f"{SEED_TEAM_OWNERS}: franchise {'/'.join(key)} has "
+                f"{len(r_rows)} real owner row(s) but {len(t_rows)} twin "
+                f"row(s); the group cannot be aligned."
+            )
+        if len(r_rows) == 1:
+            record((r_rows[0].get('owner_id') or '').strip(),
+                   (t_rows[0].get('owner_id') or '').strip(), 'franchise key')
         else:
-            unbridged += 1
+            shared.append((key, r_rows, t_rows))
 
-    if disagreements:
+    # (c)/(d) Co-owner groups: name evidence first, then elimination.
+    private = {real.lower(): fake for real, fake in _load_private_map()}
+    real_name_by_id = {(r.get('owner_id') or '').strip(): _owner_name(r)
+                       for r in nick_real}
+    twin_id_by_name = {}
+    for r in nick_twin:
+        twin_id_by_name.setdefault(_owner_name(r).lower(),
+                                   (r.get('owner_id') or '').strip())
+
+    def _bridge(rid):
+        """Twin owner id for a real id, via real name -> fake name."""
+        fake = private.get((real_name_by_id.get(rid) or '').strip().lower())
+        return twin_id_by_name.get((fake or '').strip().lower())
+
+    unresolved = []
+    for key, r_rows, t_rows in shared:
+        t_ids = [(x.get('owner_id') or '').strip() for x in t_rows]
+        claimed, pending = set(), []
+        for r in r_rows:
+            rid = (r.get('owner_id') or '').strip()
+            if rid in crosswalk:
+                claimed.add(crosswalk[rid])
+                continue
+            aid = _bridge(rid)
+            if aid and aid in t_ids and aid not in claimed:
+                record(rid, aid, 'private map')
+                claimed.add(aid)
+            else:
+                pending.append(rid)
+        left = [a for a in t_ids if a not in claimed]
+        if len(pending) == 1 and len(left) == 1:
+            record(pending[0], left[0], 'elimination')
+        elif pending:
+            unresolved.append((key, len(pending)))
+
+    # Owners who appear in nicknames but never in cbs_team_owners still
+    # need a pairing -- the alias file reaches them by canonical id.
+    for r in nick_real:
+        rid = (r.get('owner_id') or '').strip()
+        if not rid or rid in crosswalk:
+            continue
+        aid = _bridge(rid)
+        if aid:
+            record(rid, aid, 'private map')
+
+    if unresolved:
+        detail = ', '.join(f"{'/'.join(k)} ({n})" for k, n in unresolved[:4])
         raise RuntimeError(
-            f"{SEED_NICKNAMES}: {disagreements} owner id(s) pair differently "
-            f"by row order than by the {SEED_TEAM_OWNERS} bridge. The two "
-            f"seeds disagree about who is who; refusing to guess."
+            f"{len(unresolved)} co-owned franchise group(s) could not be "
+            f"separated by name evidence or elimination: {detail}. The "
+            f"private scrub map (archives/anonymization/name_map.csv) is what "
+            f"resolves these; without it the pairing would be a guess, and a "
+            f"mis-paired owner is a mapping this tool must not produce."
         )
-    if unbridged:
+
+    unmapped = sorted(
+        rid for rid in real_name_by_id
+        if rid and rid not in crosswalk
+    )
+    if unmapped:
         raise RuntimeError(
-            f"{SEED_NICKNAMES}: {unbridged} owner(s) have a rewritten "
-            f"owner_id that {SEED_TEAM_OWNERS} cannot bridge. The mapping "
-            f"would be incomplete."
+            f"{len(unmapped)} owner(s) in {_REAL_DIR}/{SEED_NICKNAMES} have no "
+            f"twin. Their real names would pass through a screenshot "
+            f"unreplaced; refusing to run with an incomplete mapping."
         )
+
     if verbose:
-        print(f"  owner crosswalk: {stable} stable-id (ESPN GUID) + "
-              f"{bridged} bridged (CBS slug) = {len(crosswalk)} owners")
+        summary = ' + '.join(f'{n} {src}' for src, n in sorted(sources.items()))
+        print(f"  owner crosswalk: {summary} = {len(crosswalk)} owners")
     return crosswalk
 
 
@@ -321,7 +554,8 @@ def build_mapping(verbose=True):
     """
     crosswalk = _build_owner_crosswalk(verbose=verbose)
     pairs = []          # (real, anon)
-    report = {'sources': Counter(), 'ambiguous': [], 'skipped_short': []}
+    report = {'sources': Counter(), 'ambiguous': [], 'skipped_short': [],
+              'unpaired_alias': []}
 
     def add(real_value, anon_value, source):
         real_value = (real_value or '').strip()
@@ -337,11 +571,46 @@ def build_mapping(verbose=True):
         pairs.append((real_value, anon_value))
         report['sources'][source] += 1
 
+    # Real owner-name form -> twin form. This is what separates co-owner
+    # rows in the by-year file further down, where the stable key alone
+    # names several rows.
+    #
+    # Seeded from the private scrub map because the by-year file reaches
+    # back further than the nickname table does: most of its distinct name
+    # forms belong to owners who left the league years ago and hold no
+    # nickname row at all. The scrub map is the only record that covers
+    # them. Nickname-derived pairs are written over the top, since those
+    # are derived from the published twin itself.
+    owner_name_map = {real.lower(): anon for real, anon in _load_private_map()}
+
+    def note_name(real_value, anon_value):
+        real_value = (real_value or '').strip()
+        anon_value = (anon_value or '').strip()
+        if real_value and anon_value:
+            owner_name_map[real_value.lower()] = anon_value
+
     # owner_nicknames: the primary name table. first/last are single-token
     # columns and become token-level replacements (this is what reaches a
     # surname buried inside a team name); preferred_name is a whole form.
-    nick_real, nick_anon = _load_pair(SEED_NICKNAMES)
-    for r, a in zip(nick_real, nick_anon):
+    #
+    # Paired through the crosswalk, not by row order: for ESPN owners the
+    # id is stable and joins directly, and for CBS owners the crosswalk is
+    # what carries the rewritten slug across.
+    nick_real, nick_twin = _load_pair(SEED_NICKNAMES)
+    twin_nick_by_id = {(x.get('owner_id') or '').strip(): x for x in nick_twin}
+    nick_pairs = []
+    for r in nick_real:
+        rid = (r.get('owner_id') or '').strip()
+        aid = crosswalk.get(rid)
+        a = twin_nick_by_id.get(aid) if aid else None
+        if a is None:
+            raise RuntimeError(
+                f"{SEED_NICKNAMES}: owner {_ref(rid)} has no row in the "
+                f"published twin. The mapping would be incomplete."
+            )
+        nick_pairs.append((r, a))
+
+    for r, a in nick_pairs:
         add(r.get('first_name'), a.get('first_name'), 'nicknames.first_name')
         add(r.get('last_name'), a.get('last_name'), 'nicknames.last_name')
         add(r.get('preferred_name'), a.get('preferred_name'), 'nicknames.preferred_name')
@@ -352,6 +621,9 @@ def build_mapping(verbose=True):
             add(f'{first} {last}', f'{afirst} {alast}', 'nicknames.full_name')
             add(f'{last}, {first}', f'{alast}, {afirst}', 'nicknames.last_first')
             add(f'{first[0]}. {last}', f'{afirst[0]}. {alast}', 'nicknames.initial_last')
+            note_name(f'{first} {last}', f'{afirst} {alast}')
+            note_name(f'{last}, {first}', f'{alast}, {afirst}')
+        note_name(r.get('preferred_name'), a.get('preferred_name'))
         # Contact columns have no anonymized counterpart (dropped from the
         # committed twin) -- redact rather than map.
         for col, placeholder in _REDACTIONS.items():
@@ -362,24 +634,52 @@ def build_mapping(verbose=True):
                 if col == 'phone_number' and len(digits) >= 7 and digits != raw:
                     add(digits, re.sub(r'\D', '', placeholder), 'nicknames.phone_digits')
 
-    # owner_alias: preferred_name keyed by owner. This file carries its own
-    # id space -- legacy/duplicate ids being folded into a canonical one --
-    # so most of its owner_ids are absent from the crosswalk by design.
-    # Verify only the ones the crosswalk actually knows about; demanding
-    # full membership would reject a correct pairing.
-    alias_real, alias_anon = _load_pair(SEED_ALIAS)
-    _assert_stable(SEED_ALIAS, alias_real, alias_anon, ['league_key'])
-    for r, a in zip(alias_real, alias_anon):
-        for col in ('owner_id', 'canonical_owner_id'):
-            rid, aid = (r.get(col) or '').strip(), (a.get(col) or '').strip()
-            if rid in crosswalk and crosswalk[rid] != aid:
+    # owner_alias: legacy/duplicate owner ids folded into a canonical one.
+    # Its own owner_id column is a name-DERIVED variant slug that the scrub
+    # rewrote, so it is not a key. The canonical id IS reachable through the
+    # crosswalk, and one alias row per canonical owner makes that a join.
+    alias_real, alias_twin = _load_pair(SEED_ALIAS)
+    twin_alias_by_canon = {(x.get('canonical_owner_id') or '').strip(): x
+                           for x in alias_twin}
+    alias_paired, alias_pending = [], []
+    for r in alias_real:
+        canon = (r.get('canonical_owner_id') or '').strip()
+        a = twin_alias_by_canon.get(crosswalk.get(canon, ''))
+        if a is None:
+            alias_pending.append(r)
+        else:
+            alias_paired.append((r, a))
+
+    # A canonical id the crosswalk never saw belongs to a legacy owner who
+    # holds no franchise row and no nickname row -- there is nothing left
+    # to key on. If exactly one twin row is also unclaimed, the pairing is
+    # forced by elimination, which is evidence and not row order.
+    claimed = {id(a) for _, a in alias_paired}
+    alias_left = [x for x in alias_twin if id(x) not in claimed]
+    if len(alias_pending) == 1 and len(alias_left) == 1:
+        alias_paired.append((alias_pending.pop(), alias_left.pop()))
+
+    for r, a in alias_paired:
+        _assert_stable(SEED_ALIAS, [(r, a)], ['league_key'])
+        rid, aid = (r.get('owner_id') or '').strip(), (a.get('owner_id') or '').strip()
+        if rid and aid:
+            if crosswalk.get(rid, aid) != aid:
                 raise RuntimeError(
-                    f"{SEED_ALIAS}: {col} {rid[:8]}... pairs to a different "
-                    f"anonymized id than {SEED_TEAM_OWNERS} does."
+                    f"{SEED_ALIAS}: variant id {_ref(rid)} pairs to a "
+                    f"different twin id than {SEED_TEAM_OWNERS} does."
                 )
-            if rid and aid:
-                crosswalk.setdefault(rid, aid)
+            crosswalk.setdefault(rid, aid)
         add(r.get('preferred_name'), a.get('preferred_name'), 'alias.preferred_name')
+
+    # Anything still unpaired carries a real, name-derived slug with no
+    # twin to become. Redact it to a neutral placeholder rather than let
+    # it render: the same call _REDACTIONS makes for the contact columns,
+    # for the same reason -- no counterpart is not a licence to pass it
+    # through. Reported, never silent.
+    for r in alias_pending:
+        for col in ('owner_id', 'canonical_owner_id'):
+            add(r.get(col), _ALIAS_REDACTION, f'alias.{col}.redacted')
+        report['unpaired_alias'].append((r.get('canonical_owner_id') or '').strip())
 
     # The CBS owner_id slugs are themselves name-derived, so an id that
     # leaked into a rendered cell would leak a name with it. Map them
@@ -388,17 +688,56 @@ def build_mapping(verbose=True):
     for rid, aid in crosswalk.items():
         add(rid, aid, 'owner_id.slug')
 
-    # team_owner_by_year: the rendered owner label per season. Stable key.
-    year_real, year_anon = _load_pair(SEED_BY_YEAR)
-    _assert_stable(SEED_BY_YEAR, year_real, year_anon,
-                   ['league_key', 'season_year', 'franchise_id'])
-    for r, a in zip(year_real, year_anon):
+    # team_owner_by_year: the rendered owner label per season. The stable
+    # key names several rows for a co-owned franchise-season, so those
+    # groups are separated by the owner-name mapping built above.
+    def _resolve_by_year(name, key, r_rows, t_rows):
+        """Separate co-owner rows in one franchise-season by name evidence.
+
+        Three passes, strongest evidence first. A scrubbed name is matched
+        through the mapping; a name the scrub deliberately KEPT (a handful
+        of single-token labels that are nobody's personal name) appears
+        verbatim on both sides and pairs to itself; a lone survivor on each
+        side is settled by elimination. Row order is never consulted.
+        """
+        remaining, pending, out = list(t_rows), list(r_rows), []
+
+        def _claim(match_for):
+            for r in list(pending):
+                want = match_for(r)
+                if not want:
+                    continue
+                hit = next((t for t in remaining
+                            if (t.get('owner_name') or '').strip().lower() == want),
+                           None)
+                if hit is not None:
+                    remaining.remove(hit)
+                    pending.remove(r)
+                    out.append((r, hit))
+
+        def _own(r):
+            return (r.get('owner_name') or '').strip().lower()
+
+        _claim(lambda r: (owner_name_map.get(_own(r)) or '').strip().lower())
+        _claim(_own)
+
+        if len(pending) == 1 and len(remaining) == 1:
+            out.append((pending[0], remaining[0]))
+        elif pending:
+            raise RuntimeError(
+                f"{name}: franchise-season {'/'.join(key)} carries "
+                f"{len(pending)} co-owner row(s) that the owner-name mapping "
+                f"cannot separate. Refusing to pair them by row order."
+            )
+        return out
+
+    year_real, year_twin = _load_pair(SEED_BY_YEAR)
+    for r, a in _pair_by_key(SEED_BY_YEAR, year_real, year_twin, _resolve_by_year):
         add(r.get('owner_name'), a.get('owner_name'), 'by_year.owner_name')
 
     # cbs_franchises: team names (which carry surnames) and abbrevs.
-    fr_real, fr_anon = _load_pair(SEED_FRANCHISES)
-    _assert_stable(SEED_FRANCHISES, fr_real, fr_anon, ['league_key', 'franchise_id'])
-    for r, a in zip(fr_real, fr_anon):
+    fr_real, fr_twin = _load_pair(SEED_FRANCHISES)
+    for r, a in _pair_by_key(SEED_FRANCHISES, fr_real, fr_twin):
         add(r.get('franchise_name'), a.get('franchise_name'), 'franchises.franchise_name')
         add(r.get('abbrev'), a.get('abbrev'), 'franchises.abbrev')
 
@@ -424,6 +763,9 @@ def build_mapping(verbose=True):
         for value, src in report['skipped_short']:
             print(f"  [skipped] {src}: real form shorter than "
                   f"{_MIN_TOKEN_LEN} chars -- unsafe to match, NOT replaced")
+        for canon in report['unpaired_alias']:
+            print(f"  [unpaired] {SEED_ALIAS}: canonical owner {_ref(canon)} "
+                  f"has no twin row; its slugs are REDACTED, not mapped")
     return pairs, report
 
 

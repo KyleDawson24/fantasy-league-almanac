@@ -235,11 +235,29 @@ def get_scoring_periods(matchup_period, year):
 # lineup_slot per scoring_period, owners, team_ids) for rostered players.
 # Wrapper stats remain a per-player fallback if kona misses someone.
 # ---------------------------------------------------------------------------
+class KonaUnavailable(RuntimeError):
+    """The kona endpoint did not give a usable answer (MLB-199).
+
+    Distinct from a valid empty response, and the distinction is the whole
+    point. This used to be encoded as `{}` -- the same value a genuine
+    no-games day produces -- so every caller read "the fetch failed" and
+    "nobody played" as the same thing. On the backfill path that meant a
+    network blip rewrote a scoring period's stored `clubOfGame` to null for
+    every player and committed it; a wholesale outage during a run could
+    erase the requested range's enrichment. Failure now has its own type,
+    and no caller writes when it is raised.
+    """
+
+
 def fetch_all_player_stats(year, scoring_period):
     """
     Pull per-player stats for a single scoring period from ESPN's
     kona_player_info endpoint. Returns the full MLB universe (rostered +
     FA) — caller distinguishes via anti-join against the wrapper lineup.
+
+    Raises KonaUnavailable if the endpoint could not be read or answered
+    with something that is not a player payload. Returns a dict -- possibly
+    empty -- only when ESPN genuinely said so.
 
     Returns dict[player_id] -> {
         "breakdown":     {stat_name: stat_value, ...}  # summed across splits
@@ -266,8 +284,6 @@ def fetch_all_player_stats(year, scoring_period):
 
     Limit 1500 with sortPercOwned reliably covers the ~420 players who
     actually accumulate fantasy stats on a typical day (Phase 4 handoff).
-
-    Returns {} on any failure — caller falls back to wrapper data per-player.
     """
     url = f"{ESPN_API_BASE}/{year}/segments/0/leagues/{LEAGUE_ID}"
     fantasy_filter = {
@@ -287,8 +303,20 @@ def fetch_all_player_stats(year, scoring_period):
         response.raise_for_status()
         data = response.json()
     except (requests.RequestException, ValueError) as e:
-        print(f"    [warn] kona fetch failed for sp={scoring_period}: {e}")
-        return {}
+        raise KonaUnavailable(
+            f"kona fetch failed for sp={scoring_period}: {e}"
+        ) from e
+
+    # A 200 carrying something that is not a player payload is a failure
+    # wearing a success's clothes -- an auth wall or an error document
+    # parses as JSON perfectly well. Absent `players` means unavailable;
+    # `players: []` means ESPN said nobody played, which is an answer.
+    if not isinstance(data, dict) or "players" not in data:
+        raise KonaUnavailable(
+            f"kona returned no players key for sp={scoring_period} "
+            f"(got {type(data).__name__} with keys "
+            f"{sorted(data)[:6] if isinstance(data, dict) else 'n/a'})"
+        )
 
     by_player = {}
     for entry in data.get("players", []) or []:
@@ -590,6 +618,70 @@ def ensure_league_key_column(cursor, table):
     )
 
 
+def _table_exists(cursor, table):
+    """Whether `table` exists in the connection's schema, asked of the catalog.
+
+    Deliberately not inferred from an exception. Snowflake reports a missing
+    object and an object you may not read with the SAME error -- "Object 'X'
+    does not exist or not authorized" -- because telling the two apart would
+    itself leak information. So the exception cannot answer this question,
+    and a guard that reads it as "absent" waves through the permission case.
+    """
+    cursor.execute(
+        """
+        SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES
+        WHERE TABLE_SCHEMA = CURRENT_SCHEMA() AND TABLE_NAME = %s
+        """,
+        (table,),
+    )
+    return cursor.fetchone()[0] > 0
+
+
+def _table_has_column(cursor, table, column):
+    cursor.execute(
+        """
+        SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = CURRENT_SCHEMA()
+          AND TABLE_NAME = %s AND COLUMN_NAME = %s
+        """,
+        (table, column),
+    )
+    return cursor.fetchone()[0] > 0
+
+
+def refuse_unverifiable_guard(exc, year):
+    """Build the refusal for a guard that could not be evaluated (MLB-199).
+
+    The guard protects settled history from being deleted and re-extracted.
+    If it cannot run, the safe reading is not "nothing is loaded" -- it is
+    "we do not know what is loaded", and the extract must not proceed.
+    """
+    return "\n".join([
+        "",
+        "=" * 72,
+        f"REFUSING TO EXTRACT -- cannot verify settled history for {year}",
+        "=" * 72,
+        "",
+        f"  {type(exc).__name__}: {exc}",
+        "",
+        "  The settled-history guard reads BOX_SCORES to find periods a",
+        "  re-extract would overwrite. That read failed, so the guard cannot",
+        "  say whether this run would destroy day-accurate history.",
+        "",
+        "  This used to be treated as 'no table yet, nothing to protect',",
+        "  which meant a permission error, a renamed column or any other",
+        "  compilation failure bypassed the guard immediately before the",
+        "  loader deleted settled rows (MLB-199).",
+        "",
+        "  Fix the access or schema problem above and re-run. If you have",
+        "  confirmed there is genuinely nothing to lose, the snapshot route",
+        "  in the MLB-188 refusal still applies.",
+        "",
+        "=" * 72,
+        "",
+    ])
+
+
 def settled_loaded_periods(conn, year, league_key, periods, today=None):
     """
     MLB-188 guard. Of `periods`, return the ones a re-extract would damage:
@@ -608,8 +700,19 @@ def settled_loaded_periods(conn, year, league_key, periods, today=None):
         the routine path had to bypass would teach everyone to bypass it,
         and the flag would be permanently on by the second week.
 
-    Fails closed: a period with no schedule row has no knowable age, so it
-    counts as settled rather than being waved through.
+    Fails closed, in two senses. A period with no schedule row has no
+    knowable age, so it counts as settled rather than being waved through.
+    And an error evaluating the guard AT ALL refuses the run (MLB-199): the
+    previous version caught every ProgrammingError as "no table yet", so a
+    pre-registry table missing `league_key` -- the exact legacy shape this
+    file documents and self-heals -- threw on the guard's OWN query, read as
+    "nothing is loaded", and bypassed protection moments before the loader
+    added the column and deleted settled rows. Permission errors and
+    identifier typos took the same bypass.
+
+    The legacy shape is now MIGRATED BEFORE THE DECISION rather than
+    stumbled over during it, and existence is asked of the catalog instead
+    of inferred from an exception.
     """
     today = today or date.today()
     cutoff = today - timedelta(days=LIVE_CAPTURE_WINDOW_DAYS)
@@ -619,6 +722,19 @@ def settled_loaded_periods(conn, year, league_key, periods, today=None):
 
     cursor = conn.cursor()
     try:
+        if not _table_exists(cursor, "BOX_SCORES"):
+            # Nothing has ever been loaded, so nothing can be overwritten.
+            # The loader creates the table moments from now.
+            return []
+
+        # The documented legacy shape: a pre-registry table with no
+        # league_key. Self-heal it HERE, before the guard query needs the
+        # column, so the upgrade path cannot masquerade as an absent table.
+        if not _table_has_column(cursor, "BOX_SCORES", "LEAGUE_KEY"):
+            print("  [guard] BOX_SCORES predates the league registry; "
+                  "adding league_key before checking settled history.")
+            ensure_league_key_column(cursor, "BOX_SCORES")
+
         cursor.execute(
             """
             SELECT matchup_period, MAX(loaded_at)
@@ -630,10 +746,11 @@ def settled_loaded_periods(conn, year, league_key, periods, today=None):
             (year, league_key),
         )
         last_loaded = {int(mp): ts for mp, ts in cursor.fetchall()}
-    except snowflake.connector.errors.ProgrammingError:
-        # No BOX_SCORES table yet: nothing has ever been loaded, so nothing
-        # can be overwritten. The loader creates it moments from now.
-        return []
+    except snowflake.connector.errors.Error as exc:
+        # Anything else -- permissions, a renamed column, schema drift, a
+        # typo -- means the guard could not be evaluated. Refuse; do not
+        # read an unanswered question as "safe".
+        raise SystemExit(refuse_unverifiable_guard(exc, year))
     finally:
         cursor.close()
 
@@ -792,6 +909,69 @@ def _iter_player_entries(blob):
         yield entry
 
 
+def refuse_extract_without_stats(year, matchup_period, why):
+    """Build the MLB-199 extract refusal.
+
+    The loader is delete-then-insert. Kona is the ONLY source of free-agent
+    production and of club-of-game, so a period serialized without it is
+    not merely thinner -- it has no FA rows at all and every club label is
+    null. Storing that over a good period is a silent downgrade, and the
+    old code did exactly that because a failed fetch returned {}.
+    """
+    return "\n".join([
+        "",
+        "=" * 72,
+        f"REFUSING TO EXTRACT -- no player stats for {year} "
+        f"matchup period {matchup_period}",
+        "=" * 72,
+        "",
+        f"  {why}",
+        "",
+        "  Nothing was written for this matchup period: the loader runs once",
+        "  per period, after every scoring period has been serialized, so a",
+        "  failure here happens before the delete-then-insert.",
+        "",
+        "  kona is the only source of free-agent production and of",
+        "  club-of-game. A period built without it carries no FA rows and no",
+        "  club labels at all, and storing that over an already-good period",
+        "  loses both. Re-run when ESPN answers again.",
+        "",
+        "=" * 72,
+        "",
+    ])
+
+
+def refuse_backfill_without_evidence(year, matchup_period, scoring_period, why):
+    """Build the MLB-199 backfill refusal.
+
+    The backfill's whole safety argument is that it only ever ADDS a key.
+    That argument holds when the fetch succeeded and fails completely when
+    it did not: a failed fetch used to resolve every player to null and
+    commit it, turning an additive enrichment into a wholesale erasure of
+    the very field it was there to add.
+    """
+    return "\n".join([
+        "",
+        "=" * 72,
+        f"REFUSING TO BACKFILL -- no club evidence for {year} "
+        f"mp={matchup_period} sp={scoring_period}",
+        "=" * 72,
+        "",
+        f"  {why}",
+        "",
+        "  Nothing was written for this scoring period. Periods completed",
+        "  before this point are already committed and are unaffected -- the",
+        "  backfill is idempotent, so re-running resumes where it stopped.",
+        "",
+        "  Writing what this run knows would set clubOfGame to null for",
+        "  every player in the period, which is not 'no club' -- it is 'we",
+        "  did not ask successfully'. The two used to be the same value.",
+        "",
+        "=" * 72,
+        "",
+    ])
+
+
 def backfill_club_of_game(conn, year, league_key, periods):
     """
     Add `clubOfGame` to periods that are already loaded, and change nothing
@@ -836,18 +1016,47 @@ def backfill_club_of_game(conn, year, league_key, periods):
             print(f"  Matchup period {mp}: {len(rows)} scoring period(s)")
             for scoring_period, raw_json in rows:
                 blob = json.loads(raw_json)
-                player_stats = fetch_all_player_stats(year, int(scoring_period))
 
-                entries = 0
-                attributed = 0
+                # Fetch BEFORE touching the blob, and let an unavailable
+                # endpoint stop the run rather than resolve to null. This
+                # loop is the one that used to write `clubOfGame = None`
+                # over every player in the period whenever the fetch failed.
+                try:
+                    player_stats = fetch_all_player_stats(year, int(scoring_period))
+                except KonaUnavailable as exc:
+                    raise SystemExit(refuse_backfill_without_evidence(
+                        year, mp, scoring_period, str(exc)))
+
+                # A valid but empty universe is only believable if the
+                # stored period agrees that nobody played. If the blob
+                # records games and kona reports none, that is an outage
+                # answering 200, and writing nulls from it is the erasure
+                # this guard exists to prevent.
+                played = sum(1 for e in _iter_player_entries(blob)
+                             if (e.get("games_played") or 0) > 0)
+                if played and not player_stats:
+                    raise SystemExit(refuse_backfill_without_evidence(
+                        year, mp, scoring_period,
+                        f"kona reported an empty player universe, but the "
+                        f"stored period records {played} player(s) who played"))
+
+                entries = attributed = preserved = 0
                 for entry in _iter_player_entries(blob):
                     stats = player_stats.get(entry.get("playerId"))
                     club = stats["club_of_game"] if stats else None
-                    entry["clubOfGame"] = club
                     entries += 1
                     if club:
+                        entry["clubOfGame"] = club
                         attributed += 1
+                    elif entry.get("clubOfGame"):
+                        # Positive evidence already stored and none offered
+                        # now. Absence of evidence is not evidence of
+                        # absence: keep what is there.
+                        preserved += 1
+                    else:
+                        entry["clubOfGame"] = None
 
+                note = f", {preserved} preserved" if preserved else ""
                 cursor.execute(
                     """
                     UPDATE BOX_SCORES
@@ -859,7 +1068,7 @@ def backfill_club_of_game(conn, year, league_key, periods):
                     (json.dumps(blob), year, mp, int(scoring_period), league_key),
                 )
                 print(f"    sp={scoring_period}: {attributed}/{entries} players "
-                      f"attributed to a club of game")
+                      f"attributed to a club of game{note}")
             conn.commit()
     finally:
         cursor.close()
@@ -1438,6 +1647,9 @@ if __name__ == "__main__":
 
             for mp in periods:
                 print(f"\nMatchup period {mp}:")
-                extract_matchup_period(conn, league, mp, year, league_key)
+                try:
+                    extract_matchup_period(conn, league, mp, year, league_key)
+                except KonaUnavailable as exc:
+                    raise SystemExit(refuse_extract_without_stats(year, mp, str(exc)))
 
     print("\nDone.")

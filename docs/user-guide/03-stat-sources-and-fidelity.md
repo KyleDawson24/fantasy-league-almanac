@@ -34,33 +34,35 @@ provide direct lineup and scoring history rather than a reconstruction.
 One important exception is transaction history, which ESPN exposes only
 for the current season.
 
-A second exception is the MLB club attached to each player. ESPN's player
-records carry only his *current* club, not the one he played for on a
-given day, and that label is applied per scoring week rather than per
-game. Of the two ESPN seasons published here, 2026 was collected live and
-2025 was loaded in one pass afterwards, and they are wrong in different
-ways and at very different scales.
-
-For the live season the label follows club changes to within a week, but
-the week a player moves is labelled entirely with his new club -- so a
-handful of games get credited to the club he was joining rather than the
-one he was leaving. That affects about a tenth of a percent of the
-season. For the loaded season there is a single label for the whole year,
-so no mid-season move is represented at all. Lineups, stats and scoring
-for 2025 are unaffected -- those come from the box scores directly -- but
-the club label on them is the one the player held at collection time.
+A second exception is the MLB club attached to each player, and it is
+worth telling as what it was: a defect this project found in its own
+work, measured, and then closed. ESPN's player *record* carries only his
+current club, not the one he played for on a given day. For a season
+loaded after the fact that leaves a single label for the whole year, so
+no mid-season move was represented at all; for a live season the label
+follows moves only to within a scoring week. Lineups, stats and scoring
+were never affected -- those come from the box scores directly -- but the
+club label on them was the one the player held at collection time.
 
 The roster-affinity chart on Advanced Standings is the only surface that
-depends on that label, and it does two things about it. Production it
-cannot place is shown in a row labelled **Unattributed** -- about 12% of
-2025, and effectively none of 2026 -- rather than being dropped, which is
-what previously happened. And production it places *wrongly* is still
-there: anyone whose club changed between playing the games and the data
-being collected is credited to the later club, and no 2025 mid-season
-move appears at all. Read the 2025 half of that chart as directional --
-its shape is informative, its individual club totals are not. The
-equivalent CBS chart does not have this problem; it resolves each club
-from the game itself.
+depends on that label, so it is where the cost landed. Measured against
+2025: **22.25%** of that chart's weight was filed under the wrong club,
+and a further **11.7%** could not be placed at all and rendered in a
+labelled *Unattributed* row.
+
+**This is fixed.** The club now comes from the game rather than from the
+person -- each per-scoring-period split already carried the club the
+player was actually with, so reading it needed no identity crosswalk. The
+Unattributed band now measures **0.0 across 2025, 2026 and all-time**,
+all 30 MLB clubs render in every scope, and the 2025 half of that chart
+no longer has to be read as directional. The CBS chart resolves club the
+same way, from the game itself.
+
+The historical measurement is kept in
+[Known Data Issues](../known-data-issues.md) rather than deleted, and the
+person-level club stamp is still written and preserved on every extract:
+it is the observation record of what ESPN believed and when. It is simply
+no longer what the chart attributes from.
 
 **The published CBS league's 2001-2026 history** draws on three different
 sources, because no single source available during implementation covers
@@ -74,7 +76,8 @@ the full history:
    third source exists.
 2. **The league's own web pages, scraped**, for the history the API does
    not serve: standings back to 2001, year-end roster snapshots back to
-   2003, roughly 56,000 individual transaction records back to 2001, and
+   2003, 55,980 player-actions across roughly 25,700 transactions back to
+   2001, and
    drafts back to 2009.
 3. **The public MLB Stats API**, for the actual baseball: full career game
    logs for every player involved, independent of any fantasy platform.
@@ -114,7 +117,8 @@ it covers. The error figures below come from that comparison.
 |---|---|---|
 | 2026 onward | Captured live, daily | -- |
 | 2021-2025 | Reconstructed day by day from the transaction log | about 2-4% |
-| 2004-2020 | Estimated from year-end start-share rates | about 5-13% |
+| 2004-2019 | Estimated from year-end start-share rates | about 5-13% |
+| 2020 | The same, on a short COVID season with a thin log | about 20% |
 | 2001-2003 | Reconstructed from the transaction log, without roster anchors | 2001-02 about 12-15% |
 
 A few things this table implies that are worth stating outright:
@@ -124,8 +128,10 @@ the log records who was on a roster but not who was in the lineup on a
 given day. The reconstruction uses each player's season-long rate of
 being started as a weight. Where even that is unavailable, the
 contribution is counted as **zero** rather than guessed -- so those
-seasons under-count rather than over-count. From 2011 onward the estimate
-runs roughly 8-13% low.
+seasons under-count rather than over-count. The error is not flat across
+the era, either: it is roughly unbiased 2005-2010, runs about 8-13% low
+from 2011, and reaches about 20% in 2020, the short COVID season with the
+thinnest log in the book.
 
 **That start-share rate is a player statistic, not a team one.** If a
 player was traded mid-season, the rate describing how often he was

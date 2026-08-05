@@ -5,7 +5,7 @@
 --
 --   name -> owner_id : a CURRENT owner is matched by display name so it keeps
 --       its seeded slug ('Julian D. Sherman' -> cbs-julian-sherman, NOT a fresh
---       cbs-jason-d-scott); everyone else is slugged from the name (matching
+--       cbs-julian-d-sherman); everyone else is slugged from the name (matching
 --       build_continuity_sheet._slug).
 --   owner_id -> canonical : the owner_alias seed collapses the drift the
 --       historian merged (Des/Desmond Foster, Rex/Rexford Landon, Sol/Solomon).

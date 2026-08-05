@@ -12,13 +12,13 @@ Treats your fantasy league like it was a real league. Real product, real user ba
 
 ![The Advanced Standings tab: a 2026 rank-by-period chart above a 2001-2026 season-finish matrix](docs/img/cbs-advanced-standings.png)
 
-**What you are looking at:** The matrix under that chart is twenty-six seasons of one league, 2001 through 2026, in a single grid. Stitching it together is the hard part. Franchises get renamed, handed to new owners, and re-issued fresh platform ids, so one continuous team can surface under three names and two identities across the run.
+**What you are looking at:** The matrix under that chart is **26 seasons of data (2001-2026), 25 completed** -- one league in a single grid. Stitching it together is the hard part. Franchises get renamed, handed to new owners, and re-issued fresh platform ids, so one continuous team can surface under three names and two identities across the run.
 
 Resolving that lineage is what lets a single row credit the Hardball Hackers with five titles and a 4.7 average finish over a quarter-century, instead of scattering them across three unrelated rows.
 
-The honesty note is the other half. Only 2026 was captured live. For our ESPN league, 2025 lineups and scoring still existed at full fidelity -- with one exception worth stating, because it is the kind of thing that hides: ESPN records only a player's *current* MLB club, so a season loaded after the fact cannot say which club he was actually playing for. The roster-affinity chart is the one surface that depends on that, and it now shows the 11.7% of 2025 it cannot place as a labelled Unattributed band rather than dropping it. For CBS, we needed some clever reconstruction.
+The honesty note is the other half. Only 2026 was captured live. For our ESPN league, 2025 lineups and scoring still existed at full fidelity -- with one exception worth telling, because it is the kind of thing that hides, and because it is a defect this project found in its own work rather than one anybody reported: ESPN's *player record* carries only a player's current MLB club, so a season loaded after the fact cannot say from that field which club he was actually playing for. Measured against 2025, it was not small -- 22.25% of the roster-affinity chart's weight was filed under the wrong club, and a further 11.7% could not be placed at all. That is fixed. The club now comes from the game rather than from the person: each per-scoring-period split already carried the club the player was actually with, and the chart reads that, so the unplaceable band measures 0.0 across 2025, 2026 and all-time. The measurement and the fix both stay in [Known Data Issues](docs/known-data-issues.md) rather than being quietly deleted -- a closed defect is still part of the record. For CBS, we needed some clever reconstruction.
 
-2004-2020 is estimated from start-share rates and runs 5-13% low, always under rather than over. (Actual sit/start data is not available from that era so is estimated by site-wide numbers. It is a foreseeable selection bias that the league with 25 years of history made, on average, better start/sit decisions than the average random CBS subscriber)
+2004-2020 is estimated from start-share rates, and it always runs under rather than over -- but the error is not uniform across that stretch, so it is worth stating as the ladder it actually is: roughly unbiased 2005-2010, undershooting about 8-13% from 2011, and around 20% for 2020, the short COVID season with the thinnest log. (Actual sit/start data is not available from that era, so it is estimated from site-wide numbers. It is a foreseeable selection bias that a league with 25 completed seasons behind it made, on average, better start/sit decisions than the average random CBS subscriber.)
 
 2021-2025 is reconstructed day by day from the transaction log (which for this era _does_ include sit/start transactions).
 
@@ -45,7 +45,7 @@ It has since grown into a cross-platform data model that produces customized, br
 
 The same transform layer now serves **two leagues on two different platforms with two different formats**: a head-to-head league where teams play each other weekly, and a season-long points league whose history runs back to **2001**.
 
-Neither platform's website will tell you what its own rosters looked like fifteen years ago. So the pipeline rebuilds them: a day-by-day reconstruction from ~56,000 scraped transaction records, anchored on year-end roster snapshots, cross-checked against the league's official published standings, and **graded** -- every era carries its own measured error rate, printed in the almanac rather than hidden.
+Neither platform's website will tell you what its own rosters looked like fifteen years ago. So the pipeline rebuilds them: a day-by-day reconstruction from **55,980 player-actions across roughly 25,700 transactions**, anchored on year-end roster snapshots, cross-checked against the league's official published standings, and **graded**. What the almanac prints on its own surfaces is each era's *provenance* -- how much of it was captured live, reconstructed day by day, or estimated. The measured error rates behind those labels come from the reconciliation contract, which grades every reconstructed season against the official standings, and they are stated per era rather than as one number.
 
 On top of that sits a record book that had to be built from scratch, showing individual performances and statistical outputs at a grain that is not visible on either platform's website.
 
@@ -61,11 +61,11 @@ The pipeline was built for one league on one platform. Adding a second one that 
 | History available             | Recent seasons, fully recorded | Back to 2001, mostly *not* recorded                            |
 | Per-day scoring from platform | Yes                            | **None -- season totals only**                                 |
 | Roster history                | Served by the API              | Reconstructed from transactions                                |
-| Position eligibility          | Served by the API              | Derived from real MLB game logs, in congress w league settings |
+| Position eligibility          | Served by the API              | Derived from real MLB game logs, in concert with league settings |
 
 What made this tractable rather than a fork:
 
-- **One warehouse, one set of models, a `league_key` grain.** Per-league schemas were considered and rejected. Every fact and mart carries the league key; the output layer filters. It is designed so that a new league on an already-supported platform is configuration rather than code -- though in fairness that is designed-and-unexercised, not proven: both books today are one league per platform. The packaged sample league on the 2.0 roadmap is the live test, and it carries a zero-new-models acceptance rider precisely so the claim gets checked instead of assumed.
+- **One warehouse, one set of models, a `league_key` grain.** Per-league schemas were considered and rejected. Every fact and mart carries the league key; the output layer filters. It is designed so that a new league on an already-supported platform is configuration rather than code -- though in fairness that is designed-and-unexercised, not proven: both books today are one league per platform. The packaged sample league (MLB-11, scoped to v2.1) is the live test, and it carries a zero-new-models acceptance rider precisely so the claim gets checked instead of assumed.
 - **Platform vocabulary is translated at staging; platform *work* converges at the facts.** Stat ids, slot ids and format labels stay native in staging and are mapped to a canonical catalog through seeds. Where a platform serves something the other cannot -- CBS has no per-day scoring, so its roster stints, lineup intervals and eligibility windows have to be reconstructed -- that reconstruction gets its own `int_cbs__*` models and lands in the shared fact family. Thirteen models below staging are platform-specific by design; everything downstream of the facts speaks one language. The rules are written down in [docs/platform-adapter-contract.md](docs/platform-adapter-contract.md).
 - **Format is a separate axis from platform.** "Points league" and "which website" are independent dimensions, so a feed can be required, optional, or conditional on format rather than on vendor.
 - **The universal layer is real baseball.** Stats come from the public MLB Stats API, not from a fantasy vendor, so the underlying numbers are never in doubt. Only the fantasy state around them (who owned whom, who was in the lineup on a given day) has to be reconstructed.
@@ -153,7 +153,7 @@ A few of its tabs:
      `WHERE IS_ACTIVE` returns nothing and looks like a falsification. -->
 **One thing this makes possible that no standard fantasy site can answer:** Carlos Martinez spent more time on FLV's roster than almost anyone in franchise history, and if he'd never been benched he would have been the franchise's third-biggest pitching contributor of all time. But he scored over 40% of his points from the bench, and ends up missing the "Starting Lineup" entirely. That said, he was used well: his 3.20 ERA while active for FLV beats his career mark of 3.74 by more than half a run.
 
-That comparison -- not his career line, the line for what he actually did *for this team, in the games this team started him* -- only exists because the pipeline creates visibility into active-vs-benched performance for every player, every day, across 25 years.
+That comparison -- not his career line, the line for what he actually did *for this team, in the games this team started him* -- only exists because the pipeline creates visibility into active-vs-benched performance for every player, every day, across all 26 seasons.
 
 ![All-League Team](docs/img/espn-all-league-team.png)
 
@@ -193,7 +193,7 @@ That comparison -- not his career line, the line for what he actually did *for t
 
 ## What's next
 
-v1.x is polish on the current architecture: a player-entity layer (`dim_player` / `fct_player_career`) and more analytics surfaces on data the pipeline already has. v2.0 is structural: Yahoo and Sleeper adapters to prove the platform-agnostic design against a third and fourth platform, and a DuckDB target (see Quick start below) so the project runs without a cloud warehouse. Full detail (including what's been explicitly decided against) is in [ROADMAP.md](ROADMAP.md).
+v1.x is polish on the current architecture: a player-entity layer (`dim_player` / `fct_player_career`) and more analytics surfaces on data the pipeline already has. v2.0 is structural, and its engine half has landed: the transform layer builds on DuckDB as well as Snowflake, behind adapter-dispatch macros, and the output layer can read either. What remains is the platform half -- Yahoo and Sleeper adapters, to prove the platform-agnostic design against a third and fourth vendor -- and the onboarding half (see Quick start below). Full detail (including what's been explicitly decided against) is in [ROADMAP.md](ROADMAP.md).
 
 ---
 
@@ -201,9 +201,15 @@ v1.x is polish on the current architecture: a player-entity layer (`dim_player` 
 
 **Just here to look?** The screenshots above and the [hosted dbt catalog](https://kyledawson24.github.io/fantasy-league-almanac/) cover the design; [docs/user-guide/](docs/user-guide/) covers how to read the almanac itself.
 
-**Want to run it?** Today that means bringing your own Snowflake account -- the free tier is enough, and [SETUP.md](SETUP.md) will get you most of the way there (~30-45 minutes, mostly Snowflake provisioning); a step-by-step setup wizard is planned for August 2026. A clone-and-run demo mode with no warehouse account at all (DuckDB, packaged sample data, one command) is planned for v2.0 and isn't available yet. A portability spike ([docs/duckdb-portability-audit.md](docs/duckdb-portability-audit.md)) sized the transform-layer port at roughly a focused week of engineering, so this is a scoped near-term plan, not a someday-maybe.
+**Want to run it?** Three things are true here, and they are easy to hear as one, so they are stated apart.
 
-**What it takes to run.** The full 26-season, 441-team-season, 1.09M-player-game reconstruction builds comfortably on a 16 GB machine, and on the in-progress DuckDB target it completes at a **6 GB memory cap, in a single run, with engine threads pinned**. Both of those are where it has been tested -- not guaranteed minimums, and not ceilings. ⟨A "needs N GB free" figure stays bracketed until there is an instrument that can measure it: DuckDB rewrites its profile per query, so a multi-statement run retains only the last query's peak.⟩
+- **The engine port has landed.** The transform layer builds on DuckDB as well as Snowflake: engine-specific SQL sits behind adapter-dispatch macros, and the output layer can point at either. That is done and exercised locally, not planned.
+- **`tools/demo.sh` is a build-and-render wrapper, not a demo you can run from a clean clone.** It builds the chain and renders the almanac off the tracked demo fixture in its own local warehouse, with no Snowflake account and no Google credentials -- but it does not land raw data and will not invent any, so on a clone that has never run an extract it says so and stops. It is maintainer scaffolding until the packaged sample exists.
+- **A credential-free clone-and-run demo does not exist yet.** The missing pieces -- a packaged sample league, and onboarding that needs no `.env` edit and no flags -- are tracked together as MLB-11 and scoped to v2.1. Until then, running this means bringing your own league and your own warehouse: [SETUP.md](SETUP.md) is the walkthrough (~30-45 minutes, mostly Snowflake provisioning).
+
+The portability spike that sized the transform-layer port, including the traps it found, is written up in [docs/duckdb-portability-audit.md](docs/duckdb-portability-audit.md).
+
+**What it takes to run.** The full 26-season, 441-team-season, 1.09M-player-game reconstruction builds comfortably on a 16 GB machine, and on the DuckDB target it completes at a **6 GB memory cap, in a single run, with engine threads pinned**. Both of those are where it has been tested -- not guaranteed minimums, and not ceilings. ⟨A "needs N GB free" figure stays bracketed until there is an instrument that can measure it: DuckDB rewrites its profile per query, so a multi-statement run retains only the last query's peak.⟩
 
 ---
 
@@ -211,13 +217,13 @@ v1.x is polish on the current architecture: a player-entity layer (`dim_player` 
 
 The current shape of the transform layer: **74 dbt models** (32 views, 39 tables, 3 incremental), **18 seeds**, **543 data tests**, **22 sources**, and **4 declared exposures**. These counts are regenerated from the parsed manifest at each release cut; if you are reading them mid-cycle, `dbt parse` and the manifest are the truth.
 
-Most of that needs a warehouse to exercise, but not all of it: with no account and no credentials, `pytest tests/` runs **268 tests green** (17 warehouse-marked tests deselect, and the tests that need private regression corpora skip rather than fail), and `dbt deps && dbt parse` compiles the project.
+Most of that needs a warehouse to exercise, but not all of it: with no account and no credentials, `pytest tests/` runs **402 tests green** (24 warehouse-marked tests deselect, and the tests that need private regression corpora skip rather than fail), and `dbt deps && dbt parse` compiles the project. Counts drift between releases; `pytest tests/ -q` is the truth.
 
 - **Modeling that survived a second implementation.** Wide convergence facts at consumer grain; a symmetric active/inactive split ("active is fantasy reality, inactive is MLB reality") that is what makes wasted-production analysis possible at all; a seed-driven UNPIVOT mart where adding a tracked stat is a CSV row rather than a five-file SQL change.
 - **Reproducibility.** Floating-point sums are not associative, and SQL engines do not promise summation order, so rebuilding with no code change could move a rendered cell by one, and oh boy it often did. Sums now run in exact decimal with pinned tie-breaks, and a byte-diff harness pins a known week so any drift fails loudly.
 - **Reconstruction with published error bars.** The walk-back does not claim to know what it cannot know. Where records are simply unavailable we make that clear and render a zero. The resulting under-count is stated per era instead of being smoothed away (while still allowing manual override tables to populate data manually where a "league historian" might know something that the platform's API no longer stores).
 - **Cross-language data contracts.** One seed CSV drives both the dbt mart's Jinja loop and the Python display, polarity and record-surfacing logic.
-- **Portability assessed, not assumed.** A spike ported the staging layer to DuckDB on real data to size a warehouse-independence effort honestly, including the traps; a 32-bit `FLOAT` that silently narrows values, and an engine default that would have emptied the record book without erroring. Written up in [docs/duckdb-portability-audit.md](docs/duckdb-portability-audit.md).
+- **Portability assessed, not assumed.** A spike ported the staging layer to DuckDB on real data to size a warehouse-independence effort honestly, including the traps; a 32-bit `FLOAT` that silently narrows values, and an engine default that would have emptied the record book without erroring. Written up in [docs/duckdb-portability-audit.md](docs/duckdb-portability-audit.md) — and the port it sized has since landed, behind adapter-dispatch macros.
 - **Real-data debugging discipline.** A doubleheader bug in an upstream wrapper found from team totals running ~3.6 points low; a scoring category whose season feed disagrees with its own per-game data; a record book rebuilt after discovering its source neglected significant portions of the player pool. Each documented with the evidence.
 
 ---

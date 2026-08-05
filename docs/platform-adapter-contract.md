@@ -6,6 +6,19 @@ adapter #1 of this contract with goldens held byte-identical, plus
 per-adapter contract tests; every later platform (CBS, Yahoo, Fantrax)
 implements the same surface.
 
+> **Status note, 2026-08-05 — where this describes a target, not the
+> code.** This section presents convergence at *staging* as the accepted
+> boundary. The implemented architecture deliberately converges lower, at
+> the **shared daily fact**: thirteen models below staging are
+> platform-specific by design (CBS has no per-day scoring, so its roster
+> stints, lineup intervals and eligibility windows are reconstructed in
+> `int_cbs__*` models before landing in the shared fact family), and
+> everything downstream of the facts speaks one language. The boundary
+> redraw is catalogued in
+> [dag-boundaries-DRAFT.md](dag-boundaries-DRAFT.md). Read the
+> staging-convergence language below as a superseded target; the contract
+> itself is not rewritten here.
+
 ## The idea
 
 Everything downstream of `RAW` — staging reshapes, the slot-validity

@@ -441,7 +441,8 @@ skipped to keep internal docs unambiguous.
     (900 "Ohtani (Batter)" / 901 "(Pitcher)") invisible to both universe
     tables; the gamelog fetch handles them explicitly.
   - `extract/cbs_ui_capture.py` captures what the API denies: site-UI
-    standings 2001+ (final standings derive all 26 champions),
+    standings 2001+ (final standings derive all 25 completed-season
+    champions),
     transaction reports 2001+, year-end roster reports 2003+, drafts
     2017+, and per-franchise overview pages -- 526 GETs, verdict PASS.
 

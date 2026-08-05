@@ -15,8 +15,8 @@ Snowflake free-tier provisioning.
 
 ## 1. Prerequisites
 
-- **Python 3.13+**. The codebase pins to 3.13; earlier 3.x versions
-  haven't been tested.
+- **Python 3.13.x** — not 3.14, which the pinned stack currently crashes
+  under (mashumaro, via dbt). Earlier 3.x versions haven't been tested.
 - **Git**.
 - **An ESPN Fantasy Baseball league**. Private leagues are supported
   (requires cookies — see step 3). Public leagues should work without
@@ -416,7 +416,7 @@ displays in a way you want to change.
 
 ### Seeing it work before you fill anything in
 
-You do not have to configure a league to see what this project produces.
+You do not have to configure *your* league to render an almanac.
 `demo/league_config/` is a complete fake league -- a fixture, tracked in
 git, containing no real-league data:
 
@@ -429,9 +429,13 @@ That builds and renders off the fixture in its own warehouse
 `dbt_league/league_config/`, so it cannot pick up anything of yours, and
 it needs no Snowflake account and no Google credentials.
 
-It does need raw league data to transform, which it does not land for you
--- so on a clone that has never run an extract it will say so and stop.
-The packaged sample that removes that last step is not built yet.
+**It is not a clean-clone demo, though, and the distinction matters.** It
+*transforms* raw league data; it does not land any, and it will not
+invent any -- so on a clone that has never run an extract it says so and
+stops. That makes it a build-and-render wrapper for someone who already
+has data (maintainer scaffolding, in practice), not the "clone it and
+look" path. The packaged sample league that would make it that path is
+tracked as MLB-11, scoped to v2.1, and is not built yet.
 
 ### Switching between them
 
@@ -520,9 +524,10 @@ nothing in it should be a reflex.
 pytest tests/
 ```
 
-Expected on a fresh clone: **268 passed, 17 deselected**. The
+Expected on a fresh clone: **402 passed, 24 deselected**. The
 warehouse-marked tests are deselected by default via `pytest.ini`; no
-credentials are involved and nothing is written.
+credentials are involved and nothing is written. These counts drift
+between releases -- `pytest tests/ -q` is the truth.
 
 ### Tier 2: the warehouse suite
 
@@ -530,10 +535,10 @@ credentials are involved and nothing is written.
 pytest tests/ -m warehouse
 ```
 
-This collects **17 tests**. It reads your warehouse and subprocess-runs
+This collects **24 tests**. It reads your warehouse and subprocess-runs
 the output scripts, but does not write to the warehouse.
 
-**How many of the 17 actually run depends on corpora you do not have.**
+**How many of the 24 actually run depends on corpora you do not have.**
 See below.
 
 ### Which tests need what

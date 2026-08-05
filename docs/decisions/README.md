@@ -15,7 +15,11 @@ every document anyone once called a decision is just another archive.
   is the document that explains numbers a reader can currently see.
 - **`v2.0 Groundwork.md`** — the scope call that 2.0 is still executing
   against: what "run it yourself" does and does not include, and what was
-  deferred to 2.x.
+  deferred to 2.x. **Scope re-drawn 2026-08-05** — v2.0 is the engine
+  port, the blank-templates/demo-fixture separation, and the truth pass;
+  the frictionless-bootstrap acceptance moved to v2.1 under MLB-11. The
+  original acceptance text stays visible beneath the note in that
+  document.
 - **`../dag-boundaries-DRAFT.md`** — the layer-boundary design (MLB-158
   Phase A): every model mapped to a target layer, with the graph's backward
   edges catalogued as options rather than decisions. **Draft status is

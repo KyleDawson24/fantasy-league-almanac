@@ -5,6 +5,10 @@ templates: a header row and nothing else. Fill in the ones your league
 needs, run `dbt seed`, and the pipeline starts describing your league
 instead of nobody's.
 
+> **Once filled in, these files hold your league's private data** -- real
+> names, and the platform's own member ids -- so do not `git add` them; a
+> safer ignored-folder flow is coming (MLB-204).
+
 This directory is deliberately separate from `../seeds/`. Those files are
 reference vocabulary -- stat maps, MLB team abbreviations, which stats are
 record-worthy. They are the same for every league on a given platform, so

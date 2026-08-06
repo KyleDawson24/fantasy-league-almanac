@@ -1,4 +1,4 @@
-# Release Notes — v1.6.0
+# Release Notes -- v1.6.0
 
 *The pre-port anchor release.*
 

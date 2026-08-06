@@ -20,8 +20,8 @@ is not a sign the repository is idle._
 ### Upgrading
 
 - **The club-of-game backfill is a required migration step** (MLB-200),
-  and `dbt build` now enforces it. The chain reads `clubOfGame` — the club
-  of the *game* production came from — but old RAW carries no such key: it
+  and `dbt build` now enforces it. The chain reads `clubOfGame` -- the club
+  of the *game* production came from -- but old RAW carries no such key: it
   is written by `extract.py --backfill-club-of-game`, not by the
   transform. An existing install upgrading across the flip therefore built
   **every model green** while its historical affinity chart silently went
@@ -37,8 +37,8 @@ is not a sign the repository is idle._
 
 - **Seeds split three ways, and a stranger no longer inherits our league**
   (MLB-114). One directory was doing three unrelated jobs: reference
-  vocabulary, this league's configuration, and — by way of the anonymized
-  twins — the only sample data the project had. Now
+  vocabulary, this league's configuration, and -- by way of the anonymized
+  twins -- the only sample data the project had. Now
   `dbt_league/seeds/` is reference vocabulary (same for everyone, ships
   filled in), `dbt_league/league_config/` is user config (**blank
   templates**, documented file by file with a worked example each), and
@@ -46,7 +46,7 @@ is not a sign the repository is idle._
   reads both roots and `DBT_LEAGUE_CONFIG` selects the second, so the demo
   swaps one directory and every model follows; no model changed, because
   dbt resolves seeds by filename rather than path. `SETUP.md` gains the
-  step that never existed — which files you actually have to fill in, and
+  step that never existed -- which files you actually have to fill in, and
   the honest minimum for an ESPN league, which is one.
 - `owner_nicknames`' `column_types` **stops naming contact columns**. It
   typed `email`/`phone_number` so a six-column local copy would satisfy
@@ -56,22 +56,22 @@ is not a sign the repository is idle._
   buying nothing. The template is now the schema.
 - **The demo builds its own warehouse and refuses the real one.**
   Rendering reads marts, not seeds, so a fixture pointed at marts built
-  from real config would still have produced a real-name book — which is
+  from real config would still have produced a real-name book -- which is
   the sample workbook published read-only.
 - **The repository root is curated** (MLB-154). It held 40 tracked files,
-  28 of which were session exhaust — handoffs, phase journals, progress
-  notes and three variants of one release-notes file — burying the six
+  28 of which were session exhaust -- handoffs, phase journals, progress
+  notes and three variants of one release-notes file -- burying the six
   documents a stranger actually wants. Those 28 moved to `docs/archive/`
   (24), `docs/decisions/` (2) and `docs/releases/` (2), each with an
   index; the root now carries the canon plus infrastructure. Nothing was
-  deleted — the handoff pile is the record of how the project got here,
+  deleted -- the handoff pile is the record of how the project got here,
   and it reads as evidence once indexed and as clutter while it sits at
   the front door.
 - `RELEASING.md` carries the **publish-the-GitHub-Release step** it had
   been missing, which is how v1.6.0 was tagged and published with no
   notes file ever landing in the repo. That file now exists too.
 
-## [1.6.0] — 2026-07-30
+## [1.6.0] - 2026-07-30
 
 The last stable point before the engine port -- MLB-10's rollback anchor,
 and the reason this range gets a tag at all. Two halves: a polish pass
@@ -196,7 +196,7 @@ glossary rewrite above, not to any of this.)
   graph's backward edges catalogued and each one written up as options
   rather than decisions. Draft status is deliberate -- nothing has moved.
 
-## [1.5.1] — 2026-07-25
+## [1.5.1] - 2026-07-25
 
 A correctness pass on the CBS record book -- the story of this release,
 and several days longer than it looked. Finishing the multi-league
@@ -310,7 +310,7 @@ adding new ones.
   human-owned override seeds (one name-form, one franchise-scoped) form a
   single id-first identity map keyed on MLBAM rather than names.
 
-## [1.5.0] — 2026-07-21
+## [1.5.0] - 2026-07-21
 
 The multi-league release, and the longest arc I've let build up between
 public versions. The warehouse gains a league registry and a
@@ -829,14 +829,14 @@ residual on all 8,185 reconciled player-seasons).
 
 ---
 
-## [1.2.0] — 2026-05-30
+## [1.2.0] - 2026-05-30
 
 First product-feature release after the v1.1.x refactor line. Two surfaces:
 the Home tab becomes a navigation-hub dashboard, and a net-new Draft Recap
 tab adds the draft board + draft-value analysis (a new ESPN extract through
 dbt to the Sheet). Reviewed tab-by-tab against the live Sheet; the almanac
 byte-diff fixtures were re-baselined for both. No separate `Phase X.Y
-Documentation.md` — the retrospective lives in `v1.x Handoff.md` "Status at
+Documentation.md` -- the retrospective lives in `v1.x Handoff.md` "Status at
 v1.2.0 ship," consistent with the v1.1.x releases.
 
 ### Added
@@ -844,7 +844,7 @@ v1.2.0 ship," consistent with the v1.1.x releases.
 - **Home two-band redesign.** Left navigation band (links to Records,
   Matchup History, the per-team pages, and Draft Recap; a points glossary;
   an all-time All-League Team) beside a right band with the All-League Team
-  of the Week and Season-to-Date — each carrying two player-only "Total-Pts
+  of the Week and Season-to-Date -- each carrying two player-only "Total-Pts
   Best (incl. bench & FA)" deviation columns that surface where a bench / FA
   player out-produced the active pick at a slot. Nav links are live in-sheet
   `#gid` hyperlinks resolved at write time (a two-pass write: build the
@@ -884,10 +884,10 @@ unrelated to this release). Open design calls (snake-draft presentation,
 pick trading, a cross-session float-summation follow-up) are in
 `v1.x Handoff.md`.
 
-## [1.1.2] — 2026-05-27
+## [1.1.2] - 2026-05-27
 
 Team-tab polish on the v1.1.1 almanac. No dbt changes and no
-selection-logic changes — just rendering fixes and explanatory copy on
+selection-logic changes -- just rendering fixes and explanatory copy on
 the per-team "Best Lineup" tabs, after QA'ing them in the live Sheet.
 
 ### Fixed
@@ -914,14 +914,14 @@ including the regenerated almanac byte-diff); pytest default 144 passed
 (5 preexisting `test_almanac_sheets.py` failures unrelated to this
 release).
 
-## [1.1.1] — 2026-05-27
+## [1.1.1] - 2026-05-27
 
 Almanac refactor + optimal-team reframe. This release was scoped as a
 refactor-only pass against the v1.1.0 golden TSV snapshot, and the first
 half delivered exactly that: reusable analytical SQL moved into dbt
 contracts, `output/almanac_sheets.py` split along data/logic/rendering
 lines, output held byte-identical. The second half intentionally broke
-byte-identity — a new optimal-team primitive reframes the All-League
+byte-identity -- a new optimal-team primitive reframes the All-League
 Team and the per-team tabs from "who was actually slotted" to "the best
 lineup the team could have fielded," scored on the calculated
 (cross-season-normalized) points lens.
@@ -935,16 +935,16 @@ the fixtures were re-baselined.
 - **`get_optimal_team` primitive.** Parameterized "best lineup for any
   (timespan, scope, points_type)" dispatcher over the new
   `int_player_position_pts` model (per-position points via
-  `LATERAL FLATTEN` of `eligible_slots`). Gap-based selection — fill the
-  slot where the second-best option hurts most — with a disjoint-stat-
+  `LATERAL FLATTEN` of `eligible_slots`). Gap-based selection -- fill the
+  slot where the second-best option hurts most -- with a disjoint-stat-
   categories rule so two-way players (Shohei) can fill one hitting and
   one pitching slot without double-counting.
-- **`int_player_position_pts`** — per-position points accumulation at
+- **`int_player_position_pts`** -- per-position points accumulation at
   matchup grain, calculated-points lens.
-- **`mart_team_matchup`** — wide matchup-grain view carrying opponent
+- **`mart_team_matchup`** -- wide matchup-grain view carrying opponent
   line, head-to-head margin, combined totals, and league-wide per-week
   averages. First consumer: the Team Weeks tab.
-- **`fct_player_season_performance`** — slot-bearing season-grain rollup
+- **`fct_player_season_performance`** -- slot-bearing season-grain rollup
   of the weekly player fact; foundation brick of the player-profile
   layer, carrying both calculated and platform point lenses.
 - **Almanac byte-diff regression.** `tests/test_almanac_byte_diff.py`
@@ -957,7 +957,7 @@ the fixtures were re-baselined.
   The Home tab and every per-team tab fill their lineups by best-possible
   production at each position rather than by who was actually slotted
   there most often.
-- **Per-team tabs reframed as "Best Lineup — current season + all-time."**
+- **Per-team tabs reframed as "Best Lineup -- current season + all-time."**
   Side-by-side current-season and franchise-history best lineups; Bench /
   IL / Other ranked by total rostered production (active + bench/IL
   points) to surface "could have helped but was blocked or benched"; an
@@ -973,10 +973,10 @@ the fixtures were re-baselined.
 ### Fixed
 
 - **Live-write crashes masked by the `--no-sheets` preview path.** Two
-  separate breakages in `output/almanac_write.py` — missing
+  separate breakages in `output/almanac_write.py` -- missing
   `os`/`re`/`records` imports, and a dangling
   `get_all_league_team_season_to_date` call left behind by the
-  dispatcher consolidation — surfaced only on the live Sheets write,
+  dispatcher consolidation -- surfaced only on the live Sheets write,
   which the byte-diff regression doesn't exercise. Both fixed.
 - **Optimal-team rows render in canonical slot order.** The gap-based
   selector returns picks in fill order; it now sorts to baseball-card
@@ -1000,7 +1000,7 @@ the records + recap BBCode goldens); pytest default 144 passed (5
 preexisting `test_almanac_sheets.py` failures unrelated to this release).
 Per-team and Home tabs visually QA'd against the live Sheet.
 
-## [1.1.0] — 2026-05-22
+## [1.1.0] - 2026-05-22
 
 League almanac release. This is the first v1.x product expansion after
 the stable BBCode/records foundation: a browsable Google Sheets workbook
@@ -1074,10 +1074,10 @@ including 120 data tests and 4 exposures); dbt static docs regenerated;
 pytest default green (148 passed, 15 deselected); pytest warehouse green
 (15 passed, 148 deselected).
 
-## [1.0.2] — 2026-05-19
+## [1.0.2] - 2026-05-19
 
 DAG hygiene + dbt-architecture cleanup release. No consumer-visible
-behavior change — the recap and records report render byte-identical
+behavior change -- the recap and records report render byte-identical
 output pre- vs. post-refactor against the golden BBCode regression.
 What changed is internal: the dbt DAG got a contract-layer cleanup
 that separates "config seeds" from "data marts," promotes a real
@@ -1093,17 +1093,17 @@ shift; 1.0.x stays "polish + refactor" releases. Treat 1.0.2 as
 
 ### Added
 
-- **`dim_stat`** — mart-layer dimension over the `stat_classification`
+- **`dim_stat`** -- mart-layer dimension over the `stat_classification`
   seed. Adds a `leaderboard_name` column (seed-name post translation:
   `1B` → `SINGLES`, `30` → `CYC`, `64` → `SHO`, etc.) and carries all
   other seed columns through unchanged. Single source of truth for the
   seed → leaderboard name translation; `output/stat_catalog.py` and
   the `mart_stat_leaderboard` compile-time loop both read from here.
-- **`dim_matchup_period`** — mart-layer dimension over the
+- **`dim_matchup_period`** -- mart-layer dimension over the
   `matchup_schedule` seed. Carries calendar metadata
   (`is_abnormal` / `is_playoff` / `playoff_round` / start/end dates)
   for consumer-side reads.
-- **`fct_player_daily_performance`** — mart-layer fact over
+- **`fct_player_daily_performance`** -- mart-layer fact over
   `int_player_daily`. Exposes per-day data (counting stats, point
   contributions, per-day platform totals, per-day metadata) to
   consumers via a contract layer. Adds `performance_status` and
@@ -1183,13 +1183,13 @@ shift; 1.0.x stays "polish + refactor" releases. Treat 1.0.2 as
 Verification: dbt build clean (116 PASS / 0 ERROR with the new models
 and tests); pytest tests/ green (113 passed); pytest tests/ -m
 warehouse green (15 passed including byte-diff golden BBCode
-regression — confirms the refactor is consumer-side transparent).
+regression -- confirms the refactor is consumer-side transparent).
 
-## [1.0.1] — 2026-05-18
+## [1.0.1] - 2026-05-18
 
 A v1.0 polish release. Strictly speaking the changes here include
 several new features that would justify a v1.1.0 under a strict
-semver reading — record-surfacing for NEGATIVE_POINTS, the Hit-for-
+semver reading -- record-surfacing for NEGATIVE_POINTS, the Hit-for-
 the-Cycle stat, a league-wide benchmarks mart, an always-on "League
 This Week" recap line, eight new league_notes callouts, and key-pair
 Snowflake auth. The maintainer chose to land them as a 1.0.x patch
@@ -1210,27 +1210,27 @@ grew."
   overall …"). Renders every week regardless of whether anything
   noteworthy fired; foregrounds league-level context as a baseline.
 - **Eight new league_notes callouts:**
-  - `cycles` — per-player cycle announcement with cumulative history
+  - `cycles` -- per-player cycle announcement with cumulative history
     ordinal and "first of the season" flourish.
-  - `no_quality_starts` — teams that started at least one SP but
+  - `no_quality_starts` -- teams that started at least one SP but
     produced zero QS; cumulative 0-QS-with-starts ordinal.
-  - `hr_streak_active` — teams whose ≥7-day HR streak is still alive
+  - `hr_streak_active` -- teams whose ≥7-day HR streak is still alive
     at MP end; cites all-time league record for context.
-  - `hr_streak_ended` — streaks of ≥10 consecutive HR-days that broke
+  - `hr_streak_ended` -- streaks of ≥10 consecutive HR-days that broke
     in the recap MP.
-  - `hero` — second-banana-margin walk-off lens: a player whose
+  - `hero` -- second-banana-margin walk-off lens: a player whose
     individual outperformance vs. their #2 single-handedly closed the
     margin in a narrow win.
-  - `scapegoat` — symmetric loss-attribution lens: a player whose
+  - `scapegoat` -- symmetric loss-attribution lens: a player whose
     negative output exceeded the loss margin.
-  - `mismatch` — top vs. bottom scorer in the same head-to-head
+  - `mismatch` -- top vs. bottom scorer in the same head-to-head
     matchup; cumulative-margin-rank ordinal.
-  - `no_negative_days` — teams where every active player-day had
+  - `no_negative_days` -- teams where every active player-day had
     `platform_points ≥ 0`; "first of the season" flourish on first
     qualifying team.
-  - `hot_week` / `cold_week` — league-level outlier callouts driven
+  - `hot_week` / `cold_week` -- league-level outlier callouts driven
     by the new benchmarks mart.
-- **`mart_league_weekly_benchmarks`** — aggregate of league-week means
+- **`mart_league_weekly_benchmarks`** -- aggregate of league-week means
   + percentile rank within league history for overall / hitting /
   pitching points. Powers the always-on `League This Week:` line and
   the hot/cold-week callouts. Future surfaces (frontend, dashboard)
@@ -1254,7 +1254,7 @@ grew."
 - **Random seed determinism.** `random` seeded per-recap so varied-
   template callouts (e.g., `hr_drought`) pick the same phrasing across
   rebuilds of the same MP.
-- **dbt docs catalog hosted via GitHub Pages** — initial publish at
+- **dbt docs catalog hosted via GitHub Pages** -- initial publish at
   https://kyledawson24.github.io/fantasy-league-almanac/.
 
 ### Changed
@@ -1286,13 +1286,13 @@ grew."
 
 - **`no_quality_starts` historical ordinal drift.** The cumulative
   count used `league_history_count('team', 'QS', 0)`, which includes
-  team-MPs where no SP started at all — so the ordinal drifted upward
+  team-MPs where no SP started at all -- so the ordinal drifted upward
   from the trigger's actual definition. Fix mirrors the trigger's
   `lineup_slot='SP' AND games_played≥1` filter in the historical
   count.
 - **`hr_streak_active` "new record" claim on tied streaks.** Said "a
   new league record" when the longest active streak matched the
-  existing record. Two issues — (a) `record_len` included the active
+  existing record. Two issues -- (a) `record_len` included the active
   streak itself, and (b) the comparison was `>=` rather than `>`.
   Fix: exclude the current longest active run from the prior-record
   calculation and split into explicit new / tied / existing-stands
@@ -1304,10 +1304,10 @@ grew."
 ### Removed
 
 - Parked `_replace_tab` formatting-preservation change in
-  `output/sheets_writer.py` discarded — pending Sheets surface
+  `output/sheets_writer.py` discarded -- pending Sheets surface
   redesign supersedes the in-place-update logic.
 
-## [1.0.0] — 2026-05-13
+## [1.0.0] - 2026-05-13
 
 First stable release. Phase 7 was a portfolio-prep rearchitect spanning
 an 8-step dbt overhaul (Steps A–H), a three-way split of `records.py`,
@@ -1322,18 +1322,18 @@ plus release tooling.
   source of truth for stat metadata: display names, abbreviations,
   polarity, record-candidate flags, derivation expressions. Adding a
   tracked stat is now one CSV row, not edits in five Python locations.
-- `output/stat_catalog.py` — six `lru_cached` accessors over the seed
+- `output/stat_catalog.py` -- six `lru_cached` accessors over the seed
   (`get_display_map`, `get_abbrev_map`, `get_polarity_map`,
   `get_always_tracked`, `get_record_candidates`, `get_derived_exprs`).
-- `output/records_data.py` + `output/records_logic.py` — `records.py`
+- `output/records_data.py` + `output/records_logic.py` -- `records.py`
   split into Snowflake-querying layer + pure consumer-side rules layer
   (was 930 lines / 22 functions; now three files with backward-compat
   re-exports so consumer scripts and tests didn't have to change).
-- `output/db.py` — consolidated Snowflake connection wrapper.
+- `output/db.py` -- consolidated Snowflake connection wrapper.
 - 112 pure pytest + 15 warehouse-marked tests, including byte-diff
   golden-output regression against pinned BBCode baselines for both the
   weekly recap and the all-time records report.
-- `tools/regen_stat_classification.py` — idempotent seed-regen tool.
+- `tools/regen_stat_classification.py` -- idempotent seed-regen tool.
 - MIT LICENSE, this CHANGELOG, README, SETUP, ROADMAP, and dbt docs
   (hosted via GitHub Pages).
 
@@ -1358,13 +1358,13 @@ plus release tooling.
 
 See `Phase 7 Documentation.md` for architectural detail.
 
-## [0.6.0] — 2026-05-08
+## [0.6.0] - 2026-05-08
 
 ### Added
 - Google Sheets sink as an opt-in second consumer surface for the
   records report. Three-tab layout: rank-1 records, top-5 with
   contributors, full leaderboard dump.
-- `output/records.py` — consolidated SQL and polarity-filter logic in
+- `output/records.py` -- consolidated SQL and polarity-filter logic in
   one place so both consumer scripts (recap + records report) share a
   single data-access layer.
 - Tracked-stats expansion to surface derived counters (PA, SB-CS, W-L,
@@ -1377,12 +1377,12 @@ See `Phase 7 Documentation.md` for architectural detail.
 
 ### Changed
 - Mart record-direction values renamed: `best`/`worst` → `most`/`fewest`.
-- Records section displays owner names; recap section doesn't —
+- Records section displays owner names; recap section doesn't --
   separation of audience (recap is fast-glance; records reward attribution).
 
 See `Phase 6.3.3 Documentation.md`.
 
-## [0.5.0] — 2026-05-04
+## [0.5.0] - 2026-05-04
 
 ### Added
 - "Records set this week" callouts in the recap, surfacing new or tied
@@ -1398,18 +1398,18 @@ See `Phase 6.3.3 Documentation.md`.
   scoring-weight-derived) rather than `platform_*` (ESPN-reported,
   drift-prone across rule changes). Platform values retained for audit.
 - Wasted-points scope extended to active players who scored negative
-  points — the manager could have benched them rather than letting the
+  points -- the manager could have benched them rather than letting the
   negative drag the lineup. Generalizes "wasted" as points achievable
   via free lineup changes (start a bench player, sign a free agent,
   sit a negative scorer) that weren't made.
 
 See `Phase 5.0 Documentation.md`.
 
-## [0.4.0] — 2026-05-02
+## [0.4.0] - 2026-05-02
 
 ### Added
 - Wasted-points concept introduced: per-player-per-matchup tracking
-  of points the manager could have captured but didn't — initially
+  of points the manager could have captured but didn't -- initially
   scoped to bench-side waste (productive players left on the bench
   while their owner started someone else).
 - Slot validity model distinguishing roster slot (e.g., "OF") from
@@ -1424,7 +1424,7 @@ See `Phase 5.0 Documentation.md`.
 
 See `Phase 4.0 Documentation.md`.
 
-## [0.3.4] — 2026-05-01
+## [0.3.4] - 2026-05-01
 
 ### Changed
 - Raw-always extraction: simplified the doubleheader-fix code path from
@@ -1432,7 +1432,7 @@ See `Phase 4.0 Documentation.md`.
   per-day-per-platform-level raw capture. Same downstream output, cleaner
   mental model.
 
-## [0.3.3] — 2026-04-30
+## [0.3.3] - 2026-04-30
 
 ### Fixed
 - Silent doubleheader stat-overwrite bug in `espn-api`'s `box_scores()`
@@ -1444,7 +1444,7 @@ See `Phase 4.0 Documentation.md`.
 
 See `Phase 3.3 Documentation.md`.
 
-## [0.3.2] — 2026-04-29
+## [0.3.2] - 2026-04-29
 
 ### Added
 - `calculated_points` columns derived from scoring-settings seed × stat
@@ -1458,7 +1458,7 @@ See `Phase 3.3 Documentation.md`.
 
 See `Phase 3.2 Documentation.md`.
 
-## [0.3.1] — 2026-04-26
+## [0.3.1] - 2026-04-26
 
 ### Added
 - "Wide convergence" facts: `fct_weekly_player_stats` and
@@ -1468,7 +1468,7 @@ See `Phase 3.2 Documentation.md`.
 
 See `Phase 3.1 Documentation.md`.
 
-## [0.3.0] — 2026-04-24
+## [0.3.0] - 2026-04-24
 
 ### Added
 - Stat-level league records: most HRs, most Ks, most SBs, etc., with
@@ -1482,7 +1482,7 @@ See `Phase 3.1 Documentation.md`.
 
 See `Phase 3.0 Documentation.md`.
 
-## [0.2.1] — 2026-04-22
+## [0.2.1] - 2026-04-22
 
 ### Added
 - Owner names end-to-end: player → owner mapping wired through staging,
@@ -1497,7 +1497,7 @@ See `Phase 3.0 Documentation.md`.
 
 See `Phase 2.1 Documentation.md`.
 
-## [0.2.0] — 2026-04-20
+## [0.2.0] - 2026-04-20
 
 ### Added
 - Player-level contribution callouts in the weekly summary: top
@@ -1508,7 +1508,7 @@ See `Phase 2.1 Documentation.md`.
 
 See `Phase 2.0 Documentation.md`.
 
-## [0.1.0] — 2026-04-19
+## [0.1.0] - 2026-04-19
 
 ### Added
 - Initial end-to-end pipeline: ESPN Fantasy API → Python extractor →

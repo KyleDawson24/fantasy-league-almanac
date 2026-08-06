@@ -1,4 +1,4 @@
-## [1.5.0] — 2026-07-21
+## [1.5.0] - 2026-07-21
 
 ### Highlights
 
@@ -15,7 +15,7 @@ The short version, for people who read the almanacs rather than build them.
   catalog sits alongside it, so a stat means the same thing on both books
   and the record boards track it automatically instead of by a hardcoded
   list. The practical effect: the record book covers players the fantasy
-  platform itself no longer carried — Bonds, Randy Johnson, anyone who
+  platform itself no longer carried -- Bonds, Randy Johnson, anyone who
   retired before the platform's own archive began.
 
 - **Player-card links throughout the almanac.** Record holders, All-League
@@ -38,7 +38,7 @@ The short version, for people who read the almanacs rather than build them.
   team by team.
 
 - **Overrides you control.** Preferred owner names, player nicknames, and
-  franchise continuity — declare that two team ids are the same franchise
+  franchise continuity -- declare that two team ids are the same franchise
   and a quarter-century of history reads as one team, however many times
   the platform's internal ids changed underneath it.
 

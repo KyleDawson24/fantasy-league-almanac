@@ -15,11 +15,11 @@ Snowflake free-tier provisioning.
 
 ## 1. Prerequisites
 
-- **Python 3.13.x** — not 3.14, which the pinned stack currently crashes
+- **Python 3.13.x** -- not 3.14, which the pinned stack currently crashes
   under (mashumaro, via dbt). Earlier 3.x versions haven't been tested.
 - **Git**.
 - **An ESPN Fantasy Baseball league**. Private leagues are supported
-  (requires cookies — see step 3). Public leagues should work without
+  (requires cookies -- see step 3). Public leagues should work without
   cookies but haven't been tested for v1.0.
 - **A Snowflake account**. Free-tier (Standard, 30-day trial → $0 storage
   for small datasets after) is plenty. Sign up at
@@ -78,8 +78,8 @@ Open your browser's dev tools while logged in to ESPN Fantasy:
 
 Find two cookies:
 
-- `espn_s2` — long opaque string, ~300 chars
-- `SWID` — UUID wrapped in curly braces, like `{AB12CD34-...}`
+- `espn_s2` -- long opaque string, ~300 chars
+- `SWID` -- UUID wrapped in curly braces, like `{AB12CD34-...}`
 
 Copy both values verbatim (including the `{}` braces on SWID).
 
@@ -133,7 +133,7 @@ You'll need these for both `.env` and the dbt profile:
 ### Authentication: key-pair (recommended) vs password
 
 Snowflake supports password authentication, but **the moment MFA is
-enforced on your account, password-based scripts stop working** — the
+enforced on your account, password-based scripts stop working** -- the
 Python connector can't satisfy an interactive MFA prompt and fails
 with `Multi-factor authentication is required for this account`.
 MFA enforcement is increasingly default on new accounts.
@@ -142,7 +142,7 @@ MFA enforcement is increasingly default on new accounts.
 Snowflake-recommended programmatic-access path) and is what the rest
 of this guide steers toward. One-time setup, no expiring tokens, works
 forever. If your account doesn't yet have MFA enforced, password auth
-still works as a fallback — the pipeline detects which one you've
+still works as a fallback -- the pipeline detects which one you've
 configured.
 
 #### Generate an RSA key pair
@@ -175,7 +175,7 @@ print(body)
 ```
 
 The script prints the public-key body (with PEM headers stripped, one
-line) — that's what goes into the Snowflake `ALTER USER` command below.
+line) -- that's what goes into the Snowflake `ALTER USER` command below.
 
 The private key file (`~/.snowflake_rsa_key.p8`) needs to stay on your
 machine. Don't commit it; don't share it. The path goes into `.env` in
@@ -262,7 +262,7 @@ dbt debug
 ```
 
 You should see `All checks passed!`. If `dbt debug` fails with an MFA
-error, you're on password auth against an MFA-enforced account —
+error, you're on password auth against an MFA-enforced account --
 switch to the key-pair stanza above.
 
 ---
@@ -320,34 +320,34 @@ otherwise it falls back to password.
 Skip the Google Sheets vars for now (see section 10 if you want that
 sink later).
 
-**CBS league (optional — only if you archive a second-platform league):**
+**CBS league (optional -- only if you archive a second-platform league):**
 
 ```bash
 # CBS (all browser-extracted; the login is reCAPTCHA-walled, so there
-# is no scripted credential flow — and these leagues are treated as
+# is no scripted credential flow -- and these leagues are treated as
 # read-only museums by the capture scripts)
 CBS_LEAGUE=<league slug, e.g. bsb>
-CBS_TOKEN=<fantasy API access_token — extraction steps below>
+CBS_TOKEN=<fantasy API access_token -- extraction steps below>
 CBS_WEB_COOKIES=<the whole `cookie:` request-header value from devtools>
 ```
 
-Where the token actually hides (re-verified 2026-07-18 — the page has
+Where the token actually hides (re-verified 2026-07-18 -- the page has
 SEVERAL token-shaped variables; the old "Ctrl+F `var token`" tip no
 longer matches):
 
 1. Open any logged-in league page (e.g. `/standings/overall`) and View
    Page Source. The right value is the `access_token` inside the
-   **global player-search function** (~128 chars) — the search widget
+   **global player-search function** (~128 chars) -- the search widget
    calls the same `api.cbssports.com/fantasy` API the capture scripts
    do, which is what makes it the right one. The similarly-shaped CBSi
-   token is CBS Interactive's site-wide identity — not it.
+   token is CBS Interactive's site-wide identity -- not it.
 2. Zero-guess alternative: DevTools → Network → filter `fantasy` →
    fire the player-search box → read `access_token=` off any
    `api.cbssports.com/fantasy/...` request URL.
 
 `CBS_TOKEN` drives the API captures (`extract/cbs_capture.py`,
 `extract/cbs_backfill.py`); `CBS_WEB_COOKIES` drives the site-page
-archive (`extract/cbs_ui_capture.py`). Both expire eventually — the
+archive (`extract/cbs_ui_capture.py`). Both expire eventually -- the
 token's one observed lifetime is 2–11 days (minted 2026-07-07, alive
 07-09, dead by 07-18), so assume roughly a week and re-extract when a
 run reports auth failure. The scripts refuse to land anything
@@ -500,7 +500,7 @@ See section 11 for common gotchas.
 
 ### Upgrading an existing install: the club-of-game backfill (REQUIRED)
 
-**Skip this if you are setting up for the first time** — a fresh extract
+**Skip this if you are setting up for the first time** -- a fresh extract
 lands the field already. This is for a warehouse that was loaded before
 the club-of-game flip.
 
@@ -509,8 +509,8 @@ The MLB team credited for a player's production used to come from
 belonged to when the period was pulled. For a season pulled in one pass,
 that is the same club for every day of the year, so anyone traded
 mid-season had their whole season misfiled under the club they finished
-at. The chain now reads `clubOfGame` — the club of the *game* the
-production came from — which does not decay.
+at. The chain now reads `clubOfGame` -- the club of the *game* the
+production came from -- which does not decay.
 
 **Old RAW has no `clubOfGame` key at all.** It is written by a backfill
 pass, not by the transform, so an existing warehouse has nothing for the
@@ -523,7 +523,7 @@ python extract/extract.py --backfill-club-of-game --year 2026
 
 The backfill only ever ADDS a key. It updates rows in place, deletes
 nothing, and leaves `loaded_at` alone, so it is safe on settled history
-and safe to re-run — a half-finished pass is resumed by running it again.
+and safe to re-run -- a half-finished pass is resumed by running it again.
 
 You do not have to remember to do this. `dbt build` fails with
 `assert_club_of_game_migrated` until you have, and the failure names this
@@ -540,14 +540,14 @@ spending a test on.
 ### The three tiers
 
 Every command in this repo falls into one of three tiers. The tier tells
-you what it needs and what it touches — worth knowing before you run
+you what it needs and what it touches -- worth knowing before you run
 something that rebuilds your warehouse.
 
 | Tier | Needs | Touches | Commands |
 |---|---|---|---|
-| **1 — offline** | nothing but the clone | nothing | `pytest tests/`, `dbt deps`, `dbt parse`, `dbt compile` |
-| **2 — live, read-only** | Snowflake creds | reads only | `dbt debug`, `dbt source freshness`, `dbt docs generate`, `dbt ls`, `pytest tests/ -m warehouse`, output scripts with `--no-sheets` |
-| **3 — mutation & regeneration** | creds + intent | **writes** | `dbt seed`, `dbt build`, `--full-refresh` variants, `python extract/*.py`, `REGENERATE_BASELINES=1 pytest`, output scripts *without* `--no-sheets` |
+| **1 -- offline** | nothing but the clone | nothing | `pytest tests/`, `dbt deps`, `dbt parse`, `dbt compile` |
+| **2 -- live, read-only** | Snowflake creds | reads only | `dbt debug`, `dbt source freshness`, `dbt docs generate`, `dbt ls`, `pytest tests/ -m warehouse`, output scripts with `--no-sheets` |
+| **3 -- mutation & regeneration** | creds + intent | **writes** | `dbt seed`, `dbt build`, `--full-refresh` variants, `python extract/*.py`, `REGENERATE_BASELINES=1 pytest`, output scripts *without* `--no-sheets` |
 
 Tier 1 is what CI runs (see `.github/workflows/ci.yml`) and what a
 reviewer can run on a fresh clone with no account. Tier 3 is ceremony:
@@ -588,7 +588,7 @@ throughout, so they live locally and on a private remote only:
 | `tests/fixtures/almanac_v1_1_0/` | ESPN almanac TSV byte-diff | `test_almanac_byte_diff.py` **skips** |
 | `tests/fixtures/cbs_almanac/` | CBS almanac TSV byte-diff | `test_cbs_almanac_byte_diff.py` **skips** |
 
-These **skip, they do not fail** — a fresh clone gets a green run with
+These **skip, they do not fail** -- a fresh clone gets a green run with
 skips, not red X's. That is deliberate: a stranger's clone should never
 show failures for data they were never given.
 
@@ -601,7 +601,7 @@ data. To generate your own baselines after a successful end-to-end run:
 REGENERATE_BASELINES=1 pytest tests/ -m warehouse
 ```
 
-This **writes fixture files** — hence tier 3. After regenerating, future
+This **writes fixture files** -- hence tier 3. After regenerating, future
 runs lock to your league's expected output and catch regressions on
 rebuilds. Re-anchor deliberately and review the diff; a golden that moves
 without a reviewed cause is the bug the harness exists to catch.
@@ -618,7 +618,7 @@ layout for offline analysis). Skip if you only want the BBCode output.
 1. Go to https://console.cloud.google.com and create (or pick) a
    project. Any name; the project is just an OAuth container.
 2. Enable the Google Sheets API and Google Drive API for the project.
-3. Configure the OAuth consent screen — pick **External** user type;
+3. Configure the OAuth consent screen -- pick **External** user type;
    leave most fields default. Add yourself as a test user. Don't worry
    about app verification; this is a personal-use OAuth client.
 4. Credentials → Create credentials → OAuth client ID → **Desktop app**.
@@ -674,7 +674,7 @@ just `abc12345`.
 **Everything builds green but the weekly surfaces are empty.** Almost
 always a blank `dbt_league/league_config/matchup_schedule.csv`. That seed
 is the only thing that knows when your weeks started and ended, and it
-ships blank on purpose — so an unfilled one is not an error, it is a
+ships blank on purpose -- so an unfilled one is not an error, it is a
 league with no calendar. Nothing fails, because there is nothing wrong;
 there is just no week to report on. Fill it in (section 7) and re-run
 `dbt seed && dbt build`.
@@ -683,7 +683,7 @@ The same shape explains a green build with unnamed CBS franchises or no
 CBS owner history: `cbs_franchises.csv`, `cbs_team_owners.csv` and
 `team_owner_by_year.csv` are also read directly rather than as overrides.
 The seeds that genuinely do nothing when blank are the naming and merging
-ones — those are listed as "optional" in section 7 and in
+ones -- those are listed as "optional" in section 7 and in
 `dbt_league/league_config/README.md`.
 
 **`dbt seed` succeeds but `dbt run` complains about missing seed
@@ -707,7 +707,7 @@ REGENERATE_BASELINES=1 pytest tests/ -m warehouse
 
 **Tempted to enrich the output BBCode?** Don't. ESPN's front-page
 renderer supports only `[b]bold[/b]`, `[u]underline[/u]`, and
-`[i]italics[/i]` — hyperlinks, images, embeds, color tags, and most
+`[i]italics[/i]` -- hyperlinks, images, embeds, color tags, and most
 other standard BBCode get stripped or rendered literally. The output
 formatters in `output/formatters.py` are tuned to that constraint; if
 you want fancier output, target the Sheets sink instead.
@@ -728,7 +728,7 @@ python extract/extract.py        # ~30 seconds for current week
 cd dbt_league && dbt build       # ~60 seconds for full build
 cd .. && python output/generate_summary.py
 python extract/cbs_capture.py --capture   # CBS league (if configured):
-                                 # idempotent — extends the roster
+                                 # idempotent -- extends the roster
                                  # sweep to today, lands new standings
                                  # periods + fresh transaction/config
                                  # snapshots. Runs LAST on purpose: a

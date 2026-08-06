@@ -18,7 +18,7 @@ The items below are what's still on deck, organized by
 priority and ambition. v1.x = incremental polish on the current
 architecture; v2.0 = structural change.
 
-## Now (v1.x — incremental polish)
+## Now (v1.x -- incremental polish)
 
 Low-risk changes building on the current architecture. Most would ship in
 a single afternoon.
@@ -61,7 +61,7 @@ a single afternoon.
 - **Identify playoff-contention teams during playoff weeks.** The
   calendar layer correctly flags playoff weeks (`is_playoff=true` on
   `matchup_schedule` rows), but during those weeks all teams still play
-  — some in the actual playoff bracket, some in the consolation
+  -- some in the actual playoff bracket, some in the consolation
   tournament. The records output today can't distinguish a Finals MVP
   performance from a 13th-place consolation week. Identifying which
   `(team, season, matchup_period)` tuples represent actual playoff
@@ -79,7 +79,7 @@ a single afternoon.
     position of mp within the playoff range
 
   `is_abnormal` (All-Star break, weather-shortened weeks, commissioner-
-  declared anomalies) is the only genuinely manual field — no ESPN API
+  declared anomalies) is the only genuinely manual field -- no ESPN API
   concept for it.
 
   Proposed shape: `extract.py` writes a new `raw.matchup_schedule`
@@ -106,21 +106,21 @@ a single afternoon.
   from box scores) unlocks "career milestone" callouts in the recap.
   Most data is already in the pipeline; bio/draft additions to the
   extract layer are a follow-on (see "Draft position integration"
-  in Next). Framed as a v1.x "proof of progress" — even partial
+  in Next). Framed as a v1.x "proof of progress" -- even partial
   scaffolding ships value (consumer simplification, lineage clarity)
   and lays foundation for full player-profile analytics post-v1.0.
 - **`fct_team_career_stats` mart.** Career-aggregate equivalent of
-  `fct_weekly_team_active_performance` — "who has the most points scored
+  `fct_weekly_team_active_performance` -- "who has the most points scored
   for their team in league history," etc. Team-side counterpart to
   `fct_player_career` above. Especially fun for keeper-league framing.
   Data's already there; this is a new aggregation layer.
 
-## Next (v2.0 — substantive features)
+## Next (v2.0 -- substantive features)
 
 Larger changes that would re-shape parts of the project.
 
 > **Scoping note:** Yahoo eligibility and DuckDB target are both v2.0
-> candidates, but realistically only one would ship per major version —
+> candidates, but realistically only one would ship per major version --
 > they're roughly equivalent in scope and effort. Final pick TBD.
 
 ### Cross-platform portability
@@ -137,8 +137,8 @@ Larger changes that would re-shape parts of the project.
   tabs through two entirely separate builders; the CBS one
   (`build_draft_recap_rows`) exists because CBS never joined the ESPN
   chain. Converging them retires the duplicate and stops a third platform
-  from adding a third builder. The warehouse half already landed — the
-  CBS mart's columns are shaped on `mart_draft_board`'s contract — so
+  from adding a third builder. The warehouse half already landed -- the
+  CBS mart's columns are shaped on `mart_draft_board`'s contract -- so
   what remains is renderer work plus four contract seams (NULL
   `overall_pick` on most CBS seasons, varchar player ids, no `team_id` on
   CBS draft pages, and two different value contracts).
@@ -163,7 +163,7 @@ Larger changes that would re-shape parts of the project.
 - **MetricFlow / dbt Semantic Layer integration.** Would formalize
   user-defined metrics ("wasted points," "calculated points") as
   declared metrics rather than column outputs. Targeted as a deliberate
-  v2.0 learning exercise — pending a fit assessment for the project's
+  v2.0 learning exercise -- pending a fit assessment for the project's
   data shape (worth doing if metrics-layer benefits land for analytical
   use; not worth forcing if it's a square-peg-round-hole).
 
@@ -211,8 +211,8 @@ Ideas worth exploring if the project evolves in their direction.
   `fct_weekly_*_inactive_performance` models currently surface only
   `calculated_*` totals plus grain dims, not the full counting and
   per-stat `*_pts` columns their active counterparts expose. Two paths:
-  (a) full mirror — extend inactive facts to match the active schema and
-  document accordingly; (b) intentional asymmetry — keep inactive terse,
+  (a) full mirror -- extend inactive facts to match the active schema and
+  document accordingly; (b) intentional asymmetry -- keep inactive terse,
   formally document the omissions. Worth deciding before adding a real
   consumer that needs inactive-grain stat detail.
 - **Bucket-specific inactive leaderboard view.** `wasted_bucket` is
@@ -227,7 +227,7 @@ Ideas worth exploring if the project evolves in their direction.
   worth confirming whether it's a real scored stat the project should
   track or a one-off artifact.
 - **Hosted multi-tenant deployment ("Path C").** Running the pipeline as
-  a service for other leagues. Deferred indefinitely — different product
+  a service for other leagues. Deferred indefinitely -- different product
   class than a single-league tool, and the lift to get there (auth,
   per-league credentials management, hosting infrastructure) is far past
   the project's current scope.
@@ -246,7 +246,7 @@ Ideas worth exploring if the project evolves in their direction.
   threshold tuning to avoid small-sample noise, with diminishing return.
 - **Sheets sink formatting-preservation (`_replace_tab` in-place update).**
   Considered in v1.x as a fix for the "weekly run wipes formatting"
-  complaint, but dropped at v1.0.1 — the v1.1.0 almanac surface
+  complaint, but dropped at v1.0.1 -- the v1.1.0 almanac surface
   superseded the old 3-tab records-sheet layout. Any future work should
   target the almanac writer, not the legacy records-sheet sink.
 - **`output/_setup.py` boilerplate factoring.** v1.x Handoff item;

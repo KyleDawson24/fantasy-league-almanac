@@ -69,7 +69,7 @@ test fails the build until the migration is run, so it announces itself.
   ESPN's Matchup History moves to the end of the book in the same pass.
 - **Two Halls on the head-to-head book** (MLB-164): a career Hall of
   Shame split by production type, plus the futility block both books now
-  share, with the records tabs put in lockstep across platforms.
+  share, with the Halls put in lockstep across platforms.
 - **[QUICKSTART.md](QUICKSTART.md)**, an interim on-ramp: the fields to
   fill and the commands to run, one screen, every step linked into
   SETUP.md. It still requires a Snowflake account and says so at the top.

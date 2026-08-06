@@ -25,7 +25,7 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 
-# Legacy research scripts — local-only, not tracked. The tests/ dir at
+# Legacy research scripts -- local-only, not tracked. The tests/ dir at
 # repo root IS tracked; pytest discovers it via pytest.ini.
 archive/research/
 extract/debug_stats_keys.py
@@ -146,6 +146,21 @@ league-tactical-research/
 /DOCUMENTATION_GUIDE.md
 /DBT EXPLORATORY SWEEP.md
 /v*.* Refactor Brief.md
+# CLAUDE.md is the maintainer's working agreement with his Claude Code
+# sessions -- house rules, standing corrections, the false alarms worth
+# not re-raising. Internal-facing AND personal, which is what separates it
+# from RELEASING.md: a release checklist is project process a stranger can
+# read as discipline, this is a record of how one person works with a
+# tool. Untracked at the 2.0.0 cut.
+#
+# The file STAYS ON DISK and keeps working: Claude Code reads it from the
+# checkout, not from git, so nothing about the house rules changes.
+#
+# History is deliberately NOT rewritten. Measured rather than assumed: its
+# history carries no sensitive strings, and the public timeline already
+# has AI co-author trailers in other commits -- so a rewrite would hide
+# nothing while force-pushing days before launch. Fix-forward stands.
+/CLAUDE.md
 
 # Obsidian vault config -- editor state, both vault roots.
 .obsidian/

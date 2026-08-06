@@ -189,14 +189,14 @@ round every displayed value at source.
 
 ## Testing
 
-543 dbt data tests (532 generic + 11 singular) plus source-freshness
+544 dbt data tests (532 generic + 12 singular) plus source-freshness
 contracts:
 
 - **Generic tests** (532) — every model carries a
   `dbt_utils.unique_combination_of_columns` grain test; keys and
   partitions carry `not_null` / `accepted_values`; staging FKs into the
   seed catalog carry `relationships`.
-- **Singular tests** (11, in `dbt_league/tests/`) — cross-model
+- **Singular tests** (12, in `dbt_league/tests/`) — cross-model
   invariants that used to be run-when-you-remember analyses, now
   enforced on every build: the season-fact-vs-weekly-rollup fidelity
   check (grain completeness both directions + points within the

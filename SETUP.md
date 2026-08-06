@@ -472,7 +472,7 @@ dbt deps                              # Install dbt_utils package (first
                                       # run only; idempotent)
 dbt seed                              # Load the 18 seed CSVs -- 5 reference
                                       # + 13 from league_config (section 7)
-dbt build                             # Build 74 models + run 543 tests
+dbt build                             # Build 74 models + run 544 tests
 
 cd ..
 python output/generate_summary.py     # Weekly recap BBCode
@@ -559,7 +559,7 @@ nothing in it should be a reflex.
 pytest tests/
 ```
 
-Expected on a fresh clone: **402 passed, 24 deselected**. The
+Expected on a fresh clone: **515 passed, 24 deselected**. The
 warehouse-marked tests are deselected by default via `pytest.ini`; no
 credentials are involved and nothing is written. These counts drift
 between releases -- `pytest tests/ -q` is the truth.

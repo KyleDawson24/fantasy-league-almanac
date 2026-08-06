@@ -201,7 +201,7 @@ v1.x is polish on the current architecture: a player-entity layer (`dim_player` 
 
 **Just here to look?** The screenshots above and the [hosted dbt catalog](https://kyledawson24.github.io/fantasy-league-almanac/) cover the design; [docs/user-guide/](docs/user-guide/) covers how to read the almanac itself.
 
-**Want to run it?** Three things are true here, and they are easy to hear as one, so they are stated apart.
+**Want to run it?** [QUICKSTART.md](QUICKSTART.md) is the short path: the fields to fill and the commands to run, one screen, with every step linked into SETUP.md. Read the three notes below first, because they set expectations that the quickstart then assumes.
 
 - **The engine port has landed.** The transform layer builds on DuckDB as well as Snowflake: engine-specific SQL sits behind adapter-dispatch macros, and the output layer can point at either. That is done and exercised locally, not planned.
 - **`tools/demo.sh` is a build-and-render wrapper, not a demo you can run from a clean clone.** It builds the chain and renders the almanac off the tracked demo fixture in its own local warehouse, with no Snowflake account and no Google credentials -- but it does not land raw data and will not invent any, so on a clone that has never run an extract it says so and stops. It is maintainer scaffolding until the packaged sample exists.
@@ -215,9 +215,9 @@ The portability spike that sized the transform-layer port, including the traps i
 
 ## What this demonstrates
 
-The current shape of the transform layer: **74 dbt models** (32 views, 39 tables, 3 incremental), **18 seeds**, **543 data tests**, **22 sources**, and **4 declared exposures**. These counts are regenerated from the parsed manifest at each release cut; if you are reading them mid-cycle, `dbt parse` and the manifest are the truth.
+The current shape of the transform layer: **74 dbt models** (32 views, 39 tables, 3 incremental), **18 seeds**, **544 data tests**, **22 sources**, and **4 declared exposures**. These counts are regenerated from the parsed manifest at each release cut; if you are reading them mid-cycle, `dbt parse` and the manifest are the truth.
 
-Most of that needs a warehouse to exercise, but not all of it: with no account and no credentials, `pytest tests/` runs **402 tests green** (24 warehouse-marked tests deselect, and the tests that need private regression corpora skip rather than fail), and `dbt deps && dbt parse` compiles the project. Counts drift between releases; `pytest tests/ -q` is the truth.
+Most of that needs a warehouse to exercise, but not all of it: with no account and no credentials, `pytest tests/` runs **515 tests green** (24 warehouse-marked tests deselect, and the tests that need private regression corpora skip rather than fail), and `dbt deps && dbt parse` compiles the project. Counts drift between releases; `pytest tests/ -q` is the truth.
 
 - **Modeling that survived a second implementation.** Wide convergence facts at consumer grain; a symmetric active/inactive split ("active is fantasy reality, inactive is MLB reality") that is what makes wasted-production analysis possible at all; a seed-driven UNPIVOT mart where adding a tracked stat is a CSV row rather than a five-file SQL change.
 - **Reproducibility.** Floating-point sums are not associative, and SQL engines do not promise summation order, so rebuilding with no code change could move a rendered cell by one, and oh boy it often did. Sums now run in exact decimal with pinned tie-breaks, and a byte-diff harness pins a known week so any drift fails loudly.
@@ -247,8 +247,8 @@ Most of that needs a warehouse to exercise, but not all of it: with no account a
 
 - **v1.6.0** -- current, 2026-07-30. The pre-port anchor release: the Points Glossary settles on the Total-Points lenses, Advanced Standings moves its era and scope text into the section banners, and a re-render hygiene gap that had been quietly layering each render over the last one is closed across every ESPN writer. Underneath, a determinism sweep pins every row-selection tie so no database engine gets to choose a value -- groundwork for the DuckDB port, and the last stable point before it.
 - **v1.5.1** -- 2026-07-25. A correctness pass on the CBS record book: fixed non-deterministic rebuilds, a silent transaction-capture gap (~408 rows dropped across 26 seasons of history), records that were rounded twice, and player identity that gave up whenever a name had two candidates. Patch, not minor -- everything in it corrects an existing surface rather than adding one.
-- **v1.5.0** - 2026-07-21. The multi-league release: a league registry and a `league_key` re-grain of every layer, and the CBS points league (2001-2026) ships end to end through the same tab builders as ESPN. Advanced Standings, Trades, Baseball Reference links, and a reworked Draft Recap land on the ESPN side in the same release.
-- **v1.2.0** - 2026-05-30. Home became a navigation-hub dashboard, and a net-new Draft Recap tab (draft board plus draft-value analysis) landed. (1.3 and 1.4 were internal working labels during an unreleased stretch, skipped deliberately to keep the docs unambiguous.)
+- **v1.5.0** -- 2026-07-21. The multi-league release: a league registry and a `league_key` re-grain of every layer, and the CBS points league (2001-2026) ships end to end through the same tab builders as ESPN. Advanced Standings, Trades, Baseball Reference links, and a reworked Draft Recap land on the ESPN side in the same release.
+- **v1.2.0** -- 2026-05-30. Home became a navigation-hub dashboard, and a net-new Draft Recap tab (draft board plus draft-value analysis) landed. (1.3 and 1.4 were internal working labels during an unreleased stretch, skipped deliberately to keep the docs unambiguous.)
 - **v1.0.0 - v1.1.2** -- the original single-league ESPN foundation: the weekly BBCode recap, the all time records report, and the first Google Sheets almanac. Full per-release history in [CHANGELOG.md](CHANGELOG.md).
 - **License**: MIT (see [LICENSE](LICENSE)).
 - **Built with**: dbt 1.11 · Snowflake · Python 3.13 · `espn-api` wrapper · `gspread`.

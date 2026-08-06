@@ -151,7 +151,7 @@ league-tactical-research/
 # not re-raising. Internal-facing AND personal, which is what separates it
 # from RELEASING.md: a release checklist is project process a stranger can
 # read as discipline, this is a record of how one person works with a
-# tool. Untracked at the 2.0.0 cut.
+# tool. Untracked at the 1.7.0 cut.
 #
 # The file STAYS ON DISK and keeps working: Claude Code reads it from the
 # checkout, not from git, so nothing about the house rules changes.

@@ -135,6 +135,8 @@ Logan Gilbert: 29.6, Nathan Eovaldi: 25.6, Rico Garcia: 20.7
 
 **An all-time records report**, and **a multi-tab league almanac in Google Sheets**: Home, Records, Advanced Standings, Draft Recap, a matchup history, a trade board, and one page per team. How to read it is documented in the [user guide](docs/user-guide/).
 
+Browse a real rendered almanac: the [H2H league sample](https://docs.google.com/spreadsheets/d/1gj4Lfp098asXtCRHmTzM6gWhzgfZiQ9urUMQ3oPqJzU) and the [points league sample](https://docs.google.com/spreadsheets/d/1mZeqeIQZeIFjs5Kj3LUwQcWU0pBh03sBep8RKwXJVo8), both read-only. These are copies of the real books with owner and franchise identities swapped for the same twins the demo fixture uses; the player names, the stat lines and every number in them are real.
+
 A few of its tabs:
 
 ![Firefly Lake Vandals Team Tab](docs/img/cbs-team-tab-flv.png)

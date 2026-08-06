@@ -1,122 +1,103 @@
 # Eligibility, lineups, and two-way players
 
-Status: **DRAFT** -- not yet published.
+This page documents how eligibility, roster slots, and two-way players are handled in the two almanacs this project currently publishes.
 
-This page explains which positions a player can fill, how lineup slots
-work in each league, and what happens to players who both hit and pitch.
+These behaviors are not consequences of head-to-head versus season-points scoring. They come from each league's rules, the way ESPN and CBS represent those rules, and the historical data each platform makes available.
+
+For a new league, the platform's eligibility and roster configuration are the starting point. Historical eligibility is reconstructed only when the platform does not preserve it and the league rule can be applied from dated evidence.
 
 ## Position eligibility
 
-**In the head-to-head league, eligibility is handed to us.** The platform
-publishes the full list of slots each player can fill, so a first
-baseman already arrives listed as eligible at the corner-infield and
-utility slots too. Nothing is inferred.
+**For our published ESPN league, ESPN supplies eligibility directly.**
+Its feed includes the full list of slots each player can fill, so a first baseman already arrives listed as eligible at corner infield and utility too. The almanac does not infer additional positions. This eligibility is stamped on a daily level; a player may show as eligible at SS for the first 20 games of the season, and then show SS/2B from the 21st onwards.
 
-**In the points league, eligibility has to be rebuilt**, because the
-platform serves only today's answer and the almanac needs every past
-season's. The league's own rule is applied literally:
+ESPN, as of writing, declares each player's primary position and the almanac simply reads that stated value.
 
-> A player is eligible at their primary position, plus any position
-> they played 20 games at last year or 10 games at this year.
+**For the published CBS league, only current eligibility is available directly.**
+The almanac therefore rebuilds historical eligibility using that league's rule:
 
-Three details make the reconstruction faithful rather than approximate:
+> A player is eligible at their primary position, plus any position at which they played 20 games last year or 10 games this year.
 
-- **Eligibility is dated, not seasonal.** The 10-games-this-year clause
-  opens on the day the tenth game is played, not retroactively for the
-  whole season. Points earned before that day do not count toward the
-  new position.
-- **Games played at each position** are taken as the larger of two
-  independent counts -- a season-level fielding summary and a game-by-game
-  positional record -- so neither source silently under-reports.
-- **Primary position is estimated, and this is the one soft spot.** The
-  platform serves no historical record of what it considered a player's
-  primary position, so the pipeline derives it as the position they
-  played most the prior season. It is graded against present-day captures
-  rather than assumed correct.
+Three details matter to that reconstruction:
 
-The designated-hitter slot is deliberately *not* handled as an earned
-eligibility. It is a property of the slot -- anyone who hits can fill it
--- rather than something a player qualifies for, so it is applied when
-lineups are built instead of being written into each player's
-eligibility windows.
+- **Eligibility is dated, not seasonal.**
+  The 10-games-this-year clause opens on the day the tenth game is played, not retroactively for the whole season. Earlier production cannot be assigned to the new position on date-aware lineup views.
+- **Games played at each position are taken as the larger of two independent counts**
+
+  1. A season-level fielding summary.
+  2. A game-by-game positional record.
+
+  This reduces the chance that an omission in either source suppresses a position the player earned.
+- **Primary position is estimated in CBS.**
+  The CBS history available to the project does not preserve what the platform considered a player's primary position, so the pipeline derives it as the position they played most in the prior season. It is graded against present-day captures rather than assumed correct.
+
+In this CBS league, the designated-hitter slot is deliberately *not* handled as earned eligibility. Anyone who hits can fill it, so that rule is applied when lineups are built rather than written into each player's eligibility history. I believe that is a platform-wide rule, but have not yet tested on additional CBS leagues.
 
 ## Lineup slots
 
-The head-to-head league reads its slot configuration from the platform,
-including how many of each slot exist. Where a slot repeats, the almanac
-labels them in order (OF 1, OF 2, and so on) rather than showing three
-identical rows.
+The published ESPN league reads its slot configuration from ESPN, including how many of each slot exist. Where a slot repeats, the almanac labels the instances in order (OF 1, OF 2, and so on) rather than showing three identical rows. (Most often, those are ordered by descending Active Points within whatever scope is being viewed.)
 
-The points league's active shape is fixed by its own rules: catcher,
-first, second, third, short, three outfield, a designated hitter, one
-utility, and nine pitchers -- nineteen active slots, plus eleven reserve
-slots.
+The published CBS league has a different configured shape: catcher, first, second, third, short, three outfield, a designated hitter, one utility, and nine pitchers -- nineteen active slots, plus eleven reserve slots.
 
-The two leagues use different names for the utility slot, which is worth
-knowing if you compare tabs side by side.
+These slots and shapes are read from the platforms' respective APIs. New-league configurations are designed to flow through automatically, but that behavior has not yet been exercised against additional leagues.
 
 ## The slot-validity rule
 
 This is the rule most likely to explain a number you think is wrong.
 
-**Stats only count from a slot of the matching kind.** A hitter's hitting
-line counts when he is in a hitting slot; a pitcher's pitching line
-counts when he is in a pitching slot. If someone is slotted somewhere
-that does not match the kind of production they generated, that
-production does not count toward the team.
+**Hitting and pitching stats count only from a slot of the matching kind.**
+Hitting production counts from a hitting slot, and pitching production counts from a pitching slot. If a player generates production of the other kind, it does not count toward the team's calculated score. Fielding stats are handled separately rather than classified as hitting or pitching.
 
-This matches how the platform itself scores teams, which is the reason it
-is the default rather than a choice.
+For the published ESPN league, this rule was verified by reconciling the calculated totals to ESPN's team scoring. In the CBS history it is applied to the reconstructed lineup state under that league's slot and eligibility rules.
 
-One deliberate exception: **bench, injured-list and unowned rows skip the
-filter entirely.** Those lenses exist to measure production a team did
-*not* get, so they capture the full stat line rather than a slot-filtered
-one.
+One deliberate exception: **bench, injured-list and unowned rows skip the filter entirely.** Those lenses exist to measure production a team did *not* get, so they capture the full stat line rather than a slot-filtered one.
+
+## How the All-League Teams use these rules
+
+When constructing the "All-League Teams," the picker optimizes according to positional eligibility AND league-specific roster restrictions. Most obviously, this means those teams take the shape of a roster in the league's current season. More subtly:
+
+1. **Roster limits are observed.**
+   - E.g., our sample ESPN league has a maximum of 1 "Primary" DH per team. You should not see a DH/1B in the Utility slot and then another at 1B, although you may see a 1B/DH and a C/DH on the same lineup.
+2. **Only points earned AFTER earning eligibility at a position are deemed eligible for a given slot.**
+   - A pure DH who scores 1000 points and earns 1B eligibility after the last game of the season will count as having 0 1B-eligible points.
+   - Where that player's stats are detailed, though, the default is to display all active stats.
 
 ## Two-way players
 
-A player who both hits and pitches -- an Ohtani-type -- breaks the
-assumption that one player is one thing. The points league's own platform
-solves this by splitting such a player into **two separate entries**, a
-batter card and a pitcher card, both pointing at the same real person.
-The pipeline follows that convention rather than fighting it.
+This division becomes especially impactful regarding...
 
-What that means in practice:
+A player who both hits and pitches breaks the usual assumption that one fantasy player produces only one kind of stat. ESPN and CBS represent that case differently in the two published leagues.
 
-- **The two halves are independent.** They can be on different rosters at
-  the same time, and they are rostered, benched and started separately.
-  In the record book and on leaderboards, they appear as two players.
-- **Each half sees only its own kind of production.** Hitting game logs
-  feed the batter entry, pitching game logs feed the pitcher entry. A
-  player who is not split -- an ordinary pitcher who occasionally batted
-  in the pre-universal-DH era -- keeps a single entry and takes both.
-- **Eligibility follows the same split.** The batter half never shows a
-  pitching slot; the pitcher half shows only pitching. This mirrors how
-  the platform's own player cards behave.
-- **The handling is data-driven, not a hard-coded list of names.** Nothing
-  in the pipeline names a specific player; a new two-way player is
-  handled by the same mechanism automatically.
+Theoretically a player could produce both from both types of slot -- an obscure fella named Shohei Ohtani being the most likely culprit. In our sample leagues, however, such players are divided differently -- in ESPN Shohei is treated as one player, but can only be slotted as a hitter or pitcher in a given day. In CBS, he is treated as two separate players -- a hitter Ohtani and a pitcher Ohtani can be on different rosters. In either case, his production is tied to the slot he occupies.
+
+**CBS uses two fantasy assets.** Its batter card and pitcher card point to the same real person but remain independently rosterable entries. The almanac preserves that platform convention:
+
+- The two assets can belong to different fantasy teams and can be rostered, benched, and started separately.
+- Hitting game logs feed the batter asset; pitching game logs feed the pitcher asset. Their eligibility is separated the same way.
+- In CBS records and leaderboards, they appear as two players, matching the platform.
+- The split is identified from the data rather than from a hard-coded list of names.
+
+**ESPN uses one fantasy asset** but only allows that asset to occupy a single lineup slot per calendar day, and adheres to the slot-validity rules in the prior section: a hitting slot only counts hitting production, a pitching slot only counts pitching production.
+A two-way player's deployed lineup slot determines which kind of production counts toward the team's calculated score on that day. The almanac retains hitting and pitching components separately so it can report each without pretending that the player occupied two slots at once.
+
+On a team's own page, the two disciplines are shown against their own categories -- hitting points at a hitting slot and pitching points at a pitching slot -- rather than repeating one combined total in both rows. (In hybrid roles like bench slots, this can get wonky, but has not yet reared its head in either of our sample leagues.)
+
+### A relevant known ESPN issue
+
+ESPN's own API often briefly bungles this rule. On days that a player both hits and pitches, his stats will often count as if he occupied both types of slots for roughly 24 hours. I am yet to observe it not self-correct relatively quickly but, at times, if you run the extract right after a game has finished you will see inaccurate stats for the owners of a 2-way player that did actually hit and pitch in the same game that day.
 
 ### The one thing the optimal lineups cannot see
 
-On the computed best-lineup boards, a two-way player may be selected
-**twice -- but only once as a hitter and once as a pitcher.** Being
-picked twice in the same category (say, at both first base and DH) would
-count the same production twice, so it is blocked.
+On the computed best-lineup boards, ESPN's unified two-way asset may be selected **twice -- but only once as a hitter and once as a pitcher.** Those selections use separate pools of production. A second selection in the same category, such as first base and designated hitter, would count the same production twice and is blocked. CBS's two assets already enter the selection independently, each in its own category.
 
-There is a real limitation underneath this, and it is worth stating
-plainly rather than glossing:
+Sometimes, this means a player -- again most likely known rascal Shohei Ohtani -- will appear on an All-League lineup as both a pitcher and hitter because he produced points in both slot types over the course of the observed timespan, even though the platform does not allow him to do so on any given day.
 
-> If a player genuinely both pitched and hit on the same day but was
-> slotted in only one of those roles, **only the slotted half counts.**
+There is a real limitation underneath this:
 
-That follows directly from the slot-validity rule above -- the off-slot
-production was already zeroed before the lineup board ever sees it, and
-the board does not recover it. So a real two-way day is under-credited on
-those boards by design. This is a known, accepted trade-off rather than an
-oversight; changing it would mean changing what "counted for your team"
-means everywhere else.
+> In the published ESPN league, if a player both pitched and hit on the
+> same day but occupied only one of those roles, **only the matching
+> discipline counts toward the calculated team score.**
 
-On a team's own page, the two halves are shown against their own
-categories -- hitting points at the hitting slot, pitching points at the
-pitching slot -- rather than repeating one combined total in both rows.
+That follows directly from the slot-validity rule above and is "correct" -- the off-slot production is zeroed out before the lineup board ever sees it, assuming that our extract ran after ESPN's feed had settled (see [the known ESPN timing issue](#a-relevant-known-espn-issue)). The board does not recover that production. It therefore reflects what could count for that fantasy team under the league's slot rules, not every MLB stat the player produced that day. This is an ESPN-league behavior, not a general limitation imposed on every two-way-player model.
+
+The handling is designed but not yet proven against additional platform representations. I expect to encounter tripwires as we ingest a variety of leagues, and feedback from early adopters will be essential in making our coverage comprehensive.

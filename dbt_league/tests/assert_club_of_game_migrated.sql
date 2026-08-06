@@ -82,7 +82,7 @@ select
     r.lineup_slot,
     case
         when s.attributed_rows = 0
-            then 'RAW NOT MIGRATED for this period -- run: python extract/extract.py --backfill-club-of-game --year <season> --matchup-period <n>'
+            then 'RAW NOT MIGRATED for this period -- run: python extract/extract.py --backfill-club-of-game --all --year <season>'
         else 'club evidence missing for a producing rostered player-day'
     end as failure_reason
 from rostered r

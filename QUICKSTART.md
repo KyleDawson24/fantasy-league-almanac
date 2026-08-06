@@ -8,6 +8,13 @@ This is the short path. [SETUP.md](SETUP.md) is the long one, and every
 step here links into it at the section that explains the step properly.
 When the two disagree, SETUP.md is right.
 
+**This is the v1.7 path, and it is interim.** It asks you to create a
+Snowflake account, because today that is genuinely required. v2.0 exists
+to delete that requirement: its goal is that a stranger with an ESPN or
+CBS league enters some credentials, runs some things, and gets an almanac
+their league can open, with no warehouse accounts at all. Until then, the
+honest instructions are the ones below.
+
 ## What you need
 
 - **Python 3.13.x** and **git**.

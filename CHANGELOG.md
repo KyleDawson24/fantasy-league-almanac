@@ -12,10 +12,24 @@ them by filename alone.)
 
 ## [Unreleased]
 
-_In progress: the DuckDB engine port (MLB-10), so the project can run
-without a cloud warehouse. Release notes are built from the commit range
+_Next up is v2.0, whose goal is that a stranger with an ESPN or CBS
+league enters some credentials, runs some things, and gets an almanac
+their league can open -- a workbook in their own Drive, not files on
+disk. ESPN end to end is the gate; CBS is a first-class goal being
+priced. The charter is MLB-210; the keystones are MLB-208 (extract has
+to write RAW locally, which it cannot yet) and MLB-209 (the journey ends
+in a shareable workbook). Release notes are built from the commit range
 at each cut rather than accumulated here, so this section staying short
 is not a sign the repository is idle._
+
+## [1.7.0] - 2026-08-05
+
+The first public release. 129 commits. Full story in
+[RELEASE NOTES v1.7.0.md](RELEASE%20NOTES%20v1.7.0.md).
+
+Minor rather than major: an additive wave plus one gated migration. The
+club-attribution flip is the only thing that moves rendered values, and a
+test fails the build until the migration is run, so it announces itself.
 
 ### Upgrading
 
@@ -32,6 +46,35 @@ is not a sign the repository is idle._
   fails the build until the backfill has run and names the command in the
   failure; the FA rows ESPN no longer serves stay exempt, since those are
   deliberately null rather than missing. See SETUP.md §8.
+
+  Run it once per already-loaded season:
+  `python extract/extract.py --backfill-club-of-game --all --year 2025`.
+  `--all` is load-bearing: without it the run covers only periods that
+  ended in the last 21 days, which for a finished season is none of them,
+  so it would exit quietly having changed nothing.
+
+### Added
+
+- **The DuckDB engine port** (MLB-10). The transform layer builds on
+  DuckDB as well as Snowflake: engine-specific SQL sits behind
+  adapter-dispatch macros, the output layer reads either, and the full
+  74-model chain builds in one run at a 6 GB memory cap with engine
+  threads pinned. Read precisely: nothing lands RAW anywhere but
+  Snowflake yet, so this is "build and render locally", not "no warehouse
+  needed". The port turned up a 32-bit `FLOAT` that silently narrowed
+  values, an engine default that would have emptied the record book
+  without erroring, and a decimal division only one engine rounded.
+- **CBS Season History** on the awarded lens (MLB-163), rebuilt in the
+  points-league format and carrying Matchup History's highlighting rules.
+  ESPN's Matchup History moves to the end of the book in the same pass.
+- **Two Halls on the head-to-head book** (MLB-164): a career Hall of
+  Shame split by production type, plus the futility block both books now
+  share, with the records tabs put in lockstep across platforms.
+- **[QUICKSTART.md](QUICKSTART.md)**, an interim on-ramp: the fields to
+  fill and the commands to run, one screen, every step linked into
+  SETUP.md. It still requires a Snowflake account and says so at the top.
+  `.env.example` now names, per field, the exact SETUP.md section where
+  that field's answer lives.
 
 ### Changed
 
@@ -54,10 +97,30 @@ is not a sign the repository is idle._
   withheld columns into public config. Tested rather than assumed: a
   six-column file loads fine against a four-column map, so the keys were
   buying nothing. The template is now the schema.
+- **Production is credited to the club of the GAME, not the club on the
+  player record** (MLB-159 Exit 1, MLB-129). ESPN's player record carries
+  only a player's current club, so a season loaded after the fact filed
+  anyone traded mid-season under wherever they finished. Measured against
+  2025: 22.25% of the roster-affinity chart's weight was filed under the
+  wrong club and a further 11.7% could not be placed at all. Each
+  per-scoring-period split already carried the club the player was
+  actually with, and the chart reads that now, so the Unattributed band
+  measures 0.0 across 2025, 2026 and all-time and has been retired from
+  the rendered surfaces rather than kept as an empty row. The measurement
+  and the fix both stay in Known Data Issues.
 - **The demo builds its own warehouse and refuses the real one.**
   Rendering reads marts, not seeds, so a fixture pointed at marts built
-  from real config would still have produced a real-name book -- which is
-  the sample workbook published read-only.
+  from real config would still have produced a real-name book.
+- **The two Google Sheets exposures no longer publish a url.** Both
+  described the link as a read-only sample workbook, but the id resolved
+  to the maintainer's own production sheet, so the "sample" was the live
+  league book. Removed from `exposures.yml` and from the compiled
+  catalog; a genuinely anonymized sample is separate work.
+- **`CLAUDE.md` is untracked**, and the reader-facing docs were swept from
+  em-dashes to the house `--` voice. `dbt_project.yml`'s `version` is
+  synced to the release for the first time, and RELEASING.md gained a
+  checklist line so it cannot silently drift again: it had sat at `1.0.2`
+  through six releases.
 - **The repository root is curated** (MLB-154). It held 40 tracked files,
   28 of which were session exhaust -- handoffs, phase journals, progress
   notes and three variants of one release-notes file -- burying the six
@@ -70,6 +133,43 @@ is not a sign the repository is idle._
 - `RELEASING.md` carries the **publish-the-GitHub-Release step** it had
   been missing, which is how v1.6.0 was tagged and published with no
   notes file ever landing in the repo. That file now exists too.
+
+### Fixed
+
+A cold review, a surface scrub and a fail-closed hardening batch, in that
+order. The batch fixed six defects that were all the same shape: a
+question that could not be answered being read as the reassuring answer.
+
+- **Demo isolation was theater** (MLB-198). `demo.sh` guarded a shell
+  variable it never exported, while dbt and the output layer read the env
+  var and defaulted to the real warehouse -- so with the variable unset,
+  which is every clone, the script announced the demo path and then
+  seeded and rendered somewhere else. The cleared path is exported now,
+  paths are compared canonically, and the demo warehouse carries a
+  provenance stamp so an existing file is trusted only if this script
+  built it.
+- **The settled-history guard failed open** (MLB-199). It caught every
+  database error as "no table, nothing to protect", so a legacy table
+  missing `league_key` bypassed it immediately before the loader deleted
+  settled rows. Existence is asked of the catalog now; anything else
+  refuses with the error surfaced.
+- **A failed API fetch was indistinguishable from an empty one**
+  (MLB-199). Encoded as `{}`, the same value a genuine no-games day
+  produces, which on the backfill path would have nulled every stored
+  club label and committed it. Failure has its own type now, no caller
+  writes when it is raised, and an existing label is never overwritten
+  with null.
+- **The points-league preview crashed** (MLB-201) on a run with no dev
+  Sheet and no flags, which is a stranger's first render.
+- **The screenshot anonymizer was dead** (MLB-202) since the seed split
+  moved its inputs, and it paired rows by position rather than by key.
+- **The PII guard could pass without looking** (MLB-203). On a clean
+  clone it warned, swept nothing, and exited 0, so "the guard passed" and
+  "nothing was checked" were the same exit code. Strict by default now,
+  and it matches a whole identity family rather than the single spelling
+  that happened to be stored.
+
+The suite is 515 pure tests and 544 dbt data tests.
 
 ## [1.6.0] - 2026-07-30
 

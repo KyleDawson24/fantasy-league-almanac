@@ -517,9 +517,19 @@ pass, not by the transform, so an existing warehouse has nothing for the
 models to read. Run it once per already-loaded season:
 
 ```bash
-python extract/extract.py --backfill-club-of-game --year 2025
-python extract/extract.py --backfill-club-of-game --year 2026
+python extract/extract.py --backfill-club-of-game --all --year 2025
+python extract/extract.py --backfill-club-of-game --all --year 2026
 ```
+
+**`--all` is load-bearing.** Without it the run backfills only the
+periods that ended in the last 21 days, which for a season that is
+already over is none of them: it would finish quietly, change nothing,
+and leave the build failing with no clue why. `--all` means every
+completed period of that season.
+
+To backfill specific weeks instead, pass them as positional arguments
+(`... --backfill-club-of-game --year 2025 7 8 9`); there is no
+`--matchup-period` flag.
 
 The backfill only ever ADDS a key. It updates rows in place, deletes
 nothing, and leaves `loaded_at` alone, so it is safe on settled history

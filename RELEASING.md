@@ -45,6 +45,11 @@ lands), not on a calendar. Hard backstop: if `[Unreleased]` exceeds
 - [ ] Version rationale sanity check: MAJOR = breaking/platform-shift
       milestone, MINOR = additive features (ESPN byte-neutral), PATCH =
       fixes only.
+- [ ] **Sync `dbt_league/dbt_project.yml`'s `version:` to the release
+      number.** It is not derived from anything, so nothing catches it
+      drifting: it sat at `1.0.2` through six releases before the v1.7.0
+      cut noticed. Every number in this repo is either true or
+      explained, and this one is the cheapest to keep true.
 - [ ] Write `RELEASE NOTES vX.Y.Z.md` at the repo root, and move the
       previous release's notes file into `docs/releases/`. **The root
       carries exactly one notes file -- the current release.** Build it

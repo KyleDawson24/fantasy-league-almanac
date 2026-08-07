@@ -49,9 +49,14 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT" || exit 1
 
-# A maintainer's venv path is not a default anybody else can use. Fall back to
-# whatever `dbt` is on PATH, which is what a fresh clone will have.
-DBT_BIN="${DBT_BIN:-C:/Users/kyled/.venvs/mlb10-duckdb/Scripts/dbt.exe}"
+# A maintainer's venv path is not a default anybody else can use, so the
+# default IS whatever `dbt` is on PATH -- which is what a fresh clone has,
+# now that requirements.txt actually carries the DuckDB adapter (MLB-215).
+# It did not until then, which is why this line used to name a personal
+# venv: there was nowhere else the adapter existed. Set DBT_BIN to use a
+# different interpreter's dbt; an override that does not resolve still
+# falls back to PATH rather than failing further down.
+DBT_BIN="${DBT_BIN:-dbt}"
 command -v "$DBT_BIN" >/dev/null 2>&1 || DBT_BIN="dbt"
 PROJECT_DIR="${PROJECT_DIR:-dbt_league}"
 PROFILES_DIR="${PROFILES_DIR:-dbt_league/profiles}"

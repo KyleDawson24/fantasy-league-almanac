@@ -43,6 +43,10 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
+That takes about a minute, and it installs both dbt adapters --
+Snowflake and DuckDB -- so there is no second environment to create
+later. It does not remove the Snowflake requirement above.
+
 ## 2. Fill in your `.env`
 
 ```bash

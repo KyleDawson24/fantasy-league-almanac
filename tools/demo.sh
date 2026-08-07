@@ -70,13 +70,18 @@ FORCE_BUILD="${FORCE_BUILD:-0}"
 # seed-paths from there).
 DEMO_LEAGUE_CONFIG='../demo/league_config'
 
-# A maintainer's venv path is not a default anybody else can use. Fall back to
-# whatever `dbt` is on PATH, which is what a fresh clone will have.
-DBT_BIN="${DBT_BIN:-C:/Users/kyled/.venvs/mlb10-duckdb/Scripts/dbt.exe}"
+# A maintainer's venv path is not a default anybody else can use, so the
+# default IS whatever `dbt` is on PATH -- which is what a fresh clone has,
+# now that requirements.txt actually carries the DuckDB adapter (MLB-215).
+DBT_BIN="${DBT_BIN:-dbt}"
 command -v "$DBT_BIN" >/dev/null 2>&1 || DBT_BIN="dbt"
 # The interpreter that can see duckdb sits beside the dbt entry point, the
-# same way tools/duckdb_run.sh finds it.
-PY_BIN="${PY_BIN:-$(dirname "$DBT_BIN")/python.exe}"
+# same way tools/duckdb_run.sh finds it. Resolve through `command -v` before
+# taking the dirname: with the bare-`dbt` default, dirname alone yields "."
+# and the [ -x ] test then falls through to whatever `python` is first on
+# PATH -- which is NOT necessarily the interpreter holding duckdb, and this
+# script's PY_BIN has to import it.
+PY_BIN="${PY_BIN:-$(dirname "$(command -v "$DBT_BIN" 2>/dev/null || echo "$DBT_BIN")")/python.exe}"
 [ -x "$PY_BIN" ] || PY_BIN="python"
 
 say() { printf '[demo] %s\n' "$*"; }

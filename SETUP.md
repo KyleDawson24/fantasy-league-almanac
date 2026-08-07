@@ -47,8 +47,17 @@ pip install -r requirements.txt
 ```
 
 `requirements.txt` is a real pinned freeze; `pip install` should
-complete in 30-60 seconds with no resolution drama. If you hit any
-"can't find package" errors, double-check you're on Python 3.13.
+complete in about a minute with no resolution drama -- measured at 64
+seconds into an empty pip cache, most of it spent on two large binary
+wheels, DuckDB and pyarrow. If you hit any "can't find package"
+errors, double-check you're on Python 3.13.
+
+**One install covers both engines.** The freeze carries `dbt-snowflake`
+and `dbt-duckdb` side by side, so the same venv runs the Snowflake
+target this guide sets up next *and* the local DuckDB target that
+`tools/duckdb_run.sh` and `tools/demo.sh` build against. There is no
+second environment to create: those scripts call whatever `dbt` is on
+your PATH, which is this venv once it is activated.
 
 ---
 

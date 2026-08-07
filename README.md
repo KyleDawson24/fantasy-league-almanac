@@ -215,7 +215,7 @@ Beyond that: the platform half -- Yahoo and Sleeper adapters, to prove the platf
 
 The portability spike that sized the transform-layer port, including the traps it found, is written up in [docs/duckdb-portability-audit.md](docs/duckdb-portability-audit.md).
 
-**What it takes to run.** The full 26-season, 441-team-season, 1.09M-player-game reconstruction builds comfortably on a 16 GB machine, and on the DuckDB target it completes at a **6 GB memory cap, in a single run, with engine threads pinned**. Both of those are where it has been tested -- not guaranteed minimums, and not ceilings. ⟨A "needs N GB free" figure stays bracketed until there is an instrument that can measure it: DuckDB rewrites its profile per query, so a multi-statement run retains only the last query's peak.⟩
+**What it takes to run.** The full 26-season, 441-team-season, 1.09M-player-game reconstruction builds comfortably on a 16 GB machine, and on the DuckDB target it completes at a **6 GB memory cap, in a single run, with engine threads pinned**. Both of those are where it has been tested -- not guaranteed minimums, and not ceilings. Peak resident memory was measured at **5.970-5.980 GiB** at that 6 GB cap: three runs on 2026-08-02, across two execution paths, landing inside a 10 MB span. The engine spends its budget rather than economising, so the durable shape is peak RSS ~= cap + ~0.4 GB -- lower `DBT_DUCKDB_MEMORY_LIMIT` and the peak follows it down, at the cost of more spilling to disk. The full series, its instrument, and the caveats that travel with it are in the [portability audit](docs/duckdb-portability-audit.md#the-peak-rss-series-2026-08-02).
 
 ---
 

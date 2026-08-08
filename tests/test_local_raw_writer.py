@@ -330,6 +330,47 @@ def test_manifest_only_names_tables_whose_parquet_exists(sink):
         assert (sink.parquet_dir / f"{entry['table']}.parquet").exists()
 
 
+def test_unpopulated_contract_tables_are_created_empty(sink, contract):
+    """Absent and empty are different answers, and only one of them builds.
+
+    An ESPN-only local RAW holds 6 of the contract's 23 tables. The MLB-72
+    convergence layer reads CBS staging directly, so with the other 17
+    ABSENT, dim_owner and int_franchise_seasons fail on a missing relation
+    and drag a 27-model skip cone with them. Present-but-empty builds the
+    whole project green. Measured, not assumed.
+    """
+    created = sink.ensure_contract_tables()
+    assert set(created) == set(contract["tables"]), \
+        "a fresh landing area should materialize every contract table"
+
+    for table in contract["tables"]:
+        path = sink.path_for(table)
+        assert path.exists(), f"{table} was not created"
+        assert pq.read_metadata(path).num_rows == 0
+        assert pq.read_schema(path).names == \
+            [c["name"] for c in contract["tables"][table]]
+
+
+def test_ensuring_tables_never_disturbs_existing_data(sink):
+    """It must be safe to call on every run, including over real rows."""
+    sink.write_box_scores(_box_score_records([1, 2], 1), 1, 2026, LEAGUE)
+    created = sink.ensure_contract_tables()
+
+    assert "BOX_SCORES" not in created
+    assert pq.read_table(sink.path_for("BOX_SCORES")).num_rows == 2
+
+
+def test_writing_after_ensuring_appends_to_the_empty_table(sink):
+    """The empty file must be a real typed table the writer can append to,
+    not a placeholder that has to be special-cased later."""
+    sink.ensure_contract_tables()
+    sink.write_box_scores(_box_score_records([1], 1), 1, 2026, LEAGUE)
+
+    table = pq.read_table(sink.path_for("BOX_SCORES"))
+    assert table.num_rows == 1
+    assert table["LEAGUE_KEY"].to_pylist() == [LEAGUE]
+
+
 def test_no_partial_file_survives_a_write(sink):
     """Writes go to .partial and are renamed, so an interrupted run cannot
     leave a half-written file the next run treats as good."""

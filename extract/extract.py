@@ -1578,7 +1578,14 @@ def open_sink(raw_target, parquet_dir=None):
     ESPN.
     """
     if raw_target == "local":
-        yield LocalParquetSink(parquet_dir)
+        sink = LocalParquetSink(parquet_dir)
+        # Before any writes, so the landing area describes the whole contract
+        # rather than only the tables this run happens to touch. An ESPN-only
+        # RAW with the other tables ABSENT does not build -- the convergence
+        # layer reads them and fails on a missing relation; present-and-empty
+        # builds 74/74. See LocalParquetSink.ensure_contract_tables.
+        sink.ensure_contract_tables()
+        yield sink
     else:
         with get_snowflake_connection() as conn:
             yield SnowflakeSink(conn)

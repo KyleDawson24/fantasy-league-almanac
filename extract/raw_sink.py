@@ -312,6 +312,40 @@ class LocalParquetSink:
             {"source": "espn-extract-local", "tables": entries}, indent=2))
         return manifest_path
 
+    def ensure_contract_tables(self):
+        """Give every contract table a parquet file, EMPTY if this extract
+        does not populate it. Returns the tables it created.
+
+        MEASURED, not speculative. An ESPN-only local RAW holds 6 of the
+        contract's 23 tables, and the dbt project does not degrade gracefully
+        to that: the MLB-72 convergence layer reads CBS staging models
+        directly, so `dim_owner` and `int_franchise_seasons` fail on a
+        missing relation and take a 27-model skip cone with them -- 12 of 41
+        selected models built. With the other 17 present but empty, the whole
+        project builds 74/74 green. Absent and empty are very different
+        answers to "does this install have CBS data", and only one of them
+        compiles.
+
+        This is the same move dump_snowflake_raw_to_parquet.py already makes
+        for a genuinely empty Snowflake table -- "still emit a file so the
+        loader's table list is complete and the DuckDB build sees the same
+        relations". Doing it here rather than in load_parquet_to_duckdb.py
+        keeps that proven component untouched: it just loads what the
+        manifest lists, exactly as before.
+        """
+        created = []
+        for table in sorted(self.contract["tables"]):
+            if self.path_for(table).exists():
+                continue
+            self._write(table, self.schema(table).empty_table())
+            created.append(table)
+        if created:
+            self._log(f"  seeded {len(created)} empty RAW table(s) this "
+                      f"extract does not populate, so the DuckDB build sees "
+                      f"the full contract: {', '.join(created)}")
+        self.write_manifest()
+        return created
+
     # -- the settled-history guard's engine half --------------------------
     def loaded_box_score_periods(self, year, league_key):
         """{matchup_period: last loaded_at} for this league + season.

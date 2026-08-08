@@ -20,6 +20,15 @@ Usage:
   py extract/extract.py --settings-only --year 2025  -> league settings for 2025 only
   py extract/extract.py --year 2025 --all --backfill-club-of-game
                                                      -> add club-of-game to 2025 in place
+  py extract/extract.py --raw-target local            -> write RAW as parquet, no warehouse
+
+WHERE RAW LANDS (MLB-208). `--raw-target snowflake` is the default and is
+unchanged. `--raw-target local` writes the parquet + _manifest.json artifacts
+that tools/load_parquet_to_duckdb.py already consumes, so a fresh clone can
+go league-id -> extract -> DuckDB -> render without a warehouse account
+existing anywhere. EXTRACT_RAW_TARGET sets it by environment; the flag wins.
+Both targets share the schedule, the settle window, the refusals and the
+league_key stamp -- only the write differs. See extract/raw_sink.py.
 
 Re-extracting a matchup period that has already been loaded and has settled
 (ended more than LIVE_CAPTURE_WINDOW_DAYS ago) destroys its per-day club
@@ -32,6 +41,7 @@ import csv
 import json
 import os
 import sys
+from contextlib import contextmanager
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -44,6 +54,16 @@ import snowflake.connector
 # config/ namespace package resolves when this runs as a script.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from config.league_registry import LeagueRegistryError, get_league, league_keys
+
+# Sibling import by bare name, which is the house pattern (tests/conftest.py
+# puts output/ on the path for exactly this reason). NOT `from extract.raw_sink
+# import ...`: this file is `extract/extract.py`, so when it runs as a script
+# the name `extract` resolves to THIS MODULE FILE -- a regular module beats a
+# namespace-package directory anywhere on the path -- and the dotted form dies
+# with "'extract' is not a package" while re-executing this file. The explicit
+# insert makes the bare name work when imported as `extract.extract` too.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from raw_sink import LocalParquetSink
 
 
 # ---------------------------------------------------------------------------
@@ -682,7 +702,7 @@ def refuse_unverifiable_guard(exc, year):
     ])
 
 
-def settled_loaded_periods(conn, year, league_key, periods, today=None):
+def settled_loaded_periods(sink, year, league_key, periods, today=None):
     """
     MLB-188 guard. Of `periods`, return the ones a re-extract would damage:
     already loaded, and ended longer than LIVE_CAPTURE_WINDOW_DAYS ago.
@@ -713,6 +733,17 @@ def settled_loaded_periods(conn, year, league_key, periods, today=None):
     The legacy shape is now MIGRATED BEFORE THE DECISION rather than
     stumbled over during it, and existence is asked of the catalog instead
     of inferred from an exception.
+
+    MLB-208 split this in two. The engine-specific half -- "what is already
+    loaded" -- moved behind `sink.loaded_box_score_periods`, so Snowflake asks
+    its catalog and the local sink reads its parquet. The settle/window
+    arithmetic and the refusals stayed HERE, shared, because they are the part
+    that encodes the policy: two sinks with two copies of this reasoning is
+    exactly the drifting-twin shape MLB-175 got bitten by.
+
+    The guard is not warehouse-only and is if anything more load-bearing
+    locally -- a Snowflake-free install has no Time Travel and no `_bak`
+    clone behind the parquet, so the file IS the history.
     """
     today = today or date.today()
     cutoff = today - timedelta(days=LIVE_CAPTURE_WINDOW_DAYS)
@@ -720,39 +751,17 @@ def settled_loaded_periods(conn, year, league_key, periods, today=None):
     _, matchups = load_schedule(year)
     end_by_period = {mp: end for mp, _start, end in matchups}
 
-    cursor = conn.cursor()
     try:
-        if not _table_exists(cursor, "BOX_SCORES"):
-            # Nothing has ever been loaded, so nothing can be overwritten.
-            # The loader creates the table moments from now.
-            return []
-
-        # The documented legacy shape: a pre-registry table with no
-        # league_key. Self-heal it HERE, before the guard query needs the
-        # column, so the upgrade path cannot masquerade as an absent table.
-        if not _table_has_column(cursor, "BOX_SCORES", "LEAGUE_KEY"):
-            print("  [guard] BOX_SCORES predates the league registry; "
-                  "adding league_key before checking settled history.")
-            ensure_league_key_column(cursor, "BOX_SCORES")
-
-        cursor.execute(
-            """
-            SELECT matchup_period, MAX(loaded_at)
-            FROM BOX_SCORES
-            WHERE season_year = %s
-              AND (league_key = %s OR league_key IS NULL)
-            GROUP BY matchup_period
-            """,
-            (year, league_key),
-        )
-        last_loaded = {int(mp): ts for mp, ts in cursor.fetchall()}
-    except snowflake.connector.errors.Error as exc:
-        # Anything else -- permissions, a renamed column, schema drift, a
-        # typo -- means the guard could not be evaluated. Refuse; do not
-        # read an unanswered question as "safe".
+        last_loaded = sink.loaded_box_score_periods(year, league_key)
+    except Exception as exc:
+        # Deliberately broad, and the breadth IS the fix. Permissions, a
+        # renamed column, schema drift, an unreadable parquet, a typo -- any
+        # of them means the guard could not be evaluated, and an unanswered
+        # question must not be read as "safe". The narrow version of this
+        # catch is what MLB-199/W-02 found bypassing protection moments
+        # before the loader deleted settled rows. SystemExit is a
+        # BaseException and so passes through untouched.
         raise SystemExit(refuse_unverifiable_guard(exc, year))
-    finally:
-        cursor.close()
 
     settled = []
     for mp in periods:
@@ -877,9 +886,17 @@ def load_box_scores_to_snowflake(conn, records, matchup_period, year, league_key
         cursor.close()
 
 
-def extract_matchup_period(conn, league, matchup_period, year, league_key):
+def extract_matchup_period(sink, league, matchup_period, year, league_key):
     """
-    Extract all scoring periods for a matchup period and load to Snowflake.
+    Extract all scoring periods for a matchup period and load them to the sink.
+
+    W-03 / MLB-199 FAIL-CLOSED, AND IT IS STRUCTURAL RATHER THAN CHECKED:
+    every scoring period is serialized into `records` BEFORE the single write
+    below. A KonaUnavailable anywhere in the loop propagates out of this
+    function with nothing written for the period -- so a failed fetch cannot
+    produce a period stored without its free agents and with every club label
+    null, which the delete-then-insert would have committed over a good one.
+    The ordering is the guarantee; keep the write after the loop.
     """
     scoring_periods = get_scoring_periods(matchup_period, year)
 
@@ -896,7 +913,7 @@ def extract_matchup_period(conn, league, matchup_period, year, league_key):
             "data": sp_data,
         })
 
-    load_box_scores_to_snowflake(conn, records, matchup_period, year, league_key)
+    sink.write_box_scores(records, matchup_period, year, league_key)
 
 
 def _iter_player_entries(blob):
@@ -1449,46 +1466,149 @@ def load_transactions_to_snowflake(conn, topics, year, league_key):
         cursor.close()
 
 
-def extract_transactions(conn, year, league_key):
-    """Pull the season transaction board from ESPN and load to Snowflake."""
+# ---------------------------------------------------------------------------
+# Sinks: where RAW lands (MLB-208)
+# ---------------------------------------------------------------------------
+# Two implementations of one small interface. This one is a THIN ADAPTER over
+# the `load_*_to_snowflake` functions above -- they did not move. Relocating
+# them into a sink module for symmetry would have moved the delete-then-insert
+# MLB-188 calls "the irreversible one", plus the comment block explaining why,
+# for no behavioural gain, on the path the weekly run depends on. The new
+# code went into extract/raw_sink.py instead; the proven code stayed put.
+#
+# The interface is deliberately small: six writes, one guard read, one
+# describe. Everything else about a period -- the schedule, the settle
+# window, the refusals -- is engine-neutral and stays in this module.
+class SnowflakeSink:
+    """RAW lands in Snowflake. The original behaviour, unchanged."""
+
+    name = "snowflake"
+
+    def __init__(self, conn):
+        self.conn = conn
+
+    def describe(self):
+        db = SNOWFLAKE_CONFIG.get("database")
+        schema = SNOWFLAKE_CONFIG.get("schema")
+        return f"{self.name} -> {db}.{schema}"
+
+    def loaded_box_score_periods(self, year, league_key):
+        """{matchup_period: MAX(loaded_at)} for this league + season.
+
+        Errors PROPAGATE -- `settled_loaded_periods` turns any failure into a
+        refusal. This method must never answer "nothing is loaded" because it
+        could not tell (MLB-199 / W-02).
+        """
+        cursor = self.conn.cursor()
+        try:
+            if not _table_exists(cursor, "BOX_SCORES"):
+                # Nothing has ever been loaded, so nothing can be overwritten.
+                # The loader creates the table moments from now.
+                return {}
+
+            # The documented legacy shape: a pre-registry table with no
+            # league_key. Self-heal it HERE, before the guard query needs the
+            # column, so the upgrade path cannot masquerade as an absent table.
+            if not _table_has_column(cursor, "BOX_SCORES", "LEAGUE_KEY"):
+                print("  [guard] BOX_SCORES predates the league registry; "
+                      "adding league_key before checking settled history.")
+                ensure_league_key_column(cursor, "BOX_SCORES")
+
+            cursor.execute(
+                """
+                SELECT matchup_period, MAX(loaded_at)
+                FROM BOX_SCORES
+                WHERE season_year = %s
+                  AND (league_key = %s OR league_key IS NULL)
+                GROUP BY matchup_period
+                """,
+                (year, league_key),
+            )
+            return {int(mp): ts for mp, ts in cursor.fetchall()}
+        finally:
+            cursor.close()
+
+    def write_box_scores(self, records, matchup_period, year, league_key):
+        load_box_scores_to_snowflake(
+            self.conn, records, matchup_period, year, league_key)
+
+    def write_scoring_settings(self, scoring_items, year, league_key):
+        load_scoring_settings_to_snowflake(
+            self.conn, scoring_items, year, league_key)
+
+    def write_roster_settings(self, roster_settings, year, league_key):
+        load_roster_settings_to_snowflake(
+            self.conn, roster_settings, year, league_key)
+
+    def write_team_owners(self, team_owners, year, league_key):
+        load_team_owners_to_snowflake(self.conn, team_owners, year, league_key)
+
+    def write_draft(self, draft_rows, year, league_key):
+        load_draft_to_snowflake(self.conn, draft_rows, year, league_key)
+
+    def write_transactions(self, topics, year, league_key):
+        load_transactions_to_snowflake(self.conn, topics, year, league_key)
+
+    def backfill_club_of_game(self, year, league_key, periods):
+        backfill_club_of_game(self.conn, year, league_key, periods)
+
+
+@contextmanager
+def open_sink(raw_target, parquet_dir=None):
+    """Yield the sink for `raw_target`, holding a warehouse connection only
+    if one is actually needed.
+
+    The local branch opens nothing, which is the entire point of MLB-208: a
+    stranger with a league id and cookies never authenticates to anything but
+    ESPN.
+    """
+    if raw_target == "local":
+        yield LocalParquetSink(parquet_dir)
+    else:
+        with get_snowflake_connection() as conn:
+            yield SnowflakeSink(conn)
+
+
+def extract_transactions(sink, year, league_key):
+    """Pull the season transaction board from ESPN and load it to the sink."""
     print(f"\nTransactions for {year}:")
     topics = fetch_transactions(year)
     if topics:
         print(f"  Retrieved {len(topics)} transaction topics for {year}")
-        load_transactions_to_snowflake(conn, topics, year, league_key)
+        sink.write_transactions(topics, year, league_key)
     else:
         print(f"  No transaction activity found for {year} -- skipping transactions load")
 
 
-def extract_scoring_settings(conn, year, league_key):
-    """Pull scoring settings from ESPN and load to Snowflake."""
+def extract_scoring_settings(sink, year, league_key):
+    """Pull scoring settings from ESPN and load them to the sink."""
     print(f"\nScoring settings for {year}:")
     scoring_items = fetch_scoring_settings(year)
-    load_scoring_settings_to_snowflake(conn, scoring_items, year, league_key)
+    sink.write_scoring_settings(scoring_items, year, league_key)
 
 
-def extract_league_settings(conn, year, league_key):
-    """Pull scoring + roster settings from ESPN and load to Snowflake."""
+def extract_league_settings(sink, year, league_key):
+    """Pull scoring + roster settings from ESPN and load them to the sink."""
     print(f"\nLeague settings for {year}:")
     settings = fetch_league_settings(year)
 
     scoring_items = settings["scoringSettings"]["scoringItems"]
     print(f"  Retrieved {len(scoring_items)} scoring items for {year}")
-    load_scoring_settings_to_snowflake(conn, scoring_items, year, league_key)
+    sink.write_scoring_settings(scoring_items, year, league_key)
 
     roster_settings = settings["rosterSettings"]
     slot_count = len(roster_settings.get("lineupSlotCounts", {}) or {})
     print(f"  Retrieved roster settings for {year} ({slot_count} slot counts)")
-    load_roster_settings_to_snowflake(conn, roster_settings, year, league_key)
+    sink.write_roster_settings(roster_settings, year, league_key)
 
     team_owners = fetch_team_owners(year)
     print(f"  Retrieved {len(team_owners)} team-owner rows for {year}")
-    load_team_owners_to_snowflake(conn, team_owners, year, league_key)
+    sink.write_team_owners(team_owners, year, league_key)
 
     draft_rows = fetch_draft(year)
     if draft_rows:
         print(f"  Retrieved {len(draft_rows)} draft picks for {year}")
-        load_draft_to_snowflake(conn, draft_rows, year, league_key)
+        sink.write_draft(draft_rows, year, league_key)
     else:
         print(f"  No draft found for {year} (not drafted yet) -- skipping draft load")
 
@@ -1558,9 +1678,33 @@ if __name__ == "__main__":
         help="League registry key to extract (config/leagues.yml). "
              "Default: the registry's default_league (the ESPN league).",
     )
+    parser.add_argument(
+        "--raw-target", choices=("snowflake", "local"), default=None,
+        help="Where RAW lands. 'snowflake' (default) is the original "
+             "behaviour. 'local' writes parquet + _manifest.json under "
+             "--parquet-dir, which tools/load_parquet_to_duckdb.py already "
+             "consumes -- no warehouse account is needed anywhere (MLB-208). "
+             "Falls back to the EXTRACT_RAW_TARGET env var; the flag wins.",
+    )
+    parser.add_argument(
+        "--parquet-dir", default=None, metavar="DIR",
+        help="Output directory for --raw-target local "
+             "(default: data/parquet/raw, where the DuckDB loader looks).",
+    )
     args = parser.parse_args()
 
     year = args.year
+
+    # Target resolution: explicit flag beats ambient shell state, and the
+    # DEFAULT STAYS SNOWFLAKE so no existing invocation changes behaviour.
+    # The env var exists so the eventual CI (MLB-217) and packaged demo
+    # (MLB-11) paths can set it once instead of threading a flag everywhere.
+    raw_target = args.raw_target or os.getenv("EXTRACT_RAW_TARGET") or "snowflake"
+    if raw_target not in ("snowflake", "local"):
+        raise SystemExit(
+            f"[raw target] unknown target {raw_target!r} "
+            f"(from EXTRACT_RAW_TARGET); expected 'snowflake' or 'local'."
+        )
 
     # League resolution (MLB-57): --league picks a registry entry; the
     # default preserves the pre-registry runbook (the ESPN league). This
@@ -1587,15 +1731,16 @@ if __name__ == "__main__":
     do_settings = args.settings_only or args.include_settings
     do_transactions = args.transactions_only or args.include_transactions
 
-    with get_snowflake_connection() as conn:
+    with open_sink(raw_target, args.parquet_dir) as sink:
+        print(f"RAW target: {sink.describe()}")
 
         # --- League settings ---
         if do_settings:
-            extract_league_settings(conn, year, league_key)
+            extract_league_settings(sink, year, league_key)
 
         # --- Transactions (MLB-16) ---
         if do_transactions:
-            extract_transactions(conn, year, league_key)
+            extract_transactions(sink, year, league_key)
 
         # --- Box scores ---
         if do_box_scores:
@@ -1625,7 +1770,10 @@ if __name__ == "__main__":
                 # Enrichment, not extraction: updates in place, deletes
                 # nothing, so it is not what the guard below is guarding.
                 print(f"\nBackfilling club-of-game for {year}: {periods}")
-                backfill_club_of_game(conn, year, league_key, periods)
+                try:
+                    sink.backfill_club_of_game(year, league_key, periods)
+                except NotImplementedError as exc:
+                    raise SystemExit(f"[raw target] {exc}")
                 print("\nDone.")
                 sys.exit(0)
 
@@ -1634,7 +1782,7 @@ if __name__ == "__main__":
             # overwritten, the fourth refused — which is a worse state to be
             # handed than a clean refusal.
             if not args.overwrite_day_accurate_history:
-                settled = settled_loaded_periods(conn, year, league_key, periods)
+                settled = settled_loaded_periods(sink, year, league_key, periods)
                 if settled:
                     raise SystemExit(refuse_settled_overwrite(
                         settled, year, "--overwrite-day-accurate-history"))
@@ -1648,7 +1796,7 @@ if __name__ == "__main__":
             for mp in periods:
                 print(f"\nMatchup period {mp}:")
                 try:
-                    extract_matchup_period(conn, league, mp, year, league_key)
+                    extract_matchup_period(sink, league, mp, year, league_key)
                 except KonaUnavailable as exc:
                     raise SystemExit(refuse_extract_without_stats(year, mp, str(exc)))
 

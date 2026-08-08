@@ -6,9 +6,14 @@ by path here rather than added to conftest's sys.path, so the rest of the
 suite keeps its current import surface.
 
 Nothing in this file opens a connection. `settled_loaded_periods` takes its
-warehouse read through a cursor and its calendar through `load_schedule`
-(a seed CSV), so both are substitutable and the guard's decision logic is
-testable without Snowflake.
+warehouse read through a SINK (MLB-208) and its calendar through
+`load_schedule` (a seed CSV), so both are substitutable and the guard's
+decision logic is testable without Snowflake. The sink here is the real
+`SnowflakeSink` over a fake connection, so the cursor-level behaviour these
+tests were written for is still the thing being exercised.
+
+The LOCAL sink's half of the same guard is covered in
+tests/test_local_raw_writer.py, which needs no connection at all.
 """
 
 import importlib.util
@@ -164,8 +169,17 @@ def schedule(monkeypatch):
 
 
 def _settled(conn, periods):
+    """Drive the guard through the REAL SnowflakeSink over a fake connection.
+
+    MLB-208 split the guard: `settled_loaded_periods` now takes a sink and
+    asks it what is loaded, so the fake connection goes in one layer lower.
+    Wrapping rather than faking the sink keeps the adapter's own catalog
+    probe and legacy-column self-heal under test -- those are the parts
+    MLB-199/W-02 was about, and a fake sink would have skipped straight past
+    them.
+    """
     return extract.settled_loaded_periods(
-        conn, 2026, "espn-main", periods, today=TODAY)
+        extract.SnowflakeSink(conn), 2026, "espn-main", periods, today=TODAY)
 
 
 def test_never_loaded_period_is_allowed(schedule):

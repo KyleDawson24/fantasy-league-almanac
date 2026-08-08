@@ -183,7 +183,22 @@ ESPN_API_BASE = "https://lm-api-reads.fantasy.espn.com/apis/v3/games/flb/seasons
 # Schedule loading
 # ---------------------------------------------------------------------------
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-SEED_PATH = os.path.join(SCRIPT_DIR, "..", "dbt_league", "seeds", "matchup_schedule.csv")
+
+# The schedule is USER CONFIG, so it lives in league_config/ -- not seeds/,
+# which is reference vocabulary that is the same for every league (MLB-114's
+# three-directory rule). This constant still named seeds/ after the file
+# moved, so `load_schedule` raised FileNotFoundError and EVERY box-score path
+# was dead: the default weekly run, --all, explicit periods and
+# --backfill-club-of-game alike. Found while tracing MLB-208's acceptance,
+# and it predates that work (verified against 05c3cbb).
+#
+# Resolved the same way dbt resolves it -- dbt_project.yml has
+# `seed-paths: ["seeds", "{{ env_var('DBT_LEAGUE_CONFIG', 'league_config') }}"]`
+# -- so pointing the extract at the demo fixture works exactly like pointing
+# dbt at it, with one variable and no second convention to remember.
+LEAGUE_CONFIG_DIR = os.getenv("DBT_LEAGUE_CONFIG", "league_config")
+SEED_PATH = os.path.join(SCRIPT_DIR, "..", "dbt_league",
+                         LEAGUE_CONFIG_DIR, "matchup_schedule.csv")
 
 
 def load_schedule(year):

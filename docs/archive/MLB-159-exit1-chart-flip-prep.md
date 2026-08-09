@@ -485,7 +485,7 @@ ESPN tab that first line is week-17 data drift — not the flip:**
 | `Matchup-History.tsv` | 641 → 655 lines, Week 16 → Week 17 | **known-stale** (14 new rows = one week × 14 teams) |
 | `Records.tsv` | 96 → 124 lines, best team total 401.3 → 413.4 | **known-stale** |
 | `baseline_records_report.txt` | `Hits: 89 … Week 10` → `90 … Week 17` | **known-stale** — the exact drift handoff §5 names |
-| `Home.tsv` | *(first run)* `leagueId=1156117086` → `leagueId=0` | **test env leak — found and fixed, see below** |
+| `Home.tsv` | *(first run)* `leagueId=1234567890` → `leagueId=0` | **test env leak — found and fixed, see below** |
 | `Home.tsv` | *(clean re-run)* line 32, Cal Raleigh 645 → 649 pts | **known-stale** |
 
 After the env fix the ESPN run carries **zero** occurrences of `leagueId=0`,
@@ -543,10 +543,10 @@ outside the test**, and chased it rather than hand-waving:
 
 | probe | `LEAGUE_ID` seen |
 |---|---|
-| my direct preview's TSVs | **1156117086** (correct) |
-| `db.init()` in-process | 1156117086 |
-| child subprocess with the test's exact `env=dict(os.environ, …)` | 1156117086 |
-| same child under the PowerShell `Start-Process` launcher | 1156117086 |
+| my direct preview's TSVs | **1234567890** (correct) |
+| `db.init()` in-process | 1234567890 |
+| child subprocess with the test's exact `env=dict(os.environ, …)` | 1234567890 |
+| same child under the PowerShell `Start-Process` launcher | 1234567890 |
 | ambient / user / machine env | not set anywhere |
 | `tests/conftest.py`, `pytest.ini` | no env manipulation |
 | `SUPPRESS_UPDATED_STAMP` | only blanks the Updated stamp (`almanac_logic:569`) |

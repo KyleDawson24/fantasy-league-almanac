@@ -160,12 +160,32 @@ seeds:
           NULL is deliberate and load-bearing for CBS ACT: it is a generic
           active slot carrying BOTH hitters and pitchers, so it needs the
           player''s own discipline rather than the slot. That belongs to
-          MLB-226. ACT/U/EST have seed ROWS so coverage passes without
-          claiming a category they do not have.
+          MLB-226. ACT/EST have seed ROWS so coverage passes without
+          claiming a category they do not have. CBS U is NOT one of those
+          cases -- it is utility, a hitter slot, and is classified.
       - name: is_starting_slot
         description: 'Whether a player in this slot is deployed. false for BE/IL/FA/RS; NULL for CBS EST, which is an era marker rather than a deployment.'
       - name: notes
         description: 'Free text for the things a reader would otherwise file as a bug -- the synthetic FA row''s null id, and why CBS ACT carries no category.'
+      - name: canonical_key
+        description: >
+          Platform-independent identity for the slot: what it IS, as
+          opposed to what a given platform calls it. ESPN ''UTIL'' and CBS
+          ''U'' are the same slot wearing two labels and both carry
+          ''utility''; ESPN ''BE'' and CBS ''RS'' both carry ''bench''.
+
+          Mirrors stat_classification.canonical_key, and exists for the
+          same reason: a seed keyed (platform, lineup_slot) records what
+          each label means but never which labels mean the SAME thing, so
+          cross-platform parity work has nothing to join on. A utility
+          slot functionally exists on every platform we will ever ingest,
+          but it can be presented any number of ways.
+
+          NOTHING READS THIS YET, and that is deliberate. There is no
+          canonical_slots dimension to point at -- building one is MLB-6''s
+          call and should be made when a third platform exists to shape it.
+          The column is free while there are two platforms and no readers,
+          and it is the join key MLB-6 will want on day one.
 
   - name: matchup_schedule
     description: >

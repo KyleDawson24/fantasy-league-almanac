@@ -1,33 +1,33 @@
-platform,lineup_slot_id,lineup_slot,sort_order,position_limit_id,slot_category,is_starting_slot,notes
-espn,0,C,10,2,hitting,true,
-espn,1,1B,20,3,hitting,true,
-espn,2,2B,30,4,hitting,true,
-espn,3,3B,40,5,hitting,true,
-espn,4,SS,50,6,hitting,true,
-espn,6,2B/SS,55,,hitting,true,Flex middle-infield slot. No positionLimits entry so the maximum surfaces as N/A.
-espn,7,1B/3B,56,,hitting,true,Flex corner-infield slot. No positionLimits entry.
-espn,19,IF,60,,hitting,true,Flex infield (1B/2B/SS/3B). No positionLimits entry.
-espn,8,LF,70,7,hitting,true,
-espn,9,CF,80,8,hitting,true,
-espn,10,RF,90,9,hitting,true,
-espn,5,OF,100,,hitting,true,Flex outfield. No positionLimits entry.
-espn,11,DH,110,10,hitting,true,
-espn,12,UTIL,120,,hitting,true,Flex utility hitter. Reached 'hitting' through the else-branch before MLB-222 F-1 -- same value now stated rather than defaulted.
-espn,13,P,130,,pitching,true,Generic pitcher slot. A league that uses only P and never SP/RP is why the lineup_slot = 'SP' filters in league_notes can silently return zero starts.
-espn,14,SP,140,1,pitching,true,
-espn,15,RP,150,11,pitching,true,
-espn,16,BE,900,,inactive,false,
-espn,17,IL,910,,inactive,false,
-espn,,FA,920,,inactive,false,SYNTHETIC. The extract stamps 'FA' on every kona player absent from all wrapper lineups; it is not a roster setting and has no lineupSlotId. The null id is correct -- do not file it as a bug.
-cbs,,C,10,,hitting,true,
-cbs,,1B,20,,hitting,true,
-cbs,,2B,30,,hitting,true,
-cbs,,3B,40,,hitting,true,
-cbs,,SS,50,,hitting,true,
-cbs,,OF,100,,hitting,true,
-cbs,,DH,110,,hitting,true,
-cbs,,U,120,,,true,CBS utility slot. slot_category left NULL alongside ACT pending MLB-226 -- CBS classification is that ticket's call and nothing reads this row today.
-cbs,,P,130,,pitching,true,
-cbs,,RS,900,,inactive,false,CBS reserve -- the bench equivalent.
-cbs,,ACT,,,,true,Generic active slot carrying BOTH hitters and pitchers (211824 rows across 2001-2025). It cannot be classified from the slot at all: it needs the player's own discipline. Belongs to MLB-226. int_cbs__player_daily classifies it separately today and does not read this seed.
-cbs,,EST,,,,,CBS estimated-era marker rather than a deployed slot. int_cbs__player_daily maps it to its own 'estimated' status which sits outside the hitting/pitching/inactive domain.
+platform,lineup_slot_id,lineup_slot,sort_order,position_limit_id,slot_category,is_starting_slot,notes,canonical_key
+espn,0,C,10,2,hitting,true,,catcher
+espn,1,1B,20,3,hitting,true,,first_base
+espn,2,2B,30,4,hitting,true,,second_base
+espn,3,3B,40,5,hitting,true,,third_base
+espn,4,SS,50,6,hitting,true,,shortstop
+espn,6,2B/SS,55,,hitting,true,Flex middle-infield slot. No positionLimits entry so the maximum surfaces as N/A.,middle_infield
+espn,7,1B/3B,56,,hitting,true,Flex corner-infield slot. No positionLimits entry.,corner_infield
+espn,19,IF,60,,hitting,true,Flex infield (1B/2B/SS/3B). No positionLimits entry.,infield
+espn,8,LF,70,7,hitting,true,,left_field
+espn,9,CF,80,8,hitting,true,,center_field
+espn,10,RF,90,9,hitting,true,,right_field
+espn,5,OF,100,,hitting,true,Flex outfield. No positionLimits entry.,outfield
+espn,11,DH,110,10,hitting,true,,designated_hitter
+espn,12,UTIL,120,,hitting,true,Flex utility hitter. Reached 'hitting' through the else-branch before MLB-222 F-1 -- same value now stated rather than defaulted.,utility
+espn,13,P,130,,pitching,true,Generic pitcher slot. A league that uses only P and never SP/RP is why the lineup_slot = 'SP' filters in league_notes can silently return zero starts.,pitcher
+espn,14,SP,140,1,pitching,true,,starting_pitcher
+espn,15,RP,150,11,pitching,true,,relief_pitcher
+espn,16,BE,900,,inactive,false,,bench
+espn,17,IL,910,,inactive,false,,injured
+espn,,FA,920,,inactive,false,SYNTHETIC. The extract stamps 'FA' on every kona player absent from all wrapper lineups; it is not a roster setting and has no lineupSlotId. The null id is correct -- do not file it as a bug.,free_agent
+cbs,,C,10,,hitting,true,,catcher
+cbs,,1B,20,,hitting,true,,first_base
+cbs,,2B,30,,hitting,true,,second_base
+cbs,,3B,40,,hitting,true,,third_base
+cbs,,SS,50,,hitting,true,,shortstop
+cbs,,OF,100,,hitting,true,,outfield
+cbs,,DH,110,,hitting,true,,designated_hitter
+cbs,,U,120,,hitting,true,CBS utility slot -- the same slot ESPN spells UTIL; both carry canonical_key 'utility'. A utility slot functionally exists on every platform we ingest but the label varies.,utility
+cbs,,P,130,,pitching,true,,pitcher
+cbs,,RS,900,,inactive,false,CBS reserve -- the bench equivalent. Same canonical_key as ESPN's BE.,bench
+cbs,,ACT,,,,true,Generic active slot carrying BOTH hitters and pitchers (211824 rows across 2001-2025). It cannot be classified from the slot at all: it needs the player's own discipline. Belongs to MLB-226. int_cbs__player_daily classifies it separately today and does not read this seed.,active
+cbs,,EST,,,,,CBS estimated-era marker rather than a deployed slot. int_cbs__player_daily maps it to its own 'estimated' status which sits outside the hitting/pitching/inactive domain.,estimated

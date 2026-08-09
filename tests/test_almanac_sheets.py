@@ -369,7 +369,7 @@ class TestHomeRows:
             all_time_rows=all_time,
             season_year=2026,
             matchup_period=8,
-            team_titles=['AAA', 'BP'],
+            team_titles=['TTA', 'TTC'],
             league_id=1156117086,
         )
 
@@ -406,8 +406,8 @@ class TestHomeRows:
         assert 'Points Glossary' in left_first
         assert 'All-League Team: All-Time' in left_first
         # Per-team grid is indented (col A blank, teams in B-C).
-        grid = next(r for r in rows if len(r) > 2 and r[1] == 'AAA')
-        assert grid[2] == 'BP'
+        grid = next(r for r in rows if len(r) > 2 and r[1] == 'TTA')
+        assert grid[2] == 'TTC'
         alltime_c = next(
             r for r in rows
             if len(r) > 3 and r[0] == 'C' and _player_text(r[1]) == 'All-Time Catcher'
@@ -591,8 +591,8 @@ class TestRecordsRows:
         ]
 
     def test_record_side_is_small_tie_helper_matches_list_threshold(self):
-        assert almanac_sheets._record_side_is_small_tie('WALK')
-        assert almanac_sheets._record_side_is_small_tie('CYCL, FUBB')
+        assert almanac_sheets._record_side_is_small_tie('TTD')
+        assert almanac_sheets._record_side_is_small_tie('TTE, TTF')
         assert almanac_sheets._record_side_is_small_tie('3 teams tied')
         assert not almanac_sheets._record_side_is_small_tie('4 teams tied')
         assert not almanac_sheets._record_side_is_small_tie('22 teams tied')
@@ -1027,7 +1027,7 @@ _STANDINGS_SPECS = [
 ]
 
 
-def _standings_team(team_id=1, abbrev='AAA', wins=2, losses=1, ties=0,
+def _standings_team(team_id=1, abbrev='TTA', wins=2, losses=1, ties=0,
                     **overrides):
     row = {
         'team_id': team_id,
@@ -1053,7 +1053,7 @@ def _standings_team(team_id=1, abbrev='AAA', wins=2, losses=1, ties=0,
     return row
 
 
-def _acq_team(team_id=1, abbrev='AAA', **overrides):
+def _acq_team(team_id=1, abbrev='TTA', **overrides):
     """A mart_team_acquisition_channels-shaped row for the acquisition blocks."""
     row = {
         'team_id': team_id,
@@ -1097,7 +1097,7 @@ class TestAdvancedStandingsRows:
         )
 
         assert row == [
-            3, 'AAA', 'Owner 1', '2-1',
+            3, 'TTA', 'Owner 1', '2-1',
             5.0, 10.0, 50.0, '',
             10.0, 2.0, 25.0, '',
             75.0, 60.0,
@@ -1148,8 +1148,8 @@ class TestAdvancedStandingsRows:
 
     def test_build_advanced_standings_tab_rows_layout(self):
         standings = [
-            _standings_team(team_id=1, abbrev='AAA', wins=2, losses=1),
-            _standings_team(team_id=2, abbrev='BBB', wins=1, losses=2),
+            _standings_team(team_id=1, abbrev='TTA', wins=2, losses=1),
+            _standings_team(team_id=2, abbrev='TTB', wins=1, losses=2),
         ]
         slot_rows = [
             {'team_id': 1, 'lineup_slot': 'SP', 'slot_pts': 9.9, 'sort_order': 140},
@@ -1169,8 +1169,8 @@ class TestAdvancedStandingsRows:
         assert rows[3] == ['Detailed Standings', '', '',
                            'Weekly Averages, Current Season']
         assert rows[4][:4] == ['Rank', 'Team', 'Owner', 'W-L']
-        assert rows[5][:2] == [1, 'AAA']
-        assert rows[6][:2] == [2, 'BBB']
+        assert rows[5][:2] == [1, 'TTA']
+        assert rows[6][:2] == [2, 'TTB']
 
         # Slot grid: indented one cell with Owner added so Team / Owner sit
         # under Table A's columns; slot columns in sort_order (C before SP
@@ -1179,8 +1179,8 @@ class TestAdvancedStandingsRows:
         # (Single blank between sections since the round-11 parity pass.)
         assert rows[8] == ['Points by Lineup Slot', '', '', 'Season Totals']
         assert rows[9] == ['', 'Team', 'Owner', 'C', 'SP']
-        assert rows[10] == ['', 'AAA', 'Owner 1', 5.5, 9.9]
-        assert rows[11] == ['', 'BBB', 'Owner 2', 4.4, '']
+        assert rows[10] == ['', 'TTA', 'Owner 1', 5.5, 9.9]
+        assert rows[11] == ['', 'TTB', 'Owner 2', 4.4, '']
 
     def test_acquisition_header_layout(self):
         # Kyle rounds 8+12: one table per lens, season half left /
@@ -1232,10 +1232,10 @@ class TestAdvancedStandingsRows:
         ]
 
     def test_build_advanced_standings_appends_ranked_acquisition_blocks(self):
-        standings = [_standings_team(team_id=1, abbrev='AAA')]
+        standings = [_standings_team(team_id=1, abbrev='TTA')]
         acq = [
-            _acq_team(team_id=1, abbrev='AAA', acquired_active_pts=100.0),
-            _acq_team(team_id=2, abbrev='BBB', acquired_active_pts=300.0),
+            _acq_team(team_id=1, abbrev='TTA', acquired_active_pts=100.0),
+            _acq_team(team_id=2, abbrev='TTB', acquired_active_pts=300.0),
         ]
         rows = almanac_sheets.build_advanced_standings_tab_rows(
             standings, [], _STANDINGS_SPECS, 2026, acquisition_rows=acq,
@@ -1255,7 +1255,7 @@ class TestAdvancedStandingsRows:
         assert len(acq_headers) == 2
         # Ranked by the lens's Acquired total desc: BBB (300) before AAA (100).
         first_block = rows[acq_headers[0] + 1: acq_headers[0] + 3]
-        assert [r[1] for r in first_block] == ['BBB', 'AAA']
+        assert [r[1] for r in first_block] == ['TTB', 'TTA']
 
     def test_build_advanced_standings_omits_blocks_without_data(self):
         rows = almanac_sheets.build_advanced_standings_tab_rows(
@@ -1270,7 +1270,7 @@ class TestAdvancedStandingsRows:
                        for r in rows)
 
     def test_build_advanced_standings_alltime_slot_grid(self):
-        standings = [_standings_team(team_id=1, abbrev='AAA')]
+        standings = [_standings_team(team_id=1, abbrev='TTA')]
         season_slots = [
             {'team_id': 1, 'lineup_slot': 'C', 'slot_pts': 5.5, 'sort_order': 10},
         ]
@@ -1301,12 +1301,12 @@ class TestAdvancedStandingsRows:
         assert banner[21] == 'Weekly Averages, All-Time'
         # Season totals now divide by the team's matchups played (2 in
         # the fixture): 5.5 -> 2.8.
-        assert rows[hdr + 1] == ['', 'AAA', 'Owner 1',
+        assert rows[hdr + 1] == ['', 'TTA', 'Owner 1',
                                  2.8, '', *pad, 1.2, 9.1]
 
     def test_build_advanced_standings_affinity_shares(self):
-        standings = [_standings_team(team_id=1, abbrev='AAA'),
-                     _standings_team(team_id=2, abbrev='BBB')]
+        standings = [_standings_team(team_id=1, abbrev='TTA'),
+                     _standings_team(team_id=2, abbrev='TTB')]
         affinity = [
             {'team_id': 1, 'pro_team': 'Atl',
              'season_wt': 30.0, 'alltime_wt': 60.0},
@@ -1328,8 +1328,8 @@ class TestAdvancedStandingsRows:
         # Owner column's width), season columns from E, all-time still
         # past the U divider; columns alphabetical by abbrev.
         aff_pad = [''] * 15                 # E + 2 teams -> pad to V
-        hdr = rows.index(['', '', 'MLB Team', '', 'AAA', 'BBB', *aff_pad,
-                          'AAA', 'BBB'])
+        hdr = rows.index(['', '', 'MLB Team', '', 'TTA', 'TTB', *aff_pad,
+                          'TTA', 'TTB'])
         # MLB-142 round 2: the era scopes ride the banner row (two above
         # the header, past the explainer); the separate era row is gone.
         banner = rows[hdr - 2]
@@ -1360,8 +1360,8 @@ class TestAdvancedStandingsRows:
         total (the pre-MLB-159 behaviour) versus 0.6 if it is counted, so
         restoring the old filter cannot leave this test green.
         """
-        standings = [_standings_team(team_id=1, abbrev='AAA'),
-                     _standings_team(team_id=2, abbrev='BBB')]
+        standings = [_standings_team(team_id=1, abbrev='TTA'),
+                     _standings_team(team_id=2, abbrev='TTB')]
         affinity = [
             {'team_id': 1, 'pro_team': 'Atl',
              'season_wt': 30.0, 'alltime_wt': 60.0},
@@ -1382,8 +1382,8 @@ class TestAdvancedStandingsRows:
         )
 
         aff_pad = [''] * 15
-        hdr = rows.index(['', '', 'MLB Team', '', 'AAA', 'BBB', *aff_pad,
-                          'AAA', 'BBB'])
+        hdr = rows.index(['', '', 'MLB Team', '', 'TTA', 'TTB', *aff_pad,
+                          'TTA', 'TTB'])
         spine = [r[2] for r in rows[hdr + 1:] if len(r) > 2 and r[2]]
 
         # Named, not left as the raw sentinel and not rendered as 'FA'.
@@ -1448,13 +1448,13 @@ class TestAdvancedStandingsRows:
         arc = []
         for p in (1, 2):
             arc += [
-                {'team_id': 1, 'team_abbrev': 'AAA', 'period': p,
+                {'team_id': 1, 'team_abbrev': 'TTA', 'period': p,
                  'standings_rank': 1},
-                {'team_id': 2, 'team_abbrev': 'BBB', 'period': p,
+                {'team_id': 2, 'team_abbrev': 'TTB', 'period': p,
                  'standings_rank': 2},
             ]
         rows = almanac_sheets.build_advanced_standings_tab_rows(
-            [_standings_team(team_id=1, abbrev='AAA')], [],
+            [_standings_team(team_id=1, abbrev='TTA')], [],
             _STANDINGS_SPECS, 2026, rank_arc_rows=arc)
 
         # The chart section leads (title, subtitle, blank, then chart).
@@ -1463,7 +1463,7 @@ class TestAdvancedStandingsRows:
                        if r and r[0] == '(check to plot)')
         # Kyle's toggle scheme: individuals OFF, one ALL master ON.
         assert rows[chk_idx][1:] == [False, False, True]
-        assert rows[chk_idx - 1][:4] == ['Chart teams:', 'AAA', 'BBB', 'ALL']
+        assert rows[chk_idx - 1][:4] == ['Chart teams:', 'TTA', 'TTB', 'ALL']
 
         b = almanac_write._rank_chart_bounds(rows)
         assert b and b['n_teams'] == 2
@@ -1474,8 +1474,8 @@ class TestAdvancedStandingsRows:
         assert b['series_cols'] == [46, 47]
         assert b['raw_end_col0'] == 50
         assert b['last_row'] - b['first_row'] - 1 == 2   # two weeks
-        assert rows[b['first_row']][45:] == ['Week', 'AAA', 'BBB',
-                                             'AAA', 'BBB']
+        assert rows[b['first_row']][45:] == ['Week', 'TTA', 'TTB',
+                                             'TTA', 'TTB']
         data = rows[b['first_row'] + 1]
         # Formulas gate on OR(ALL, own) and read same-row hidden raw ranks.
         assert data[46].startswith('=IF(AND(OR($D$')
@@ -1503,28 +1503,28 @@ class TestAdvancedStandingsRows:
         arc = []
         for p in (1, 2):
             arc += [
-                {'team_id': 1, 'team_abbrev': 'AAA', 'period': p,
+                {'team_id': 1, 'team_abbrev': 'TTA', 'period': p,
                  'standings_rank': 1},
-                {'team_id': 2, 'team_abbrev': 'BBB', 'period': p,
+                {'team_id': 2, 'team_abbrev': 'TTB', 'period': p,
                  'standings_rank': 2},
             ]
         finishes = [
-            {'season_year': 2025, 'team_id': 1, 'team_abbrev': 'AAA',
+            {'season_year': 2025, 'team_id': 1, 'team_abbrev': 'TTA',
              'owner_display': 'Owner 1', 'wins': 10, 'losses': 4,
              'ties': 0, 'finish': 1, 'is_champion': False},
             # The playoff upset: BBB finished 2nd but swept the bracket.
-            {'season_year': 2025, 'team_id': 2, 'team_abbrev': 'BBB',
+            {'season_year': 2025, 'team_id': 2, 'team_abbrev': 'TTB',
              'owner_display': 'Owner 2', 'wins': 8, 'losses': 6,
              'ties': 0, 'finish': 2, 'is_champion': True},
-            {'season_year': 2026, 'team_id': 1, 'team_abbrev': 'AAA',
+            {'season_year': 2026, 'team_id': 1, 'team_abbrev': 'TTA',
              'owner_display': 'Owner 1', 'wins': 2, 'losses': 0,
              'ties': 0, 'finish': 1, 'is_champion': False},
-            {'season_year': 2026, 'team_id': 2, 'team_abbrev': 'BBB',
+            {'season_year': 2026, 'team_id': 2, 'team_abbrev': 'TTB',
              'owner_display': 'Owner 2', 'wins': 0, 'losses': 2,
              'ties': 0, 'finish': 2, 'is_champion': False},
         ]
-        standings = [_standings_team(team_id=1, abbrev='AAA'),
-                     _standings_team(team_id=2, abbrev='BBB')]
+        standings = [_standings_team(team_id=1, abbrev='TTA'),
+                     _standings_team(team_id=2, abbrev='TTB')]
         rows = almanac_sheets.build_advanced_standings_tab_rows(
             standings, [], _STANDINGS_SPECS, 2026,
             rank_arc_rows=arc, finishes_rows=finishes)
@@ -1553,7 +1553,7 @@ class TestAdvancedStandingsRows:
         import almanac_write
 
         rows = almanac_sheets.build_advanced_standings_tab_rows(
-            [_standings_team(team_id=1, abbrev='AAA')],
+            [_standings_team(team_id=1, abbrev='TTA')],
             [{'team_id': 1, 'lineup_slot': 'C', 'slot_pts': 5.5,
               'sort_order': 10}],
             _STANDINGS_SPECS, 2026,

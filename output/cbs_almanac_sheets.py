@@ -529,9 +529,18 @@ def get_season_context():
         f"SELECT MIN(season_year) AS lo, MAX(season_year) AS hi"
         f" FROM stg_cbs__ui_standings WHERE {league_predicate()}"
     )[0]
+    # stg_cbs__ui_standings holds CLOSED seasons only, so a league in its
+    # first year makes both aggregates NULL over an empty set. first_season
+    # falls back to the season in flight -- which is literally true, and
+    # keeps the six "{first_season}–{season}" era banners from rendering
+    # the string "None–2026" (MLB-222 C-4). last_closed_season stays None:
+    # "no season has closed" is a real answer, and its one consumer
+    # (get_acquisition_channels_alltime) is guarded to return nothing
+    # rather than invent a year.
     return {'season_year': season, 'latest_period': period,
             'roster_date': roster_date,
-            'first_season': era['lo'], 'last_closed_season': era['hi']}
+            'first_season': season if era['lo'] is None else era['lo'],
+            'last_closed_season': era['hi']}
 
 
 def _entity_where(entity_id, alias=''):
@@ -984,6 +993,14 @@ def get_acquisition_channels_alltime(last_closed_season):
     same franchise that season, else season end -- decades of a dropped
     prospect's career never count. The builder sums these rows with the
     current-season query's for the all-time blocks."""
+    # No season has closed yet -- a league in its first year. There is
+    # nothing for an all-time block to be all-time ABOUT, and int(None)
+    # took the WHOLE almanac build down here, not just this section
+    # (MLB-222 C-3). Empty renders as an absent block, which is the ESPN
+    # path's own idiom for the same condition (`if rows:` guards every
+    # all-time block in almanac_logic).
+    if last_closed_season is None:
+        return []
     yr = int(last_closed_season)
     return query_snowflake(f"""
         WITH attr AS (
@@ -3722,7 +3739,13 @@ def build_standings_rows(context, arc, finishes, active_franchises,
     year_labels = [str(y) for y in seasons] + [str(season)]
     finish_header = ['Franchise', 'Titles', 'Div', 'Avg'] + year_labels
     last_finish_col = _col(4 + len(year_labels))
-    _section('SEASON FINISHES', scopes=[(1, f'{seasons[0]}–{season}')],
+    # `seasons` holds CLOSED seasons only, so it is empty in a league's
+    # first year and seasons[0] raised IndexError -- taking the whole
+    # build down, not this section (MLB-222 C-4). With nothing closed the
+    # matrix is just the season in flight, so the scope names that season
+    # alone rather than printing a range with no left edge.
+    era_scope = f'{seasons[0]}–{season}' if seasons else str(season)
+    _section('SEASON FINISHES', scopes=[(1, era_scope)],
              width=last_finish_col)
     _note('🏆 = Season Champion. Bright Green Border = Division Champion. '
           'Uses most current Team Names; franchises stitched across '
@@ -3861,8 +3884,12 @@ def build_standings_rows(context, arc, finishes, active_franchises,
                  scopes=[(1, 'Totals by Deployed Slot, Current Season'),
                          (2 + n_l, 'Pace per Standard Season, All-Time')],
                  width=grid_last_col)
-        _note('All-time cells are paces per standard season '
-              f'(= {n_std} gameplay days); short seasons (2020) and the '
+        # The parenthetical is dropped rather than printed as "= None
+        # gameplay days" when no season has closed and there is therefore
+        # no standard length to quote (MLB-222 C-4).
+        _std_len = f' (= {n_std} gameplay days)' if n_std else ''
+        _note('All-time cells are paces per standard season'
+              f'{_std_len}; short seasons (2020) and the '
               'season in flight weigh exactly the days they played. The P '
               'column spans all years -- started pitching is the P slot '
               'in every era -- while hitter slots exist only where daily '
@@ -4368,10 +4395,16 @@ def build_draft_recap_rows(season_year, franchise_map, value_lens='calc_total',
         p['points_rank'] = rank
         p['value_delta'] = p['overall_pick'] - rank
     parts = ' + '.join(dict.fromkeys(p['draft_label'] for p in year_picks))
-    _band(f'Draft Recap: {season_year}',
-          f'{parts} stitched as one {len(year_picks)}-pick draft. Δ Rank = overall '
-          f'pick minus season Total Points rank (positive = steal). (No keepers '
-          f'in this league.)')
+    # Same empty-season condition as max_round below: with no picks the
+    # stitched-draft sentence has no subject, and would render as a
+    # leading blank followed by "stitched as one 0-pick draft".
+    if year_picks:
+        _subtitle = (f'{parts} stitched as one {len(year_picks)}-pick draft. '
+                     f'Δ Rank = overall pick minus season Total Points rank '
+                     f'(positive = steal). (No keepers in this league.)')
+    else:
+        _subtitle = 'No draft captured for this season yet.'
+    _band(f'Draft Recap: {season_year}', _subtitle)
     rows.append([])
     # Value block B-F, a buffer column at G, busts block H-L (Kyle
     # 2026-07-18); the powder banner runs the full width across the buffer.
@@ -4415,7 +4448,15 @@ def build_draft_recap_rows(season_year, franchise_map, value_lens='calc_total',
     by_round_team = {}
     for p in year_picks:
         by_round_team[(p['round_num'], p['team_name_raw'])] = p
-    max_round = max((p['round_num'] or 0) for p in year_picks)
+    # default= is load-bearing: year_picks is empty for any season with no
+    # captured draft, and max() over an empty sequence raised ValueError
+    # that took down the ENTIRE almanac build, not just this tab
+    # (MLB-222 C-2). This stops being hypothetical in 2027 -- the
+    # draft_assembly_plan seed's last row is 2026, so the first 2027
+    # standings row makes season_year 2027 with no picks behind it. With
+    # max_round 0 the board loop below simply does not run and the section
+    # renders as its header alone.
+    max_round = max(((p['round_num'] or 0) for p in year_picks), default=0)
     lens_vals = [p[lens] for p in year_picks if p.get(lens) is not None]
     lens_lo, lens_hi = (min(lens_vals), max(lens_vals)) if lens_vals else (0.0, 1.0)
     color_grid = []

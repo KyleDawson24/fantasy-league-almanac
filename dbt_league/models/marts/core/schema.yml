@@ -962,7 +962,7 @@ models:
       - name: opponent_points
         description: 'Opponent total fantasy points for this matchup.'
       - name: result
-        description: 'W if team scored more than opponent, L if less, T if tied. Determined by platform_points (the official ESPN arbiter).'
+        description: 'W if team scored more than opponent, L if less, T if tied. Determined by platform_points (the official ESPN arbiter). NULL when the team had a BYE -- an odd-numbered league leaves one team per period unpaired, and a bye is not a tie. opponent_id/name/owner/points are NULL on those rows too; the team''s own production is still present and still counts (MLB-222).'
       - name: days_in_period
         description: 'Count of days in the matchup period (from matchup_schedule.end_date - start_date + 1). Normal weeks = 7; opening week and All-Star break are higher.'
 

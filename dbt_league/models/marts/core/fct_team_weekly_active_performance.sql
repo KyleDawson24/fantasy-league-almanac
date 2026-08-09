@@ -229,6 +229,20 @@ team_with_platform as (
 
 with_opponents as (
     -- Home side
+    --
+    -- The OPPONENT join is a left join, not an inner one (MLB-222 C-1b).
+    -- In an odd-numbered league one team per period has no opponent, and
+    -- stg_matchup_pairs carries that as a NULL away_team_id. Under an
+    -- inner join that team produced no team-week row at all and its whole
+    -- week of production vanished from every downstream surface -- a
+    -- silent hole, not a visible gap. The pairing join above stays INNER:
+    -- it is the schedule spine, and a team-week with no schedule row is
+    -- genuinely unknown rather than a bye.
+    --
+    -- result is NULL for a bye rather than 'T'. That is the contract the
+    -- consumers were already written against -- output/league_notes.py's
+    -- `if team['result'] is None: return []  # bye-week team breaks the
+    -- rule` could never fire before this change.
     select
         t.*,
         opp.team_id      as opponent_id,
@@ -236,6 +250,7 @@ with_opponents as (
         opp.owner_name   as opponent_owner,
         opp.platform_points as opponent_points,
         case
+            when opp.team_id is null then null
             when t.platform_points > opp.platform_points then 'W'
             when t.platform_points < opp.platform_points then 'L'
             else 'T'
@@ -246,7 +261,7 @@ with_opponents as (
         and t.season_year = mp.season_year
         and t.matchup_period = mp.matchup_period
         and t.team_id = mp.home_team_id
-    inner join team_with_platform opp
+    left join team_with_platform opp
         on mp.league_key = opp.league_key
         and mp.season_year = opp.season_year
         and mp.matchup_period = opp.matchup_period
@@ -254,7 +269,9 @@ with_opponents as (
 
     union all
 
-    -- Away side
+    -- Away side. Symmetric with the home arm above; see that comment.
+    -- A bye row (NULL away_team_id) matches no team here, so the bye team
+    -- is emitted exactly once -- by the home arm -- and never doubled.
     select
         t.*,
         opp.team_id      as opponent_id,
@@ -262,6 +279,7 @@ with_opponents as (
         opp.owner_name   as opponent_owner,
         opp.platform_points as opponent_points,
         case
+            when opp.team_id is null then null
             when t.platform_points > opp.platform_points then 'W'
             when t.platform_points < opp.platform_points then 'L'
             else 'T'
@@ -272,7 +290,7 @@ with_opponents as (
         and t.season_year = mp.season_year
         and t.matchup_period = mp.matchup_period
         and t.team_id = mp.away_team_id
-    inner join team_with_platform opp
+    left join team_with_platform opp
         on mp.league_key = opp.league_key
         and mp.season_year = opp.season_year
         and mp.matchup_period = opp.matchup_period

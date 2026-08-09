@@ -70,6 +70,14 @@ ESPN_RAW_TABLES = (
     "TEAM_OWNERS",
     "DRAFT_PICKS",
     "TRANSACTIONS",
+    # MLB-227: settings blocks the extract already fetched and discarded,
+    # plus the team-season standings ESPN serves alongside them. One table
+    # per block on purpose -- see the SNAPSHOT_TABLES comment in extract.py.
+    "SCHEDULE_SETTINGS",
+    "DRAFT_SETTINGS",
+    "ACQUISITION_SETTINGS",
+    "TRADE_SETTINGS",
+    "TEAM_STANDINGS",
 )
 
 # Contract type -> pyarrow type. Deliberately NOT the same mapping as the
@@ -451,6 +459,25 @@ class LocalParquetSink:
 
     def write_transactions(self, topics, year, league_key):
         self._write_snapshot("TRANSACTIONS", topics, year, league_key)
+
+    # -- MLB-227 ----------------------------------------------------------
+    # Same append-only snapshot semantics as the five above, so they share
+    # _write_snapshot rather than each restating it. The warehouse twin is
+    # extract.py's load_snapshot_to_snowflake.
+    def write_schedule_settings(self, payload, year, league_key):
+        self._write_snapshot("SCHEDULE_SETTINGS", payload, year, league_key)
+
+    def write_draft_settings(self, payload, year, league_key):
+        self._write_snapshot("DRAFT_SETTINGS", payload, year, league_key)
+
+    def write_acquisition_settings(self, payload, year, league_key):
+        self._write_snapshot("ACQUISITION_SETTINGS", payload, year, league_key)
+
+    def write_trade_settings(self, payload, year, league_key):
+        self._write_snapshot("TRADE_SETTINGS", payload, year, league_key)
+
+    def write_team_standings(self, payload, year, league_key):
+        self._write_snapshot("TEAM_STANDINGS", payload, year, league_key)
 
     # -- deliberately unimplemented ---------------------------------------
     def backfill_club_of_game(self, year, league_key, periods):

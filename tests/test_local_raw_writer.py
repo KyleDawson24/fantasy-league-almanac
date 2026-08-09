@@ -141,6 +141,12 @@ def test_written_parquet_matches_the_contract_schema_exactly(sink, contract):
     sink.write_team_owners([{"team_id": 1, "owner_id": "{G}"}], 2026, LEAGUE)
     sink.write_draft([{"overall_pick": 1, "player_id": 7}], 2026, LEAGUE)
     sink.write_transactions([{"id": "t1"}], 2026, LEAGUE)
+    # MLB-227
+    sink.write_schedule_settings({"matchupPeriodCount": 22}, 2026, LEAGUE)
+    sink.write_draft_settings({"keeperCount": 5}, 2026, LEAGUE)
+    sink.write_acquisition_settings({"acquisitionLimit": -1}, 2026, LEAGUE)
+    sink.write_trade_settings({"max": -1}, 2026, LEAGUE)
+    sink.write_team_standings([{"id": 1, "playoffSeed": 1}], 2026, LEAGUE)
 
     for table in ESPN_RAW_TABLES:
         path = sink.path_for(table)
@@ -248,9 +254,16 @@ def test_a_different_league_is_not_touched(sink):
     (lambda s, n: s.write_team_owners([{"n": n}], 2026, LEAGUE), "TEAM_OWNERS"),
     (lambda s, n: s.write_draft([{"n": n}], 2026, LEAGUE), "DRAFT_PICKS"),
     (lambda s, n: s.write_transactions([{"n": n}], 2026, LEAGUE), "TRANSACTIONS"),
+    # MLB-227 -- same semantics, asserted rather than assumed from the
+    # shared _write_snapshot, for the reason in the docstring below.
+    (lambda s, n: s.write_schedule_settings({"n": n}, 2026, LEAGUE), "SCHEDULE_SETTINGS"),
+    (lambda s, n: s.write_draft_settings({"n": n}, 2026, LEAGUE), "DRAFT_SETTINGS"),
+    (lambda s, n: s.write_acquisition_settings({"n": n}, 2026, LEAGUE), "ACQUISITION_SETTINGS"),
+    (lambda s, n: s.write_trade_settings({"n": n}, 2026, LEAGUE), "TRADE_SETTINGS"),
+    (lambda s, n: s.write_team_standings([{"n": n}], 2026, LEAGUE), "TEAM_STANDINGS"),
 ])
 def test_snapshot_tables_are_append_only(sink, write, table):
-    """These five keep every snapshot on purpose.
+    """These ten keep every snapshot on purpose.
 
     Collapsing them to overwrite still runs and still returns one row from
     staging, so nothing looks broken -- it just silently discards the

@@ -1131,6 +1131,35 @@ def get_recent_matchup_periods(year, lookback_days=LIVE_CAPTURE_WINDOW_DAYS):
 # ---------------------------------------------------------------------------
 # ESPN extraction — scoring settings
 # ---------------------------------------------------------------------------
+def fetch_league_payload(year, views):
+    """
+    Pull one ESPN league document carrying every requested view.
+
+    ESPN's `view` parameter REPEATS rather than replacing -- asking for
+    mSettings and mTeam together returns a single document with both
+    `settings` and `teams` top-level keys, in one round trip. Verified
+    against 2026 and 2025: the `settings` block is byte-identical to what
+    a mSettings-only request returns, so adding a view to an existing call
+    cannot disturb the payload an existing caller already reads (MLB-227).
+
+    That is why the standings capture costs no extra API call. It is the
+    same request that was already being made, asked to hand back a part of
+    the response the extract was previously throwing away.
+    """
+    url = f"{ESPN_API_BASE}/{year}/segments/0/leagues/{LEAGUE_ID}"
+
+    response = requests.get(
+        url,
+        # A list of pairs, not a dict: a dict cannot express a repeated key,
+        # and repeating `view` is precisely the mechanism being used.
+        params=[("view", v) for v in views],
+        cookies={"swid": SWID, "espn_s2": ESPN_S2},
+    )
+    response.raise_for_status()
+
+    return response.json()
+
+
 def fetch_league_settings(year):
     """
     Pull league settings from ESPN's raw API.
@@ -1140,17 +1169,7 @@ def fetch_league_settings(year):
     We persist the pieces we consume as append-only raw snapshots so dbt
     can build stable contract dims over them.
     """
-    url = f"{ESPN_API_BASE}/{year}/segments/0/leagues/{LEAGUE_ID}"
-
-    response = requests.get(
-        url,
-        params={"view": "mSettings"},
-        cookies={"swid": SWID, "espn_s2": ESPN_S2},
-    )
-    response.raise_for_status()
-
-    data = response.json()
-    return data["settings"]
+    return fetch_league_payload(year, ["mSettings"])["settings"]
 
 
 def fetch_scoring_settings(year):
@@ -1209,6 +1228,80 @@ def load_scoring_settings_to_snowflake(conn, scoring_items, year, league_key):
 
         conn.commit()
         print(f"  Loaded scoring settings for {year} into Snowflake.")
+
+    finally:
+        cursor.close()
+
+
+# ---------------------------------------------------------------------------
+# The settings blocks the extract fetched and threw away (MLB-227)
+# ---------------------------------------------------------------------------
+# ONE RAW TABLE PER SETTINGS BLOCK, and that is Kyle's ruling rather than a
+# fallout of the code: scheduleSettings and rosterSettings could share a
+# SETTINGS table and will not, because a human troubleshooting roster slots
+# would not think to look in the same place as the playoff bracket. Readability
+# at RAW outranks table-count economy. It also matches what RAW already does --
+# roster and scoring settings have always been two tables, not one.
+#
+# TEAM_STANDINGS is a different grain again (one payload per season holding
+# every team's row) and gets its own table for that reason, exactly as
+# TEAM_OWNERS does.
+#
+# All five are append-only snapshots with the shape the other snapshot tables
+# use, so staging picks the latest per (league_key, season_year) by
+# extracted_at with no new convention to learn.
+SNAPSHOT_TABLES = (
+    "SCHEDULE_SETTINGS",
+    "DRAFT_SETTINGS",
+    "ACQUISITION_SETTINGS",
+    "TRADE_SETTINGS",
+    "TEAM_STANDINGS",
+)
+
+
+def load_snapshot_to_snowflake(conn, table, payload, year, league_key, label):
+    """Append one verbatim payload as a row in RAW.<table>.
+
+    The shared engine for the MLB-227 tables. Written once rather than
+    copied five times because these five genuinely are the same write --
+    same columns, same append-only semantics, same staging contract. The
+    three PRE-EXISTING snapshot loaders are deliberately NOT refactored onto
+    it: they are on the path Kyle's weekly run depends on, and consolidating
+    proven DML for symmetry is how a settled write acquires a new bug.
+
+    `table` is never user input -- it comes from SNAPSHOT_TABLES -- but it is
+    checked anyway, because it lands in DDL by string interpolation and a
+    typo should fail here rather than create a table nobody meant.
+    """
+    if table not in SNAPSHOT_TABLES:
+        raise ValueError(
+            f"{table!r} is not one of the MLB-227 snapshot tables "
+            f"({', '.join(SNAPSHOT_TABLES)})."
+        )
+
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute(f"""
+            CREATE TABLE IF NOT EXISTS {table} (
+                season_year     INTEGER,
+                raw_json        VARIANT,
+                extracted_at    TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP(),
+                league_key      VARCHAR
+            )
+        """)
+        ensure_league_key_column(cursor, table)
+
+        cursor.execute(
+            f"""
+            INSERT INTO {table} (season_year, raw_json, league_key)
+            SELECT %s, PARSE_JSON(%s), %s
+            """,
+            (year, json.dumps(payload), league_key),
+        )
+
+        conn.commit()
+        print(f"  Loaded {label} for {year} into Snowflake.")
 
     finally:
         cursor.close()
@@ -1564,6 +1657,27 @@ class SnowflakeSink:
     def write_transactions(self, topics, year, league_key):
         load_transactions_to_snowflake(self.conn, topics, year, league_key)
 
+    # -- MLB-227: the blocks that were already being fetched ---------------
+    def write_schedule_settings(self, payload, year, league_key):
+        load_snapshot_to_snowflake(self.conn, "SCHEDULE_SETTINGS", payload,
+                                   year, league_key, "schedule settings")
+
+    def write_draft_settings(self, payload, year, league_key):
+        load_snapshot_to_snowflake(self.conn, "DRAFT_SETTINGS", payload,
+                                   year, league_key, "draft settings")
+
+    def write_acquisition_settings(self, payload, year, league_key):
+        load_snapshot_to_snowflake(self.conn, "ACQUISITION_SETTINGS", payload,
+                                   year, league_key, "acquisition settings")
+
+    def write_trade_settings(self, payload, year, league_key):
+        load_snapshot_to_snowflake(self.conn, "TRADE_SETTINGS", payload,
+                                   year, league_key, "trade settings")
+
+    def write_team_standings(self, payload, year, league_key):
+        load_snapshot_to_snowflake(self.conn, "TEAM_STANDINGS", payload,
+                                   year, league_key, "team standings")
+
     def backfill_club_of_game(self, year, league_key, periods):
         backfill_club_of_game(self.conn, year, league_key, periods)
 
@@ -1609,10 +1723,29 @@ def extract_scoring_settings(sink, year, league_key):
     sink.write_scoring_settings(scoring_items, year, league_key)
 
 
+# Each settings block that gets its own RAW table, paired with the sink
+# method that writes it. A tuple rather than five inline calls so the set of
+# captured blocks is one readable list -- adding a sixth block is one line
+# here plus one sink method, and nothing else moves.
+SETTINGS_BLOCK_WRITERS = (
+    ("scheduleSettings", "write_schedule_settings", "schedule settings"),
+    ("draftSettings", "write_draft_settings", "draft settings"),
+    ("acquisitionSettings", "write_acquisition_settings", "acquisition settings"),
+    ("tradeSettings", "write_trade_settings", "trade settings"),
+)
+
+
 def extract_league_settings(sink, year, league_key):
-    """Pull scoring + roster settings from ESPN and load them to the sink."""
+    """Pull scoring + roster settings from ESPN and load them to the sink.
+
+    Also captures the four settings blocks the same response has always
+    carried but nothing read (MLB-227), plus the team-season standings from
+    the mTeam view. One request serves all of it -- see fetch_league_payload
+    -- so the added tables cost no extra call.
+    """
     print(f"\nLeague settings for {year}:")
-    settings = fetch_league_settings(year)
+    payload = fetch_league_payload(year, ["mSettings", "mTeam"])
+    settings = payload["settings"]
 
     scoring_items = settings["scoringSettings"]["scoringItems"]
     print(f"  Retrieved {len(scoring_items)} scoring items for {year}")
@@ -1622,6 +1755,31 @@ def extract_league_settings(sink, year, league_key):
     slot_count = len(roster_settings.get("lineupSlotCounts", {}) or {})
     print(f"  Retrieved roster settings for {year} ({slot_count} slot counts)")
     sink.write_roster_settings(roster_settings, year, league_key)
+
+    # MLB-227. Each block is skipped rather than defaulted when ESPN does not
+    # send it: an absent block and an empty one are different facts about the
+    # season, and writing `{}` would make a league that has no trade rules
+    # indistinguishable from a season whose payload changed shape.
+    for key, method, label in SETTINGS_BLOCK_WRITERS:
+        block = settings.get(key)
+        if block is None:
+            print(f"  No {label} in the {year} payload -- skipping")
+            continue
+        print(f"  Retrieved {label} for {year} ({len(block)} keys)")
+        getattr(sink, method)(block, year, league_key)
+
+    # Team-season standings: divisions, records, playoff seeds and final
+    # ranks, verbatim. `playoffSeed` is a full standings rank (1..N, assigned
+    # to non-qualifiers too), and it is NOT the same number as
+    # `rankCalculatedFinal` -- 2025's champion was the 7 seed. Both are kept
+    # because they answer different questions, and neither is reconstructable
+    # from a record sort: ESPN seeds division winners first.
+    teams = payload.get("teams")
+    if teams:
+        print(f"  Retrieved standings for {len(teams)} teams in {year}")
+        sink.write_team_standings(teams, year, league_key)
+    else:
+        print(f"  No teams in the {year} payload -- skipping standings")
 
     team_owners = fetch_team_owners(year)
     print(f"  Retrieved {len(team_owners)} team-owner rows for {year}")

@@ -334,8 +334,36 @@ def get_wasted_points(season_year, matchup_period, limit=5):
         FROM wasted_combined w
         LEFT JOIN player_meta m ON w.player_id = m.player_id
         LEFT JOIN active_points a ON w.player_id = a.player_id
-        ORDER BY w.wasted_points_total
-                 + GREATEST(0, -COALESCE(a.platform_points, 0)) DESC
+        -- Ordered to the precision the surface PRINTS, then broken on the
+        -- name it prints, then on player_id (MLB-231). Bare
+        -- `ORDER BY <value> DESC` was never deterministic: Snowflake
+        -- guarantees no ordering among equal values, so a tie returned in
+        -- whichever order the scan happened to produce and the golden
+        -- flapped with nothing underneath it having changed.
+        --
+        -- ROUND comes FIRST and that is the load-bearing part. This is
+        -- MLB-128 compounding: wasted_points_total is an unfrozen float
+        -- SUM(), so two values that both display as 28.6 can differ in the
+        -- fifteenth decimal. Ordering on the raw value sorts them strictly,
+        -- the tiebreakers below never fire, and the order re-rolls whenever
+        -- the summation order does. Two rows a reader cannot tell apart
+        -- must not be separated by float noise a reader cannot see.
+        --
+        -- The tiebreaker is a column the surface already prints, so it can
+        -- never move a golden for an invisible reason -- if display_name
+        -- changes, the rendered line was changing anyway. COALESCE, not
+        -- w.display_name, because the coalesce is what gets printed.
+        -- player_id sits behind it for the same-name case.
+        --
+        -- Cosmetic today (a clean two-way tie at ranks 4 and 5 against
+        -- LIMIT 5, both inside either way) but it sits ON the boundary,
+        -- and this league already contains a THREE-way tie: 2026 period 7
+        -- at 24.1, Manzardo / Walls / Holmes. One row over and LIMIT
+        -- silently drops a player out of a shipped callout.
+        ORDER BY ROUND(w.wasted_points_total
+                       + GREATEST(0, -COALESCE(a.platform_points, 0)), 1) DESC,
+                 COALESCE(m.display_name, w.display_name) ASC,
+                 w.player_id ASC
         LIMIT %s
     """, (season_year, matchup_period, season_year, matchup_period,
           season_year, matchup_period, limit))

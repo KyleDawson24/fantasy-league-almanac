@@ -361,10 +361,11 @@ class LocalParquetSink:
         The engine-specific half of the MLB-188 guard; the settle/window
         arithmetic and the refusal live in extract.py and are shared by both
         sinks. NOT N/A locally -- more load-bearing than in the warehouse.
-        The guard protects per-day club stamps ESPN cannot re-serve, and in a
-        Snowflake-free install this parquet file is the only copy of them that
-        exists anywhere. The refusal text's "snapshot RAW first" advice has no
-        Time Travel behind it here.
+        The guard protects club-of-game labels and aged-out free-agent rows
+        that ESPN will not re-serve, and in a Snowflake-free install this
+        parquet file is the only copy of them that exists anywhere. The
+        refusal text's "snapshot RAW first" advice has no Time Travel behind
+        it here.
 
         An absent file means nothing has ever been loaded, which is a genuine
         answer. A file that exists and cannot be read is NOT: it propagates,
@@ -405,10 +406,15 @@ class LocalParquetSink:
         """Replace this (league, season, matchup period) and insert the run's rows.
 
         The local twin of the warehouse's delete-then-insert, and it carries
-        the same warning: the rows this drops hold each player's club as ESPN
-        reported it when the period was last written, and ESPN serves only
-        CURRENT club. `settled_loaded_periods` is the gate that keeps this
-        from being reachable by accident -- do not call this around it.
+        the same warning: for a settled period the rows this drops hold club-
+        of-game labels and free-agent rows that kona can no longer reproduce,
+        so what gets inserted in their place is thinner than what was there.
+        `settled_loaded_periods` is the gate that keeps this from being
+        reachable by accident -- do not call this around it.
+
+        It is WORSE here than in the warehouse, and that is worth saying
+        plainly: Snowflake has Time Travel and a `_bak` clone behind it. This
+        file has neither. On the local path the parquet IS the history.
         """
         loaded_at = datetime.now()
         rows = [{

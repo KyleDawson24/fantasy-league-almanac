@@ -222,11 +222,15 @@ closed:
   Two things did NOT change, and are worth stating so nobody re-opens
   them. The person-level `proTeam` stamp is still written on every extract
   and still preserved byte-for-byte in RAW -- it is the observation record
-  of what ESPN believed and when, and MLB-188's guard exists to stop it
-  being overwritten. And the fix is a **re-read, not a re-fetch**: the
-  spike pulled 2025's splits a year late and they still showed every
-  deadline trade on the right day, which is why this route was ruled
-  canonical over a crosswalk.
+  of what ESPN believed and when. It is **not** what MLB-188's guard is
+  for, and saying so cost real time: every stated rationale for that guard
+  described `proTeam`, nothing reads `proTeam`, and three separate readings
+  therefore concluded the guard protected nothing (corrected in MLB-224).
+  The stamp is owed nothing and guarded by nothing -- it stays only because
+  RAW records ESPN's answers verbatim. And the fix is a **re-read, not a
+  re-fetch**: the spike pulled 2025's splits a year late and they still
+  showed every deadline trade on the right day, which is why this route was
+  ruled canonical over a crosswalk.
 
   The scale of what it corrected, as measured before the flip:
 
@@ -301,14 +305,24 @@ remained of it. The band now renders no rows at all, and its code path is
 deliberately kept live: for a league whose seasons were backfilled years
 late it is a working diagnostic, which is why its wording still matters.
 
-**The hazard this creates (MLB-188).** Because the stamp is whatever ESPN
-reports at fetch time, **re-extracting an already-loaded matchup period
-overwrites its stored per-day clubs with the clubs of the day you re-ran
-it**, and ESPN cannot serve the originals again. There is no earlier copy
-in RAW to restore from -- 2025 is the proof, not the warning: all 195 of
-its rows were written in one ten-minute pass and carry one date's clubs.
+**The hazard this creates (MLB-188).** Club of game is read out of kona's
+per-scoring-period splits, and kona answers about an old period from
+**today's** player universe. So **re-extracting an already-loaded matchup
+period replaces its rows with a thinner answer than the one already
+stored**: players who have since aged out of that window come back with no
+club label, or -- if they were free agents -- as no row at all. Kona is the
+only source of free-agent production, so those rows have nowhere else to
+come from. There is no earlier copy in RAW to restore from, and on
+`--raw-target local` the parquet file is the only copy in existence.
 Any ordinary reason to re-pull -- a gap fill, a corrupted week, a schema
 migration -- silently converts a live-captured season into a second 2025.
+
+The loss is measurable at both ends. Forward: the 476 unplaceable
+player-days above, a population that grows with every week a period waits
+to be asked about. Backward: 2025 is what it looks like once it has
+happened -- all 195 rows written in one ten-minute pass, and 0 of its
+1,236 player-seasons record a mid-season club change, against 66 of 1,208
+in 2026.
 
 Two things make this survivable, and the distinction matters:
 
@@ -319,14 +333,43 @@ Two things make this survivable, and the distinction matters:
   more than `LIVE_CAPTURE_WINDOW_DAYS` (21) ago fails the whole invocation
   loudly, naming every offending period, and proceeds only behind
   `--overwrite-day-accurate-history`. Periods inside that window are
-  exempt -- the weekly run revisits them on purpose, which is how the
-  stamps get captured at all, and a guard the routine path had to bypass
-  would be bypassed permanently within a fortnight.
+  exempt -- the weekly run revisits them on purpose, which is how the club
+  labels and the FA rows get captured at all, and a guard the routine path
+  had to bypass would be bypassed permanently within a fortnight.
+
+The refusal message is written to be self-sufficient (MLB-224): it names
+what is protected, why ESPN will not re-serve it, and the flag, so hitting
+the guard needs no outside explanation.
 
 To add a **new field** to settled periods, use `--backfill-club-of-game`,
 which updates rows in place, assigns only the new key, and preserves
-`loaded_at` -- the only surviving evidence of when each period was stamped.
+`loaded_at` -- the only surviving evidence of when each period was written.
+The asymmetry is deliberate and is the reason both commands exist: the
+backfill keeps a stored value that today's fetch cannot confirm, because
+absence of evidence is not evidence of absence. A delete-then-insert has
+no way to do that -- by the time it inserts, the evidence is gone.
 
 **These RAW payloads are temporally irreplaceable** and should be backed
 up accordingly (MLB-131). Every other input in this warehouse can be
 re-fetched from its source; this one cannot.
+
+**The photo has been taken (MLB-224).** Two copies of `BOX_SCORES` exist
+outside the live table, so this is a matter of record rather than of
+intention:
+
+| copy | where | taken |
+|---|---|---|
+| Snowflake clone | `ESPN_FANTASY.RAW.BOX_SCORES_BAK_20260803_MLB129` | 2026-08-03 |
+| parquet snapshot | `data/archive/raw_snapshots/BOX_SCORES_20260809_MLB224.parquet` | 2026-08-09 |
+
+The parquet is a byte-identical copy of the dump
+`tools/dump_snowflake_raw_to_parquet.py --table BOX_SCORES` produced from
+the live table, verified to read back at 326 rows (195 in 2025 across 26
+matchup periods, 131 in 2026 across 17), carrying 144,270 rostered
+player-rows with 66,778 club labels and 50,676 free-agent rows. It lives
+under `data/`, which is gitignored -- it is real league data and is not
+committed. It is deliberately **not** in `data/parquet/raw/`, because
+every file there needs a `_manifest.json` entry for
+`tools/load_parquet_to_duckdb.py`; an archive is not a landing artifact.
+To take another, re-run that dump and copy the result aside under a dated
+name.

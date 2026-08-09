@@ -31,9 +31,11 @@ Both targets share the schedule, the settle window, the refusals and the
 league_key stamp -- only the write differs. See extract/raw_sink.py.
 
 Re-extracting a matchup period that has already been loaded and has settled
-(ended more than LIVE_CAPTURE_WINDOW_DAYS ago) destroys its per-day club
-history and is refused — see `settled_loaded_periods` (MLB-188). To put a new
-field on settled periods, use --backfill-club-of-game, which updates in place.
+(ended more than LIVE_CAPTURE_WINDOW_DAYS ago) replaces its rows with a
+thinner answer than the one already stored — club-of-game labels ESPN will
+not serve again, and free agents kona has aged out — and is refused; see
+`settled_loaded_periods` (MLB-188). To put a new field on settled periods,
+use --backfill-club-of-game, which updates in place.
 """
 
 import argparse
@@ -135,12 +137,13 @@ PRO_TEAM_MAP = getattr(espn_baseball_constant, "PRO_TEAM_MAP", {})
 # How far back the default weekly run reaches, and — the same number, on
 # purpose — how long a loaded matchup period stays eligible for a rewrite.
 #
-# ESPN serves CURRENT club on the player record, so the per-day `proTeam`
-# stamp a period carries is only ever as accurate as the date it was last
-# written. Inside this window a rewrite is the point: it is how the stamps
-# get captured at all, and it catches scoring adjustments. Outside it, a
-# rewrite replaces a period's clubs with the clubs of today, and ESPN cannot
-# serve the originals back — see the guard on `settled_loaded_periods`.
+# Inside this window a rewrite is the point: it is how a period acquires its
+# club-of-game labels and its free-agent rows at all, and it catches scoring
+# adjustments. Outside it, the same rewrite is a downgrade — kona answers
+# about a long-settled period out of TODAY's player universe, so players who
+# have since aged out of it come back unlabelled or not at all, and the
+# stored rows were the only copy. See the guard on `settled_loaded_periods`
+# for the full account of what is protected.
 #
 # Both readers take the number from here. A second hardcoded 21 that drifts
 # from this one would silently widen or narrow the guard (MLB-175's scar:
@@ -800,15 +803,42 @@ def settled_loaded_periods(sink, year, league_key, periods, today=None):
     Returns [(matchup_period, end_date, last_loaded_at)] sorted by period.
     Empty means the requested set is safe to extract.
 
+    WHAT IS PROTECTED. Settled rows as a class, because a re-extract is
+    delete-then-insert and the answer it inserts is thinner than the one it
+    drops. Concretely, and each of these is measured:
+
+      * `clubOfGame` on rostered rows — the club of the GAME a player-day's
+        production came from, and what the shipped affinity chart reads in
+        both books. It is read out of kona's per-scoring-period splits, so
+        it can only be captured while kona still returns that period's
+        players: 476 player-days across 60 players (2026) already have no
+        placeable club because ESPN stopped returning them (MLB-193). The
+        gap between a period being lived and being asked about IS the loss
+        function, and it only grows.
+      * the free-agent rows kona has aged out. Kona is the only source of
+        free-agent production; a player who has dropped out of today's
+        window does not come back as an unlabelled row, he comes back as no
+        row at all.
+      * and the fact that 2025 is the demonstration, not the hypothesis:
+        all 195 of its rows were written in one ten-minute pass, and it
+        shows in the product — 0 of 1,236 player-seasons multi-club in
+        2025 against 66 of 1,208 in 2026.
+
+    The asymmetry with `--backfill-club-of-game` is the whole argument. The
+    backfill keeps stored evidence when today's fetch cannot confirm it
+    ("absence of evidence is not evidence of absence"); the re-extract's
+    DELETE cannot, because by the time the INSERT runs the evidence is gone.
+
     Two ways a period is NOT damageable, and both matter:
 
       * it has no rows yet — a first extract invents no history, so a
         genuinely new period never trips the guard; and
       * it ended inside the live-capture window — the weekly run revisits
-        those on purpose, which is the mechanism that captures the day-of
-        stamps in the first place and picks up scoring adjustments. A guard
-        the routine path had to bypass would teach everyone to bypass it,
-        and the flag would be permanently on by the second week.
+        those on purpose, which is the mechanism that captures the club
+        labels and the FA rows in the first place and picks up scoring
+        adjustments. A guard the routine path had to bypass would teach
+        everyone to bypass it, and the flag would be permanently on by the
+        second week.
 
     Fails closed, in two senses. A period with no schedule row has no
     knowable age, so it counts as settled rather than being waved through.
@@ -867,7 +897,14 @@ def settled_loaded_periods(sink, year, league_key, periods, today=None):
 def refuse_settled_overwrite(settled, year, flag):
     """Build the MLB-188 refusal. Names every offender, the flag, and the
     snapshot — a refusal that does not say how to proceed just gets pattern-
-    matched into `--force` by the next person in a hurry."""
+    matched into `--force` by the next person in a hurry.
+
+    MLB-224 raised the bar from "says how to proceed" to "explains itself":
+    the message has to carry what is protected and why it cannot be re-
+    fetched, not just what to type. Three separate readings of the old
+    rationale concluded the guard protected nothing, because the rationale
+    described a field (`proTeam`) that nothing reads. Someone who trips this
+    should need no human to interpret it."""
     lines = [
         "",
         "=" * 72,
@@ -884,19 +921,48 @@ def refuse_settled_overwrite(settled, year, flag):
         lines.append(f"  {mp:>7}  {ended:<12} {str(loaded_at)[:19]:<20}")
     lines += [
         "",
-        "Re-extracting them overwrites each player's stored per-day club with",
-        "whatever club ESPN reports TODAY. ESPN serves only current club, so",
-        "the originals cannot be fetched again -- from ESPN or from here.",
+        "WHAT IS PROTECTED",
+        "",
+        "  Re-extracting is delete-then-insert, and for a period this old the",
+        "  rows it would insert are THINNER than the rows it would drop:",
+        "",
+        "    * the club-of-game label on every rostered player-day -- the",
+        "      club whose GAME the production came from. This is what the",
+        "      affinity chart in both books reads. It is only readable while",
+        "      kona still returns that period's players, and it already",
+        "      cannot be read for 476 player-days of 2026 (60 players) that",
+        "      ESPN has stopped returning.",
+        "",
+        "    * the free agents. Kona is the ONLY source of free-agent",
+        "      production. A player who has aged out of today's window does",
+        "      not come back unlabelled -- he comes back as no row at all.",
+        "",
+        "  ESPN will not re-serve the originals: not to this command, not to",
+        "  any other, not ever. There is no earlier copy inside the warehouse",
+        "  to restore from, and on --raw-target local that parquet file is the",
+        "  only copy of these rows in existence anywhere.",
+        "",
+        "  2025 is what this looks like after it has happened -- written in a",
+        "  single pass, and 0 of its 1,236 player-seasons record a mid-season",
+        "  club change, against 66 of 1,208 in 2026.",
         "",
         "Nothing was written. Nothing was deleted.",
         "",
-        "If you want the club-of-game field on these periods, that is not this",
-        "command -- use --backfill-club-of-game, which updates in place, adds",
-        "only the new field, and leaves every stored value untouched.",
+        "IF YOU MEANT TO ADD A FIELD RATHER THAN REPLACE THE ROWS",
         "",
-        "If you truly mean to overwrite the history:",
-        f"  1. snapshot RAW first  (CREATE TABLE ..._bak CLONE BOX_SCORES)",
+        "  Use --backfill-club-of-game. It updates in place, assigns only the",
+        "  new key, keeps any stored value today's fetch cannot confirm, and",
+        "  deletes nothing. It does not need the flag below.",
+        "",
+        "IF YOU TRULY MEAN TO OVERWRITE THIS HISTORY",
+        "",
+        "  1. snapshot RAW first, so the rows survive the decision:",
+        "       Snowflake  CREATE TABLE BOX_SCORES_BAK_<date> CLONE BOX_SCORES",
+        "       local      copy BOX_SCORES.parquet aside under a dated name",
         f"  2. re-run with {flag}",
+        "",
+        "  That flag is the deliberate way through. Nothing else bypasses",
+        "  this, and it is not a --force: it means the sentence above.",
         "",
         "=" * 72,
     ]
@@ -932,15 +998,16 @@ def load_box_scores_to_snowflake(conn, records, matchup_period, year, league_key
         # IS NULL arm self-heals rows that predate the league_key migration
         # (all such rows belong to the default ESPN league).
         #
-        # !! MLB-188 -- THIS DELETE IS THE IRREVERSIBLE ONE. The rows it drops
-        # carry each player's `proTeam` as ESPN reported it on the day this
-        # period was last written. ESPN serves only CURRENT club, so the
-        # INSERT below refills them with the clubs of today: run this against
-        # a period that has settled and its per-day club history is gone, from
-        # here and from ESPN both. 2025 is what that looks like — all 195 rows
-        # written in one ten-minute pass, every row stamped with one date's
-        # clubs. There is no backup inside this warehouse to restore from.
-        # `settled_loaded_periods` is the gate that keeps this from being
+        # !! MLB-188 -- THIS DELETE IS THE IRREVERSIBLE ONE. What the rows it
+        # drops carry, and the INSERT below cannot put back for a settled
+        # period: `clubOfGame` on every rostered player-day (the club whose
+        # game the production came from, and what the shipped affinity chart
+        # reads), and the free-agent rows themselves. Both are read out of
+        # kona, which answers about an old scoring period from TODAY's player
+        # universe -- players who have aged out come back unlabelled, or as no
+        # row at all. 476 player-days of 2026 are already in that state
+        # (MLB-193). There is no earlier copy inside this warehouse to restore
+        # from. `settled_loaded_periods` is the gate that keeps this from being
         # reachable by accident; do not call this loader around it. Re-running
         # *dbt* is always safe — RAW is the only thing that cannot be rebuilt.
         # Adding a field to a settled period is a job for
@@ -1086,18 +1153,16 @@ def backfill_club_of_game(conn, year, league_key, periods):
 
     This exists because the obvious way to get a new field onto old rows —
     re-run the extract — is the one thing MLB-188 forbids: the loader's
-    delete-then-insert would refill every stored `proTeam` with today's
-    clubs. Both seasons' stamps are wanted exactly as they are. 2026's are
-    the only near-contemporaneous capture that will ever exist; 2025's are
-    the record of what a one-pass backfill produced, which is evidence, not
-    garbage. The shipped affinity chart also still reads `proTeam` until the
-    wave-end flip, so anything that moved it would move the goldens too.
+    delete-then-insert would throw away rows kona can no longer reproduce.
+    Both seasons' rows are wanted exactly as they are. 2026's are the only
+    near-contemporaneous capture that will ever exist; 2025's are the record
+    of what a one-pass backfill produced, which is evidence, not garbage.
 
     So: read each stored row, set ONE new key on each player, write the row
     back with UPDATE. No DELETE. No other key is assigned, so preservation
     holds by construction rather than by a diff run afterwards — and
     `loaded_at` survives, which matters because it is the only remaining
-    evidence of when each period's `proTeam` was actually stamped.
+    evidence of when each period was actually written.
 
     Idempotent: re-running rewrites the same key with the same value, so a
     half-finished run is resumed simply by running it again.
@@ -1979,11 +2044,12 @@ if __name__ == "__main__":
         "--overwrite-day-accurate-history", action="store_true",
         help="DESTRUCTIVE. Permit re-extracting matchup periods that are "
              "already loaded and ended more than "
-             f"{LIVE_CAPTURE_WINDOW_DAYS} days ago. Their stored per-day club "
-             "stamps are replaced with the clubs ESPN reports today and cannot "
-             "be recovered from ESPN. Snapshot RAW before using this. To add a "
-             "new field to old periods you want --backfill-club-of-game "
-             "instead (MLB-188).",
+             f"{LIVE_CAPTURE_WINDOW_DAYS} days ago. Their stored club-of-game "
+             "labels and their free-agent rows are replaced with whatever kona "
+             "still returns for that period today, which is less, and ESPN "
+             "will not serve the originals again. Snapshot RAW before using "
+             "this. To add a new field to old periods you want "
+             "--backfill-club-of-game instead (MLB-188).",
     )
     parser.add_argument(
         "--league", default=None, metavar="LEAGUE_KEY",
@@ -2099,9 +2165,11 @@ if __name__ == "__main__":
                     raise SystemExit(refuse_settled_overwrite(
                         settled, year, "--overwrite-day-accurate-history"))
             elif periods:
-                print("\n!! --overwrite-day-accurate-history: stored per-day club "
-                      "stamps for already-loaded settled periods will be "
-                      "replaced with today's clubs and cannot be recovered.")
+                print("\n!! --overwrite-day-accurate-history: for already-loaded "
+                      "settled periods, the stored club-of-game labels and the "
+                      "free-agent rows will be replaced by whatever kona still "
+                      "returns today, and ESPN will not serve the originals "
+                      "again.")
 
             league = connect_espn(year)
 

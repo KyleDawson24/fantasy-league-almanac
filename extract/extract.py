@@ -474,6 +474,45 @@ def connect_espn(year):
     )
 
 
+def unmapped_lineup_slot_error(exc, matchup_period, scoring_period):
+    """Turn espn-api's bare KeyError into something a stranger can act on.
+
+    `BoxPlayer.__init__` does `POSITION_MAP[data['lineupSlotId']]` with no
+    default, so a league using a slot id the wrapper does not map raises a
+    KeyError carrying nothing but the number, and the extract dies with no
+    indication of what went wrong (MLB-222 C-6). The wrapper's own constant
+    file admits the gap in a comment: ids 18, 21 and 22 "have appeared but
+    unknown what position they correspond to".
+
+    This FAILS rather than coercing the slot to a plausible default, and
+    that is deliberate. An unrecognised slot classified as hitting counts a
+    benched or minors player as active starter production; classified as
+    pitching it deletes his stat line outright. That two-sided damage is
+    exactly what MLB-222 F-1 is about, and a wrong number that looks right
+    is worse than a run that stops.
+
+    Note `Player.lineupSlot` uses `.get(..., '')` for the same lookup, which
+    is where the empty-string slot F-1 has to classify comes from -- the two
+    call sites in the same dependency disagree.
+    """
+    key = exc.args[0] if exc.args else None
+    known = sorted(k for k in LINEUP_SLOT_MAP if isinstance(k, int))
+    if isinstance(key, int) and key not in LINEUP_SLOT_MAP:
+        detail = (f"ESPN returned lineup slot id {key}, which the installed "
+                  f"espn-api does not map. Ids it knows: {known}.")
+    else:
+        detail = (f"espn-api raised KeyError({key!r}) while building box "
+                  f"scores.")
+    return RuntimeError(
+        f"{detail} Stopped at matchup period {matchup_period}, scoring "
+        f"period {scoring_period} rather than guess: an unrecognised slot "
+        f"is silently counted as active hitting production downstream, so "
+        f"guessing would corrupt the totals instead of failing. Report the "
+        f"id upstream (espn_api.baseball.constant.POSITION_MAP), or pin an "
+        f"espn-api release that maps it, then re-run."
+    )
+
+
 def serialize_box_scores(league, scoring_period, matchup_period):
     """
     Pull box scores for a single scoring period. Returns a dict with two
@@ -500,10 +539,18 @@ def serialize_box_scores(league, scoring_period, matchup_period):
     case where kona misses a rostered player (network blip, edge cases at
     trade deadlines / waiver claims).
     """
-    box_scores = league.box_scores(
-        matchup_period=matchup_period,
-        scoring_period=scoring_period,
-    )
+    # The guard sits HERE, at the call site, and not in the dependency:
+    # espn_api is a pinned requirement, not vendored, so a patch to
+    # site-packages would vanish on the next venv rebuild from
+    # requirements.txt. See unmapped_lineup_slot_error (MLB-222 C-6).
+    try:
+        box_scores = league.box_scores(
+            matchup_period=matchup_period,
+            scoring_period=scoring_period,
+        )
+    except KeyError as exc:
+        raise unmapped_lineup_slot_error(
+            exc, matchup_period, scoring_period) from exc
 
     # One kona call covers all ~1500 fantasy-relevant players (rostered + FA)
     # in this scoring period; we look up each wrapper-returned player by
@@ -522,23 +569,51 @@ def serialize_box_scores(league, scoring_period, matchup_period):
             return f"{o['firstName'].title()} {o['lastName'].title()}"
         return " / ".join(o['firstName'].title() for o in owners_list)
 
+    def side_identity(team):
+        """Identify one side of a matchup, which may be a BYE.
+
+        In an odd-numbered league a team's opponent does not exist, and the
+        wrapper says so by leaving that side as the int `0`:
+        `H2HPointsBoxScore._get_team_data` returns `(0, 0, -1, [])` for an
+        absent side, and `League.box_scores()` only swaps an int for a
+        `Team` when some team's `team_id` equals it -- no team is numbered
+        0, so the int survives. Reading `.owners` off it took the WHOLE
+        extract down, not one row (MLB-222 C-1).
+
+        The bye is represented rather than dropped, because it is a real
+        fact about the week and the team ON the bye still played a full
+        slate that has to reach the marts. `team_id` stays NULL: a sentinel
+        integer would collide the day a league really does number a team 0,
+        and NULL is what the downstream left joins are shaped to expect.
+        """
+        if not hasattr(team, "team_id"):
+            return {"team_name": "BYE", "team_id": None,
+                    "team_abbrev": "BYE", "owner": "BYE"}, True
+        return {
+            "team_name": team.team_name,
+            "team_id": team.team_id,
+            "team_abbrev": team.team_abbrev,
+            "owner": format_owners(team.owners),
+        }, False
+
     matchups = []
 
     for matchup in box_scores:
-        home_owners = matchup.home_team.owners
-        away_owners = matchup.away_team.owners
+        home, home_is_bye = side_identity(matchup.home_team)
+        away, away_is_bye = side_identity(matchup.away_team)
 
         matchup_dict = {
-            "home_team": matchup.home_team.team_name,
-            "home_team_id": matchup.home_team.team_id,
-            "home_team_abbrev": matchup.home_team.team_abbrev,
-            "home_owner": format_owners(home_owners),
-            "away_team": matchup.away_team.team_name,
-            "away_team_id": matchup.away_team.team_id,
-            "away_team_abbrev": matchup.away_team.team_abbrev,
-            "away_owner": format_owners(away_owners),
+            "home_team": home["team_name"],
+            "home_team_id": home["team_id"],
+            "home_team_abbrev": home["team_abbrev"],
+            "home_owner": home["owner"],
+            "away_team": away["team_name"],
+            "away_team_id": away["team_id"],
+            "away_team_abbrev": away["team_abbrev"],
+            "away_owner": away["owner"],
             "home_score": matchup.home_score,
             "away_score": matchup.away_score,
+            "is_bye": home_is_bye or away_is_bye,
             "home_lineup": [],
             "away_lineup": [],
         }
@@ -1258,6 +1333,24 @@ SNAPSHOT_TABLES = (
     "TEAM_STANDINGS",
 )
 
+# Every RAW table whose CREATE sits INSIDE a conditional write. A league
+# that has never drafted, has no transactions, or whose settings payload
+# omits a block never reaches the loader -- so the table was never created
+# and `dbt run` died resolving source('raw', ...) rather than reading an
+# empty one (MLB-222 C-5). Absent and empty are very different answers to
+# "does this install have a draft", and only one of them compiles.
+#
+# The local sink already got this right: LocalParquetSink.ensure_contract_
+# tables() seeds an empty parquet for every contract table before any
+# write. This is the same instinct on the warehouse path.
+#
+# All seven share the snapshot shape, which is why one DDL covers them.
+# The loaders keep their own CREATE TABLE IF NOT EXISTS: those are on the
+# path Kyle's weekly run depends on, and consolidating proven DML for
+# symmetry is how a settled write acquires a new bug (see the note in
+# load_snapshot_to_snowflake). Idempotent DDL run twice costs nothing.
+CONDITIONAL_RAW_TABLES = SNAPSHOT_TABLES + ("DRAFT_PICKS", "TRANSACTIONS")
+
 
 def load_snapshot_to_snowflake(conn, table, payload, year, league_key, label):
     """Append one verbatim payload as a row in RAW.<table>.
@@ -1636,6 +1729,40 @@ class SnowflakeSink:
         finally:
             cursor.close()
 
+    def ensure_contract_tables(self):
+        """Create every conditionally-written RAW table, EMPTY, up front.
+
+        The warehouse half of LocalParquetSink.ensure_contract_tables, and
+        for the same reason: a table this league has no rows for must be
+        PRESENT and empty, not missing. See CONDITIONAL_RAW_TABLES.
+
+        Returns the tables it actually created, so a first run can say what
+        it added and a repeat run stays silent.
+        """
+        cursor = self.conn.cursor()
+        created = []
+        try:
+            for table in CONDITIONAL_RAW_TABLES:
+                if not _table_exists(cursor, table):
+                    created.append(table)
+                cursor.execute(f"""
+                    CREATE TABLE IF NOT EXISTS {table} (
+                        season_year     INTEGER,
+                        raw_json        VARIANT,
+                        extracted_at    TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP(),
+                        league_key      VARCHAR
+                    )
+                """)
+                ensure_league_key_column(cursor, table)
+            self.conn.commit()
+        finally:
+            cursor.close()
+        if created:
+            print(f"  created {len(created)} empty RAW table(s) this league "
+                  f"has no rows for, so dbt can resolve every source: "
+                  f"{', '.join(created)}")
+        return created
+
     def write_box_scores(self, records, matchup_period, year, league_key):
         load_box_scores_to_snowflake(
             self.conn, records, matchup_period, year, league_key)
@@ -1702,7 +1829,12 @@ def open_sink(raw_target, parquet_dir=None):
         yield sink
     else:
         with get_snowflake_connection() as conn:
-            yield SnowflakeSink(conn)
+            sink = SnowflakeSink(conn)
+            # Same call, same position, same reason as the local branch
+            # above: the tables a league happens to have no rows for must
+            # exist and be empty before dbt is asked to resolve them.
+            sink.ensure_contract_tables()
+            yield sink
 
 
 def extract_transactions(sink, year, league_key):

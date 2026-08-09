@@ -1250,6 +1250,15 @@ def build_advanced_standings_tab_rows(standings_rows, slot_rows, stat_specs,
                         cells.append(int(e['finish']))
                 cells.append(current_rank_by_id.get(tid) or '')
                 side.append(cells)
+            # The side table is written INTO rows the left-hand blocks
+            # already produced, so it has to make any it still needs.
+            # rows[2 + k] held only while max(18, 1 + periods) >= n_teams -
+            # 2: at 30 teams over a 23-period season that is 24 >= 28, and
+            # the write ran off the end with IndexError (MLB-222 C-8).
+            # Padding here rather than widening the left blocks keeps the
+            # extra rows blank on the left, which is what they should be.
+            while len(rows) < 2 + len(side):
+                rows.append([])
             for k, cells in enumerate(side):
                 target = rows[2 + k]
                 need = f_col0 + len(cells)

@@ -541,6 +541,31 @@ def run_transactions_sweep(client: UiClient, ui_dir: Path, last_season: int,
 _DRAFT_OPTION_RE = re.compile(
     r'<option value="/draft/results/([^"/]+)/"[^>]*>([^<]*)</option>')
 
+# Where a draft period label we cannot order sorts: after every numbered
+# one, and after Pre-season (0). Large enough that no real period number
+# reaches it.
+_UNORDERED_PERIOD = 10 ** 6
+
+
+def _period_order(period: str) -> int:
+    """Sort rank for a draft's period label.
+
+    'Pre-season' leads, then the supplemental drafts by number -- the
+    documented stitching order for treating same-year drafts as one draft.
+
+    A label that is neither raised ValueError from a bare int() and took
+    down the WHOLE catalog rather than the one draft it belonged to
+    (MLB-222 C-7). CBS's dropdown is free-form enough to serve
+    'Supplemental' or 'Post-season', and an unreadable label is a reason to
+    order that draft last, not a reason to lose the other nine.
+    """
+    if period.lower() == "pre-season":
+        return 0
+    try:
+        return int(period)
+    except ValueError:
+        return _UNORDERED_PERIOD
+
 
 def draft_catalog(ui_dir: Path) -> list:
     """Union the draft dropdown across every captured draft page.
@@ -560,7 +585,7 @@ def draft_catalog(ui_dir: Path) -> list:
             if not parts[0].isdigit():
                 continue
             period = parts[1] if len(parts) > 1 else "Pre-season"
-            period_order = 0 if period.lower() == "pre-season" else int(period)
+            period_order = _period_order(period)
             seen[key] = {"key": key, "year": int(parts[0]), "period": period,
                          "period_order": period_order,
                          "title": parts[2] if len(parts) > 2 else "",

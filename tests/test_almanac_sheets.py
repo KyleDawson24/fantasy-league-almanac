@@ -1429,7 +1429,17 @@ class TestAdvancedStandingsRows:
         assert "pro_team IS NULL OR pro_team = 'FA'" in sql
         assert almanac_data.AFFINITY_UNATTRIBUTED in sql
         # The other FA -- unrostered days -- stays excluded.
-        assert "lineup_slot NOT IN ('BE', 'IL', 'FA')" in sql
+        #
+        # Asserted as a SET rather than as literal text since MLB-222 F-1:
+        # the slot list is now rendered from the slot_classification seed
+        # and sorted for stable generated SQL, so ('BE', 'FA', 'IL') and
+        # ('BE', 'IL', 'FA') are the same exclusion. This is stricter than
+        # the substring it replaced -- it fails if a slot is added OR
+        # dropped, where the substring only noticed one exact spelling.
+        exclusion = re.search(r"lineup_slot NOT IN \(([^)]*)\)", sql)
+        assert exclusion, 'the lineup-slot exclusion disappeared entirely'
+        excluded = {s.strip().strip("'") for s in exclusion.group(1).split(',')}
+        assert excluded == {'BE', 'IL', 'FA'}
         assert calls[0][1] == (2026,)
 
     def test_rank_chart_block_leads_the_tab(self):

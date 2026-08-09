@@ -23,6 +23,7 @@ from zoneinfo import ZoneInfo
 import almanac_data
 import almanac_render
 import records
+import slot_catalog
 import stat_catalog
 from almanac_data import (
     AFFINITY_UNATTRIBUTED,
@@ -374,16 +375,23 @@ def select_all_league_team(candidates, slot_caps):
 # -------------------------------------------------------------------------
 
 
-_PITCHING_SLOTS = frozenset({'SP', 'RP', 'P'})
-
-
 def _slot_category(slot):
-    """'pitching' for SP/RP/P, 'hitting' for everything else.
+    """'pitching' for the platform's pitching slots, 'hitting' otherwise.
 
-    Mirrors the CASE expression in fct_player_position_pts that drives
-    position_calculated_pts -- keep these two in sync.
+    Reads the slot_classification seed through slot_catalog rather than a
+    local frozenset (MLB-222 F-1). What stood here was
+    `_PITCHING_SLOTS = frozenset({'SP', 'RP', 'P'})` under a docstring
+    that said "keep these two in sync" about the CASE in
+    fct_player_position_pts -- two hand-maintained lists agreeing by
+    discipline, which is what the seed exists to end. The generic P slot
+    matters: a league that configures only P and never SP/RP is the shape
+    the literal handled badly.
+
+    Same 'hitting' floor as the SQL layer, for the same reason -- see
+    slot_catalog.DEFAULT_SLOT_CATEGORY.
     """
-    return 'pitching' if slot in _PITCHING_SLOTS else 'hitting'
+    return ('pitching' if slot in slot_catalog.get_pitching_slots()
+            else 'hitting')
 
 
 def get_optimal_team_selections(candidates, slot_caps):

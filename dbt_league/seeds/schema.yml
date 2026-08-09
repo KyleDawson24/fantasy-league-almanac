@@ -90,6 +90,83 @@ seeds:
                 to: ref('canonical_stats')
                 field: canonical_key
 
+  - name: slot_classification
+    description: >
+      Seed-driven dictionary of every lineup slot the pipeline knows about,
+      per platform. Single source of truth for slot metadata: identity
+      (platform, lineup_slot_id, lineup_slot), display order (sort_order),
+      the roster-settings join key (position_limit_id), and -- the reason
+      it exists -- what stat category the slot belongs to.
+
+      Before MLB-222 F-1 the classification was a closed list repeated
+      across the project with `else 'hitting'` at the end of it, and that
+      else was a two-sided bug: stg_box_scores' lineup_slot_category is
+      used as a STAT FILTER by int_player_daily, so a hitter in an
+      unrecognised slot counted as active starter production while a
+      pitcher in one had his pitching stats deleted outright. Slots that
+      fell through included IF, UTIL, and the empty string espn-api
+      produces for a lineup slot id it cannot map.
+
+      Same problem and same fix as stat_classification: the vocabulary
+      lives in ONE place and adding a slot is a CSV edit plus a reseed.
+
+      The seed drives:
+      (1) stg_box_scores' lineup_slot_category, by join. The fallback there
+      is 'hitting' rather than NULL on purpose -- a category matching no
+      stat_category would DELETE the player's stats, which is the failure
+      being fixed. The alarm is at BUILD time instead:
+      assert_slot_classification_covers_observed_slots fails and names any
+      slot missing a row.
+      (2) dim_roster_slot_counts' slot_map, which held this dictionary as
+      an inline VALUES block until MLB-222 lifted it here. That is the move
+      MLB-6 calls for; the per-platform generalization stays with MLB-6.
+      (3) output/slot_catalog.py, the Python accessor (modelled on
+      stat_catalog.py) that almanac_logic reads instead of its own
+      _PITCHING_SLOTS frozenset.
+
+      Reseed with `dbt seed --full-refresh -s slot_classification` (plain
+      `dbt seed` may treat the existing table as already-loaded and skip).
+    columns:
+      - name: platform
+        description: '''espn'' | ''cbs''. Part of the key: the two platforms genuinely disagree (CBS has no BE/IL/FA and ESPN has no ACT/RS/EST), so the same label can mean different things.'
+        tests:
+          - not_null
+      - name: lineup_slot_id
+        description: >
+          ESPN lineupSlotId, the numeric key box-score rows and
+          rosterSettings.lineupSlotCounts use. NULL for CBS (which is
+          label-keyed, not id-keyed) and NULL for ESPN's synthetic FA row,
+          which the extract stamps on unrostered players rather than
+          reading from settings. dim_roster_slot_counts filters on
+          `lineup_slot_id is not null` to reproduce its original nineteen.
+      - name: lineup_slot
+        description: 'The slot label as it appears in lineup_slot across staging and the facts. Together with platform this is the primary key.'
+        tests:
+          - not_null
+      - name: sort_order
+        description: 'Display order within a platform -- starters in field-position order, then flex, then pitching, then bench/IL at 900+. NULL where the slot is not a deployed position (CBS ACT/EST).'
+      - name: position_limit_id
+        description: 'ESPN defaultPositionId used to join rosterSettings.positionLimits for per-position maximums. NULL for flex and roster-management slots (IF, OF, UTIL, P, BE, IL, 2B/SS, 1B/3B), which have no maximum and surface as N/A.'
+      - name: slot_category
+        description: >
+          ''hitting'' | ''pitching'' | ''inactive'', or NULL where the slot
+          cannot be classified from the slot alone. The non-null values are
+          drawn from stat_classification.stat_category's domain plus
+          ''inactive'', because int_player_daily matches the two directly
+          (c.stat_category = d.lineup_slot_category) -- seeding both makes
+          that a stated contract rather than two hand-maintained lists
+          agreeing by luck.
+
+          NULL is deliberate and load-bearing for CBS ACT: it is a generic
+          active slot carrying BOTH hitters and pitchers, so it needs the
+          player''s own discipline rather than the slot. That belongs to
+          MLB-226. ACT/U/EST have seed ROWS so coverage passes without
+          claiming a category they do not have.
+      - name: is_starting_slot
+        description: 'Whether a player in this slot is deployed. false for BE/IL/FA/RS; NULL for CBS EST, which is an era marker rather than a deployment.'
+      - name: notes
+        description: 'Free text for the things a reader would otherwise file as a bug -- the synthetic FA row''s null id, and why CBS ACT carries no category.'
+
   - name: matchup_schedule
     description: >
       Per-week calendar metadata: start/end dates, abnormal-week flag, and

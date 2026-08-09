@@ -199,11 +199,31 @@ all_players as (
 select
     p.*,
     coalesce(n.nickname, p.player_name) as display_name,
-    case
-        when p.lineup_slot in ('SP', 'RP', 'P')   then 'pitching'
-        when p.lineup_slot in ('BE', 'IL', 'FA')  then 'inactive'
-        else 'hitting'
-    end as lineup_slot_category
+    -- Slot -> stat category comes from the slot_classification seed rather
+    -- than a closed list repeated here (MLB-222 F-1). What it replaced was
+    -- `else 'hitting'`, and that else was the bug: int_player_daily uses
+    -- this value as a STAT FILTER, so a slot in the wrong category does
+    -- two-sided damage -- a hitter in an unrecognised slot counted as
+    -- active starter production, and a pitcher in one had his pitching
+    -- stats deleted outright. Slots that fell through included IF, UTIL,
+    -- and the empty string espn-api produces for an unmapped slot id.
+    --
+    -- The 'hitting' fallback is a deliberate floor, not a guess, and it
+    -- deliberately is NOT null or 'unclassified': a category that matches
+    -- no stat_category downstream would DELETE the player's stats, so
+    -- louder at value time is quieter in the output. The alarm lives at
+    -- BUILD time instead -- assert_slot_classification_covers_observed_
+    -- slots fails the build naming any slot missing from the seed, so
+    -- 'hitting' can never silently ship over an unknown slot. The
+    -- remediation is one row in a CSV.
+    coalesce(sc.slot_category, 'hitting') as lineup_slot_category
 from all_players p
 left join {{ ref('player_nicknames') }} n
     on p.player_id = n.player_id
+-- platform is pinned to 'espn' because this model is ESPN-only by
+-- construction: it reads source('raw', 'box_scores'), which is the ESPN
+-- extract's table. CBS lands in its own raw tables and classifies slots in
+-- int_cbs__player_daily.
+left join {{ ref('slot_classification') }} sc
+    on sc.platform = 'espn'
+    and sc.lineup_slot = p.lineup_slot

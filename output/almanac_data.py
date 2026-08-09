@@ -33,6 +33,7 @@ import requests
 from db import latest_by, league_predicate, listagg, query_snowflake
 from formatters import TOP_SCORER_STAT_DISPLAY
 import records
+import slot_catalog
 
 
 # Affinity-chart club sentinel (MLB-159). ESPN records only a player's
@@ -1244,6 +1245,11 @@ def get_team_affinity_weights(season_year):
                    ' + COALESCE(sf, 0) + COALESCE(outs, 0)'
                    ' + COALESCE(p_h, 0) + COALESCE(p_bb, 0)'
                    ' + COALESCE(hbp_p, 0))')
+    # "Which slots are not a deployment" comes from the slot_classification
+    # seed rather than a literal repeated here (MLB-222 F-1). Resolves to
+    # the same 'BE', 'FA', 'IL' this line used to spell out, sorted so the
+    # generated SQL is stable run to run.
+    inactive_slots = slot_catalog.sql_in_list(slot_catalog.get_inactive_slots())
     return query_snowflake(f"""
         SELECT team_id,
                CASE WHEN pro_team IS NULL OR pro_team = 'FA'
@@ -1257,7 +1263,7 @@ def get_team_affinity_weights(season_year):
                          * COALESCE(active_weight, 0) AS DECIMAL(18, 6))) AS DOUBLE), 1) AS alltime_wt
         FROM fct_player_daily_performance
         WHERE {league_predicate()}
-          AND lineup_slot NOT IN ('BE', 'IL', 'FA')
+          AND lineup_slot NOT IN ({inactive_slots})
         GROUP BY 1, 2
     """, (season_year,))
 

@@ -21,36 +21,27 @@
 {{ config(materialized='view') }}
 
 with slot_map as (
-    -- Named-column VALUES rather than Snowflake's bare `from values` with
-    -- its implicit column1..N: the aliased form says what each position
-    -- means at the point of use, and it is the spelling every engine
-    -- accepts (MLB-134).
+    -- The ESPN slot dictionary, lifted out of this model and into the
+    -- slot_classification seed (MLB-222 F-1) -- the move MLB-6 already
+    -- calls for: "the slot_map VALUES block in dim_roster_slot_counts
+    -- becomes per-platform mapping data rather than inline constants."
+    --
+    -- Roster SETTINGS supply the ids and the starter counts; the labels
+    -- and what they mean are ours, so they are data rather than inline
+    -- constants. Nothing here is derived from settings.
+    --
+    -- LIFT AND SHIFT ONLY: the same nineteen rows, the same output. The
+    -- per-platform generalization stays with MLB-6. The null-id filter
+    -- excludes the seed's synthetic FA row, which is an extract label
+    -- rather than a roster slot and was never in this dictionary.
     select
-        slot_id::integer   as lineup_slot_id,
-        slot_name::varchar as lineup_slot,
-        slot_sort::integer as sort_order,
-        limit_id::integer  as position_limit_id
-    from (values
-        (0,  'C',     10,  2),
-        (1,  '1B',    20,  3),
-        (2,  '2B',    30,  4),
-        (3,  '3B',    40,  5),
-        (4,  'SS',    50,  6),
-        (6,  '2B/SS', 55,  null),
-        (7,  '1B/3B', 56,  null),
-        (19, 'IF',    60,  null),
-        (8,  'LF',    70,  7),
-        (9,  'CF',    80,  8),
-        (10, 'RF',    90,  9),
-        (5,  'OF',    100, null),
-        (11, 'DH',    110, 10),
-        (12, 'UTIL',  120, null),
-        (13, 'P',     130, null),
-        (14, 'SP',    140, 1),
-        (15, 'RP',    150, 11),
-        (16, 'BE',    900, null),
-        (17, 'IL',    910, null)
-    ) as v(slot_id, slot_name, slot_sort, limit_id)
+        lineup_slot_id::integer    as lineup_slot_id,
+        lineup_slot::varchar       as lineup_slot,
+        sort_order::integer        as sort_order,
+        position_limit_id::integer as position_limit_id
+    from {{ ref('slot_classification') }}
+    where platform = 'espn'
+      and lineup_slot_id is not null
 ),
 
 lineup_slot_counts as (

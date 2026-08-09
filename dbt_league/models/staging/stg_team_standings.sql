@@ -9,14 +9,15 @@
 -- WHY THIS EXISTS AT ALL: the platform's own seeding was being reconstructed
 -- downstream with a flat `order by wins desc, ties desc, points desc`, and
 -- that reconstruction is provably wrong. ESPN seeds DIVISION WINNERS FIRST,
--- then the rest of the field by record. 2026 is the counterexample: SMEL
--- (14-3, Beer League leader) seeds 1, HH (11-6, Spitballs leader) seeds 2,
--- and CYCL (13-4, best non-leader) seeds only 3 -- a flat record sort swaps
--- the last two. The remaining eleven seeds then match record order exactly,
--- which is what makes it the rule rather than a coincidence; 2025 reproduces
--- it with four divisions, where seeds 1-4 are precisely the four division
--- leaders. The fix is not a better sort. It is reading the number ESPN
--- already computed, which is what this model surfaces.
+-- then the rest of the field by record. The two-division season here is the
+-- counterexample: both division leaders take seeds 1 and 2, and the best
+-- record among teams leading nothing -- better than the second division's
+-- leader by two games -- seeds only 3. A flat record sort swaps those last
+-- two. The remaining eleven seeds then match record order exactly, which is
+-- what makes it the rule rather than a coincidence; the four-division season
+-- reproduces it, with seeds 1-4 being precisely the four division leaders.
+-- The fix is not a better sort. It is reading the number ESPN already
+-- computed, which is what this model surfaces.
 --
 -- PLAYOFF SEED AND FINAL RANK ARE DIFFERENT QUESTIONS and both are kept:
 --   playoff_seed  -- the REGULAR-SEASON standing, 1..N, assigned to every
@@ -24,8 +25,8 @@
 --                    bracket-membership flag; compare it against
 --                    playoff_team_count to get that.
 --   final_rank    -- the POST-PLAYOFF finish.
--- They routinely disagree. In 2025 the 7 seed (FUBB) finished 1st, the 1
--- seed (DPRK) finished 2nd, the 2 seed (CYCL) finished 6th.
+-- They routinely disagree. In the last closed season the 7 seed won the
+-- title, the 1 seed finished 2nd, and the 2 seed finished 6th.
 --
 -- ZERO MEANS UNASSIGNED, NOT A RANK. ESPN serves rankCalculatedFinal = 0 for
 -- every team in a season that has not finished (all of 2026 today), and a

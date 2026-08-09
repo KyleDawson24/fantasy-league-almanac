@@ -459,9 +459,9 @@ models:
           - not_null
       - name: division_name
         description: >
-          Trimmed at this boundary. ESPN stores 'Beer League ' with a
-          trailing space; untrimmed it groups and renders as a distinct
-          label from 'Beer League'.
+          Trimmed at this boundary. At least one division name is stored
+          with a trailing space; untrimmed it groups and renders as a
+          distinct label from its own trimmed spelling.
         tests:
           - not_null
 

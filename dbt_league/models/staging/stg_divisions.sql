@@ -9,20 +9,21 @@
 -- TWO DATA-SHAPE TRAPS live in this array, both measured on the real payload
 -- rather than anticipated:
 --
---   1. DIVISION IDS ARE NOT CONTIGUOUS. 2026 is {0: 'Spitballs Allowed',
---      3: 'Beer League '} -- ids 0 and 3, with no 1 or 2, because the league
---      dropped two divisions and ESPN kept the surviving ids rather than
---      renumbering. Anything that indexes divisions positionally, or assumes
---      id = row number, silently mislabels every team in the second
---      division. The id is carried through as ESPN's own value and joined
---      on; the schema test asserting every team's division_id resolves is
---      what would catch a regression here.
+--   1. DIVISION IDS ARE NOT CONTIGUOUS. A season that has dropped divisions
+--      keeps the SURVIVING ids rather than renumbering, so a two-division
+--      season can present ids 0 and 3 with no 1 or 2 -- which is exactly the
+--      shape one season here has. Anything that indexes divisions
+--      positionally, or assumes id = row number, silently mislabels every
+--      team in the second division. The id is carried through as ESPN's own
+--      value and joined on; the schema test asserting every team's
+--      division_id resolves is what would catch a regression here.
 --
---   2. NAMES CARRY TRAILING WHITESPACE. 'Beer League ' really is stored with
---      the trailing space. Untrimmed it renders as a distinct label from
---      'Beer League' anywhere the two meet, and groups separately. Trimmed
---      here, at the staging boundary, so no consumer has to remember; RAW
---      still holds the verbatim payload for anyone who needs the original.
+--   2. NAMES CARRY TRAILING WHITESPACE. At least one division name is stored
+--      with a trailing space, in every season it appears. Untrimmed it
+--      renders as a distinct label from its own trimmed spelling anywhere
+--      the two meet, and groups separately. Trimmed here, at the staging
+--      boundary, so no consumer has to remember; RAW still holds the
+--      verbatim payload for anyone who needs the original.
 --
 -- division_size is ESPN's declared size, not a count of teams observed in
 -- stg_team_standings. They agree today; keeping the declared value means a

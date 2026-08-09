@@ -59,7 +59,7 @@ class _FakeTeam:
         self.team_id = team_id
         self.team_name = name
         self.team_abbrev = abbrev
-        self.owners = [{"firstName": "sam", "lastName": "reyes"}]
+        self.owners = [{"firstName": "test", "lastName": "owner"}]
 
 
 class _FakeMatchup:
@@ -96,7 +96,7 @@ def _no_kona(monkeypatch):
 def _bye_league():
     """One real team, one bye. The int 0 on the away side is the whole
     point -- see the module docstring."""
-    home = _FakeTeam(4, "Hot Dog Junkies", "HDJ")
+    home = _FakeTeam(4, "Test Team Home", "TTH")
     home_lineup = [_FakePlayer(101, "Real Hitter", "1B")]
     return _FakeLeague([
         _FakeMatchup(home, 0, home_lineup, [], home_score=88.5, away_score=0),
@@ -138,7 +138,7 @@ def test_bye_week_team_keeps_its_production():
         _bye_league(), scoring_period=100, matchup_period=7)["matchups"][0]
 
     assert m["home_team_id"] == 4
-    assert m["home_team"] == "Hot Dog Junkies"
+    assert m["home_team"] == "Test Team Home"
     assert m["home_score"] == 88.5
     assert [p["playerId"] for p in m["home_lineup"]] == [101]
 
@@ -146,8 +146,8 @@ def test_bye_week_team_keeps_its_production():
 def test_normal_matchup_is_untouched_by_the_guard():
     """The fix must be invisible to a paired league -- which is every
     period of both pioneer leagues."""
-    home = _FakeTeam(4, "Hot Dog Junkies", "HDJ")
-    away = _FakeTeam(9, "Mesa Joses", "MJ")
+    home = _FakeTeam(4, "Test Team Home", "TTH")
+    away = _FakeTeam(9, "Test Team Away", "TTA")
     league = _FakeLeague([_FakeMatchup(
         home, away,
         [_FakePlayer(101, "Home Bat", "1B")],
@@ -159,8 +159,8 @@ def test_normal_matchup_is_untouched_by_the_guard():
 
     assert m["is_bye"] is False
     assert (m["home_team_id"], m["away_team_id"]) == (4, 9)
-    assert m["away_team"] == "Mesa Joses"
-    assert m["away_owner"] == "Sam Reyes"
+    assert m["away_team"] == "Test Team Away"
+    assert m["away_owner"] == "Test Owner"
     assert [p["playerId"] for p in m["away_lineup"]] == [202]
 
 
@@ -226,7 +226,7 @@ def test_bye_on_the_home_side_is_handled_too():
     """The wrapper guards `if team not in data` for BOTH sides, so the
     guard here is symmetric rather than assuming ESPN only ever drops the
     away key."""
-    away = _FakeTeam(9, "Mesa Joses", "MJ")
+    away = _FakeTeam(9, "Test Team Away", "TTA")
     league = _FakeLeague([_FakeMatchup(
         0, away, [], [_FakePlayer(202, "Away Bat", "2B")],
         home_score=0, away_score=77.0)])

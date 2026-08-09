@@ -386,6 +386,137 @@ models:
         tests:
           - not_null
 
+  - name: stg_schedule_settings
+    description: >
+      One row per (league_key, season_year): the league's schedule and
+      playoff structure as ESPN declares it, from RAW.SCHEDULE_SETTINGS
+      (latest snapshot per league + season). Every season is kept -- the
+      league's shape genuinely changes between them (16 teams / 4 divisions
+      in 2025, 14 / 2 in 2026), so there is no season-invariant answer.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - season_year
+    columns:
+      - name: league_key
+        tests:
+          - not_null
+      - name: season_year
+        tests:
+          - not_null
+      - name: regular_season_periods
+        description: 'matchupPeriodCount -- regular-season matchup periods only (22 in 2026).'
+        tests:
+          - not_null
+      - name: total_matchup_periods
+        description: >
+          Every scheduled matchup period including playoff rounds (25 in
+          2026), read as the key count of the matchupPeriods object because
+          ESPN serves no scalar for it. This is the ONE useful thing that
+          degenerate identity map carries.
+        tests:
+          - not_null
+      - name: playoff_rounds
+        description: 'total_matchup_periods - regular_season_periods. Must be positive: a season cannot schedule fewer periods than its own regular season.'
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 1
+                inclusive: true
+      - name: playoff_team_count
+        tests:
+          - not_null
+
+  - name: stg_divisions
+    description: >
+      One row per (league_key, season_year, division_id): the league's
+      divisions for that season, flattened from the divisions array in
+      RAW.SCHEDULE_SETTINGS.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - season_year
+              - division_id
+    columns:
+      - name: league_key
+        tests:
+          - not_null
+      - name: season_year
+        tests:
+          - not_null
+      - name: division_id
+        description: >
+          ESPN's own division id, carried through unchanged. NOT CONTIGUOUS
+          and not a row number -- 2026 uses ids 0 and 3 with no 1 or 2,
+          because the league dropped two divisions and ESPN kept the
+          surviving ids. Anything indexing divisions positionally is wrong.
+        tests:
+          - not_null
+      - name: division_name
+        description: >
+          Trimmed at this boundary. ESPN stores 'Beer League ' with a
+          trailing space; untrimmed it groups and renders as a distinct
+          label from 'Beer League'.
+        tests:
+          - not_null
+
+  - name: stg_team_standings
+    description: >
+      One row per (league_key, season_year, team_id): the platform's own
+      standings -- division, record, playoff seed and final rank -- from
+      RAW.TEAM_STANDINGS (latest snapshot per league + season). playoff_seed
+      is the regular-season standing and final_rank the post-playoff finish;
+      they are different questions and routinely disagree.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - season_year
+              - team_id
+    columns:
+      - name: league_key
+        tests:
+          - not_null
+      - name: season_year
+        tests:
+          - not_null
+      - name: team_id
+        tests:
+          - not_null
+      - name: division_id
+        description: >
+          THE NON-CONTIGUOUS-ID TEST LIVES HERE. Every team's division_id
+          must resolve to a row in stg_divisions on the same
+          (league_key, season_year). Anything that renumbered, indexed
+          positionally or assumed 0..N-1 fails this rather than silently
+          mislabelling a division.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_divisions')
+                field: division_id
+      - name: playoff_seed
+        description: >
+          Regular-season standing, 1..N, assigned to non-qualifiers too --
+          not a bracket-membership flag. NULL while a season has no seeding.
+      - name: final_rank
+        description: >
+          Post-playoff finish. NULL until the season closes (ESPN serves 0,
+          which is nulled here so it cannot sort ahead of first place).
+      - name: wins
+        tests:
+          - not_null
+      - name: losses
+        tests:
+          - not_null
+
   - name: stg_matchup_scores
     description: >
       One row per (league_key, season_year, matchup_period, team_id): the

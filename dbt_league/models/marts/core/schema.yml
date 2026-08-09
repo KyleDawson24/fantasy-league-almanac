@@ -1691,3 +1691,53 @@ models:
         description: 'Hitting-side split of calculated_fpts.'
       - name: calculated_pitching_pts
         description: 'Pitching-side split of calculated_fpts.'
+
+  - name: dim_team_season_standing
+    description: >
+      One row per (league_key, season_year, team_id): how each team finished
+      each season, as the PLATFORM reports it (MLB-227). Reads ESPN's own
+      playoffSeed and rankCalculatedFinal rather than reconstructing them --
+      ESPN seeds division winners ahead of the field, so no ordering over
+      wins/points reproduces its seeding.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - season_year
+              - team_id
+    columns:
+      - name: league_key
+        tests:
+          - not_null
+      - name: season_year
+        tests:
+          - not_null
+      - name: team_id
+        tests:
+          - not_null
+      - name: team_name
+        description: 'User data, and can be anything -- numeric-looking strings, emoji and sentinel names are all real team names here.'
+      - name: division_id
+        description: "ESPN's own id, not contiguous and not a row number (2026 uses 0 and 3)."
+      - name: division_name
+        description: 'Trimmed in staging; ESPN pads one of them with a trailing space.'
+      - name: playoff_seed
+        description: >
+          Regular-season standing, 1..N, assigned to every team including
+          non-qualifiers. NOT a bracket-membership flag and NOT the same
+          number as final_rank. NULL while a season has no seeding.
+      - name: final_rank
+        description: >
+          Post-playoff finish. NULL until the season closes. Disagrees with
+          playoff_seed routinely -- 2025's champion was the 7 seed.
+      - name: made_playoffs
+        description: >
+          playoff_seed <= the season's own playoff_team_count, not a
+          hardcoded 8. NULL rather than false while the seed is unassigned:
+          an in-progress season has no answer yet.
+      - name: platform_points
+        description: >
+          ESPN's own season point total. NOT asserted equal to the
+          warehouse's calculated total -- the platform's point stats have
+          diverged before, so this stays labelled as the platform's number.

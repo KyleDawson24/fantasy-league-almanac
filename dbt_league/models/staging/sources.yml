@@ -56,6 +56,48 @@ sources:
             warn_after: {count: 210, period: day}
             error_after: {count: 420, period: day}
 
+      # Settings blocks the extract had always fetched and discarded, plus
+      # the team-season standings served alongside them (MLB-227). ONE TABLE
+      # PER BLOCK deliberately: these could share a SETTINGS table and do
+      # not, because a human troubleshooting roster slots and a human
+      # troubleshooting the playoff bracket are on different errands.
+      # Payloads are verbatim; interpretation lives in stg_*.
+      - name: schedule_settings
+        description: "Raw ESPN scheduleSettings JSON, append-only. Divisions (ids are NOT contiguous and names carry trailing whitespace), matchup period counts, and the playoff structure -- playoffTeamCount, playoffSeedingRule, playoffReseed. matchupPeriods is a degenerate identity map in ESPN's own payload ({'1': [1], ...}), so it yields a true total period count and nothing else: no membership, no dates, no per-period length. Staging picks the latest snapshot per season."
+        config:
+          loaded_at_field: extracted_at
+          freshness:
+            warn_after: {count: 210, period: day}
+            error_after: {count: 420, period: day}
+      - name: draft_settings
+        description: "Raw ESPN draftSettings JSON, append-only. Draft type, date, pick order and keeper count (5 in 2026, 0 in 2025 -- the league became a keeper league between seasons). Distinct from draft_picks, which is the resulting board. No staging model yet; captured because the payload was already being fetched."
+        config:
+          loaded_at_field: extracted_at
+          freshness:
+            warn_after: {count: 210, period: day}
+            error_after: {count: 420, period: day}
+      - name: acquisition_settings
+        description: "Raw ESPN acquisitionSettings JSON, append-only. Waiver rules, acquisition limits and budget. No staging model yet; captured because the payload was already being fetched."
+        config:
+          loaded_at_field: extracted_at
+          freshness:
+            warn_after: {count: 210, period: day}
+            error_after: {count: 420, period: day}
+      - name: trade_settings
+        description: "Raw ESPN tradeSettings JSON, append-only. Trade deadline, review period and veto rules. No staging model yet; captured because the payload was already being fetched."
+        config:
+          loaded_at_field: extracted_at
+          freshness:
+            warn_after: {count: 210, period: day}
+            error_after: {count: 420, period: day}
+      - name: team_standings
+        description: "Raw ESPN per-team season standings (mTeam view), append-only. Each row is a VARIANT array of verbatim team objects for a season, carrying divisionId, playoffSeed, rankCalculatedFinal and the full record block. playoffSeed is a 1..N regular-season rank assigned to non-qualifiers too, and it is NOT rankCalculatedFinal -- 2025's champion was the 7 seed. Both are captured because ESPN seeds division winners ahead of the field, so neither is reconstructable from a record sort. rankCalculatedFinal is 0 until a season closes, then backfillable on re-fetch. Staging picks the latest snapshot per season."
+        config:
+          loaded_at_field: extracted_at
+          freshness:
+            warn_after: {count: 210, period: day}
+            error_after: {count: 420, period: day}
+
       # CBS raw archives (MLB-59 loader, extract/cbs_load.py) -- same
       # warehouse, same RAW schema, platform-prefixed tables. Payloads land
       # VERBATIM in a `payload` VARIANT with envelope-lineage columns

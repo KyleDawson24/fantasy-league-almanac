@@ -87,6 +87,7 @@ from almanac_render import (
     _bref_player_cell,
     draft_initial_text,
     explainer_text_format,
+    finish_column_scale,
     finish_medal,
     medal_fill_for_cell,
     upright_emoji_runs,
@@ -3864,14 +3865,33 @@ def build_standings_rows(context, arc, finishes, active_franchises,
         formats.append({'ranges': year_ranges, 'gradient': _finish_gradient()})
 
     # podium highlight: the champion keeps the finish scale's best-finish
-    # green; silver and bronze take their own fills (the numeric gradient
-    # skips text cells, so every medal cell needs a static one). Year
-    # columns only -- a franchise name is user data and may itself start
-    # with a medal glyph, which a whole-row scan would fill.
+    # green; silver and bronze take the scale colour for their OWN rank, so
+    # a medal sits in the year's colour run rather than punching a flat
+    # swatch through it (the numeric gradient skips text cells, so every
+    # medal cell still needs a static fill). Year columns only -- a
+    # franchise name is user data and may itself start with a medal glyph,
+    # which a whole-row scan would fill.
+    #
+    # Ranks are gathered per year across BOTH matrices, because that is the
+    # range the year's gradient rule spans; scaling a medal against the
+    # active section alone would colour it off a different spread than the
+    # numbers beside it.
+    # DATA rows of both sections only, taken from the very spans the year
+    # gradients run over. Sweeping rows[matrix_start:] wholesale would drag
+    # in the former-franchise section's own header, whose year cells read
+    # as ranks in the thousands and flatten the scale they are meant to
+    # describe.
     year_cols = range(4, 4 + len(year_labels))
-    for i, row in enumerate(rows[matrix_start:], start=matrix_start):
-        for j in (c for c in year_cols if c < len(row)):
-            fill = medal_fill_for_cell(row[j])
+    matrix_rows = [(i, rows[i])
+                   for span in (active_span, former_span) if span
+                   for i in range(span[0] - 1, span[1])]
+    for j in year_cols:
+        column_ranks = finish_column_scale(
+            [row[j] for _i, row in matrix_rows if len(row) > j])
+        for i, row in matrix_rows:
+            if len(row) <= j:
+                continue
+            fill = medal_fill_for_cell(row[j], column_ranks)
             if fill:
                 col = gspread.utils.rowcol_to_a1(i + 1, j + 1)
                 formats.append({'range': f'{col}:{col}',

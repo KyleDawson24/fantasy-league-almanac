@@ -1124,15 +1124,13 @@ def build_advanced_standings_tab_rows(standings_rows, slot_rows, stat_specs,
     )
     rows = [
         [f'Advanced Standings: {season_year}'],
+        # Kyle 2026-08-09: platform-agnostic. The W-L clause named ESPN and
+        # the standings/chart caveat moved down to sit with the table it
+        # describes, which is also where a reader hits the disagreement.
         [f'Regular season to date, shown as averages per {std_days} days of '
          'gameplay (one standard matchup; abnormal-length weeks normalize by '
          'their actual days with games). Offense / Defense / Total and '
-         'Against are calculated points (Against = points conceded); W-L is '
-         'the official ESPN record. Standings order is ESPN\'s own seeding, '
-         'which puts division winners first -- so it is not always record '
-         'order. Rank by Week is reconstructed from weekly results alone '
-         'and applies no divisions, so the chart can disagree with the '
-         'standings above it.'],
+         'Against are calculated points (Against = points conceded).'],
         [],
     ]
 
@@ -1324,6 +1322,21 @@ def build_advanced_standings_tab_rows(standings_rows, slot_rows, stat_specs,
                 target[f_col0:f_col0 + len(cells)] = cells
 
         rows.append([])
+
+    # Kyle 2026-08-09, placed here rather than in the tab explainer: it sits
+    # flush with the table it describes, which is where a reader meets the
+    # surprise (a 13-4 team ranked below an 11-6 one). Worded without naming
+    # a platform or a scoring format, so the same sentence serves either
+    # book. The chart half only appears when there IS a chart -- the caveat
+    # is about a disagreement that cannot exist without one.
+    standings_note = ("Standings order is pulled from league's official "
+                      'standings, which may put division winners first.')
+    if rank_arc_rows:
+        standings_note += (' Rank by Week Time Series is reconstructed from '
+                           'weekly results alone and applies no divisions, '
+                           'so the chart can disagree with the official '
+                           'standings.')
+    rows.append([standings_note])
 
     rows.append(['Detailed Standings', '', '',
                  'Weekly Averages, Current Season'])

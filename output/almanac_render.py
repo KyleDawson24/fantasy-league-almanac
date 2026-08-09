@@ -12,6 +12,7 @@ where the seed-driven stat metadata lives.
 
 import math
 import os
+import statistics
 import urllib.parse
 
 import almanac_data
@@ -151,32 +152,128 @@ def finish_medal(rank):
     return FINISH_MEDALS.get(int(rank))
 
 
-# A finish grid paints its year columns with a numeric color scale, and a
-# conditional-format gradient skips text cells. A medal cell IS text, so
-# without a static fill it reads as a white hole in an otherwise graded
-# column -- which is why the champion has carried one since the grid
-# shipped. The champion's value is that original green, unchanged, so
-# existing renders do not move; silver and bronze sit deliberately off the
-# green/yellow/red scale so a medal never reads as a gradient step.
-FINISH_MEDAL_FILLS = {
-    '🏆': {'red': 0.341, 'green': 0.733, 'blue': 0.541},   # #57BB8A
-    '🥈': {'red': 0.812, 'green': 0.831, 'blue': 0.851},   # #CFD4D9
-    '🥉': {'red': 0.784, 'green': 0.604, 'blue': 0.416},   # #C89A6A
-}
+# The finish scale, shared by both books: MIN green -> median yellow -> MAX
+# red, auto-scaled per year column.
+FINISH_GREEN = {'red': 0.341, 'green': 0.733, 'blue': 0.541}    # #57BB8A
+FINISH_YELLOW = {'red': 1.0, 'green': 0.839, 'blue': 0.4}       # #FFD666
+FINISH_RED = {'red': 0.902, 'green': 0.486, 'blue': 0.451}      # #E67C73
+
+# The champion's cell is the ONE deliberate override of that scale: green
+# for the title regardless of where the team finished the regular season,
+# which is what lets a trophy read as a trophy from across the tab. It has
+# been that way since the grid shipped and MLB-230 did not change it.
+CHAMPION_FILL = dict(FINISH_GREEN)
 
 
-def medal_fill_for_cell(cell):
-    """The static fill a rendered finish cell needs, or None if it is not a
-    medal cell. Matches on the leading glyph, so it serves both the bare
-    '🥈' the CBS matrix writes and the '🥈 1' the ESPN table writes (ESPN
-    keeps the regular-season seed beside the medal because the two genuinely
-    differ -- the last champion came out of the 7 seed)."""
+def finish_cell_rank(cell):
+    """The numeric rank behind a rendered finish cell, or None.
+
+    Reads the bare `12`, the CBS matrix's bare `🥈`, and the ESPN table's
+    `🥈 1` alike. Deliberately does NOT match a medal glyph appearing
+    anywhere other than the front: team and owner names are user data and
+    an emoji name is a real name.
+    """
+    if isinstance(cell, bool):
+        return None
+    if isinstance(cell, (int, float)):
+        return int(cell)
     if not isinstance(cell, str):
         return None
-    for glyph, fill in FINISH_MEDAL_FILLS.items():
-        if cell.startswith(glyph):
-            return fill
-    return None
+    text = cell.strip()
+    for rank, glyph in FINISH_MEDALS.items():
+        if text == glyph:
+            return rank
+        if text.startswith(glyph):
+            tail = text[len(glyph):].strip()
+            return int(tail) if tail.isdigit() else rank
+    return int(text) if text.isdigit() else None
+
+
+def is_medal_cell(cell):
+    """Whether a rendered finish cell leads with a podium glyph."""
+    return isinstance(cell, str) and cell.startswith(tuple(FINISH_MEDALS.values()))
+
+
+def finish_column_scale(cells):
+    """The ranks a year column's gradient actually scales over.
+
+    NUMERIC CELLS ONLY, because that is what Sheets sees: a conditional
+    gradient ignores text, so every medal cell drops out of its own
+    column's MIN / PERCENTILE / MAX. Matching that exactly is the point --
+    a medal interpolated against the full set lands a shade off from the
+    painted cells either side of it, which is the tell that its colour was
+    computed somewhere else.
+
+    Falls back to the full set only when a column is nothing but medals,
+    where there is no gradient to agree with anyway.
+    """
+    numeric = [finish_cell_rank(c) for c in cells if not is_medal_cell(c)]
+    numeric = [v for v in numeric if v is not None]
+    if numeric:
+        return numeric
+    return [v for v in (finish_cell_rank(c) for c in cells) if v is not None]
+
+
+def finish_scale_fill(rank, column_ranks):
+    """The colour the finish gradient would paint for `rank`, interpolated
+    over `column_ranks` on the same MIN / median / MAX stops Sheets uses.
+
+    A medal cell is TEXT, and a conditional gradient paints numeric cells
+    only -- so a medal has to carry a static fill or it reads as a white
+    hole. Computing that fill from the column's own spread is what keeps
+    the medal IN the colour run instead of overriding it (Kyle 2026-08-09:
+    the medals "sort of messed up the color grading ... that should
+    continue as it had been"). A flat medal-coloured swatch put the best
+    finish in the grid on a grey cell surrounded by greens.
+
+    `rank` is CLAMPED to the scale rather than extrapolated: a medal is
+    usually the very value its column's gradient no longer sees, so 1st
+    place routinely sits below a MIN of 2. Clamping paints it the green end
+    exactly, which is where it belongs.
+
+    Returns None when the column has no spread to interpolate over, which
+    leaves the caller to fall back rather than invent a colour.
+    """
+    values = sorted(v for v in column_ranks if v is not None)
+    if not values or rank is None:
+        return None
+    lo, hi = values[0], values[-1]
+    mid = statistics.median(values)
+    if hi == lo:
+        return dict(FINISH_GREEN)
+    if rank <= mid:
+        span = mid - lo
+        t = 0.0 if span == 0 else (rank - lo) / span
+        start, end = FINISH_GREEN, FINISH_YELLOW
+    else:
+        span = hi - mid
+        t = 1.0 if span == 0 else (rank - mid) / span
+        start, end = FINISH_YELLOW, FINISH_RED
+    t = min(1.0, max(0.0, t))
+    return {k: start[k] + (end[k] - start[k]) * t
+            for k in ('red', 'green', 'blue')}
+
+
+def medal_fill_for_cell(cell, column_ranks=()):
+    """The static fill a rendered finish cell needs, or None if it is not a
+    medal cell.
+
+    The champion takes its own green. Silver and bronze take the scale
+    colour for the rank they represent, so they sit in the gradient run
+    rather than punching a flat swatch through it. Pass `column_ranks` from
+    finish_column_scale() so the scale matches the one Sheets will use.
+    """
+    if not isinstance(cell, str):
+        return None
+    if cell.startswith(FINISH_MEDALS[1]):
+        return dict(CHAMPION_FILL)
+    if not cell.startswith((FINISH_MEDALS[2], FINISH_MEDALS[3])):
+        return None
+    rank = finish_cell_rank(cell)
+    # Falling back to the scale's best-finish end rather than to the
+    # champion's fill: they are the same colour, but only one of those is a
+    # true statement about a runner-up.
+    return finish_scale_fill(rank, column_ranks) or dict(FINISH_GREEN)
 
 
 def upright_emoji_runs(text, base_format=None):

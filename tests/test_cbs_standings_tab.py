@@ -70,23 +70,28 @@ class TestFinishesMatrix:
                  if s.get('format', {}).get('backgroundColor') == cbs._FINISH_GREEN]
         assert len(fills) == 2
 
-    def test_runners_up_render_silver_with_their_own_fill(self, monkeypatch):
+    def test_runners_up_render_silver_on_the_year_scale(self, monkeypatch):
         """MLB-230. The year gradient only paints numeric cells, so every
         medal cell needs a static fill or it reads as a white hole in a
-        graded column -- the reason the trophy has carried one all along."""
+        graded column -- the reason the trophy has carried one all along.
+        The fill is the one the gradient WOULD have given that rank, so the
+        medal stays in the colour run instead of overriding it."""
         import almanac_render
 
         rows, formats = _build(monkeypatch)
         silver = [c for row in rows for c in row if c == '🥈']
         assert len(silver) == 2                # Alpha 2025 + Beta 2024
-        fills = [s for s in formats
-                 if (s.get('format', {}).get('backgroundColor')
-                     == almanac_render.FINISH_MEDAL_FILLS['🥈'])]
-        assert len(fills) == 2
-        # Silver sits off the green/yellow/red finish scale, so a medal is
-        # never mistakable for a gradient step.
-        assert almanac_render.FINISH_MEDAL_FILLS['🥈'] not in (
-            cbs._FINISH_GREEN, cbs._FINISH_YELLOW, cbs._FINISH_RED)
+        fills = [s['format']['backgroundColor'] for s in formats
+                 if s.get('format', {}).get('backgroundColor')
+                 and s.get('format', {}).get('textFormat') == {'bold': True}]
+        # Two silvers + two champions (Alpha 2024, Ghosts 2025).
+        assert len(fills) == 4
+        greens = [f for f in fills if f == almanac_render.FINISH_GREEN]
+        # Both champions keep the best-finish green; each fixture year has
+        # only two ranked franchises, so 2nd of 2 is last and paints red.
+        assert len(greens) == 2
+        assert [f for f in fills if f != almanac_render.FINISH_GREEN] == [
+            almanac_render.FINISH_RED, almanac_render.FINISH_RED]
 
     def test_a_franchise_named_after_a_medal_gets_no_fill(self, monkeypatch):
         """Team names are user data and can be anything, emoji included.
@@ -101,12 +106,14 @@ class TestFinishesMatrix:
             _context(), _arc(), _finishes(), franchises)
 
         assert any(r[0] == '🥈 Silver Sluggers' for r in rows if r)
-        silver_fills = [s for s in formats
-                        if (s.get('format', {}).get('backgroundColor')
-                            == almanac_render.FINISH_MEDAL_FILLS['🥈'])]
-        # Still exactly the two real runner-up cells -- the name adds none.
-        assert len(silver_fills) == 2
-        assert not any(s['range'].startswith('A') for s in silver_fills)
+        medal_fills = [s for s in formats
+                       if s.get('format', {}).get('backgroundColor')
+                       and s.get('format', {}).get('textFormat')
+                       == {'bold': True}]
+        # Still exactly the four real medal cells -- the name adds none,
+        # and nothing lands in the Franchise column.
+        assert len(medal_fills) == 4
+        assert not any(s['range'].startswith('A') for s in medal_fills)
 
     def test_finish_matrices_carry_rank_gradient_and_centering(self, monkeypatch):
         rows, formats = _build(monkeypatch)

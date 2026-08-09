@@ -68,6 +68,7 @@ from almanac_render import (
     RECORDS_TAB,
     col_letter,
     explainer_text_format,
+    finish_column_scale,
     medal_fill_for_cell,
     upright_emoji_runs,
     TRADE_AVAILABILITY_LABELS,
@@ -1227,6 +1228,17 @@ def _replace_advanced_standings_tab(spreadsheet, rows, stat_specs):
                 scope_cols.append(ESPN_DIVIDER_COL0 + 1)
             scope_cells.extend(
                 (i + 1, c) for c in scope_cols if len(row) > c and row[c])
+            # The standings/chart caveat sits ABOVE its banner rather than
+            # under it (Kyle 2026-08-09: flush with the table it describes).
+            # Guarded on the row actually carrying text, so the blank line
+            # above the all-time twin's banner is skipped rather than
+            # styled -- and so a layout without the note stays correct.
+            if (title.startswith('Detailed Standings') and i > 0
+                    and rows[i - 1] and rows[i - 1][0]):
+                formats.append({
+                    'range': f'A{i}:{last_col}{i}',
+                    'format': {'textFormat': explainer_text_format()},
+                })
             if title in ('Production by Acquisition Channel',
                          'Roster Affinity by MLB Team'):
                 # The explainer-style caption directly underneath. Was a
@@ -1376,9 +1388,20 @@ def _replace_advanced_standings_tab(spreadsheet, rows, stat_specs):
             # covers. Team and owner names are user data and can start with
             # any glyph at all, medals included; a whole-row scan would fill
             # a cell for being named after a trophy.
-            for i in range(fin['hdr'] + 1, fin['end']):
-                for j in range(f0 + 7, min(f0 + fin['n_cols'], len(rows[i]))):
-                    fill = medal_fill_for_cell(rows[i][j])
+            #
+            # Silver and bronze take the scale colour for their own rank, so
+            # they stay IN the year's colour run; only the champion overrides
+            # it. The ranks are gathered per column so each year scales to
+            # its own spread, exactly as the conditional gradient does.
+            for j in range(f0 + 7, f0 + fin['n_cols']):
+                column_ranks = finish_column_scale([
+                    rows[i][j] for i in range(fin['hdr'] + 1, fin['end'])
+                    if len(rows[i]) > j
+                ])
+                for i in range(fin['hdr'] + 1, fin['end']):
+                    if len(rows[i]) <= j:
+                        continue
+                    fill = medal_fill_for_cell(rows[i][j], column_ranks)
                     if fill:
                         a1 = f'{_a1_col(j + 1)}{i + 1}'
                         formats.append({

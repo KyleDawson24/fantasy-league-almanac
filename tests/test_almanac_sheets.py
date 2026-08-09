@@ -1165,22 +1165,27 @@ class TestAdvancedStandingsRows:
         # Subtitle reads the DERIVED standard matchup length (8 here), not
         # a hardcoded 7.
         assert 'averages per 8 days of gameplay' in rows[1][0]
+        # The standings-order caveat sits flush above the table it
+        # describes. With no rank arc there is no chart to disagree with,
+        # so the chart half of the sentence stays out.
+        assert rows[3] == ["Standings order is pulled from league's official "
+                           'standings, which may put division winners first.']
         # (β) MLB-142: scope rides the banner row as an italic caption.
-        assert rows[3] == ['Detailed Standings', '', '',
+        assert rows[4] == ['Detailed Standings', '', '',
                            'Weekly Averages, Current Season']
-        assert rows[4][:4] == ['Rank', 'Team', 'Owner', 'W-L']
-        assert rows[5][:2] == [1, 'TTA']
-        assert rows[6][:2] == [2, 'TTB']
+        assert rows[5][:4] == ['Rank', 'Team', 'Owner', 'W-L']
+        assert rows[6][:2] == [1, 'TTA']
+        assert rows[7][:2] == [2, 'TTB']
 
         # Slot grid: indented one cell with Owner added so Team / Owner sit
         # under Table A's columns; slot columns in sort_order (C before SP
         # despite input order); a team missing a slot renders blank. BE/IL
         # never arrive here -- the data layer filters to active slots.
         # (Single blank between sections since the round-11 parity pass.)
-        assert rows[8] == ['Points by Lineup Slot', '', '', 'Season Totals']
-        assert rows[9] == ['', 'Team', 'Owner', 'C', 'SP']
-        assert rows[10] == ['', 'TTA', 'Owner 1', 5.5, 9.9]
-        assert rows[11] == ['', 'TTB', 'Owner 2', 4.4, '']
+        assert rows[9] == ['Points by Lineup Slot', '', '', 'Season Totals']
+        assert rows[10] == ['', 'Team', 'Owner', 'C', 'SP']
+        assert rows[11] == ['', 'TTA', 'Owner 1', 5.5, 9.9]
+        assert rows[12] == ['', 'TTB', 'Owner 2', 4.4, '']
 
     def test_acquisition_header_layout(self):
         # Kyle rounds 8+12: one table per lens, season half left /
@@ -1490,10 +1495,18 @@ class TestAdvancedStandingsRows:
         assert len(spec['basicChart']['series']) == 2
         assert spec['hiddenDimensionStrategy'] == 'SHOW_ALL'
 
+        # The chart half of the standings caveat is present here (there IS
+        # a chart) and absent from the chart-less layout below.
+        note = next(r[0] for r in rows
+                    if r and str(r[0]).startswith('Standings order'))
+        assert 'Rank by Week Time Series is reconstructed' in note
+
         # Without rank rows the tab keeps its classic layout.
         plain = almanac_sheets.build_advanced_standings_tab_rows(
             [_standings_team()], [], _STANDINGS_SPECS, 2026)
-        assert plain[3] == ['Detailed Standings', '', '',
+        assert plain[3][0].startswith('Standings order is pulled from')
+        assert 'Rank by Week' not in plain[3][0]
+        assert plain[4] == ['Detailed Standings', '', '',
                             'Weekly Averages, Current Season']
         assert almanac_write._rank_chart_bounds(plain) is None
 
@@ -1690,21 +1703,69 @@ class TestPodiumMarks:
         assert almanac_render.finish_medal('') is None
 
     def test_fill_matches_the_leading_glyph_only(self):
-        """Both cell shapes take a fill -- the bare '🥈' of the CBS matrix
-        and the '🥈 1' of the ESPN table. Nothing else does: team names are
-        user data and an emoji team name is a real team name, so a fill
-        must never follow from a cell merely CONTAINING a medal."""
+        """Nothing but a medal cell takes a fill: team names are user data
+        and an emoji team name is a real team name, so a fill must never
+        follow from a cell merely CONTAINING a medal."""
         import almanac_render
 
-        assert (almanac_render.medal_fill_for_cell('🥈')
-                == almanac_render.medal_fill_for_cell('🥈 1')
-                == almanac_render.FINISH_MEDAL_FILLS['🥈'])
-        assert almanac_render.medal_fill_for_cell(2) is None
-        assert almanac_render.medal_fill_for_cell('Runner-Up 🥈') is None
+        assert almanac_render.medal_fill_for_cell(2, [1, 2, 3]) is None
+        assert almanac_render.medal_fill_for_cell('Runner-Up 🥈',
+                                                  [1, 2, 3]) is None
         # The champion's fill is the value it has always had, so no
         # existing render moves.
-        assert almanac_render.FINISH_MEDAL_FILLS['🏆'] == {
+        assert almanac_render.medal_fill_for_cell('🏆 7', [1, 7, 16]) == {
             'red': 0.341, 'green': 0.733, 'blue': 0.541}
+
+    def test_medals_take_the_scale_colour_for_their_own_rank(self):
+        """Kyle 2026-08-09: the medals "shouldn't override" the colour
+        grading. A medal cell is text and the conditional gradient paints
+        numeric cells only, so it needs a static fill -- but that fill has
+        to be the one the gradient WOULD have given it, or the best finish
+        in the grid ends up a grey cell surrounded by greens."""
+        import almanac_render
+
+        column = [1, 2, 3, 4, 5, 6, 7]
+        # Rank 1 is the column minimum, so it lands exactly on the scale's
+        # green end -- the same colour a plain 1 would have been painted.
+        assert (almanac_render.medal_fill_for_cell('🥈 1', column)
+                == pytest.approx(almanac_render.FINISH_GREEN))
+        # Rank 4 is the median, so it lands exactly on yellow.
+        assert (almanac_render.medal_fill_for_cell('🥉 4', column)
+                == pytest.approx(almanac_render.FINISH_YELLOW))
+        # And a mark between the stops interpolates rather than snapping.
+        mid = almanac_render.medal_fill_for_cell('🥈 2', column)
+        assert (almanac_render.FINISH_GREEN['red'] < mid['red']
+                < almanac_render.FINISH_YELLOW['red'])
+
+    def test_each_year_scales_to_its_own_spread(self):
+        """The gradient is per-year auto-scaled, so the same rank is not
+        the same colour in a 16-team season and a 4-team one."""
+        import almanac_render
+
+        wide = almanac_render.medal_fill_for_cell('🥉 3', list(range(1, 17)))
+        narrow = almanac_render.medal_fill_for_cell('🥉 3', [1, 2, 3])
+        assert wide != narrow
+        # 3rd of 3 is last, so it sits at the red end.
+        assert narrow == pytest.approx(almanac_render.FINISH_RED)
+
+    def test_finish_cell_rank_reads_every_cell_shape(self):
+        """The scale is built from the column's own ranks, so the reader
+        has to see through both cell shapes -- and stop at a name."""
+        import almanac_render
+
+        assert almanac_render.finish_cell_rank(12) == 12
+        assert almanac_render.finish_cell_rank('12') == 12
+        assert almanac_render.finish_cell_rank('🥈 1') == 1
+        assert almanac_render.finish_cell_rank('🥈') == 2      # CBS's bare
+        assert almanac_render.finish_cell_rank('🥉') == 3
+        assert almanac_render.finish_cell_rank('') is None
+        assert almanac_render.finish_cell_rank('Some Team') is None
+        # A glyph mid-string is never a rank...
+        assert almanac_render.finish_cell_rank('Runner-Up 🥈') is None
+        # ...but a name STARTING with one reads as that medal, which is why
+        # both callers scope this to year columns. Pinned so the constraint
+        # is visible rather than discovered.
+        assert almanac_render.finish_cell_rank('🥈 Silver Sluggers') == 2
 
     def test_upright_runs_match_the_hardcoded_pair_they_replace(self):
         """The old pass de-italicized at 0 and resumed at 2. That is still

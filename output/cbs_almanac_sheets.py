@@ -87,6 +87,9 @@ from almanac_render import (
     _bref_player_cell,
     draft_initial_text,
     explainer_text_format,
+    finish_medal,
+    medal_fill_for_cell,
+    upright_emoji_runs,
     _hitting_rate,
     _pitching_rate,
     format_all_league_team_row,
@@ -352,7 +355,12 @@ _FINISH_RED = {'red': 0.902, 'green': 0.486, 'blue': 0.451}     # #E67C73
 _SCALE_RED = {'red': 0.96, 'green': 0.62, 'blue': 0.60}
 _SCALE_GREEN = {'red': 0.67, 'green': 0.86, 'blue': 0.64}
 # True-zero/null cells on the affinity chart (Kyle 2026-07-17 round 5).
-_LIGHT_GRAY = {'red': 0.937, 'green': 0.937, 'blue': 0.937}
+# Sheets' "light gray 1" (#D9D9D9), one step down its gray ramp from the
+# "light gray 2" (#EFEFEF) this started as -- Kyle 2026-08-09, wanting the
+# unplayed cells to read as deliberately empty rather than as near-white.
+# The ESPN writer's affinity block carries the same value; the two charts
+# are the same surface in two books and drift between them is a bug.
+_LIGHT_GRAY = {'red': 0.851, 'green': 0.851, 'blue': 0.851}
 
 
 def _finish_gradient():
@@ -3747,15 +3755,21 @@ def build_standings_rows(context, arc, finishes, active_franchises,
     era_scope = f'{seasons[0]}–{season}' if seasons else str(season)
     _section('SEASON FINISHES', scopes=[(1, era_scope)],
              width=last_finish_col)
-    _note('🏆 = Season Champion. Bright Green Border = Division Champion. '
-          'Uses most current Team Names; franchises stitched across '
-          'renames + re-ids.', width=last_finish_col)
-    # The trophy glyph stays upright inside the italic note (Kyle round
-    # 12); the emoji is 2 UTF-16 units, so italics resume at index 2.
-    formats.append({'range': 'A' + str(len(rows)), 'runs': [
-        {'startIndex': 0, 'format': {'italic': False}},
-        {'startIndex': 2, 'format': {'italic': True}},
-    ]})
+    # No playoffs in a season-long points league, so second and third are
+    # exactly what the standings say -- there is no bracket finish to
+    # prefer over them, which is the opposite of the ESPN book's rule
+    # (MLB-230). The medal replaces the rank number here rather than
+    # sitting beside it, matching how the trophy has always rendered in
+    # this matrix; the glyph IS the rank.
+    finish_note = ('🏆 = Season Champion. 🥈 = 2nd. 🥉 = 3rd. Bright Green '
+                   'Border = Division Champion. Uses most current Team '
+                   'Names; franchises stitched across renames + re-ids.')
+    _note(finish_note, width=last_finish_col)
+    # The medal glyphs stay upright inside the italic note (Kyle round 12),
+    # computed from the text -- silver and bronze sit mid-sentence, where
+    # the old hardcoded 0/2 pair would have left them italic.
+    formats.append({'range': 'A' + str(len(rows)),
+                    'runs': upright_emoji_runs(finish_note)})
     _header(finish_header, width=last_finish_col)
 
     def _matrix_section_formats(header_row, n_rows, hide=False):
@@ -3790,10 +3804,21 @@ def build_standings_rows(context, arc, finishes, active_franchises,
             entry = by_franchise.get(fid, {}).get(y)
             if entry is None:
                 cells.append('')
-            elif entry['is_champion']:
+                continue
+            rank = int(entry['standings_rank'])
+            # The platform's awarded champion, not rank 1 recomputed -- the
+            # reason get_cbs_season_standings reads is_champion at all. A
+            # joint rank is the platform's own and is left alone: a shared
+            # third means two bronzes that season, which is what happened.
+            if entry['is_champion']:
                 cells.append('🏆')
-            else:
-                cells.append(int(entry['standings_rank']))
+                continue
+            medal = finish_medal(rank)
+            if medal == '🏆':
+                # Rank 1 the platform did not crown. Show the number; the
+                # trophy is the awarded title's glyph and nothing else's.
+                medal = None
+            cells.append(medal or rank)
         rows.append([name, titles or '', div_titles or '',
                      avg if avg is not None else '']
                     + cells + [current_rank.get(fid, '')])
@@ -3838,14 +3863,19 @@ def build_standings_rows(context, arc, finishes, active_franchises,
             year_ranges.append(f'{c}{former_span[0]}:{c}{former_span[1]}')
         formats.append({'ranges': year_ranges, 'gradient': _finish_gradient()})
 
-    # champion highlight: the finish scale's best-finish green on 🏆 cells
-    # (the numeric gradient skips text cells, so they need the static fill)
+    # podium highlight: the champion keeps the finish scale's best-finish
+    # green; silver and bronze take their own fills (the numeric gradient
+    # skips text cells, so every medal cell needs a static one). Year
+    # columns only -- a franchise name is user data and may itself start
+    # with a medal glyph, which a whole-row scan would fill.
+    year_cols = range(4, 4 + len(year_labels))
     for i, row in enumerate(rows[matrix_start:], start=matrix_start):
-        for j, cell in enumerate(row):
-            if cell == '🏆':
+        for j in (c for c in year_cols if c < len(row)):
+            fill = medal_fill_for_cell(row[j])
+            if fill:
                 col = gspread.utils.rowcol_to_a1(i + 1, j + 1)
                 formats.append({'range': f'{col}:{col}',
-                                'format': {'backgroundColor': _FINISH_GREEN,
+                                'format': {'backgroundColor': fill,
                                            'textFormat': {'bold': True}}})
     _note('Div counts division titles (best league finish within the '
           'division that season); Avg is the mean finish across CLOSED '
@@ -4810,15 +4840,24 @@ def build_season_history_rows(context, finishes, franchise_map,
                     'format': {'textFormat': {'italic': True},
                                'backgroundColor': _PALE_BLUE}})
     # House explainer token (MLB-170): italic, size 9, never bold.
-    rows.append(['Outscored = teams this one finished ahead of on points; '
-                 'Outscored By = teams ahead of it; an exact tie counts in '
-                 'neither, so the three always total one less than the teams '
-                 'that season. Margin is points behind the winner. Points are '
-                 'the league\'s own awarded season totals; the stat columns '
-                 'are reconstructed from daily rosters, and are least certain '
-                 'in 2004–2020 where lineups are estimated from start share.'])
+    # The podium clause leads: MLB-230 put two new glyphs in the Finish
+    # column, and this row is the only place on the tab that can say what
+    # they mean (the trophy has been unexplained here since the tab
+    # shipped -- it stops being so now that it has company).
+    season_history_note = (
+        '🏆 / 🥈 / 🥉 mark the season\'s top three on points. '
+        'Outscored = teams this one finished ahead of on points; '
+        'Outscored By = teams ahead of it; an exact tie counts in '
+        'neither, so the three always total one less than the teams '
+        'that season. Margin is points behind the winner. Points are '
+        'the league\'s own awarded season totals; the stat columns '
+        'are reconstructed from daily rosters, and are least certain '
+        'in 2004–2020 where lineups are estimated from start share.')
+    rows.append([season_history_note])
     formats.append({'range': f'A3:{last_col}3',
                     'format': {'textFormat': explainer_text_format()}})
+    formats.append({'range': 'A3',
+                    'runs': upright_emoji_runs(season_history_note)})
     rows.append([])
 
     rows.append(_season_history_header())
@@ -4848,11 +4887,16 @@ def build_season_history_rows(context, finishes, franchise_map,
             fid = int(r['franchise_id'])
             outscored, outscored_by, ties = counts[i]
             finish = int(r['standings_rank'])
+            # Podium glyph BESIDE the rank here, unlike the finishes matrix
+            # -- this tab's Finish column is read down a season's rows, so
+            # the number has to stay legible in every one of them.
+            podium = ('🏆' if r['is_champion']
+                      else (finish_medal(finish) if finish != 1 else None))
             rows.append(
                 [year,
                  labels[fid],
                  owners.get((year, fid), ''),
-                 f'🏆 {finish}' if r['is_champion'] else finish,
+                 f'{podium} {finish}' if podium else finish,
                  -_whole(r['points_behind']),      # winner total - ours
                  '']
                 + _stat_cells(year, fid)

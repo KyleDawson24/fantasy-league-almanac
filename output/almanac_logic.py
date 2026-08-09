@@ -45,6 +45,7 @@ from almanac_render import (
     ESPN_PRO_TEAM_NAMES,
     ESPN_UNATTRIBUTED_CLUB,
     col_letter,
+    finish_medal,
     ADVANCED_STANDINGS_TAB,
     HOME_ALLTIME_HEADER,
     HOME_DEVIATION_LABEL,
@@ -1127,7 +1128,11 @@ def build_advanced_standings_tab_rows(standings_rows, slot_rows, stat_specs,
          'gameplay (one standard matchup; abnormal-length weeks normalize by '
          'their actual days with games). Offense / Defense / Total and '
          'Against are calculated points (Against = points conceded); W-L is '
-         'the official ESPN record.'],
+         'the official ESPN record. Standings order is ESPN\'s own seeding, '
+         'which puts division winners first -- so it is not always record '
+         'order. Rank by Week is reconstructed from weekly results alone '
+         'and applies no divisions, so the chart can disagree with the '
+         'standings above it.'],
         [],
     ]
 
@@ -1203,8 +1208,28 @@ def build_advanced_standings_tab_rows(standings_rows, slot_rows, stat_specs,
             for r in finishes_rows:
                 fin_by_team.setdefault(
                     r['team_id'], {})[int(r['season_year'])] = r
-            current_rank_by_id = {tid: rank_of.get((tid, last_p))
-                                  for tid, _ in chart_teams}
+            # The in-flight column is a STANDING, so it reads the platform's
+            # seed like every other column in this table -- not the rank
+            # arc's endpoint, which is what it used to read (MLB-230).
+            #
+            # Those two disagree, and while the column took the arc this
+            # table did not add up: Avg averages `finish` across every
+            # season INCLUDING the one in flight, so a row could show 13 and
+            # 3 and an Avg of 7.5. Both numbers came from a defensible
+            # source and the row still looked wrong, because a reader checks
+            # a mean against the numbers beside it.
+            #
+            # The chart keeps the reconstruction (Kyle, this session) -- see
+            # docs/decisions/STANDINGS_ORDER_AND_THE_RANK_CHART.md. It is a
+            # per-week series and no per-week seed exists to replace it
+            # with; the tab explainer says so rather than leaving the reader
+            # to notice.
+            current_rank_by_id = {
+                tid: (fin_by_team.get(tid, {})
+                      .get(int(season_year), {})
+                      .get('finish')
+                      or rank_of.get((tid, last_p)))
+                for tid, _ in chart_teams}
 
             def _team_finish_stats(tid):
                 entries = fin_by_team.get(tid, {})
@@ -1231,7 +1256,9 @@ def build_advanced_standings_tab_rows(standings_rows, slot_rows, stat_specs,
             # band -- explainer row 3, header row 4, teams from row 5.
             # The navy 'SEASON FINISHES' band went with the move.
             side = [
-                ['🏆 = Season Champion. W% = all-time regular-season win '
+                ['🏆 = Season Champion. 🥈 = Runner-Up. 🥉 = Third Place -- '
+                 'these are PLAYOFF finishes; the number beside them is the '
+                 'regular-season seed. W% = all-time regular-season win '
                  'rate. Uses current owner names.'],
                 ['Team', '', '', '', 'Titles', 'W%', 'Avg',
                  *[str(y) for y in closed], str(season_year)],
@@ -1248,12 +1275,34 @@ def build_advanced_standings_tab_rows(standings_rows, slot_rows, stat_specs,
                     e = fin_by_team.get(tid, {}).get(y)
                     if e is None:
                         cells.append('')
-                    elif e.get('is_champion'):
-                        # Trophy AND finish (Kyle 2026-07-18): in an H2H
-                        # league the champion is the PLAYOFF winner, so
-                        # the regular-season finish is real information
-                        # -- McKendry won 2025 from 7th.
-                        cells.append(f'🏆 {int(e["finish"])}')
+                        continue
+                    # Medal AND finish (Kyle 2026-07-18, extended to silver
+                    # and bronze by MLB-230): in an H2H league the podium is
+                    # decided in the BRACKET, so the regular-season seed
+                    # printed beside the medal is real information rather
+                    # than a restatement -- the season on the book was won
+                    # from the 7 seed by a team the 1 seed had finished six
+                    # places above.
+                    #
+                    # Silver and bronze read the platform's post-playoff
+                    # rank; the trophy keeps its own derivation (won every
+                    # playoff week), which is older, agrees with it, and
+                    # survives a season with no standings capture.
+                    #
+                    # The trophy is the ONLY glyph is_champion can produce
+                    # and the only one that can land on first place. Were a
+                    # season's two definitions ever to disagree, letting
+                    # final_rank = 1 mint a second trophy would put a
+                    # champion on the grid that the Titles column beside it
+                    # does not count.
+                    if e.get('is_champion'):
+                        medal = '🏆'
+                    else:
+                        medal = finish_medal(e.get('final_rank'))
+                        if medal == '🏆':
+                            medal = None
+                    if medal:
+                        cells.append(f'{medal} {int(e["finish"])}')
                     else:
                         cells.append(int(e['finish']))
                 cells.append(current_rank_by_id.get(tid) or '')

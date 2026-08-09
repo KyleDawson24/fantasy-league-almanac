@@ -237,13 +237,42 @@ class TestLayout:
         rows, _ = _build(finishes)
         data = _data_rows(rows)
         assert [r[0] for r in data] == [2024, 2024, 2024, 2001, 2001, 2001]
-        assert [r[3] for r in data] == [1, 2, 3, 1, 2, 3]
+        # Second and third carry medals; the rank stays beside them because
+        # this column is read DOWN a season (MLB-230). No champion in this
+        # fixture, so first place is a bare 1 -- the trophy marks the
+        # platform's awarded title, never rank 1 recomputed.
+        assert [r[3] for r in data] == [1, '🥈 2', '🥉 3',
+                                        1, '🥈 2', '🥉 3']
 
     def test_champion_gets_the_trophy_on_the_finish_cell(self):
         finishes = _clean_season(3)
         finishes[0]['is_champion'] = True
         rows, _ = _build(finishes)
         assert _data_rows(rows)[0][_col0('Finish')] == '🏆 1'
+
+    def test_podium_medals_sit_beside_the_rank(self):
+        """Silver and bronze follow the trophy's shape on this tab, and
+        fourth place is left undecorated."""
+        rows, _ = _build(_clean_season(4))
+        finish = [r[_col0('Finish')] for r in _data_rows(rows)]
+        assert finish == [1, '🥈 2', '🥉 3', 4]
+
+    def test_explainer_names_every_podium_glyph_and_keeps_them_upright(self):
+        """A glyph with no legend entry is a worse surface than no glyph;
+        an italic one 'looks quite bad' (Kyle round 12). The runs pass has
+        to reach the medals mid-sentence, not just a leading trophy."""
+        rows, formats = _build(_clean_season(4))
+        note = rows[2][0]
+        for glyph in ('🏆', '🥈', '🥉'):
+            assert glyph in note
+        (spec,) = [f for f in formats if f.get('range') == 'A3' and 'runs' in f]
+        upright = [r['startIndex'] for r in spec['runs']
+                   if r['format'].get('italic') is False]
+        assert len(upright) == 3
+        u16 = note.encode('utf-16-le')
+        for start in upright:
+            assert u16[start * 2:start * 2 + 4].decode('utf-16-le') in (
+                '🏆', '🥈', '🥉')
 
     def test_franchise_column_is_the_stitched_current_name(self):
         """Names drift and get reused, so the row carries the canonical

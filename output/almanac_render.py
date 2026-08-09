@@ -122,6 +122,94 @@ TRADE_AVAILABILITY_LABELS = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Podium marks (MLB-230)
+# ---------------------------------------------------------------------------
+#
+# Both books mark the top three of a closed season in their finish grids.
+# The vocabulary lives here because the three modules that need it -- the
+# ESPN builder, the ESPN writer and the CBS module -- all already import
+# render, and a glyph that the builder emits but the writer does not
+# recognise renders as an unpainted hole.
+#
+# WHAT COUNTS AS SECOND AND THIRD IS PER-BOOK, and deliberately so:
+#   ESPN is head-to-head with a bracket, so the medals key on the
+#   POST-PLAYOFF finish -- the finals loser and the third-place-game winner.
+#   CBS is a season-long points league with no playoffs at all, so there is
+#   no such thing to read; second and third are the season standings.
+# Callers pass whichever rank their book means. This module does not know
+# which is which, and must not guess.
+FINISH_MEDALS = {1: '🏆', 2: '🥈', 3: '🥉'}
+
+
+def finish_medal(rank):
+    """The podium glyph for `rank`, or None. Tolerates a NULL/blank rank
+    (an in-flight season has no finish yet) and the string-ish numbers the
+    warehouse hands back."""
+    if rank is None or rank == '':
+        return None
+    return FINISH_MEDALS.get(int(rank))
+
+
+# A finish grid paints its year columns with a numeric color scale, and a
+# conditional-format gradient skips text cells. A medal cell IS text, so
+# without a static fill it reads as a white hole in an otherwise graded
+# column -- which is why the champion has carried one since the grid
+# shipped. The champion's value is that original green, unchanged, so
+# existing renders do not move; silver and bronze sit deliberately off the
+# green/yellow/red scale so a medal never reads as a gradient step.
+FINISH_MEDAL_FILLS = {
+    '🏆': {'red': 0.341, 'green': 0.733, 'blue': 0.541},   # #57BB8A
+    '🥈': {'red': 0.812, 'green': 0.831, 'blue': 0.851},   # #CFD4D9
+    '🥉': {'red': 0.784, 'green': 0.604, 'blue': 0.416},   # #C89A6A
+}
+
+
+def medal_fill_for_cell(cell):
+    """The static fill a rendered finish cell needs, or None if it is not a
+    medal cell. Matches on the leading glyph, so it serves both the bare
+    '🥈' the CBS matrix writes and the '🥈 1' the ESPN table writes (ESPN
+    keeps the regular-season seed beside the medal because the two genuinely
+    differ -- the last champion came out of the 7 seed)."""
+    if not isinstance(cell, str):
+        return None
+    for glyph, fill in FINISH_MEDAL_FILLS.items():
+        if cell.startswith(glyph):
+            return fill
+    return None
+
+
+def upright_emoji_runs(text, base_format=None):
+    """textFormatRuns keeping every emoji in `text` upright inside an italic
+    explainer (Kyle round 12: an italic 🏆 'looks quite bad').
+
+    The single hardcoded pair this replaces -- de-italicize at 0, resume at
+    2 -- only ever worked because the trophy led the string and nothing else
+    followed it. A legend naming three medals has emoji in the middle too,
+    so the runs are computed from the text. Sheets indexes runs in UTF-16
+    code units, not codepoints, so offsets are measured that way.
+    """
+    base = dict(base_format or {'italic': True})
+    upright = {**base, 'italic': False}
+    runs, index, pending_resume = [], 0, False
+    for ch in text:
+        width = len(ch.encode('utf-16-le')) // 2
+        if ord(ch) >= 0x1F000:                       # pictographic planes
+            runs.append({'startIndex': index, 'format': dict(upright)})
+            pending_resume = True
+        elif pending_resume:
+            runs.append({'startIndex': index, 'format': dict(base)})
+            pending_resume = False
+        index += width
+    if not runs:
+        return []
+    # A leading run must start at 0 or Sheets rejects the request; text that
+    # opens with a non-emoji needs the base run stated first.
+    if runs[0]['startIndex'] != 0:
+        runs.insert(0, {'startIndex': 0, 'format': dict(base)})
+    return runs
+
+
 # v1.2 draft tab: Best Value / Biggest Bust leaderboard columns.
 DRAFT_VALUE_HEADER = ['Pts', 'Tm', 'Player', '(Rd) #Pick', 'Δ Rank']
 DRAFT_ALLTIME_CELLS_LABEL = "Each Round × Pick's Historical Median Value"

@@ -921,8 +921,22 @@ def get_team_standings(season_year, stat_specs):
     standings columns (record, calculated score lenses, points conceded,
     per-week normalization denominators) plus the dynamic per-stat counting
     columns the scored stat specs request -- the same spec-driven column
-    pattern get_team_weeks uses. Ordered as a standings: record first,
-    total points as the tiebreak.
+    pattern get_team_weeks uses.
+
+    ORDERED BY THE PLATFORM'S OWN SEED, NOT BY RECORD (MLB-227). ESPN seeds
+    division winners ahead of the field, so no ordering over wins/points
+    reproduces its standings -- see stg_team_standings for the worked
+    counterexample. The record sort this used to carry disagrees with the
+    platform in both captured seasons, at different division counts. The
+    record columns survive only as a tiebreak behind the seed, and they
+    engage solely for a season the capture does not cover.
+
+    THE SEED IS AS FRESH AS THE LAST SETTINGS EXTRACT. ESPN serves it on the
+    mSettings/mTeam payload, which extract.py writes only under
+    --include-settings / --settings-only, so a box-score-only weekly pull
+    advances the records without advancing the seed. When the two disagree
+    this table renders the platform's older order beside the warehouse's
+    newer record.
     """
     if not stat_specs:
         raise RuntimeError("No scored standings stat specs found.")
@@ -932,28 +946,34 @@ def get_team_standings(season_year, stat_specs):
         if not re.match(r'^[a-z][a-z0-9_]*$', column):
             raise ValueError(f"Unsafe stat column name: {column!r}")
 
-    stat_select = ',\n            '.join(stat_columns)
+    stat_select = ',\n            '.join(f'm.{c}' for c in stat_columns)
     return query_snowflake(f"""
         SELECT
-            team_id,
-            team_abbrev,
-            team_name,
-            owner_display,
-            wins,
-            losses,
-            ties,
-            matchup_periods_played,
-            scoring_days_played,
-            standard_matchup_days,
-            calculated_hitting_pts,
-            calculated_pitching_pts,
-            calculated_points,
-            against_calculated_points,
+            m.team_id,
+            m.team_abbrev,
+            m.team_name,
+            m.owner_display,
+            m.wins,
+            m.losses,
+            m.ties,
+            m.matchup_periods_played,
+            m.scoring_days_played,
+            m.standard_matchup_days,
+            m.calculated_hitting_pts,
+            m.calculated_pitching_pts,
+            m.calculated_points,
+            m.against_calculated_points,
             {stat_select}
-        FROM mart_team_season_standings
-        WHERE season_year = %s
-          AND {league_predicate()}
-        ORDER BY wins DESC, ties DESC, calculated_points DESC
+        FROM mart_team_season_standings m
+        LEFT JOIN dim_team_season_standing s
+            ON  s.league_key  = m.league_key
+            AND s.season_year = m.season_year
+            AND s.team_id     = m.team_id
+        WHERE m.season_year = %s
+          AND {league_predicate('m')}
+        ORDER BY s.playoff_seed NULLS LAST,
+                 m.wins DESC, m.ties DESC, m.calculated_points DESC,
+                 m.team_id
     """, (season_year,))
 
 
@@ -1014,22 +1034,52 @@ def get_team_slot_points_alltime():
 
 
 def get_espn_season_finishes():
-    """One row per (season, team): the regular-season finish under the
-    almanac's standings ordering, W/L/T for the all-time W%% column, and
-    is_champion = the team won EVERY playoff week that season (the
-    consolation bracket always carries at least one loss; the current
-    season has no playoff rows yet, so it crowns nobody). Feeds the
-    finishes-beside-the-chart table (Kyle 2026-07-17 round 8)."""
+    """One row per (season, team): the REGULAR-SEASON finish, W/L/T for the
+    all-time W%% column, the POST-PLAYOFF finish, and is_champion = the team
+    won EVERY playoff week that season (the consolation bracket always
+    carries at least one loss; the current season has no playoff rows yet,
+    so it crowns nobody). Feeds the finishes-beside-the-chart table (Kyle
+    2026-07-17 round 8).
+
+    TWO DIFFERENT FINISHES, AND THEY ROUTINELY DISAGREE (MLB-227):
+
+      finish      -- the platform's own regular-season seed, 1..N, assigned
+                     to every team including non-qualifiers. This is the
+                     number the table prints.
+      final_rank  -- where the team actually ENDED the season once the
+                     bracket had run. NULL until the season closes. This is
+                     what the runner-up and third-place medals key on.
+
+    In the last closed season the 7 seed won the title, the 1 seed finished
+    2nd and the 2 seed finished 6th, so a medal placed off `finish` would
+    decorate the wrong teams. is_champion stays derived from the playoff
+    sweep rather than from final_rank = 1: it is the older definition, the
+    two agree, and the derivation covers a season whose capture predates
+    MLB-227.
+
+    finish falls back to the flat record ordering ONLY for a season the
+    standings capture does not cover, so the table still renders for one.
+    That fallback is the ordering MLB-227 proved wrong; it cannot silently
+    mix with real seeds within a season, because ESPN assigns playoffSeed to
+    every team in a season or to none of them."""
     return query_snowflake(f"""
         WITH ranked AS (
-            SELECT season_year, team_id, team_abbrev, owner_display,
-                   wins, losses, ties,
-                   ROW_NUMBER() OVER (
-                       PARTITION BY season_year
-                       ORDER BY wins DESC, ties DESC,
-                                calculated_points DESC, team_id) AS finish
-            FROM mart_team_season_standings
-            WHERE {league_predicate()}
+            SELECT m.season_year, m.team_id, m.team_abbrev, m.owner_display,
+                   m.wins, m.losses, m.ties,
+                   COALESCE(
+                       s.playoff_seed,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY m.season_year
+                           ORDER BY m.wins DESC, m.ties DESC,
+                                    m.calculated_points DESC, m.team_id)
+                   ) AS finish,
+                   s.final_rank
+            FROM mart_team_season_standings m
+            LEFT JOIN dim_team_season_standing s
+                ON  s.league_key  = m.league_key
+                AND s.season_year = m.season_year
+                AND s.team_id     = m.team_id
+            WHERE {league_predicate('m')}
         ),
         champs AS (
             SELECT season_year, team_id
@@ -1039,7 +1089,7 @@ def get_espn_season_finishes():
             HAVING SUM(CASE WHEN result = 'W' THEN 0 ELSE 1 END) = 0
         )
         SELECT r.season_year, r.team_id, r.team_abbrev, r.owner_display,
-               r.wins, r.losses, r.ties, r.finish,
+               r.wins, r.losses, r.ties, r.finish, r.final_rank,
                (c.team_id IS NOT NULL) AS is_champion
         FROM ranked r
         LEFT JOIN champs c

@@ -68,6 +68,8 @@ from almanac_render import (
     RECORDS_TAB,
     col_letter,
     explainer_text_format,
+    medal_fill_for_cell,
+    upright_emoji_runs,
     TRADE_AVAILABILITY_LABELS,
     TRADES_TAB,
     RECORDS_HALL_BREAKDOWN_COLS,
@@ -1017,24 +1019,26 @@ def _apply_standings_gradients(spreadsheet, worksheet, rows, stat_specs):
                               'startRowIndex': i, 'endRowIndex': i + 1,
                               'startColumnIndex': c0, 'endColumnIndex': c1},
                     'mergeType': 'MERGE_ALL'}})
-    # De-italicize the trophy glyph inside the finishes explainer (Kyle
+    # De-italicize the medal glyphs inside the finishes explainer (Kyle
     # round 12: an italic 🏆 'looks quite bad'): a textFormatRuns pass on
-    # that one cell -- the emoji is 2 UTF-16 units, so the italic run
-    # starts at index 2.
+    # that one cell. The runs are computed from the note's own text rather
+    # than hardcoded at 0/2 -- MLB-230 put silver and bronze in the MIDDLE
+    # of the sentence, where a fixed leading pair would have left them
+    # italic, which is the exact thing round 12 ruled against.
     fin_note = _espn_finishes_bounds(rows)
     if fin_note:
-        requests.append({'updateCells': {
-            'range': {'sheetId': sheet_id,
-                      'startRowIndex': fin_note['note'],
-                      'endRowIndex': fin_note['note'] + 1,
-                      'startColumnIndex': fin_note['col0'],
-                      'endColumnIndex': fin_note['col0'] + 1},
-            'rows': [{'values': [{'textFormatRuns': [
-                {'startIndex': 0, 'format': {'italic': False}},
-                {'startIndex': 2, 'format': {'italic': True}},
-            ]}]}],
-            'fields': 'textFormatRuns',
-        }})
+        note_text = rows[fin_note['note']][fin_note['col0']]
+        runs = upright_emoji_runs(note_text)
+        if runs:
+            requests.append({'updateCells': {
+                'range': {'sheetId': sheet_id,
+                          'startRowIndex': fin_note['note'],
+                          'endRowIndex': fin_note['note'] + 1,
+                          'startColumnIndex': fin_note['col0'],
+                          'endColumnIndex': fin_note['col0'] + 1},
+                'rows': [{'values': [{'textFormatRuns': runs}]}],
+                'fields': 'textFormatRuns',
+            }})
     for b_hdr, b_end in _slot_grid_bounds(rows):
         b_range = [{'startRowIndex': b_hdr + 1, 'endRowIndex': b_end}]
         # Slot values start after the indent + Team + Owner cells.
@@ -1332,9 +1336,20 @@ def _replace_advanced_standings_tab(spreadsheet, rows, stat_specs):
                 'range': f'{first_col}{note_r}:{last_fin_col}{note_r}',
                 'format': {'textFormat': explainer_text_format()},
             })
+            # WHITE, because this header shares its row with the navy
+            # 'Rank by Week' band -- structurally, not by luck: the side
+            # table is anchored to start under the frozen band, so its
+            # header lands on the banner row every time. navy_fmt already
+            # painted the row bold white and this entry replaces textFormat
+            # WHOLESALE, so a bare {'bold': True} silently dropped the
+            # foreground back to black on a dark band. Banner formatting
+            # never reaches the TSV goldens, so the byte-diff cannot catch
+            # this class of bug -- it took Kyle's eye on the rendered book.
             formats.append({
                 'range': f'{first_col}{hdr_r}:{last_fin_col}{hdr_r}',
-                'format': {'textFormat': {'bold': True}},
+                'format': {'textFormat': {
+                    'bold': True,
+                    'foregroundColor': {'red': 1, 'green': 1, 'blue': 1}}},
             })
             formats.append({
                 'range': f'{_a1_col(f0 + 5)}{hdr_r}:{last_fin_col}{end_r}',
@@ -1352,15 +1367,23 @@ def _replace_advanced_standings_tab(spreadsheet, rows, stat_specs):
                 'format': {'numberFormat':
                            {'type': 'NUMBER', 'pattern': '0.0'}},
             })
+            # Podium fills. Trophy, silver and bronze all land here (the
+            # per-year gradient below only paints numeric cells, and every
+            # medal cell is text) -- see almanac_render.FINISH_MEDAL_FILLS
+            # for why each colour is what it is.
+            #
+            # Scanned over the YEAR columns only, the same span the gradient
+            # covers. Team and owner names are user data and can start with
+            # any glyph at all, medals included; a whole-row scan would fill
+            # a cell for being named after a trophy.
             for i in range(fin['hdr'] + 1, fin['end']):
-                for j, cell in enumerate(rows[i]):
-                    if isinstance(cell, str) and cell.startswith('🏆'):
+                for j in range(f0 + 7, min(f0 + fin['n_cols'], len(rows[i]))):
+                    fill = medal_fill_for_cell(rows[i][j])
+                    if fill:
                         a1 = f'{_a1_col(j + 1)}{i + 1}'
                         formats.append({
                             'range': f'{a1}:{a1}',
-                            'format': {'backgroundColor':
-                                       {'red': 0.341, 'green': 0.733,
-                                        'blue': 0.541},
+                            'format': {'backgroundColor': fill,
                                        'textFormat': {'bold': True}},
                         })
         # The affinity sub-label row ('<season> to date' / 'All-Time') sits
@@ -1399,8 +1422,13 @@ def _replace_advanced_standings_tab(spreadsheet, rows, stat_specs):
                 formats.append({
                     'range': f'{first_a1}{hdr + 2}:{last_a1}{end}',
                     'format': {
-                        'backgroundColor': {'red': 0.937, 'green': 0.937,
-                                            'blue': 0.937},
+                        # Sheets' "light gray 1" (#D9D9D9), one step down
+                        # the gray ramp from the "light gray 2" (#EFEFEF)
+                        # this started as (Kyle 2026-08-09). Kept equal to
+                        # cbs_almanac_sheets._LIGHT_GRAY on purpose -- the
+                        # affinity chart is one surface in two books.
+                        'backgroundColor': {'red': 0.851, 'green': 0.851,
+                                            'blue': 0.851},
                         'horizontalAlignment': 'CENTER',
                         'numberFormat': {'type': 'PERCENT',
                                          'pattern': '0%'},

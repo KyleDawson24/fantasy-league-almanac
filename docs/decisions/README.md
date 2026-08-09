@@ -13,6 +13,11 @@ every document anyone once called a decision is just another archive.
   eligibility anchors that ship today. The walk-back laws, the 2004-20
   estimator and the 2001-02 sentinel are all still in the models, so this
   is the document that explains numbers a reader can currently see.
+- **`STANDINGS_ORDER_AND_THE_RANK_CHART.md`** -- why the standings tables
+  order by ESPN's own playoff seed while the Rank by Week chart stays
+  reconstructed, and why those two are allowed to disagree. Also records
+  which quantity the podium marks read, and the weekly-extract flag the
+  seed's freshness now depends on. Read this before "fixing" either order.
 - **`v2.0 Groundwork.md`** -- the scope call that 2.0 is still executing
   against: what "run it yourself" does and does not include, and what was
   deferred to 2.x. **Scope re-drawn 2026-08-05** -- v2.0 is the engine

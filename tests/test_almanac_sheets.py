@@ -1549,6 +1549,207 @@ class TestAdvancedStandingsRows:
         assert second[26] == pytest.approx(0.75)    # 12-4 all-time
         assert second[28] == 1 and second[29] == 1
 
+    def test_medals_read_the_playoff_finish_not_the_seed(self):
+        """MLB-230. In an H2H league the podium is settled in the bracket,
+        so silver and bronze key on the platform's post-playoff rank. The
+        seed stays printed beside the medal because the two genuinely
+        disagree -- here the 1 seed lost the final and the 3 seed won the
+        third-place game."""
+        import almanac_write
+
+        arc = [{'team_id': t, 'team_abbrev': f'TT{t}', 'period': 1,
+                'standings_rank': t} for t in (1, 2, 3)]
+
+        def fin(team, seed, final_rank, champion=False):
+            return {'season_year': 2025, 'team_id': team,
+                    'team_abbrev': f'TT{team}', 'owner_display': f'Owner {team}',
+                    'wins': 10, 'losses': 4, 'ties': 0, 'finish': seed,
+                    'final_rank': final_rank, 'is_champion': champion}
+
+        finishes = [fin(1, 1, 2), fin(2, 2, 1, champion=True), fin(3, 3, 3)]
+        rows = almanac_sheets.build_advanced_standings_tab_rows(
+            [_standings_team(team_id=t, abbrev=f'TT{t}') for t in (1, 2, 3)],
+            [], _STANDINGS_SPECS, 2026,
+            rank_arc_rows=arc, finishes_rows=finishes)
+
+        fin_b = almanac_write._espn_finishes_bounds(rows)
+        cells = {r[21]: r[28] for r in rows[fin_b['hdr'] + 1:fin_b['end']]}
+        assert cells['Owner 2'] == '🏆 2'     # champion, from the 2 seed
+        assert cells['Owner 1'] == '🥈 1'     # lost the final, from the 1 seed
+        assert cells['Owner 3'] == '🥉 3'
+
+    def test_in_flight_column_is_the_seed_so_avg_reconciles(self):
+        """The in-flight column asserts a STANDING, so it reads the seed
+        like the rest of the table -- not the rank arc's endpoint. Avg
+        averages `finish` across every season including the one in flight,
+        so while the two sources disagreed a row could print 3 and 1 and an
+        Avg of 1.5. A mean has to match the numbers printed beside it."""
+        import almanac_write
+
+        # The arc ranks this team 3rd; the platform seeds it 1st. The old
+        # code showed the 3 and averaged the 1.
+        arc = [{'team_id': 1, 'team_abbrev': 'TT1', 'period': 1,
+                'standings_rank': 3},
+               {'team_id': 2, 'team_abbrev': 'TT2', 'period': 1,
+                'standings_rank': 1}]
+        finishes = [
+            {'season_year': 2025, 'team_id': 1, 'team_abbrev': 'TT1',
+             'owner_display': 'Owner 1', 'wins': 9, 'losses': 5, 'ties': 0,
+             'finish': 2, 'final_rank': 2, 'is_champion': False},
+            {'season_year': 2026, 'team_id': 1, 'team_abbrev': 'TT1',
+             'owner_display': 'Owner 1', 'wins': 4, 'losses': 0, 'ties': 0,
+             'finish': 1, 'final_rank': None, 'is_champion': False},
+        ]
+        rows = almanac_sheets.build_advanced_standings_tab_rows(
+            [_standings_team(team_id=t, abbrev=f'TT{t}') for t in (1, 2)],
+            [], _STANDINGS_SPECS, 2026,
+            rank_arc_rows=arc, finishes_rows=finishes)
+
+        fin = almanac_write._espn_finishes_bounds(rows)
+        row = next(r for r in rows[fin['hdr'] + 1:fin['end']]
+                   if r[21] == 'Owner 1')
+        avg, closed_2025, in_flight = row[27], row[28], row[29]
+        assert in_flight == 1                    # the seed, not the arc's 3
+        assert closed_2025 == '🥈 2'
+        # And now the row adds up on its face: the mean of the two finishes
+        # a reader can see. Against the arc's 3 it would have read 1.5
+        # beside a 2 and a 3.
+        assert avg == pytest.approx(1.5)
+        assert avg == pytest.approx((2 + in_flight) / 2)
+
+    def test_champion_derivation_outranks_a_disagreeing_final_rank(self):
+        """is_champion is the older definition and the one Titles counts.
+        A final_rank of 1 must not mint a second trophy the column beside
+        it would not count."""
+        import almanac_write
+
+        arc = [{'team_id': t, 'team_abbrev': f'TT{t}', 'period': 1,
+                'standings_rank': t} for t in (1, 2)]
+        finishes = [
+            {'season_year': 2025, 'team_id': 1, 'team_abbrev': 'TT1',
+             'owner_display': 'Owner 1', 'wins': 9, 'losses': 5, 'ties': 0,
+             'finish': 1, 'final_rank': 1, 'is_champion': False},
+            {'season_year': 2025, 'team_id': 2, 'team_abbrev': 'TT2',
+             'owner_display': 'Owner 2', 'wins': 8, 'losses': 6, 'ties': 0,
+             'finish': 2, 'final_rank': 2, 'is_champion': False},
+        ]
+        rows = almanac_sheets.build_advanced_standings_tab_rows(
+            [_standings_team(team_id=t, abbrev=f'TT{t}') for t in (1, 2)],
+            [], _STANDINGS_SPECS, 2026,
+            rank_arc_rows=arc, finishes_rows=finishes)
+
+        fin_b = almanac_write._espn_finishes_bounds(rows)
+        cells = {r[21]: r[28] for r in rows[fin_b['hdr'] + 1:fin_b['end']]}
+        assert cells['Owner 1'] == 1          # plain rank, no trophy
+        assert cells['Owner 2'] == '🥈 2'     # silver is unaffected
+
+    def test_finishes_legend_names_every_podium_glyph(self):
+        """A new symbol with no legend entry is a worse surface than no
+        symbol -- and an italic glyph 'looks quite bad' (Kyle round 12), so
+        the writer's runs pass has to reach all three where they actually
+        sit in the REAL note, not just a leading trophy."""
+        import almanac_render
+        import almanac_write
+
+        arc = [{'team_id': 1, 'team_abbrev': 'TT1', 'period': 1,
+                'standings_rank': 1}]
+        finishes = [{'season_year': 2025, 'team_id': 1, 'team_abbrev': 'TT1',
+                     'owner_display': 'Owner 1', 'wins': 9, 'losses': 5,
+                     'ties': 0, 'finish': 1, 'final_rank': 1,
+                     'is_champion': True}]
+        rows = almanac_sheets.build_advanced_standings_tab_rows(
+            [_standings_team(team_id=1, abbrev='TT1')], [],
+            _STANDINGS_SPECS, 2026, rank_arc_rows=arc, finishes_rows=finishes)
+
+        fin = almanac_write._espn_finishes_bounds(rows)
+        note = rows[fin['note']][fin['col0']]
+        for glyph in ('🏆', '🥈', '🥉'):
+            assert glyph in note
+        # The exact expression the writer feeds to the updateCells request.
+        runs = almanac_render.upright_emoji_runs(note)
+        u16 = note.encode('utf-16-le')
+        upright = [r['startIndex'] for r in runs
+                   if r['format'].get('italic') is False]
+        assert len(upright) == 3
+        for start in upright:
+            assert u16[start * 2:start * 2 + 4].decode('utf-16-le') in (
+                '🏆', '🥈', '🥉')
+
+
+class TestPodiumMarks:
+    """almanac_render's shared medal vocabulary (MLB-230). Both books and
+    both writers read it, so a change here moves two surfaces."""
+
+    def test_only_the_top_three_get_a_glyph(self):
+        import almanac_render
+
+        assert [almanac_render.finish_medal(r) for r in (1, 2, 3, 4)] == [
+            '🏆', '🥈', '🥉', None]
+        # An in-flight season has no finish yet; neither form is an error.
+        assert almanac_render.finish_medal(None) is None
+        assert almanac_render.finish_medal('') is None
+
+    def test_fill_matches_the_leading_glyph_only(self):
+        """Both cell shapes take a fill -- the bare '🥈' of the CBS matrix
+        and the '🥈 1' of the ESPN table. Nothing else does: team names are
+        user data and an emoji team name is a real team name, so a fill
+        must never follow from a cell merely CONTAINING a medal."""
+        import almanac_render
+
+        assert (almanac_render.medal_fill_for_cell('🥈')
+                == almanac_render.medal_fill_for_cell('🥈 1')
+                == almanac_render.FINISH_MEDAL_FILLS['🥈'])
+        assert almanac_render.medal_fill_for_cell(2) is None
+        assert almanac_render.medal_fill_for_cell('Runner-Up 🥈') is None
+        # The champion's fill is the value it has always had, so no
+        # existing render moves.
+        assert almanac_render.FINISH_MEDAL_FILLS['🏆'] == {
+            'red': 0.341, 'green': 0.733, 'blue': 0.541}
+
+    def test_upright_runs_match_the_hardcoded_pair_they_replace(self):
+        """The old pass de-italicized at 0 and resumed at 2. That is still
+        exactly right for a note whose only emoji leads it, and this pins
+        it so the generalization cannot quietly move an old render."""
+        import almanac_render
+
+        assert almanac_render.upright_emoji_runs('🏆 = Season Champion.') == [
+            {'startIndex': 0, 'format': {'italic': False}},
+            {'startIndex': 2, 'format': {'italic': True}},
+        ]
+
+    def test_upright_runs_reach_emoji_mid_sentence(self):
+        """The reason the pass had to be generalized: MLB-230 put two
+        glyphs in the middle of both legends, where a fixed leading pair
+        left them italic."""
+        import almanac_render
+
+        note = '🏆 = Champ. 🥈 = 2nd. 🥉 = 3rd.'
+        runs = almanac_render.upright_emoji_runs(note)
+        u16 = note.encode('utf-16-le')
+        upright = [r['startIndex'] for r in runs
+                   if r['format'].get('italic') is False]
+        assert len(upright) == 3
+        for start in upright:
+            assert u16[start * 2:start * 2 + 4].decode('utf-16-le') in (
+                '🏆', '🥈', '🥉')
+        # Italics resume immediately after each 2-unit glyph.
+        assert [r['startIndex'] for r in runs
+                if r['format'].get('italic') is True] == [
+                    s + 2 for s in upright]
+
+    def test_upright_runs_state_the_base_run_when_text_leads(self):
+        """Sheets rejects a run list whose first entry does not start at 0."""
+        import almanac_render
+
+        runs = almanac_render.upright_emoji_runs('Champion: 🏆')
+        assert runs[0] == {'startIndex': 0, 'format': {'italic': True}}
+        assert runs[1]['format'] == {'italic': False}
+
+    def test_a_note_with_no_emoji_needs_no_runs(self):
+        import almanac_render
+
+        assert almanac_render.upright_emoji_runs('No glyphs here.') == []
+
     def test_writer_bounds_locate_every_standings_table(self):
         import almanac_write
 

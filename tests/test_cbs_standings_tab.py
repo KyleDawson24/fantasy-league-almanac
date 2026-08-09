@@ -70,6 +70,44 @@ class TestFinishesMatrix:
                  if s.get('format', {}).get('backgroundColor') == cbs._FINISH_GREEN]
         assert len(fills) == 2
 
+    def test_runners_up_render_silver_with_their_own_fill(self, monkeypatch):
+        """MLB-230. The year gradient only paints numeric cells, so every
+        medal cell needs a static fill or it reads as a white hole in a
+        graded column -- the reason the trophy has carried one all along."""
+        import almanac_render
+
+        rows, formats = _build(monkeypatch)
+        silver = [c for row in rows for c in row if c == '🥈']
+        assert len(silver) == 2                # Alpha 2025 + Beta 2024
+        fills = [s for s in formats
+                 if (s.get('format', {}).get('backgroundColor')
+                     == almanac_render.FINISH_MEDAL_FILLS['🥈'])]
+        assert len(fills) == 2
+        # Silver sits off the green/yellow/red finish scale, so a medal is
+        # never mistakable for a gradient step.
+        assert almanac_render.FINISH_MEDAL_FILLS['🥈'] not in (
+            cbs._FINISH_GREEN, cbs._FINISH_YELLOW, cbs._FINISH_RED)
+
+    def test_a_franchise_named_after_a_medal_gets_no_fill(self, monkeypatch):
+        """Team names are user data and can be anything, emoji included.
+        The fill pass scans the YEAR columns only; a whole-row scan would
+        paint the Franchise cell for what the franchise is called."""
+        import almanac_render
+
+        monkeypatch.setattr(cbs, 'get_franchise_map', _fmap)
+        franchises = [{'team_id': 1, 'team_name': '🥈 Silver Sluggers'},
+                      {'team_id': 2, 'team_name': 'Beta'}]
+        rows, formats = cbs.build_standings_rows(
+            _context(), _arc(), _finishes(), franchises)
+
+        assert any(r[0] == '🥈 Silver Sluggers' for r in rows if r)
+        silver_fills = [s for s in formats
+                        if (s.get('format', {}).get('backgroundColor')
+                            == almanac_render.FINISH_MEDAL_FILLS['🥈'])]
+        # Still exactly the two real runner-up cells -- the name adds none.
+        assert len(silver_fills) == 2
+        assert not any(s['range'].startswith('A') for s in silver_fills)
+
     def test_finish_matrices_carry_rank_gradient_and_centering(self, monkeypatch):
         rows, formats = _build(monkeypatch)
         gradients = [s for s in formats if 'gradient' in s]
@@ -107,10 +145,12 @@ class TestFinishesMatrix:
         # column shows the CURRENT rank as a plain number (1, no trophy)
         # and counts toward none of Titles/Div/Avg.
         assert alpha[:4] == ['Alpha', 1, 2, 1.5]
-        assert alpha[4:] == ['🏆', 2, 1]
+        # 2024 champion, 2025 runner-up. In a points league the medal IS
+        # the rank in this matrix, so it replaces the number (MLB-230).
+        assert alpha[4:] == ['🏆', '🥈', 1]
         # Beta: no titles, but best-in-West 2024 (Ghosts hadn't joined).
         assert beta[:4] == ['Beta', '', 1, 2.0]
-        assert beta[6] == 2
+        assert beta[4:] == ['🥈', '', 2]
 
     def test_former_franchises_fold_into_hidden_row_group(self, monkeypatch):
         rows, formats = _build(monkeypatch)

@@ -235,6 +235,7 @@ tests/test_cbs_standings_tab.py,team-id,fdc4478a91800a26,collision,synthetic fix
 tests/test_check_pii_strict.py,team-id,2d9a63d4464f619f,collision,synthetic fixture value that happens to sit in an identity-shaped position,2026-08-10
 tests/test_check_pii_strict.py,team-id,37664d1e8aa5ce5f,collision,synthetic fixture value that happens to sit in an identity-shaped position,2026-08-10
 tests/test_check_pii_strict.py,team-id,3fd1d3cfc0e0e1b0,collision,synthetic fixture value that happens to sit in an identity-shaped position,2026-08-10
+tests/test_check_pii_strict.py,team-id,5a8c3bf304d6329c,collision,synthetic fixture value that happens to sit in an identity-shaped position,2026-08-10
 tests/test_check_pii_strict.py,team-id,e99bd9db0b6ffdd8,collision,synthetic fixture value that happens to sit in an identity-shaped position,2026-08-10
 tests/test_league_config_templates.py,owner,557213b8c90deaaf,collision,"the ordinary English word, used in its ordinary sense",2026-08-10
 tests/test_league_config_templates.py,owner,58d85cbf6e06d281,collision,"the ordinary English word, used in its ordinary sense",2026-08-10

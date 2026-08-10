@@ -43,6 +43,37 @@ def cp():
     return module
 
 
+@pytest.fixture(autouse=True)
+def _sealed_off(cp, tmp_path, monkeypatch):
+    """No test may reach a real source. Autouse, and that is the point.
+
+    Every path the guard reads is a module constant resolved from the real
+    checkout, so a test that only patches REPO still reads this repository's
+    registry -- which resolves the real league id out of the real .env and
+    walks it straight into a test process. The isolation cannot be left to
+    each test remembering: it is the same class of mistake as the guard's
+    own, where whether a thing got checked depended on whether somebody
+    remembered to check it.
+
+    Defaults are INERT rather than absent: sources that answer emptily and
+    without error, plus a salt and an empty ledger, so a test asserting on
+    degradation is asserting about the source it deliberately removed and
+    not about four it forgot to set up.
+    """
+    salt = tmp_path / "sealed-salt.txt"
+    salt.write_text("f" * 64 + "\n", encoding="utf-8")
+    monkeypatch.setattr(cp, "SALT", str(salt))
+    monkeypatch.setattr(cp, "LEDGER", str(tmp_path / "sealed-ledger.csv"))
+    monkeypatch.setattr(cp, "REGISTRY", str(tmp_path / "no-registry.yml"))
+    monkeypatch.setattr(cp, "DBT_PROJECT", str(tmp_path / "no-dbt-project.yml"))
+    monkeypatch.setattr(cp, "_registry_identifiers",
+                        lambda: (set(), set(), None))
+    monkeypatch.setattr(
+        cp, "_computed_league_inventory",
+        lambda: ({cp.FRANCHISE: set(), cp.DIVISION: set(), cp.TEAM_ID: set()},
+                 None))
+
+
 # Invented. Two tokens, a surname with internal capitals, nothing real.
 MAPPED = "Jonas McAvery"
 MAPPED_SLUG = "cbs-jonas-mcavery"
@@ -355,10 +386,454 @@ def test_every_token_is_classified(cp, tmp_path, monkeypatch):
 
     tokens, census = cp.build_tokens(use_warehouse=False)
     assert tokens
-    known = {cp.FAMILY, cp.PHRASE, cp.WORD, cp.ABBREV}
+    known = set(cp.MODES)
     assert all(t.mode in known for t in tokens)
     # Nothing is silently dropped: everything is either searchable or
     # counted in one of the census's explicit buckets.
     accounted = (len(tokens) + census["exempt_maintainer"]
                  + len(census["too_short"]))
     assert accounted == census["computed"] + census["map"]
+
+
+# ==========================================================================
+# MLB-234: the categories the guard used to be blind to, and the ledger
+# that replaced a class-wide amnesty.
+#
+# Every identity below is INVENTED, and invented ALL THE WAY DOWN -- names,
+# labels, ids, owners and divisions alike. A synthetic fixture that borrows
+# one real franchise abbrev to look realistic is not a synthetic fixture;
+# it is the leak, committed, with a test asserting it stays.
+# ==========================================================================
+
+# A league that does not exist. Four labels in four different shapes,
+# because "a label is four uppercase letters" is exactly the assumption
+# MLB-234 exists to delete.
+FAKE_FRANCHISE = "Quorum Valley Quails"      # a normal multi-part team name
+FAKE_ABBREV = "QVQL"                          # the pioneer league's house style
+FAKE_ALNUM_LABEL = "7-11-3-9"                 # digits and dashes: still a label
+FAKE_EMOJI_LABEL = "\N{DUCK}\N{DUCK}"         # two glyphs: still a label
+FAKE_SHORT_LABEL = "QV"                       # under the 3-char prose floor
+FAKE_DIVISION = "Quorum Northern Division"
+FAKE_LEAGUE_ID = "8675309421"                 # high entropy: blocks bare
+FAKE_TEAM_ID = "6"                            # low entropy: context only
+
+
+def _sources(cp, monkeypatch, *, owners=(), franchises=(), divisions=(),
+             team_ids=(), league_ids=(), keys=()):
+    """Pin every authoritative source. Nothing here touches a warehouse."""
+    monkeypatch.setattr(cp, "_computed_names", lambda: (set(owners), None))
+    monkeypatch.setattr(
+        cp, "_computed_league_inventory",
+        lambda: ({cp.FRANCHISE: set(franchises), cp.DIVISION: set(divisions),
+                  cp.TEAM_ID: set(team_ids)}, None))
+    monkeypatch.setattr(cp, "_registry_identifiers",
+                        lambda: (set(league_ids), set(keys), None))
+
+
+def _secrets_at(cp, tmp_path, monkeypatch, ledger_rows=()):
+    """A salt and a ledger of our own, never the real ones."""
+    salt = tmp_path / "salt.txt"
+    salt.write_text("0" * 64 + "\n", encoding="utf-8")
+    ledger = tmp_path / "dispositions.csv"
+    monkeypatch.setattr(cp, "SALT", str(salt))
+    monkeypatch.setattr(cp, "LEDGER", str(ledger))
+    monkeypatch.setattr(cp, "DBT_PROJECT", str(tmp_path / "no-dbt-project.yml"))
+    cp.write_ledger(ledger_rows)
+    return ledger
+
+
+def _sweep(cp, tokens, census=None):
+    return cp.sweep(tokens, None, cp._salt(), cp.load_ledger(),
+                    (census or {}).get("ident_keys", ()))
+
+
+# --------------------------------------------------------------------------
+# The inventory is DERIVED, per category, and deduplicated within one.
+# --------------------------------------------------------------------------
+
+def test_inventory_carries_every_category_from_its_own_source(
+        cp, tmp_path, monkeypatch):
+    """Each category arrives from the source that is authoritative for it."""
+    monkeypatch.setattr(cp, "MAP", str(_map_at(tmp_path)))
+    _secrets_at(cp, tmp_path, monkeypatch)
+    _sources(cp, monkeypatch, owners=["Jonas McAvery"],
+             franchises=[FAKE_FRANCHISE, FAKE_ABBREV],
+             divisions=[FAKE_DIVISION], team_ids=[FAKE_TEAM_ID],
+             league_ids=[FAKE_LEAGUE_ID])
+
+    tokens, census = cp.build_tokens()
+    assert census["categories"][cp.OWNER] == 1
+    assert census["categories"][cp.FRANCHISE] == 2
+    assert census["categories"][cp.DIVISION] == 1
+    assert census["categories"][cp.TEAM_ID] == 1
+    assert census["categories"][cp.LEAGUE_ID] == 1
+
+
+def test_the_same_string_in_two_categories_is_not_collapsed(
+        cp, tmp_path, monkeypatch):
+    """A franchise label and an owner's initials can be the same letters and
+    are searched differently; collapsing them drops one silently."""
+    monkeypatch.setattr(cp, "MAP", str(_map_at(tmp_path)))
+    _secrets_at(cp, tmp_path, monkeypatch)
+    _sources(cp, monkeypatch, owners=[FAKE_ABBREV], franchises=[FAKE_ABBREV])
+
+    tokens, _ = cp.build_tokens()
+    assert {t.category for t in tokens} == {cp.OWNER, cp.FRANCHISE}
+
+
+def test_one_category_deduplicates_within_itself(cp, tmp_path, monkeypatch):
+    """Two seams report the same franchise; it is one search, not two."""
+    monkeypatch.setattr(cp, "MAP", str(_map_at(tmp_path)))
+    _secrets_at(cp, tmp_path, monkeypatch)
+    _sources(cp, monkeypatch,
+             franchises=[FAKE_FRANCHISE, FAKE_FRANCHISE.upper()])
+
+    tokens, _ = cp.build_tokens()
+    assert len([t for t in tokens if t.category == cp.FRANCHISE]) == 1
+
+
+def test_the_holding_pen_sentinel_is_not_an_identity(cp, tmp_path, monkeypatch):
+    """The placeholder team is configuration, not somebody's franchise --
+    and it is read from the dbt vars rather than written down here."""
+    project = tmp_path / "dbt_project.yml"
+    project.write_text("vars:\n  holding_pen_franchise_id: 9999\n"
+                       "  holding_pen_label: '####'\n", encoding="utf-8")
+    monkeypatch.setattr(cp, "MAP", str(_map_at(tmp_path)))
+    _secrets_at(cp, tmp_path, monkeypatch)
+    monkeypatch.setattr(cp, "DBT_PROJECT", str(project))
+    _sources(cp, monkeypatch, franchises=["####", FAKE_ABBREV],
+             team_ids=["9999"])
+
+    tokens, census = cp.build_tokens()
+    assert census["sentinels"] == 2
+    assert [t.text for t in tokens] == [FAKE_ABBREV]
+
+
+# --------------------------------------------------------------------------
+# A label is whatever the league says it is.
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize("label", [
+    FAKE_ABBREV,            # four uppercase letters -- the old sole shape
+    FAKE_ALNUM_LABEL,       # digits and dashes
+    FAKE_EMOJI_LABEL,       # emoji
+    FAKE_SHORT_LABEL,       # two characters
+])
+def test_any_label_shape_is_searched_and_found(cp, tmp_path, monkeypatch, label):
+    """The predecessor searched exactly one of these four."""
+    monkeypatch.setattr(cp, "MAP", str(_map_at(tmp_path)))
+    _secrets_at(cp, tmp_path, monkeypatch)
+    _sources(cp, monkeypatch, franchises=[label])
+
+    tokens, _ = cp.build_tokens()
+    assert [t.mode for t in tokens] == [cp.LABEL], (
+        f"{label!r} was not classified as a label")
+    blob = f"the team ({label}) finished third"
+    assert tokens[0].find(blob, blob.lower(), {}) is not None, (
+        f"{label!r} is in the inventory but does not match its own occurrence")
+
+
+@pytest.mark.parametrize("label", [FAKE_ALNUM_LABEL, FAKE_EMOJI_LABEL])
+def test_an_odd_label_is_never_promoted_into_a_fatal_class(
+        cp, tmp_path, monkeypatch, label):
+    """THE regression. A label that broke the pioneer league's shape used to
+    fall through to the one-word class, where a hit FAILS a push -- so a team
+    was punished for not looking like the first league's teams."""
+    monkeypatch.setattr(cp, "MAP", str(_map_at(tmp_path)))
+    _secrets_at(cp, tmp_path, monkeypatch)
+    _sources(cp, monkeypatch, franchises=[label])
+
+    tokens, _ = cp.build_tokens()
+    assert cp.severity(tokens[0]) == cp.REVIEW
+
+
+def test_an_emoji_label_is_not_dropped_as_too_short(cp, tmp_path, monkeypatch):
+    """The 3-character floor exists so a token cannot fire on prose. An
+    emoji cannot fire on prose, so the floor does not apply to it -- and
+    dropping it meant the label was never searched at all."""
+    monkeypatch.setattr(cp, "MAP", str(_map_at(tmp_path)))
+    _secrets_at(cp, tmp_path, monkeypatch)
+    _sources(cp, monkeypatch, franchises=[FAKE_EMOJI_LABEL])
+
+    tokens, census = cp.build_tokens()
+    assert census["too_short"] == []
+    assert len(tokens) == 1
+
+
+def test_a_division_name_blocks(cp, tmp_path, monkeypatch):
+    """Divisions are NOT covered by the franchise-name ruling."""
+    monkeypatch.setattr(cp, "MAP", str(_map_at(tmp_path)))
+    _secrets_at(cp, tmp_path, monkeypatch)
+    _sources(cp, monkeypatch, divisions=[FAKE_DIVISION])
+
+    tokens, _ = cp.build_tokens()
+    assert cp.severity(tokens[0]) == cp.FATAL
+
+
+# --------------------------------------------------------------------------
+# Identifiers: entropy decides whether a bare occurrence counts.
+# --------------------------------------------------------------------------
+
+def test_a_high_entropy_league_id_matches_bare_and_blocks(
+        cp, tmp_path, monkeypatch):
+    monkeypatch.setattr(cp, "MAP", str(_map_at(tmp_path)))
+    _secrets_at(cp, tmp_path, monkeypatch)
+    _sources(cp, monkeypatch, league_ids=[FAKE_LEAGUE_ID])
+
+    tokens, _ = cp.build_tokens()
+    token = tokens[0]
+    assert token.bare, "a 10-character capability id must match on its own"
+    assert cp.severity(token) == cp.FATAL
+    blob = f"see the archive at {FAKE_LEAGUE_ID} for details"
+    assert token.find(blob, blob.lower(), {}) is not None
+
+
+def test_a_low_entropy_team_id_needs_an_identity_shaped_context(
+        cp, tmp_path, monkeypatch):
+    """Measured on the real tree, the one- and two-digit team ids occur
+    32,800 times across 290 of 328 files. Matching them bare is not a
+    threat model, it is a denial of service against the reader."""
+    monkeypatch.setattr(cp, "MAP", str(_map_at(tmp_path)))
+    _secrets_at(cp, tmp_path, monkeypatch)
+    _sources(cp, monkeypatch, team_ids=[FAKE_TEAM_ID])
+
+    tokens, census = cp.build_tokens()
+    token = tokens[0]
+    assert not token.bare
+    pattern = cp.ident_context_pattern(census["ident_keys"])
+
+    bare = f"the streak ran {FAKE_TEAM_ID} weeks and then broke"
+    assert token.find(bare, bare.lower(),
+                      cp.ident_contexts(bare, pattern)) is None, (
+        "a bare number in prose was read as a team id")
+
+
+@pytest.mark.parametrize("blob", [
+    'payload = {"teamId": 6}',
+    "team_id=6",
+    "GET /teams/6/roster",
+    "franchise-id: 6",
+])
+def test_an_identity_shaped_context_does_catch_the_low_entropy_id(
+        cp, tmp_path, monkeypatch, blob):
+    """The exposures a low-entropy id actually has: a committed config, a
+    captured payload, a URL."""
+    monkeypatch.setattr(cp, "MAP", str(_map_at(tmp_path)))
+    _secrets_at(cp, tmp_path, monkeypatch)
+    _sources(cp, monkeypatch, team_ids=[FAKE_TEAM_ID])
+
+    tokens, census = cp.build_tokens()
+    pattern = cp.ident_context_pattern(census["ident_keys"])
+    assert tokens[0].find(blob, blob.lower(),
+                          cp.ident_contexts(blob, pattern)) is not None, blob
+
+
+def test_a_registry_credential_name_becomes_context_vocabulary(
+        cp, tmp_path, monkeypatch):
+    """A new league's env variable is covered without editing the guard."""
+    monkeypatch.setattr(cp, "MAP", str(_map_at(tmp_path)))
+    _secrets_at(cp, tmp_path, monkeypatch)
+    _sources(cp, monkeypatch, team_ids=[FAKE_TEAM_ID], keys=["QUORUM_LEAGUE"])
+
+    tokens, census = cp.build_tokens()
+    pattern = cp.ident_context_pattern(census["ident_keys"])
+    blob = "QUORUM_LEAGUE=6"
+    assert tokens[0].find(blob, blob.lower(),
+                          cp.ident_contexts(blob, pattern)) is not None
+
+
+def test_the_entropy_boundary_is_a_named_constant(cp):
+    """So the threat model is one number in one place, not eight literals."""
+    assert cp.IDENT_BARE_MIN == 8
+
+
+# --------------------------------------------------------------------------
+# Dispositions: no class-wide amnesty, ever again.
+# --------------------------------------------------------------------------
+
+def _planted(cp, tmp_path, monkeypatch, content, **sources):
+    repo = _repo_with(tmp_path, "notes.md", content)
+    monkeypatch.setattr(cp, "REPO", str(repo))
+    monkeypatch.setattr(cp, "MAP", str(_map_at(tmp_path)))
+    _sources(cp, monkeypatch, **sources)
+    return repo
+
+
+def test_a_new_label_occurrence_is_unreviewed_not_dispositioned(
+        cp, tmp_path, monkeypatch):
+    """THE regression MLB-234 was filed for. The predecessor greeted every
+    abbrev hit -- including one committed five minutes ago -- with a banner
+    citing a ruling taken on sites nobody had enumerated."""
+    _planted(cp, tmp_path, monkeypatch, f"the {FAKE_ABBREV} tab is stale\n",
+             franchises=[FAKE_ABBREV])
+    _secrets_at(cp, tmp_path, monkeypatch)
+
+    tokens, census = cp.build_tokens()
+    hits = _sweep(cp, tokens, census)
+    assert len(hits) == 1
+    assert hits[0][5] is None, (
+        "a brand-new occurrence was reported as already dispositioned")
+
+
+def test_a_recorded_disposition_covers_only_its_own_site(
+        cp, tmp_path, monkeypatch):
+    """A decision about one path is not a decision about the next one."""
+    repo = _repo_with(tmp_path, "notes.md", f"the {FAKE_ABBREV} tab\n")
+    (repo / "other.md").write_text(f"also {FAKE_ABBREV}\n", encoding="utf-8")
+    _git(str(repo), "add", "-A")
+    _git(str(repo), "commit", "-q", "-m", "two sites")
+    monkeypatch.setattr(cp, "REPO", str(repo))
+    monkeypatch.setattr(cp, "MAP", str(_map_at(tmp_path)))
+    _sources(cp, monkeypatch, franchises=[FAKE_ABBREV])
+    _secrets_at(cp, tmp_path, monkeypatch)
+    salt = cp._salt()
+    _secrets_at(cp, tmp_path, monkeypatch, ledger_rows=[{
+        "path": "notes.md", "category": cp.FRANCHISE,
+        "digest": cp.digest(salt, cp.FRANCHISE, FAKE_ABBREV),
+        "disposition": cp.RETAIN, "reason": "sample output", "recorded": "x"}])
+
+    tokens, census = cp.build_tokens()
+    by_path = {h[1]: h[5] for h in _sweep(cp, tokens, census)}
+    assert by_path["notes.md"] is not None
+    assert by_path["other.md"] is None, (
+        "one path's disposition leaked onto another path's hit")
+
+
+def test_a_disposition_does_not_cross_categories(cp, tmp_path, monkeypatch):
+    """Reviewing a franchise label at a path says nothing about an owner
+    name at the same path."""
+    _planted(cp, tmp_path, monkeypatch,
+             f"{FAKE_ABBREV} and Jonas McAvery\n",
+             owners=["Jonas"], franchises=[FAKE_ABBREV])
+    _secrets_at(cp, tmp_path, monkeypatch)
+    salt = cp._salt()
+    _secrets_at(cp, tmp_path, monkeypatch, ledger_rows=[{
+        "path": "notes.md", "category": cp.FRANCHISE,
+        "digest": cp.digest(salt, cp.FRANCHISE, FAKE_ABBREV),
+        "disposition": cp.RETAIN, "reason": "sample output", "recorded": "x"}])
+
+    tokens, census = cp.build_tokens()
+    by_cat = {h[3].category: h[5] for h in _sweep(cp, tokens, census)}
+    assert by_cat[cp.FRANCHISE] is not None
+    assert by_cat[cp.OWNER] is None
+
+
+def test_the_ledger_never_carries_the_identity_itself(cp, tmp_path, monkeypatch):
+    """Path, category and reason are public. The token is not -- and an
+    UNSALTED digest of a four-letter label is the label, because all
+    456,976 of them can be hashed in a second."""
+    _secrets_at(cp, tmp_path, monkeypatch)
+    salt = cp._salt()
+    d = cp.digest(salt, cp.FRANCHISE, FAKE_ABBREV)
+    assert FAKE_ABBREV.casefold() not in d.casefold()
+    assert d != cp.digest("0" * 63 + "1", cp.FRANCHISE, FAKE_ABBREV), (
+        "the digest does not depend on the secret, so it is brute-forceable")
+    assert d != cp.digest(salt, cp.OWNER, FAKE_ABBREV), (
+        "the digest ignores the category, so a row would cross categories")
+
+
+def test_a_sweep_without_the_secret_refuses_to_vouch(
+        cp, tmp_path, monkeypatch, capsys):
+    """Without it, every disposition reads as missing -- and 'everything is
+    unreviewed' is indistinguishable from 'nothing was ever reviewed'."""
+    _planted(cp, tmp_path, monkeypatch, "# notes\n", franchises=[FAKE_ABBREV])
+    monkeypatch.setattr(cp, "SALT", str(tmp_path / "no-salt.txt"))
+    monkeypatch.setattr(cp, "LEDGER", str(tmp_path / "no-ledger.csv"))
+    monkeypatch.setattr(cp, "DBT_PROJECT", str(tmp_path / "none.yml"))
+
+    assert cp.main([]) == 1
+    assert "disposition secret is not on this machine" in capsys.readouterr().err
+
+
+def test_fail_on_unreviewed_is_what_a_release_cut_uses(
+        cp, tmp_path, monkeypatch):
+    """Non-blocking by default so the hook is not bypassed on sight;
+    blocking on demand so a release cannot carry an unreviewed hit."""
+    _planted(cp, tmp_path, monkeypatch, f"the {FAKE_ABBREV} tab\n",
+             franchises=[FAKE_ABBREV])
+    _secrets_at(cp, tmp_path, monkeypatch)
+
+    assert cp.main([]) == 0
+    assert cp.main(["--fail-on-unreviewed"]) == 1
+
+
+# --------------------------------------------------------------------------
+# End to end: a planted identity in a real tree, per category.
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize("category,planted,blocks", [
+    ("divisions", FAKE_DIVISION, True),
+    ("league_ids", FAKE_LEAGUE_ID, True),
+    ("franchises", FAKE_FRANCHISE, False),
+    ("franchises", FAKE_EMOJI_LABEL, False),
+    ("franchises", FAKE_ALNUM_LABEL, False),
+])
+def test_adding_one_identity_to_a_source_catches_its_planted_occurrence(
+        cp, tmp_path, monkeypatch, capsys, category, planted, blocks):
+    """Acceptance: a synthetic identity added to the SOURCE is caught at
+    HEAD with no second list to edit."""
+    _planted(cp, tmp_path, monkeypatch, f"see {planted} for details\n",
+             **{category: [planted]})
+    _secrets_at(cp, tmp_path, monkeypatch)
+
+    code = cp.main([])
+    err = capsys.readouterr().err
+    if blocks:
+        assert code == 1, f"{category} identity did not block"
+        assert "real-league strings found" in err
+    else:
+        assert code == 0
+        assert "UNREVIEWED" in err, f"{category} identity was not surfaced"
+
+
+def test_a_missing_league_inventory_refuses_to_vouch(
+        cp, tmp_path, monkeypatch, capsys):
+    """Every source gets the MLB-203 treatment, not just the original two."""
+    repo = _repo_with(tmp_path, "notes.md", "# notes\n")
+    monkeypatch.setattr(cp, "REPO", str(repo))
+    monkeypatch.setattr(cp, "MAP", str(_map_at(tmp_path, MAPPED)))
+    _secrets_at(cp, tmp_path, monkeypatch)
+    monkeypatch.setattr(cp, "_computed_names", lambda: ({"Jonas McAvery"}, None))
+    monkeypatch.setattr(
+        cp, "_computed_league_inventory",
+        lambda: ({cp.FRANCHISE: set(), cp.DIVISION: set(), cp.TEAM_ID: set()},
+                 "OperationalError: no route to warehouse"))
+    monkeypatch.setattr(cp, "_registry_identifiers", lambda: (set(), set(), None))
+
+    assert cp.main([]) == 1
+    assert "league inventory could not be computed" in capsys.readouterr().err
+
+
+def test_an_unresolvable_league_id_refuses_to_vouch(
+        cp, tmp_path, monkeypatch, capsys):
+    """An unset .env variable means the one string that would hand a
+    stranger the league is not being searched for."""
+    repo = _repo_with(tmp_path, "notes.md", "# notes\n")
+    monkeypatch.setattr(cp, "REPO", str(repo))
+    monkeypatch.setattr(cp, "MAP", str(_map_at(tmp_path, MAPPED)))
+    _secrets_at(cp, tmp_path, monkeypatch)
+    monkeypatch.setattr(cp, "_computed_names", lambda: ({"Jonas McAvery"}, None))
+    monkeypatch.setattr(
+        cp, "_computed_league_inventory",
+        lambda: ({cp.FRANCHISE: set(), cp.DIVISION: set(), cp.TEAM_ID: set()},
+                 None))
+    monkeypatch.setattr(cp, "_registry_identifiers",
+                        lambda: (set(), set(), "league id unresolved for x"))
+
+    assert cp.main([]) == 1
+    assert "league id unresolved" in capsys.readouterr().err
+
+
+def test_a_map_sourced_franchise_name_still_blocks(cp, tmp_path, monkeypatch):
+    """The franchise ruling is general; the map is specific. Somebody put
+    that exact string on the replace-list, and a later general decision
+    about team names does not repeal a specific decision to remove one."""
+    repo = _repo_with(tmp_path, "notes.md", f"see {FAKE_FRANCHISE}\n")
+    monkeypatch.setattr(cp, "REPO", str(repo))
+    monkeypatch.setattr(cp, "MAP", str(_map_at(tmp_path, FAKE_FRANCHISE)))
+    _secrets_at(cp, tmp_path, monkeypatch)
+    _sources(cp, monkeypatch, franchises=[FAKE_FRANCHISE])
+
+    assert cp.main([]) == 1, (
+        "a franchise name on the map's replace-list was downgraded to review "
+        "by the warehouse's general classification")

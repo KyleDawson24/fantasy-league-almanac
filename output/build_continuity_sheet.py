@@ -195,7 +195,7 @@ def _name_story(seasons_for_id):
 def _norm_owner(o):
     """Tidy a parsed owner name: collapse whitespace, and title-case only
     the all-caps / all-lower ones ('JOEL KIMBALL', 'miles paxton') so
-    mixed-case names that are already right ('McNeal', \"Delgado\", 'L.J.')
+    mixed-case names that are already right ('McNeal', \"Delgado\", 'Q.Z.')
     are left alone."""
     o = ' '.join((o or '').split())
     return o.title() if (o.isupper() or o.islower()) else o

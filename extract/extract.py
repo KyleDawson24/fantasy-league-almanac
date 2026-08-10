@@ -4,13 +4,24 @@ extract.py — ESPN Fantasy Baseball data extraction pipeline.
 Handles multiple extraction types from a single entry point:
   1. Box scores: daily player-level stats for each matchup period
   2. League settings: scoring weights + roster settings per season (opt-in)
+  3. Team standings: records, divisions, playoff seeds and final ranks
 
 Box scores are extracted by default. League settings require an explicit
 flag (--include-settings or --settings-only) because they change rarely
 and don't need to run on every weekly pull.
 
+Standings ALSO run by default, and deliberately do not share the settings
+flag even though they arrive on the same ESPN view (Kyle 2026-08-09). The
+two have opposite refresh needs: settings change once a season, standings
+change weekly and now ORDER the almanac's standings tables. Left behind the
+opt-in flag, a box-score pull advanced the W-L column while the row order
+stayed frozen at the last settings capture, so the table disagreed with
+itself and looked like a rendering bug. `--no-standings` opts out; a run
+that extracts settings writes them from that response instead of fetching
+twice.
+
 Usage:
-  py extract/extract.py                              -> recent box scores, current year
+  py extract/extract.py                              -> recent box scores + standings, current year
   py extract/extract.py --year 2025                  -> recent box scores, 2025
   py extract/extract.py 5                            -> box scores for matchup period 5
   py extract/extract.py --year 2025 1 2 3            -> box scores for specific periods, 2025
@@ -1932,6 +1943,44 @@ SETTINGS_BLOCK_WRITERS = (
 )
 
 
+def _write_team_standings(sink, payload, year, league_key):
+    """Write the mTeam standings out of an already-fetched league payload.
+
+    Team-season standings: divisions, records, playoff seeds and final
+    ranks, verbatim. `playoffSeed` is a full standings rank (1..N, assigned
+    to non-qualifiers too), and it is NOT the same number as
+    `rankCalculatedFinal` -- 2025's champion was the 7 seed. Both are kept
+    because they answer different questions, and neither is reconstructable
+    from a record sort: ESPN seeds division winners first.
+    """
+    teams = payload.get("teams")
+    if teams:
+        print(f"  Retrieved standings for {len(teams)} teams in {year}")
+        sink.write_team_standings(teams, year, league_key)
+    else:
+        print(f"  No teams in the {year} payload -- skipping standings")
+
+
+def extract_team_standings(sink, year, league_key):
+    """Standings ALONE, on their own mTeam request.
+
+    Split out of extract_league_settings because the two have opposite
+    refresh needs (Kyle 2026-08-09). Settings change once a season and are
+    opt-in for that reason; the standings change every week and now ORDER
+    the almanac's standings tables, so a box-score pull that advanced the
+    W-L column while leaving the row order frozen at the last settings
+    capture rendered a table that disagreed with itself.
+
+    mTeam without mSettings is a smaller response and skips the settings
+    parsing entirely, so making this the default costs one cheap request
+    per run. When settings ARE being extracted they carry mTeam already and
+    this is skipped rather than duplicated.
+    """
+    print(f"\nTeam standings for {year}:")
+    payload = fetch_league_payload(year, ["mTeam"])
+    _write_team_standings(sink, payload, year, league_key)
+
+
 def extract_league_settings(sink, year, league_key):
     """Pull scoring + roster settings from ESPN and load them to the sink.
 
@@ -1965,18 +2014,9 @@ def extract_league_settings(sink, year, league_key):
         print(f"  Retrieved {label} for {year} ({len(block)} keys)")
         getattr(sink, method)(block, year, league_key)
 
-    # Team-season standings: divisions, records, playoff seeds and final
-    # ranks, verbatim. `playoffSeed` is a full standings rank (1..N, assigned
-    # to non-qualifiers too), and it is NOT the same number as
-    # `rankCalculatedFinal` -- 2025's champion was the 7 seed. Both are kept
-    # because they answer different questions, and neither is reconstructable
-    # from a record sort: ESPN seeds division winners first.
-    teams = payload.get("teams")
-    if teams:
-        print(f"  Retrieved standings for {len(teams)} teams in {year}")
-        sink.write_team_standings(teams, year, league_key)
-    else:
-        print(f"  No teams in the {year} payload -- skipping standings")
+    # The settings response already carries mTeam, so the standings ride it
+    # rather than costing a second request on this path.
+    _write_team_standings(sink, payload, year, league_key)
 
     team_owners = fetch_team_owners(year)
     print(f"  Retrieved {len(team_owners)} team-owner rows for {year}")
@@ -2023,6 +2063,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--settings-only", action="store_true",
         help="Extract league settings only (skip box scores)",
+    )
+    parser.add_argument(
+        "--no-standings", action="store_true",
+        help="Skip the team-season standings capture. Standings run on "
+             "EVERY extract by default (one cheap mTeam request) because "
+             "they order the almanac's standings tables and go stale "
+             "weekly, unlike the settings they used to ride along with.",
     )
     parser.add_argument(
         "--include-transactions", action="store_true",
@@ -2108,6 +2155,13 @@ if __name__ == "__main__":
     do_box_scores = not args.settings_only and not args.transactions_only
     do_settings = args.settings_only or args.include_settings
     do_transactions = args.transactions_only or args.include_transactions
+    # Standings run on every invocation, including --transactions-only:
+    # "as up to date as possible" is the whole point, and one mTeam request
+    # is cheap enough that gating it on what else the run is doing would
+    # only recreate the staleness this split exists to remove. The settings
+    # path already carries mTeam, so it writes them itself and this stands
+    # down rather than fetching twice.
+    do_standings = not args.no_standings and not do_settings
 
     with open_sink(raw_target, args.parquet_dir) as sink:
         print(f"RAW target: {sink.describe()}")
@@ -2115,6 +2169,10 @@ if __name__ == "__main__":
         # --- League settings ---
         if do_settings:
             extract_league_settings(sink, year, league_key)
+
+        # --- Team standings (MLB-227 capture, split out 2026-08-09) ---
+        if do_standings:
+            extract_team_standings(sink, year, league_key)
 
         # --- Transactions (MLB-16) ---
         if do_transactions:

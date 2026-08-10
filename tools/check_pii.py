@@ -5,12 +5,16 @@ Scans the HEAD tree -- what a push publishes -- for any real-league name
 and fails loudly with the offending files. Wired locally via
 .git/hooks/pre-push; also runnable by hand:
 
-    python tools/check_pii.py                  # the sweep
-    python tools/check_pii.py --review         # every one-word-name hit, in full
+    python tools/check_pii.py                  # the sweep, and the gate
+    python tools/check_pii.py --review         # recorded decisions, in full
     python tools/check_pii.py --census         # what it will search for, counted
-    python tools/check_pii.py --unreviewed     # every hit with no disposition
     python tools/check_pii.py --record-dispositions
+    python tools/check_pii.py --allow-unreviewed  # census only; does not gate
     python tools/check_pii.py --allow-degraded # accept a partial sweep, loudly
+
+The default IS the gate: it exits non-zero on a fatal hit and on any
+occurrence nobody has reviewed. tools/hooks/pre-push runs exactly that,
+with no flags, and is tracked so the rule cannot live on one machine.
 
 Where the real-side list comes from
 -----------------------------------
@@ -148,13 +152,17 @@ all were MLB players in a seed or an ordinary word in a sentence. So:
     dropped; they just do not get to cry wolf 110 times.
   * WORD hits from the map (slugs, phone numbers) FAIL. Those are
     deliberate, unambiguous identifiers.
-  * FRANCHISE names and labels are REVIEW, by Kyle's ruling of
-    2026-08-10: a fantasy team name is deliberate public portfolio
-    content, not a privacy leak. They are still searched, still counted,
-    and still require a recorded decision -- see the ledger below -- so a
-    NEW one cannot arrive unnoticed. The ruling covers franchise names
-    and labels ONLY; owner identities, league ids and division names are
-    untouched by it.
+  * FRANCHISE names and labels are ALLOWED, by the maintainer's ruling
+    of 2026-08-10: a fantasy team name is deliberate public portfolio
+    content, not a privacy leak. The ruling is applied at the CATEGORY,
+    which is the only place it can be applied honestly -- they are
+    derived, searched and counted in the census, but an ordinary new one
+    is not privacy debt and does not earn a per-site row. Filing 197
+    identical retentions was a chore impersonating a control: nobody
+    re-reads two hundred rows that all say the same sentence, and the
+    handful of real judgements drown among them. The ruling covers
+    franchise names and labels ONLY; owner identities, league ids,
+    division names and team ids keep their stronger handling.
   * A MAP-SOURCED franchise NAME still FAILS. Somebody put that exact
     string on the replace-list; a later general ruling about team names
     does not repeal a specific decision to remove one, and a dedup that
@@ -184,10 +192,22 @@ ruling taken on 90 sites that were never enumerated, so a brand-new
 occurrence arriving tomorrow would be greeted by the same reassuring
 sentence. A green exit cannot mean both "reviewed" and "never reviewed".
 
-So every non-fatal hit is now matched against a LEDGER, one row per
-(path, category, identity):
+So every reviewable hit is now matched against a LEDGER, one row per
+OCCURRENCE:
 
     tools/pii_dispositions.csv    path,category,digest,disposition,reason,recorded
+
+Per occurrence, not per token-in-a-file, and the difference is a hole
+rather than a nicety. The matcher used to stop at the first match of a
+token in a file, so a decision recorded about that match answered for
+every later one: a file carrying a one-word owner name as an MLB
+player's name is recorded as a collision, somebody adds a genuine
+reference to that owner further down the same file, and the new one
+inherits a judgement passed on a different sentence. The digest
+therefore covers the identity, the category AND the normalized text
+around the match -- with an ordinal only where surroundings are truly
+identical. Reflowing a paragraph keeps a decision; rewriting the
+sentence invalidates it and asks again, which is the safe direction.
 
 The ledger is COMMITTED -- it is the durable record, and a count in a
 handoff document is not one. It carries no real-side value: the identity
@@ -212,9 +232,14 @@ Two dispositions, and the difference is the point:
              that happens to spell a franchise label, a stat abbreviation,
              a date-format token, a synthetic fixture value.
 
-Anything with no row is UNREVIEWED and says so by name. `--record-dispositions`
-writes the rows for the hits present now; `--fail-on-unreviewed` is what a
-release-cut sweep uses to make a new one block.
+Anything with no row is UNREVIEWED, says so by name, and BLOCKS. That is
+the default and the hook runs the default. It was previously a warning
+that exited 0 while a separate `--fail-on-unreviewed` did the blocking --
+which meant the gate was whichever command somebody happened to type, and
+the one the hook typed was the lenient one. `--allow-unreviewed` still
+exists for taking a census mid-work, and is exactly what the hook does not
+run. `--record-dispositions` writes the rows for the occurrences present
+now.
 """
 from __future__ import annotations
 
@@ -235,6 +260,10 @@ MAP = os.path.join(REPO, "archives", "anonymization", "name_map.csv")
 # meaningless to a reader is not, and lives beside the map.
 LEDGER = os.path.join(REPO, "tools", "pii_dispositions.csv")
 SALT = os.path.join(REPO, "archives", "anonymization", "pii_salt.txt")
+# The map's missing category column, kept beside it and gitignored with it.
+# Provenance cannot be inferred from four characters -- see _map_categories.
+MAP_CATEGORIES = os.path.join(REPO, "archives", "anonymization",
+                              "name_map_categories.csv")
 REGISTRY = os.path.join(REPO, "config", "leagues.yml")
 DBT_PROJECT = os.path.join(REPO, "dbt_league", "dbt_project.yml")
 
@@ -253,10 +282,26 @@ OWNER, FRANCHISE, DIVISION, LEAGUE_ID, TEAM_ID = (
     "owner", "franchise", "division", "league-id", "team-id")
 
 # Sorted in report order: what blocks the push comes first.
-FATAL, REVIEW = "1-fatal", "2-review"
+#
+# ALLOWED is a whole category ruled on ONCE, and it is the difference
+# between a policy and a chore. The maintainer's ruling of 2026-08-10 is
+# that a fantasy team name is deliberate public portfolio content -- so
+# franchise identities are derived, counted and visible in the census, but
+# an ordinary new one is not privacy debt and does not need a per-site row
+# to say so. Making the whole category answer for itself with 197 recorded
+# retentions was a filing system pretending to be a decision: nobody
+# re-reads two hundred rows that all say the same sentence, and burying the
+# handful of real judgements among them costs more than it protects.
+FATAL, REVIEW, ALLOWED = "1-fatal", "2-review", "3-allowed"
 
 RETAIN, COLLISION = "retain", "collision"
 DISPOSITIONS = (RETAIN, COLLISION)
+
+# How much text on either side of a match identifies WHICH occurrence it is.
+# Wide enough that two different sentences using the same token do not
+# collapse to the same fingerprint, narrow enough that an edit elsewhere in
+# the paragraph does not invalidate the decision.
+_CONTEXT_WINDOW = 48
 
 # How far apart the parts of a multi-part identity may drift and still be
 # the same identity. Three characters covers " ", "-", "_", ".", ", " and
@@ -440,11 +485,11 @@ def ident_context_pattern(extra_keys=()):
 
 
 def ident_contexts(text, pattern):
-    """{value: (start, end)} for every identity-shaped value in this blob.
+    """{value: [(start, end), ...]} for every identity-shaped value here.
 
-    First position per distinct value is enough: the report names a file
-    and a line, and a second occurrence in the same file does not change
-    the finding.
+    EVERY position, not the first: a config file that sets the same id in
+    two places is two sites, and a decision recorded about one of them is
+    not a decision about the other.
     """
     found = {}
     for m in pattern.finditer(text):
@@ -452,8 +497,9 @@ def ident_contexts(text, pattern):
         if value is None:
             continue
         span = m.span("kv") if m.group("kv") is not None else m.span("seg")
-        found.setdefault(value, span)
-        found.setdefault(value.casefold(), span)
+        found.setdefault(value, []).append(span)
+        if value.casefold() != value:
+            found.setdefault(value.casefold(), []).append(span)
     return found
 
 
@@ -518,8 +564,18 @@ class Token:
             # that separates a person from a word, so it is the one used.
             self.needles = sorted({text, text.title(), text.upper()})
 
-    def find(self, text, low, contexts=None):
-        """First (start, end, matched-text) in this blob, or None.
+    def find_all(self, text, low, contexts=None):
+        """EVERY (start, end, matched-text) in this blob, in order.
+
+        Enumerated rather than sampled, and that is a correctness property
+        rather than a thoroughness one. This used to return the first match
+        per token per file, which made a disposition a decision about a
+        TOKEN-IN-A-FILE and not about a site. The failure had a shape: a
+        file carries a one-word owner name as an MLB player's name and is
+        recorded, correctly, as a collision. Somebody later adds a genuine
+        reference to that owner further down the same file. The first match
+        still wins, the same ledger row still answers, and the new leak
+        inherits a decision taken about a different sentence.
 
         Word-boundary modes reject a match whose neighbour is
         alphanumeric. That is spelled out rather than left to a regex \\b
@@ -530,40 +586,44 @@ class Token:
         """
         if self.mode == FAMILY:
             if low.find(self.anchor) < 0:
-                return None                        # prefilter: no anchor
-            for m in self.pattern.finditer(text):
-                if _bounded(text, m.start(), m.end()):
-                    return (m.start(), m.end(), m.group(0))
-            return None
+                return []                          # prefilter: no anchor
+            return [(m.start(), m.end(), m.group(0))
+                    for m in self.pattern.finditer(text)
+                    if _bounded(text, m.start(), m.end())]
 
         if self.mode == IDENT:
             if not self.bare:
                 # Low-entropy: an identity-shaped context is the only
                 # evidence that this run of digits is an id at all.
-                span = (contexts or {}).get(self.text)
-                if span is None:
-                    span = (contexts or {}).get(self.text.casefold())
-                return None if span is None else (span[0], span[1], self.text)
+                spans = (contexts or {}).get(self.text)
+                if spans is None:
+                    spans = (contexts or {}).get(self.text.casefold())
+                return [(s, e, self.text) for s, e in (spans or ())]
             needle = self.needles[0]
-            i = low.find(needle)
+            found, i = [], low.find(self.needles[0])
             while i >= 0:
                 if _bounded(low, i, i + len(needle)):
-                    return (i, i + len(needle), text[i:i + len(needle)])
+                    found.append((i, i + len(needle), text[i:i + len(needle)]))
                 i = low.find(needle, i + 1)
-            return None
+            return found
 
         haystack = low if self.mode == PHRASE else text
-        best = None
+        found = []
         for needle in self.needles:
             n = len(needle)
             i = haystack.find(needle)
             while i >= 0:
                 if _bounded(haystack, i, i + n):
-                    if best is None or i < best[0]:
-                        best = (i, i + n, needle)
-                    break
+                    found.append((i, i + n, needle))
                 i = haystack.find(needle, i + 1)
-        return best
+        found.sort()
+        return found
+
+    def find(self, text, low, contexts=None):
+        """The first occurrence, or None. Kept for callers that only ask
+        whether this token appears here at all."""
+        found = self.find_all(text, low, contexts)
+        return found[0] if found else None
 
 
 def severity(token):
@@ -584,13 +644,16 @@ def severity(token):
         # doctest). Reviewable, with a recorded decision -- not a block.
         return FATAL if token.bare else REVIEW
     if token.category == FRANCHISE:
-        # Kyle's ruling, 2026-08-10: team names and labels are deliberate
-        # public content. Still searched, still dispositioned -- but a
-        # MAP-sourced name is a specific prior decision to remove that
-        # exact string, and a general ruling does not repeal it.
+        # The maintainer's ruling, 2026-08-10: team names and labels are
+        # deliberate public content, so the whole category is ALLOWED --
+        # derived and counted, but not privacy debt and not a per-site
+        # chore. The one exception is specific rather than general: a
+        # MAP-sourced NAME is a prior decision to remove that exact string,
+        # and a later ruling about team names in general does not repeal a
+        # particular decision to delete one.
         if token.source == "map" and token.mode in (FAMILY, PHRASE):
             return FATAL
-        return REVIEW
+        return ALLOWED
     if token.mode in (FAMILY, PHRASE):
         return FATAL
     if token.mode == WORD:
@@ -744,15 +807,48 @@ def _map_rows():
                 if r.get("real") and r["real"].strip()]
 
 
-def _looks_like_label(text):
-    """Is this map row a franchise label rather than a name?
+def _is_short_single_part(text):
+    """Short enough and simple enough that its category is not self-evident.
 
-    The map has two columns and no category, so its rows have to be told
-    apart by shape -- the one place in this file where that is still true.
-    A label is short and single-part; anything longer or multi-part is a
-    name or a slug, and stays in the class the map put it in.
+    NOT a classifier -- a question. Four characters carry no provenance:
+    the same shape covers a franchise abbrev, an owner's initials and a
+    stat code, and guessing between them is wrong in both directions. A
+    guess toward franchise downgrades a map-listed owner identifier from
+    fatal to allowed; a guess toward owner promotes a retired franchise
+    abbrev to fatal and blocks the push on a collision with an MLB club
+    code. Rows this shape must be RESOLVED, not inferred.
     """
     return len(text) <= 4 and not re.search(r"\s", text) and text == text.strip()
+
+
+def _map_categories():
+    """Explicit categories for map rows, from the private sidecar.
+
+    The map is two columns -- real, fake -- and has never carried what KIND
+    of identity each row is. For most rows that costs nothing: a multi-part
+    name is a name whichever league it belongs to. It costs a great deal for
+    the short single-part rows, which is why they are resolved here instead
+    of guessed (see _is_short_single_part).
+
+    The sidecar lives beside the map and is gitignored with it, because a
+    file pairing a real-side string with its category is exactly as
+    publishable as the map itself. Rows the derived warehouse inventory
+    already corroborates need no entry; the sidecar is for what the
+    warehouse can no longer confirm, which is the map's whole job --
+    retired identities it is the last record of.
+    """
+    if not os.path.exists(MAP_CATEGORIES):
+        return {}
+    with open(MAP_CATEGORIES, newline="", encoding="utf-8") as f:
+        # Comment-aware, because this file is hand-maintained and the
+        # reasoning for a row is the most useful thing in it. Without this
+        # the first `#` line becomes the header and every row parses into
+        # a column nobody asked for -- silently, and the guard then reports
+        # every row unresolved while the answers sit right there.
+        rows = csv.DictReader(
+            line for line in f if not line.lstrip().startswith("#"))
+        return {r["real"].strip(): r["category"].strip()
+                for r in rows if r.get("real") and r.get("category")}
 
 
 def classify(text, source, category, sentinels=(), too_short=None):
@@ -793,7 +889,7 @@ def classify(text, source, category, sentinels=(), too_short=None):
             too_short.append(text)
         return None
 
-    if category == FRANCHISE and _looks_like_label(text):
+    if category == FRANCHISE and _is_short_single_part(text):
         return Token(text, LABEL, source, category)
 
     parts = family_parts(text)
@@ -817,7 +913,7 @@ def classify(text, source, category, sentinels=(), too_short=None):
 # Which of two classifications of the same string wins. Never the softer
 # one: the warehouse's general franchise ruling must not quietly downgrade
 # a string the map explicitly listed for removal.
-_STRICTNESS = {FATAL: 0, REVIEW: 1}
+_STRICTNESS = {FATAL: 0, REVIEW: 1, ALLOWED: 2}
 
 
 def build_tokens(use_warehouse=True):
@@ -831,7 +927,7 @@ def build_tokens(use_warehouse=True):
     census = {"computed": 0, "map": 0, "warehouse_error": None,
               "exempt_maintainer": 0, "too_short": [], "modes": {},
               "categories": {}, "league_error": None, "registry_error": None,
-              "sentinels": 0}
+              "sentinels": 0, "map_unresolved": []}
 
     mine = _maintainer_words()
     sentinels = _sentinels()
@@ -858,15 +954,35 @@ def build_tokens(use_warehouse=True):
     mapped = _map_rows()
     census["map"] = 0 if mapped is None else len(mapped)
     census["map_present"] = mapped is not None
-    # The map has no category column. A row it shares with the warehouse's
-    # franchise inventory IS a franchise identity; the rest keep the
-    # owner-class handling the map has always had.
+    # The map has no category column, so each row's category is settled in
+    # this order and never by shape:
+    #
+    #   1. the private sidecar, if it names this row;
+    #   2. corroboration -- the warehouse's derived franchise inventory
+    #      still holds this exact string, so it is a franchise identity;
+    #   3. owner, the stronger class, for everything else.
+    #
+    # A row that is SHORT AND SINGLE-PART and survives to (3) is not
+    # classified at all: it is collected as unresolved and the sweep
+    # refuses to vouch. That is the correction to the version that guessed
+    # "four characters means franchise", which downgraded any map-listed
+    # owner initial from fatal to allowed -- silently, and in the one
+    # direction a guard must never be wrong.
+    explicit = _map_categories()
     franchise_values = {v.casefold() for v in league[FRANCHISE]}
+    unresolved = []
     for text in (mapped or []):
-        category = (FRANCHISE if (text.casefold() in franchise_values
-                                  or _looks_like_label(text))
-                    else OWNER)
+        category = explicit.get(text)
+        if category not in (OWNER, FRANCHISE, DIVISION, LEAGUE_ID, TEAM_ID):
+            if text.casefold() in franchise_values:
+                category = FRANCHISE
+            elif _is_short_single_part(text):
+                unresolved.append(text)
+                continue
+            else:
+                category = OWNER
         entries.append((text, "map", category))
+    census["map_unresolved"] = unresolved
 
     by_key = {}
     for text, source, category in entries:
@@ -1041,10 +1157,36 @@ def _salt(create=False):
     return value
 
 
-def digest(salt, category, text):
-    """The ledger's stand-in for an identity. Inert without the salt."""
-    return hmac.new(salt.encode("utf-8"),
-                    f"{category}\x00{text.casefold()}".encode("utf-8"),
+def normalize_context(text, start, end):
+    """The neighbourhood of a match, reduced to what identifies it.
+
+    Whitespace collapsed and the whole thing casefolded, so re-wrapping a
+    paragraph or re-indenting a block does not by itself invalidate a
+    decision. Anything more than that -- a sentence rewritten, a value
+    changed -- does invalidate it, and SHOULD: the reviewer agreed to a
+    specific occurrence in specific words, and once the words move far
+    enough the decision is about a site that no longer exists. Re-review
+    is the safe direction.
+    """
+    left = text[max(0, start - _CONTEXT_WINDOW):start]
+    right = text[end:end + _CONTEXT_WINDOW]
+    return " ".join(f"{left}\x00{text[start:end]}\x00{right}".split()).casefold()
+
+
+def digest(salt, category, text, context="", ordinal=0):
+    """The ledger's stand-in for one OCCURRENCE. Inert without the salt.
+
+    Keyed by the identity AND where it sits, because the ledger's claim is
+    "somebody looked at this site" and a token-level key cannot make that
+    claim about the second use in the same file.
+
+    `ordinal` separates occurrences whose surroundings are genuinely
+    identical -- a repeated table row, a generated block. It is the last
+    resort rather than the key, because an ordinal alone renumbers every
+    later decision the moment a line is inserted above it.
+    """
+    material = f"{category}\x00{text.casefold()}\x00{context}\x00{ordinal}"
+    return hmac.new(salt.encode("utf-8"), material.encode("utf-8"),
                     hashlib.sha256).hexdigest()[:16]
 
 
@@ -1071,13 +1213,17 @@ def write_ledger(rows):
 
 
 def sweep(tokens, stats=None, salt=None, ledger=None, ident_keys=()):
-    """Every (severity, path, line, token, context, disposition) at HEAD.
+    """Every (severity, path, line, token, context, disposition, digest).
 
-    `disposition` is the ledger row that already covers this exact site,
-    or None -- which is what makes a new hit distinguishable from a
-    reviewed one. There is no class-wide amnesty here any more; a hit is
-    dispositioned because somebody recorded THIS site, or it is not
-    dispositioned at all (MLB-234).
+    One entry per OCCURRENCE -- not per token, and no longer per
+    token-in-a-file. `disposition` is the ledger row covering that exact
+    occurrence, or None, which is what lets a new hit be told from a
+    reviewed one. There is no class-wide amnesty here and no per-file one
+    either: a hit is dispositioned because somebody recorded THIS site
+    (MLB-234).
+
+    ALLOWED hits are ruled on by category and never consult the ledger --
+    they are counted, not filed.
     """
     hits = []
     ledger = ledger or {}
@@ -1087,18 +1233,24 @@ def sweep(tokens, stats=None, salt=None, ledger=None, ident_keys=()):
         low = text.lower()
         contexts = ident_contexts(text, pattern) if wants_context else {}
         for token in tokens:
-            found = token.find(text, low, contexts)  # one hit per token per file
-            if found is None:
-                continue
-            start, end, matched = found
-            line_no = text.count("\n", 0, start) + 1
-            context = text[max(0, start - 40):end + 40].replace("\n", " ")
-            row = None
-            if salt is not None:
-                row = ledger.get(
-                    (path, token.category, digest(salt, token.category, token.text)))
-            hits.append((severity(token), path, line_no, token,
-                         context.strip(), row))
+            sev = severity(token)
+            # Identical surroundings inside one file need an ordinal to be
+            # told apart; counted per (token, normalized context) so the
+            # ordinal is 0 for every occurrence that is already distinct.
+            seen = {}
+            for start, end, _matched in token.find_all(text, low, contexts):
+                line_no = text.count("\n", 0, start) + 1
+                shown = text[max(0, start - 40):end + 40].replace("\n", " ")
+                fingerprint = row = None
+                if sev != ALLOWED and salt is not None:
+                    norm = normalize_context(text, start, end)
+                    ordinal = seen.get(norm, 0)
+                    seen[norm] = ordinal + 1
+                    fingerprint = digest(salt, token.category, token.text,
+                                         norm, ordinal)
+                    row = ledger.get((path, token.category, fingerprint))
+                hits.append((sev, path, line_no, token, shown.strip(), row,
+                             fingerprint))
     hits.sort(key=lambda h: (h[0], h[1], h[2]))
     return hits
 
@@ -1123,6 +1275,9 @@ def _print_census(census, tokens, show_tokens):
         print(f"      {category:10}: {census['categories'].get(category, 0)}")
     print(f"  exempt (maintainer)     : {census['exempt_maintainer']}")
     print(f"  excluded (sentinels)    : {census['sentinels']}")
+    if census["map_unresolved"]:
+        print(f"  UNRESOLVED map rows     : {len(census['map_unresolved'])} "
+              f"-- category not self-evident; name them in {MAP_CATEGORIES}")
     print(f"  dropped (under 3 chars) : {len(census['too_short'])}"
           f"{' -- ' + ', '.join(census['too_short']) if show_tokens and census['too_short'] else ''}")
     if show_tokens:
@@ -1156,13 +1311,16 @@ def main(argv=None):
                     help="with --record-dispositions, the recorded reason")
     ap.add_argument("--recorded", default="",
                     help="with --record-dispositions, the date to stamp")
-    ap.add_argument("--fail-on-label", action="store_true",
-                    help="treat franchise-label hits as failures too")
     ap.add_argument("--fail-on-review", action="store_true",
-                    help="treat reviewable hits as failures too")
+                    help="treat every reviewable hit as a failure, recorded "
+                         "or not -- the strictest reading there is")
     ap.add_argument("--fail-on-unreviewed", action="store_true",
-                    help="treat any hit with no recorded disposition as a "
-                         "failure; what a release-cut sweep wants")
+                    help="accepted and ignored: failing on an unreviewed hit "
+                         "is now the default")
+    ap.add_argument("--allow-unreviewed", action="store_true",
+                    help="DIAGNOSTIC ONLY: report unreviewed hits and exit 0. "
+                         "For taking a census while you work; never what the "
+                         "pre-push hook runs")
     args = ap.parse_args(argv)
 
     try:
@@ -1209,6 +1367,15 @@ def main(argv=None):
             f"the disposition secret is not on this machine ({SALT}), so a "
             f"reviewed hit cannot be told from an unreviewed one -- which "
             f"is the whole question the ledger exists to answer")
+    if census["map_unresolved"]:
+        degraded.append(
+            f"{len(census['map_unresolved'])} map row(s) are too short for "
+            f"their category to be self-evident and the warehouse no longer "
+            f"holds them, so nothing can say whether each is a retired "
+            f"franchise label or an owner's initials -- and the two are "
+            f"handled oppositely. Name them in {MAP_CATEGORIES} "
+            f"(real,category) rather than let this be guessed: "
+            f"{', '.join(census['map_unresolved'])}")
     if not tokens:
         degraded.append(
             "there is nothing to search for at all -- neither source "
@@ -1243,10 +1410,10 @@ def main(argv=None):
     if args.record_dispositions:
         rows = dict(ledger)
         added = 0
-        for sev, path, _line, token, _ctx, row in hits:
-            if row is not None or sev == FATAL:
+        for sev, path, _line, token, _ctx, row, fingerprint in hits:
+            if row is not None or sev in (FATAL, ALLOWED) or fingerprint is None:
                 continue
-            key = (path, token.category, digest(salt, token.category, token.text))
+            key = (path, token.category, fingerprint)
             if key in rows:
                 continue
             rows[key] = {"path": path, "category": token.category,
@@ -1269,8 +1436,19 @@ def main(argv=None):
 
     fatal = [h for h in hits if h[0] == FATAL]
     review = [h for h in hits if h[0] == REVIEW]
+    allowed = [h for h in hits if h[0] == ALLOWED]
     unreviewed = [h for h in review if h[5] is None]
     dispositioned = [h for h in review if h[5] is not None]
+
+    if allowed:
+        by_cat = {}
+        for h in allowed:
+            by_cat[h[3].category] = by_cat.get(h[3].category, 0) + 1
+        summary = ", ".join(f"{v} {k}" for k, v in sorted(by_cat.items()))
+        print(f"PII GUARD: {len(allowed)} occurrence(s) allowed by category "
+              f"rule ({summary}) across {len({h[1] for h in allowed})} "
+              f"file(s). Derived and searched, ruled on once -- not filed "
+              f"per site.", file=sys.stderr)
 
     if dispositioned:
         by_class = {}
@@ -1278,26 +1456,26 @@ def main(argv=None):
             key = h[5].get("disposition", "?")
             by_class[key] = by_class.get(key, 0) + 1
         summary = ", ".join(f"{v} {k}" for k, v in sorted(by_class.items()))
-        print(f"PII GUARD: {len(dispositioned)} hit(s) carry a recorded "
-              f"per-site disposition ({summary}). Each was reviewed at the "
-              f"path it appears in -- not covered by a class-wide ruling.",
-              file=sys.stderr)
+        print(f"PII GUARD: {len(dispositioned)} occurrence(s) carry a "
+              f"recorded disposition ({summary}). Each was reviewed at the "
+              f"exact site it appears in -- not covered by a class-wide "
+              f"ruling, and not by a decision about the same word elsewhere "
+              f"in the same file.", file=sys.stderr)
 
     if unreviewed:
         names = sorted({h[3].category for h in unreviewed})
-        print(f"PII GUARD UNREVIEWED: {len(unreviewed)} hit(s) across "
+        print(f"PII GUARD UNREVIEWED: {len(unreviewed)} occurrence(s) across "
               f"{len({h[1] for h in unreviewed})} file(s) have NO recorded "
               f"disposition [{', '.join(names)}]. These are new: no decision "
-              f"has ever been taken about them. `--unreviewed` lists them; "
-              f"`--record-dispositions` records them.", file=sys.stderr)
-        if args.unreviewed or args.review:
-            for _sev, path, line, token, context, _row in unreviewed:
-                print(f"  {path}:{line}: [{token.category}/{token.mode}]",
-                      file=sys.stderr)
-                print(f"      ...{context}...", file=sys.stderr)
+              f"has ever been taken about them. `--record-dispositions` "
+              f"records them.", file=sys.stderr)
+        for _sev, path, line, token, context, _row, _fp in unreviewed:
+            print(f"  {path}:{line}: [{token.category}/{token.mode}]",
+                  file=sys.stderr)
+            print(f"      ...{context}...", file=sys.stderr)
 
     if review and args.review:
-        for _sev, path, line, token, context, row in dispositioned:
+        for _sev, path, line, token, context, row, _fp in dispositioned:
             print(f"  {path}:{line}: [{token.category}/{token.mode}] "
                   f"{row.get('disposition')} -- {row.get('reason')}",
                   file=sys.stderr)
@@ -1305,7 +1483,7 @@ def main(argv=None):
     if fatal:
         print("PII GUARD: real-league strings found in the tree about to be "
               "pushed:", file=sys.stderr)
-        for _sev, path, line, token, context, _row in fatal:
+        for _sev, path, line, token, context, _row, _fp in fatal:
             print(f"  {path}:{line}: {token.text}  [{token.category}/"
                   f"{token.mode}, {token.source}]", file=sys.stderr)
             print(f"      ...{context}...", file=sys.stderr)
@@ -1314,10 +1492,23 @@ def main(argv=None):
               file=sys.stderr)
         return 1
 
-    if unreviewed and args.fail_on_unreviewed:
+    # UNREVIEWED BLOCKS BY DEFAULT. It did not, and the gap between the
+    # release-cut command and the hook was the whole exposure: the hook ran
+    # the default, the default printed a warning and exited 0, so a new
+    # unreviewed occurrence was pushable and only the person reading the
+    # push output would ever know. A warning that does not stop anything is
+    # a warning nobody reads twice. `--allow-unreviewed` is the diagnostic
+    # way to take a census mid-work; it is deliberately not what the hook
+    # runs.
+    if unreviewed and not args.allow_unreviewed:
+        print("\n  These have never been reviewed, so this push is blocked. "
+              "Record a decision with --record-dispositions (and commit the "
+              "ledger), or re-run with --allow-unreviewed for a non-blocking "
+              "census while you work.", file=sys.stderr)
         return 1
-    if args.fail_on_label and any(h[3].category == FRANCHISE for h in review):
-        return 1
+    if unreviewed:
+        print("  --allow-unreviewed: not blocking on the above.",
+              file=sys.stderr)
     return 1 if (review and args.fail_on_review) else 0
 
 

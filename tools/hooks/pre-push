@@ -1,0 +1,31 @@
+#!/bin/sh
+# MLB-95 / MLB-176 / MLB-203 / MLB-234 local guard: refuse pushes whose HEAD
+# tree carries a real-league string, or an occurrence nobody has reviewed.
+#
+# TRACKED ON PURPOSE. This lived in .git/hooks, which is not cloned, not
+# committed and not diffable -- so the rule that gates every push existed in
+# exactly one place on one machine, and "the guard runs on push" was a claim
+# about a file nobody else could see. Install it with:
+#
+#     git config core.hooksPath tools/hooks
+#
+# NO OVERRIDE FLAGS BELOW, and that is the point of the file. The guard's
+# default blocks on a fatal hit AND on an occurrence with no recorded
+# disposition. --allow-unreviewed and --allow-degraded both exist, both
+# exit 0 on things that should stop a push, and neither belongs in the hook
+# that is supposed to be the gate. A deliberate bypass is `git push
+# --no-verify`, which is visible in the shell history of the person who
+# chose it, rather than invisible in a hook they forgot was lenient.
+#
+# Runs under the repo's venv on purpose. Bare `python` resolves to whatever
+# is first on PATH, which on this machine has neither dotenv nor
+# snowflake-connector -- so the guard could not reach the warehouse and fell
+# back to the map alone, which is the exact blind spot MLB-176 rebuilt it to
+# close. It said so out loud rather than passing quietly, but a guard that
+# degrades on every push is not the one that was built.
+REPO="$(git rev-parse --show-toplevel)"
+PY="$REPO/.venv/Scripts/python.exe"
+[ -x "$PY" ] || PY="$REPO/.venv/bin/python"
+[ -x "$PY" ] || PY=python
+
+"$PY" "$REPO/tools/check_pii.py" || exit 1

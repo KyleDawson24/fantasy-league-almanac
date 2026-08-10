@@ -389,9 +389,11 @@ def test_every_token_is_classified(cp, tmp_path, monkeypatch):
     known = set(cp.MODES)
     assert all(t.mode in known for t in tokens)
     # Nothing is silently dropped: everything is either searchable or
-    # counted in one of the census's explicit buckets.
+    # counted in one of the census's explicit buckets. "Unresolved" is one
+    # of those buckets rather than a quiet discard -- a map row whose
+    # category cannot be established is refused, loudly, not guessed.
     accounted = (len(tokens) + census["exempt_maintainer"]
-                 + len(census["too_short"]))
+                 + len(census["too_short"]) + len(census["map_unresolved"]))
     assert accounted == census["computed"] + census["map"]
 
 
@@ -544,7 +546,7 @@ def test_an_odd_label_is_never_promoted_into_a_fatal_class(
     _sources(cp, monkeypatch, franchises=[label])
 
     tokens, _ = cp.build_tokens()
-    assert cp.severity(tokens[0]) == cp.REVIEW
+    assert cp.severity(tokens[0]) == cp.ALLOWED
 
 
 def test_an_emoji_label_is_not_dropped_as_too_short(cp, tmp_path, monkeypatch):
@@ -659,13 +661,13 @@ def _planted(cp, tmp_path, monkeypatch, content, **sources):
     return repo
 
 
-def test_a_new_label_occurrence_is_unreviewed_not_dispositioned(
+def test_a_new_owner_occurrence_is_unreviewed_not_dispositioned(
         cp, tmp_path, monkeypatch):
     """THE regression MLB-234 was filed for. The predecessor greeted every
-    abbrev hit -- including one committed five minutes ago -- with a banner
-    citing a ruling taken on sites nobody had enumerated."""
-    _planted(cp, tmp_path, monkeypatch, f"the {FAKE_ABBREV} tab is stale\n",
-             franchises=[FAKE_ABBREV])
+    hit of a class -- including one committed five minutes ago -- with a
+    banner citing a ruling taken on sites nobody had enumerated."""
+    _planted(cp, tmp_path, monkeypatch, "credited to Vance in the notes\n",
+             owners=["Vance"])
     _secrets_at(cp, tmp_path, monkeypatch)
 
     tokens, census = cp.build_tokens()
@@ -675,22 +677,42 @@ def test_a_new_label_occurrence_is_unreviewed_not_dispositioned(
         "a brand-new occurrence was reported as already dispositioned")
 
 
+def _ledger_row(cp, salt, path, category, text, context, ordinal=0,
+                disposition=None):
+    return {"path": path, "category": category,
+            "digest": cp.digest(salt, category, text, context, ordinal),
+            "disposition": disposition or cp.COLLISION,
+            "reason": "reviewed", "recorded": "x"}
+
+
+def _fingerprint_for(cp, repo, path, category, text, salt):
+    """The fingerprint the sweep will compute for the FIRST occurrence of
+    `text` in `path` -- worked out the same way the sweep does, so a test
+    can record a decision about one real occurrence."""
+    blob = (repo / path).read_text(encoding="utf-8")
+    token = [t for t in cp.build_tokens()[0]
+             if t.text == text and t.category == category][0]
+    start, end, _m = token.find_all(blob, blob.lower(), {})[0]
+    return cp.digest(salt, category, text,
+                     cp.normalize_context(blob, start, end), 0)
+
+
 def test_a_recorded_disposition_covers_only_its_own_site(
         cp, tmp_path, monkeypatch):
     """A decision about one path is not a decision about the next one."""
-    repo = _repo_with(tmp_path, "notes.md", f"the {FAKE_ABBREV} tab\n")
-    (repo / "other.md").write_text(f"also {FAKE_ABBREV}\n", encoding="utf-8")
+    repo = _repo_with(tmp_path, "notes.md", "credited to Vance here\n")
+    (repo / "other.md").write_text("also Vance over here\n", encoding="utf-8")
     _git(str(repo), "add", "-A")
     _git(str(repo), "commit", "-q", "-m", "two sites")
     monkeypatch.setattr(cp, "REPO", str(repo))
     monkeypatch.setattr(cp, "MAP", str(_map_at(tmp_path)))
-    _sources(cp, monkeypatch, franchises=[FAKE_ABBREV])
+    _sources(cp, monkeypatch, owners=["Vance"])
     _secrets_at(cp, tmp_path, monkeypatch)
     salt = cp._salt()
+    fp = _fingerprint_for(cp, repo, "notes.md", cp.OWNER, "Vance", salt)
     _secrets_at(cp, tmp_path, monkeypatch, ledger_rows=[{
-        "path": "notes.md", "category": cp.FRANCHISE,
-        "digest": cp.digest(salt, cp.FRANCHISE, FAKE_ABBREV),
-        "disposition": cp.RETAIN, "reason": "sample output", "recorded": "x"}])
+        "path": "notes.md", "category": cp.OWNER, "digest": fp,
+        "disposition": cp.COLLISION, "reason": "reviewed", "recorded": "x"}])
 
     tokens, census = cp.build_tokens()
     by_path = {h[1]: h[5] for h in _sweep(cp, tokens, census)}
@@ -700,21 +722,23 @@ def test_a_recorded_disposition_covers_only_its_own_site(
 
 
 def test_a_disposition_does_not_cross_categories(cp, tmp_path, monkeypatch):
-    """Reviewing a franchise label at a path says nothing about an owner
-    name at the same path."""
+    """Reviewing a team id at a path says nothing about an owner name at
+    the same path."""
     _planted(cp, tmp_path, monkeypatch,
-             f"{FAKE_ABBREV} and Jonas McAvery\n",
-             owners=["Jonas"], franchises=[FAKE_ABBREV])
+             "team_id=6 was credited to Vance\n",
+             owners=["Vance"], team_ids=[FAKE_TEAM_ID])
     _secrets_at(cp, tmp_path, monkeypatch)
     salt = cp._salt()
+    tokens, census = cp.build_tokens()
+    hits = _sweep(cp, tokens, census)
+    tid = [h for h in hits if h[3].category == cp.TEAM_ID][0]
     _secrets_at(cp, tmp_path, monkeypatch, ledger_rows=[{
-        "path": "notes.md", "category": cp.FRANCHISE,
-        "digest": cp.digest(salt, cp.FRANCHISE, FAKE_ABBREV),
-        "disposition": cp.RETAIN, "reason": "sample output", "recorded": "x"}])
+        "path": "notes.md", "category": cp.TEAM_ID, "digest": tid[6],
+        "disposition": cp.COLLISION, "reason": "reviewed", "recorded": "x"}])
 
     tokens, census = cp.build_tokens()
     by_cat = {h[3].category: h[5] for h in _sweep(cp, tokens, census)}
-    assert by_cat[cp.FRANCHISE] is not None
+    assert by_cat[cp.TEAM_ID] is not None
     assert by_cat[cp.OWNER] is None
 
 
@@ -745,45 +769,80 @@ def test_a_sweep_without_the_secret_refuses_to_vouch(
     assert "disposition secret is not on this machine" in capsys.readouterr().err
 
 
-def test_fail_on_unreviewed_is_what_a_release_cut_uses(
+def test_the_default_invocation_blocks_on_an_unreviewed_occurrence(
         cp, tmp_path, monkeypatch):
-    """Non-blocking by default so the hook is not bypassed on sight;
-    blocking on demand so a release cannot carry an unreviewed hit."""
-    _planted(cp, tmp_path, monkeypatch, f"the {FAKE_ABBREV} tab\n",
-             franchises=[FAKE_ABBREV])
+    """THE gap: the gate is whatever the hook types, and the hook types the
+    default. This used to print a warning and exit 0 while a separate
+    --fail-on-unreviewed did the blocking, so a new unreviewed occurrence
+    was pushable and only a reader of the push output would ever know."""
+    _planted(cp, tmp_path, monkeypatch, "credited to Vance in the notes\n",
+             owners=["Vance"])
     _secrets_at(cp, tmp_path, monkeypatch)
 
-    assert cp.main([]) == 0
-    assert cp.main(["--fail-on-unreviewed"]) == 1
+    assert cp.main([]) == 1, "the default invocation did not block"
+
+
+def test_allow_unreviewed_is_diagnostic_and_says_so(
+        cp, tmp_path, monkeypatch, capsys):
+    """The census escape hatch still exists; it is just not the gate."""
+    _planted(cp, tmp_path, monkeypatch, "credited to Vance in the notes\n",
+             owners=["Vance"])
+    _secrets_at(cp, tmp_path, monkeypatch)
+
+    assert cp.main(["--allow-unreviewed"]) == 0
+    err = capsys.readouterr().err
+    assert "UNREVIEWED" in err
+    assert "not blocking" in err
+
+
+def test_the_tracked_hook_runs_the_gate_with_no_override_flags():
+    """The hook is tracked so the rule cannot live on one machine, and it
+    must not quietly opt out of the thing it exists to enforce."""
+    hook = os.path.join(REPO, "tools", "hooks", "pre-push")
+    assert os.path.exists(hook), "the pre-push hook is not tracked in the repo"
+    body = open(hook, encoding="utf-8").read()
+    invocation = [ln for ln in body.splitlines()
+                  if "check_pii.py" in ln and not ln.lstrip().startswith("#")]
+    assert invocation, "the hook does not invoke the guard"
+    for flag in ("--allow-unreviewed", "--allow-degraded", "--no-warehouse"):
+        assert all(flag not in ln for ln in invocation), (
+            f"the hook passes {flag}, so the gate does not gate")
 
 
 # --------------------------------------------------------------------------
 # End to end: a planted identity in a real tree, per category.
 # --------------------------------------------------------------------------
 
-@pytest.mark.parametrize("category,planted,blocks", [
-    ("divisions", FAKE_DIVISION, True),
-    ("league_ids", FAKE_LEAGUE_ID, True),
-    ("franchises", FAKE_FRANCHISE, False),
-    ("franchises", FAKE_EMOJI_LABEL, False),
-    ("franchises", FAKE_ALNUM_LABEL, False),
+@pytest.mark.parametrize("category,planted,expect", [
+    ("divisions", FAKE_DIVISION, "fatal"),
+    ("league_ids", FAKE_LEAGUE_ID, "fatal"),
+    ("owners", "Vance", "unreviewed"),
+    ("franchises", FAKE_FRANCHISE, "allowed"),
+    ("franchises", FAKE_EMOJI_LABEL, "allowed"),
+    ("franchises", FAKE_ALNUM_LABEL, "allowed"),
 ])
 def test_adding_one_identity_to_a_source_catches_its_planted_occurrence(
-        cp, tmp_path, monkeypatch, capsys, category, planted, blocks):
+        cp, tmp_path, monkeypatch, capsys, category, planted, expect):
     """Acceptance: a synthetic identity added to the SOURCE is caught at
-    HEAD with no second list to edit."""
+    HEAD with no second list to edit -- and lands in the class its category
+    was ruled into, not the class its characters suggest."""
     _planted(cp, tmp_path, monkeypatch, f"see {planted} for details\n",
              **{category: [planted]})
     _secrets_at(cp, tmp_path, monkeypatch)
 
     code = cp.main([])
     err = capsys.readouterr().err
-    if blocks:
+    if expect == "fatal":
         assert code == 1, f"{category} identity did not block"
         assert "real-league strings found" in err
+    elif expect == "unreviewed":
+        assert code == 1, "an unreviewed occurrence did not block"
+        assert "UNREVIEWED" in err
     else:
-        assert code == 0
-        assert "UNREVIEWED" in err, f"{category} identity was not surfaced"
+        assert code == 0, "an allowed-by-rule franchise blocked the gate"
+        assert "allowed by category rule" in err
+        assert "UNREVIEWED" not in err, (
+            "an allowed-by-rule franchise was filed as review debt")
 
 
 def test_a_missing_league_inventory_refuses_to_vouch(
@@ -837,3 +896,226 @@ def test_a_map_sourced_franchise_name_still_blocks(cp, tmp_path, monkeypatch):
     assert cp.main([]) == 1, (
         "a franchise name on the map's replace-list was downgraded to review "
         "by the warehouse's general classification")
+
+
+# ==========================================================================
+# A disposition is about an OCCURRENCE, not a token in a file.
+#
+# The predecessor stopped at the first match of a token per file, so one
+# recorded decision answered for every later use of the same word in the
+# same file. That is not a smaller version of the class-wide amnesty it
+# replaced -- it is the same bug at file scale.
+# ==========================================================================
+
+def test_every_occurrence_is_enumerated_not_just_the_first(cp):
+    """The matcher has to see all of them before anything downstream can
+    tell them apart."""
+    token = cp.Token("Vance", cp.WORD, "warehouse", cp.OWNER)
+    blob = "Vance opened, then Vance closed, and later Vance again"
+    assert len(token.find_all(blob, blob.lower(), {})) == 3
+    assert token.find(blob, blob.lower(), {})[0] == 0, (
+        "find() must still answer 'the first one' for callers that only ask "
+        "whether this token appears here")
+
+
+def test_recording_one_occurrence_leaves_the_other_unreviewed(
+        cp, tmp_path, monkeypatch):
+    """Same token, same file, two different sentences: reviewing one is not
+    reviewing the other."""
+    _planted(cp, tmp_path, monkeypatch,
+             "Vance is an outfielder in the seed data.\n"
+             "The commissioner that year was Vance, who ran the draft.\n",
+             owners=["Vance"])
+    _secrets_at(cp, tmp_path, monkeypatch)
+    salt = cp._salt()
+
+    tokens, census = cp.build_tokens()
+    hits = _sweep(cp, tokens, census)
+    assert len(hits) == 2, "both occurrences must be seen"
+    assert hits[0][6] != hits[1][6], (
+        "two occurrences in different sentences share a fingerprint, so a "
+        "decision about one silently answers for the other")
+
+    # Record ONLY the first.
+    _secrets_at(cp, tmp_path, monkeypatch, ledger_rows=[{
+        "path": "notes.md", "category": cp.OWNER, "digest": hits[0][6],
+        "disposition": cp.COLLISION, "reason": "ballplayer", "recorded": "x"}])
+    tokens, census = cp.build_tokens()
+    after = _sweep(cp, tokens, census)
+    assert sum(1 for h in after if h[5] is not None) == 1
+    assert sum(1 for h in after if h[5] is None) == 1, (
+        "the unrecorded occurrence inherited the recorded one's decision")
+
+
+def test_an_earlier_collision_cannot_mask_a_later_genuine_use(
+        cp, tmp_path, monkeypatch, capsys):
+    """THE failure shape the review named.
+
+    A file mentions an MLB player whose surname is also a league member's
+    name; that is a collision and is recorded as one. Later somebody adds a
+    real reference to the member further down the SAME file. Under a
+    token-in-file key the old row still answers and the new one is never
+    seen -- a leak inheriting a decision taken about a ballplayer.
+    """
+    _planted(cp, tmp_path, monkeypatch,
+             "Box score: Vance went 2-for-4 with a double.\n"
+             "Roster note: the team is owned by Vance, reachable all season.\n",
+             owners=["Vance"])
+    _secrets_at(cp, tmp_path, monkeypatch)
+
+    tokens, census = cp.build_tokens()
+    hits = _sweep(cp, tokens, census)
+    ballplayer = [h for h in hits if "Box score" in h[4]][0]
+    _secrets_at(cp, tmp_path, monkeypatch, ledger_rows=[{
+        "path": "notes.md", "category": cp.OWNER, "digest": ballplayer[6],
+        "disposition": cp.COLLISION, "reason": "an MLB player's name",
+        "recorded": "x"}])
+
+    assert cp.main([]) == 1, (
+        "the later genuine use inherited the earlier collision's disposition "
+        "and passed the gate")
+    assert "UNREVIEWED" in capsys.readouterr().err
+
+
+def test_identical_contexts_are_disambiguated_by_ordinal(
+        cp, tmp_path, monkeypatch):
+    """Two occurrences whose surroundings are genuinely the same -- a
+    repeated table row, a generated block -- still have to be two."""
+    _planted(cp, tmp_path, monkeypatch,
+             "| Vance | 10 |\n| Vance | 10 |\n", owners=["Vance"])
+    _secrets_at(cp, tmp_path, monkeypatch)
+
+    tokens, census = cp.build_tokens()
+    hits = _sweep(cp, tokens, census)
+    assert len(hits) == 2
+    assert hits[0][6] != hits[1][6], (
+        "identical surroundings collapsed to one fingerprint, so one row "
+        "would silently cover both")
+
+
+def test_reflowing_text_keeps_a_decision_but_rewriting_it_does_not(cp):
+    """The deliberate boundary. Whitespace is normalized so re-wrapping a
+    paragraph does not invalidate a review; changing the words does, and
+    re-review is the safe direction."""
+    a = "the owner was Vance and the season ended"
+    b = "the owner was   Vance\nand the season ended"
+    c = "the commissioner was Vance and the season ended"
+    ctx = lambda s: cp.normalize_context(s, s.index("Vance"),
+                                         s.index("Vance") + 5)
+    assert ctx(a) == ctx(b), "re-wrapping a line invalidated a decision"
+    assert ctx(a) != ctx(c), "a rewritten sentence kept its old decision"
+
+
+def test_an_allowed_category_is_never_filed(cp, tmp_path, monkeypatch):
+    """An allowed-by-rule occurrence carries no fingerprint at all, so it
+    cannot accumulate rows and cannot be 'unreviewed'."""
+    _planted(cp, tmp_path, monkeypatch,
+             f"see {FAKE_FRANCHISE} and {FAKE_FRANCHISE} again\n",
+             franchises=[FAKE_FRANCHISE])
+    _secrets_at(cp, tmp_path, monkeypatch)
+
+    tokens, census = cp.build_tokens()
+    hits = _sweep(cp, tokens, census)
+    assert len(hits) == 2
+    assert all(h[0] == cp.ALLOWED for h in hits)
+    assert all(h[6] is None for h in hits), (
+        "an allowed occurrence was given a ledger fingerprint, which is how "
+        "a category ruling turns back into a per-site chore")
+
+
+# --------------------------------------------------------------------------
+# The map's missing category column.
+# --------------------------------------------------------------------------
+
+def _map_categories_at(cp, tmp_path, monkeypatch, **rows):
+    path = tmp_path / "name_map_categories.csv"
+    path.write_text("# a comment the reader is entitled to write\nreal,category\n"
+                    + "".join(f"{k},{v}\n" for k, v in rows.items()),
+                    encoding="utf-8")
+    monkeypatch.setattr(cp, "MAP_CATEGORIES", str(path))
+    return path
+
+
+def test_a_short_map_row_is_refused_rather_than_guessed(
+        cp, tmp_path, monkeypatch, capsys):
+    """Provenance cannot be inferred from four characters.
+
+    The predecessor called every short single-part map row a franchise
+    label, which downgraded a map-listed owner identifier from fatal to
+    allowed -- silently, and in the one direction a guard must never be
+    wrong. Guessing the other way is no better: it promotes a retired
+    franchise abbrev to fatal and blocks every push on a collision with an
+    MLB club code.
+    """
+    repo = _repo_with(tmp_path, "notes.md", "# notes\n")
+    monkeypatch.setattr(cp, "REPO", str(repo))
+    monkeypatch.setattr(cp, "MAP", str(_map_at(tmp_path, "QVQZ")))
+    _secrets_at(cp, tmp_path, monkeypatch)
+    _sources(cp, monkeypatch)
+
+    assert cp.main([]) == 1
+    err = capsys.readouterr().err
+    assert "too short for their category to be self-evident" in err
+
+
+def test_a_short_map_listed_owner_identifier_stays_owner_and_fatal(
+        cp, tmp_path, monkeypatch):
+    """The direction that matters. Named as an owner in the sidecar, a
+    four-character map row keeps the map's own fatal handling."""
+    repo = _repo_with(tmp_path, "notes.md", "signed off by QVQZ today\n")
+    monkeypatch.setattr(cp, "REPO", str(repo))
+    monkeypatch.setattr(cp, "MAP", str(_map_at(tmp_path, "QVQZ")))
+    _secrets_at(cp, tmp_path, monkeypatch)
+    _map_categories_at(cp, tmp_path, monkeypatch, QVQZ=cp.OWNER)
+    _sources(cp, monkeypatch)
+
+    tokens, _ = cp.build_tokens()
+    assert [t.category for t in tokens] == [cp.OWNER]
+    assert cp.severity(tokens[0]) == cp.FATAL
+    assert cp.main([]) == 1, "a map-listed owner identifier did not block"
+
+
+def test_a_short_map_row_named_franchise_is_allowed(
+        cp, tmp_path, monkeypatch):
+    """And the other direction: a retired franchise abbrev the warehouse no
+    longer holds is a franchise, and franchises are ruled allowed."""
+    repo = _repo_with(tmp_path, "notes.md", "the QVQZ tab is stale\n")
+    monkeypatch.setattr(cp, "REPO", str(repo))
+    monkeypatch.setattr(cp, "MAP", str(_map_at(tmp_path, "QVQZ")))
+    _secrets_at(cp, tmp_path, monkeypatch)
+    _map_categories_at(cp, tmp_path, monkeypatch, QVQZ=cp.FRANCHISE)
+    _sources(cp, monkeypatch)
+
+    tokens, _ = cp.build_tokens()
+    assert cp.severity(tokens[0]) == cp.ALLOWED
+    assert cp.main([]) == 0
+
+
+def test_corroboration_by_the_warehouse_resolves_a_short_row_too(
+        cp, tmp_path, monkeypatch):
+    """No sidecar entry needed when the derived inventory still holds the
+    exact string -- that IS the evidence."""
+    repo = _repo_with(tmp_path, "notes.md", "the QVQZ tab\n")
+    monkeypatch.setattr(cp, "REPO", str(repo))
+    monkeypatch.setattr(cp, "MAP", str(_map_at(tmp_path, "QVQZ")))
+    _secrets_at(cp, tmp_path, monkeypatch)
+    _sources(cp, monkeypatch, franchises=["QVQZ"])
+
+    tokens, census = cp.build_tokens()
+    assert census["map_unresolved"] == []
+    assert all(cp.severity(t) == cp.ALLOWED for t in tokens)
+    assert cp.main([]) == 0
+
+
+def test_a_multipart_map_name_needs_no_resolution(cp, tmp_path, monkeypatch):
+    """Only the SHORT single-part rows are ambiguous; a full name is a name
+    whichever league it belongs to, and still blocks."""
+    repo = _repo_with(tmp_path, "notes.md", f"see {MAPPED} for details\n")
+    monkeypatch.setattr(cp, "REPO", str(repo))
+    monkeypatch.setattr(cp, "MAP", str(_map_at(tmp_path, MAPPED)))
+    _secrets_at(cp, tmp_path, monkeypatch)
+    _sources(cp, monkeypatch)
+
+    tokens, census = cp.build_tokens()
+    assert census["map_unresolved"] == []
+    assert cp.main([]) == 1

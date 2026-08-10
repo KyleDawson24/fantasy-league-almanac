@@ -78,6 +78,12 @@ data/cbs_raw/
 !dbt_league/seeds/*.csv
 !dbt_league/league_config/*.csv
 !demo/league_config/*.csv
+# The PII guard's disposition ledger (MLB-234), for the same reason: it is
+# the DURABLE record of which review hits have been looked at, so a copy
+# that only exists on one machine is not a record at all -- the next sweep
+# would report every reviewed site as new. It carries no real-side value;
+# each identity is an HMAC under a secret kept with the private map.
+!tools/pii_dispositions.csv
 output/leagueNoteHeader.txt
 output/leagueNoteFooter.txt
 

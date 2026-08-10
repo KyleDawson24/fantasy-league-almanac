@@ -1408,9 +1408,15 @@ class TestAdvancedStandingsRows:
         assert band == ['', '', 'Unattributed', '', 0.2, '',
                         *aff_pad, 0.2, '']
 
-    def test_affinity_query_buckets_extract_day_free_agents(self, monkeypatch):
+    def test_affinity_query_buckets_extract_day_free_agents(
+            self, monkeypatch, stub_slot_catalog):
         """MLB-159: the club filter is gone and both stamps route to the
         sentinel -- while the LINEUP-SLOT 'FA' exclusion stays.
+
+        `stub_slot_catalog` is not optional scaffolding: this query renders
+        its exclusion list from the slot seed, and slot_catalog holds its
+        OWN binding of query_snowflake, so the monkeypatch below cannot
+        reach it. Without the fixture this test opens a real connection.
 
         Those two FAs mean different things: pro_team 'FA' is ESPN's
         extract-day stamp (the bug), lineup_slot 'FA' means nobody had the

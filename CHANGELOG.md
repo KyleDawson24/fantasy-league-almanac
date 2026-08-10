@@ -114,6 +114,11 @@ install has to do anything.
   setting `textFormat` replaces it wholesale and dropped the white.
   Formatting never reaches the TSV goldens, so the byte-diff could not
   catch it.
+- **The unit suite no longer opens a real warehouse connection.** Two
+  tests patched `almanac_data.query_snowflake`, but `slot_catalog` holds
+  its own binding, so its fetch went straight through -- masked on a
+  credentialled machine by an `lru_cache` an earlier test had warmed, and
+  failing only where there are none.
 
 ### Security
 

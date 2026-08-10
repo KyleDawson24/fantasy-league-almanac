@@ -124,7 +124,12 @@ class TestUnattributedBandStaysRenderable:
         assert almanac_data.AFFINITY_UNATTRIBUTED
         assert almanac_render.ESPN_UNATTRIBUTED_CLUB == 'Unattributed'
 
-    def test_the_bucketing_case_is_still_in_the_query(self, monkeypatch):
+    def test_the_bucketing_case_is_still_in_the_query(
+            self, monkeypatch, stub_slot_catalog):
+        # stub_slot_catalog is load-bearing: the query renders its
+        # lineup-slot exclusion from the slot seed, and slot_catalog carries
+        # its own binding of query_snowflake that the patch below cannot
+        # reach. Without it this test opens a real connection.
         import almanac_data
         calls = []
         monkeypatch.setattr(almanac_data, 'query_snowflake',

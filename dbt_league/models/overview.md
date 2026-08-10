@@ -39,14 +39,18 @@ which `dbt_league/README.md` documents rather than papers over.
                                       view, roster snapshot, draft board
             -> Python output layer (BBCode + Google Sheets almanacs)
 
-The dbt project has **74 models** (32 views, 39 tables, 3 incremental),
-**18 seeds**, **543 data tests** (532 generic + 11 singular), **22
+The dbt project has **78 models** (36 views, 39 tables, 3 incremental),
+**19 seeds**, **573 data tests** (559 generic + 14 singular), **27
 sources**, and **4 declared exposures**. Browse the **Models** section in
 the sidebar for full lineage and column-level docs; cross-model invariants
 live as singular tests in `tests/`.
 
-Counts here are regenerated from the parsed manifest at each release cut.
-If you are reading this mid-cycle, `dbt parse` and the manifest are the
+Counts here are updated by hand at each release cut, because this file is
+NOT in `tools/refresh_doc_inventory.py`'s rule set -- that script rewrites
+`SETUP.md` and `dbt_league/README.md` only. They had drifted a whole
+release before the v1.8.0 cut caught them, which is what this paragraph
+now says instead of implying an automation that does not reach here. If
+you are reading this mid-cycle, `dbt parse` and the manifest are the
 truth.
 
 **A naming caveat worth reading before you infer anything from prefixes:**

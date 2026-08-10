@@ -90,20 +90,30 @@ CBS is a season-long points league with no playoffs. None of this applies
 there: second and third are the season standings, and its ordering was not
 touched.
 
-## Operational dependency: the seed goes stale quietly
+## The seed used to go stale quietly. Resolved.
 
-`RAW.TEAM_STANDINGS` is written from the `mSettings`/`mTeam` payload, which
-`extract.py` fetches **only** under `--include-settings` / `--settings-only`.
-That flag is documented as opt-in because settings "change rarely and don't
-need to run on every weekly pull" -- which was true when the capture served
-history only, and is not true now that it orders the live standings.
+`RAW.TEAM_STANDINGS` was written only under `--include-settings` /
+`--settings-only`, because the standings arrive on the same ESPN response as
+the settings and MLB-227 wrote them from there. That flag is opt-in because
+settings "change rarely and don't need to run on every weekly pull" -- true
+while the capture served history, and false the moment it started ordering
+the live standings.
 
-A box-score-only weekly pull therefore advances the W-L column while leaving
-the row order frozen at the last settings capture. The failure is silent and
-looks like a rendering bug.
+The failure mode was silent: a box-score pull advanced the W-L column while
+the row order stayed frozen at the last settings capture, so the table
+disagreed with itself and read as a rendering bug.
 
-Either run the weekly pull with `--include-settings`, or move the standings
-write onto the box-score path. **Not yet decided.**
+**Resolved 2026-08-09 by splitting them.** `extract_team_standings` asks for
+`mTeam` alone -- a smaller response with no settings parsing -- and runs on
+every invocation, `--transactions-only` included. `--no-standings` opts out.
+A settings run still writes standings from its own combined payload rather
+than fetching twice.
+
+The general lesson outlives the fix: **two datasets arriving on one response
+are not thereby one dataset.** These two share a payload and have opposite
+refresh needs, and the flag that made sense for the slow one silently
+throttled the fast one. Do not re-merge them for the sake of the saved
+request.
 
 ## The knob this is really waiting for
 

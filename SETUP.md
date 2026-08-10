@@ -479,9 +479,9 @@ python extract/extract.py            # Extract recent matchup periods
 cd dbt_league
 dbt deps                              # Install dbt_utils package (first
                                       # run only; idempotent)
-dbt seed                              # Load the 18 seed CSVs -- 5 reference
+dbt seed                              # Load the 19 seed CSVs -- 5 reference
                                       # + 13 from league_config (section 7)
-dbt build                             # Build 74 models + run 544 tests
+dbt build                             # Build 78 models + run 573 tests
 
 cd ..
 python output/generate_summary.py     # Weekly recap BBCode
@@ -578,7 +578,7 @@ nothing in it should be a reflex.
 pytest tests/
 ```
 
-Expected on a fresh clone: **515 passed, 24 deselected**. The
+Expected on a fresh clone: **595 passed, 27 deselected**. The
 warehouse-marked tests are deselected by default via `pytest.ini`; no
 credentials are involved and nothing is written. These counts drift
 between releases -- `pytest tests/ -q` is the truth.
@@ -589,10 +589,10 @@ between releases -- `pytest tests/ -q` is the truth.
 pytest tests/ -m warehouse
 ```
 
-This collects **24 tests**. It reads your warehouse and subprocess-runs
+This collects **27 tests**. It reads your warehouse and subprocess-runs
 the output scripts, but does not write to the warehouse.
 
-**How many of the 24 actually run depends on corpora you do not have.**
+**How many of the 27 actually run depends on corpora you do not have.**
 See below.
 
 ### Which tests need what

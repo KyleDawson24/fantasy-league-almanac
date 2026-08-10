@@ -22,6 +22,110 @@ in a shareable workbook). Release notes are built from the commit range
 at each cut rather than accumulated here, so this section staying short
 is not a sign the repository is idle._
 
+## [1.8.0] - 2026-08-09
+
+The engine runs locally end to end. 30 commits. Full story in
+[RELEASE NOTES v1.8.0.md](RELEASE%20NOTES%20v1.8.0.md).
+
+Minor rather than major: the standings reorder and the podium marks move
+rendered values, but nothing needs a migration step and no existing
+install has to do anything.
+
+### Added
+
+- **`extract.py --raw-target local`** (MLB-208): RAW lands as parquet
+  plus a manifest instead of in a warehouse, into the directory
+  `tools/load_parquet_to_duckdb.py` already reads. A fresh clone with
+  league credentials and **no `SNOWFLAKE_*` key anywhere in the run**
+  reaches rendered previews -- 23 parquet tables, 23 DuckDB tables, 18
+  seeds, 74/74 models, 19 rendered tabs, as the acceptance walk measured
+  them (the project is 19 seeds and 78 models now; the walk has not been
+  repeated against the larger project). The RAW type contract is
+  generated from Snowflake and asserted on both sides; the local half
+  runs with no credentials, no accounts and no network, because a
+  warehouse-free on-ramp verified only on a machine with warehouse
+  credentials is not verified.
+- **ESPN's settings and standings are captured** (MLB-227), from views
+  every run was already fetching and discarding: schedule, draft,
+  acquisition and trade settings, plus divisions, records, playoff seeds
+  and final ranks. No extra API call -- ESPN's `view` parameter repeats
+  rather than replaces. One RAW table per block, because troubleshooting
+  roster slots and troubleshooting the playoff bracket are different
+  errands. 2025 backfilled: all sixteen teams read back with seed and
+  final rank as contiguous 1..16 permutations.
+- **The podium is marked on both books** (MLB-230): 🏆 champion, 🥈
+  runner-up, 🥉 third. The head-to-head book keys silver and bronze on
+  the **post-playoff finish**, not the seed -- the two disagree, and the
+  last closed season was won from the 7 seed while the 1 seed finished
+  second. The points league has no playoffs, so its second and third are
+  the season standings.
+- **The lineup-slot vocabulary is a seed** with a build-time coverage
+  test asserting every slot observed in player-day data, and every slot
+  the settings dictionary knows, has a row.
+
+### Changed
+
+- **Standings are ordered by the platform's own seed** (MLB-227), not by
+  `wins DESC, ties DESC, points DESC`. ESPN seeds division winners ahead
+  of the field, and no sort over wins or points recovers that: in the
+  two-division season the best record among teams leading nothing seeds
+  only 3rd. **Two sites carried the wrong rule**, and the second drove
+  the Detailed Standings row order and its Rank column. The Rank by Week
+  chart stays reconstructed -- ESPN keeps no intra-season snapshots, so
+  no per-week seed exists -- and the tab now says the two can disagree.
+  See
+  [docs/decisions/STANDINGS_ORDER_AND_THE_RANK_CHART.md](docs/decisions/STANDINGS_ORDER_AND_THE_RANK_CHART.md).
+- **Standings capture runs on every extract**, no longer riding the
+  opt-in settings flag. The two arrive on one response and have opposite
+  refresh needs; behind the shared flag a box-score pull advanced the
+  W-L column while the row order stayed frozen, so the table disagreed
+  with itself. `--no-standings` opts out.
+- **The settled-history guard is explained by what it actually
+  protects** (MLB-224). Every stated rationale named a field nothing had
+  read since an earlier flip, so a reader who checked whether anything
+  consumed it correctly concluded the guard protected nothing -- three
+  separate times.
+
+### Fixed
+
+- **Eight crash paths on league shapes this league does not have**: a bye
+  week killing the extract; a never-drafted league failing `dbt run` on a
+  missing relation; an unmapped lineup slot id raising a bare
+  `KeyError`; `max()` over an empty draft; `int(None)` and `seasons[0]`
+  on a first-year points league; first-year era banners rendering
+  `"None-2026"`; a non-numeric draft period label losing every year's
+  drafts; and the standings side table running off the end at 30 teams
+  over a 23-period season.
+- **A lineup slot that fell through the classifier deleted production.**
+  `lineup_slot_category` is used as a stat filter, so an unrecognised
+  slot counted a hitter as active starter production and **deleted a
+  pitcher's stats outright**. `IF`, `UTIL` and the empty string the
+  wrapper emits for an unmappable slot id all fell through. Nothing
+  moved: 194,946 rows across 17 pairs before and after, identical.
+- **A bye-week team's whole week of production vanished** from the
+  weekly fact -- both arms of the matchup self-join were inner joins.
+  `result` is NULL for a bye rather than `'T'`, because a bye is not a
+  tie.
+- **A tie in the wasted-points list re-rolled the golden** with nothing
+  underneath it having moved. The rounded value sorts first, then the
+  name the surface already prints, so a golden cannot move for a reason
+  a reader cannot see.
+- **The finishes header rendered black on the navy banner row**, because
+  setting `textFormat` replaces it wholesale and dropped the white.
+  Formatting never reaches the TSV goldens, so the byte-diff could not
+  catch it.
+
+### Security
+
+- **Real identifiers out of tracked files**: the ESPN league id from the
+  almanac tests and an archived journal (with the public endpoints it
+  identifies the league directly, and the PII guard has never scanned
+  numeric identifiers), real franchise abbrevs from test fixtures, and
+  real team/owner names from a bye-week fixture and from code comments.
+  Two house rules came out of it -- **a synthetic fixture is synthetic
+  all the way down, names included**, and **documentation describes the
+  shape of a real-data quirk, never the instance**.
+
 ## [1.7.0] - 2026-08-05
 
 The first public release. 129 commits. Full story in

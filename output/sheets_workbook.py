@@ -40,6 +40,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import gspread
+from gspread.urls import DRIVE_FILES_API_V3_URL
 
 
 _OUTPUT_DIR = Path(__file__).resolve().parent
@@ -80,6 +81,23 @@ SHARE_RECOVERY_MESSAGE = (
     "organization forbids that, re-run signed in to a personal Google "
     "account."
 )
+
+VERIFY_RECOVERY_MESSAGE = (
+    "The workbook was created and written, and Drive accepted the sharing "
+    "call without an error -- but reading the permission back did not prove "
+    "it is anyone-with-the-link VIEWER. The workbook is intact and is yours. "
+    "Open it, check Share > General access, and set it to 'Anyone with the "
+    "link -- Viewer' by hand before passing the link on."
+)
+
+# The Drive v3 permission fields the verification needs BY NAME.
+#
+# gspread's own `list_permissions` asks for `fields=permissions`, which
+# returns Drive's default permission representation -- and
+# `allowFileDiscovery` is not in it. Verifying link-only against that
+# response could never succeed, so the fields are requested explicitly
+# and an absent one is treated as unproven rather than as fine.
+_PERMISSION_FIELDS = 'permissions(id,type,role,allowFileDiscovery)'
 
 
 @dataclass
@@ -223,6 +241,40 @@ def is_share_policy_error(exc):
     return 'sharing' in message or 'share' in message
 
 
+def report_result(result):
+    """Print the outcome of a publish.
+
+    Lives here rather than in a caller so there is exactly ONE place that
+    decides what counts as success. The consent probe and the almanac
+    generator are very different programs; they must not be able to
+    disagree about when the share-ready line is earned.
+
+    A workbook that exists but could not be shared is still the user's,
+    so its URL is printed too -- just never under a word that claims
+    anyone else can open it.
+    """
+    if result.is_share_ready:
+        print(SHARE_READY_LINE.format(url=result.url))
+        return
+
+    if result.created and result.rendered:
+        print(
+            '[workbook] the content was written, but this workbook is NOT '
+            'share-ready.'
+        )
+        if result.share_error:
+            print(f'[workbook] {result.share_error}')
+        if result.recovery:
+            print(f'[workbook] {result.recovery}')
+        print(f'[workbook] your workbook: {result.url}')
+        return
+
+    print(
+        '[workbook] the workbook was not completed, so there is nothing to '
+        'hand out yet. Re-run to resume the unfinished workbook.'
+    )
+
+
 def create_workbook(client, title, ledger=None):
     """Create a spreadsheet and record it before returning.
 
@@ -243,6 +295,15 @@ def share_link_viewer(client, spreadsheet_id):
     grants edit to anyone who finds it is a different product. `notify`
     is off because there is no recipient to email -- the grantee is the
     link itself.
+
+    `with_link=True` states the link-only intent explicitly rather than
+    leaning on a default. Worth knowing what it does and does not buy:
+    gspread 6.2.1 sends it as `withLink`, which is the Drive **v2** field
+    name, into a **v3** endpoint that does not define it. v3's own switch
+    is `allowFileDiscovery`, and v3 defaults it to false, which is what
+    link-only means. So the flag is the honest expression of intent and
+    the default happens to agree -- but neither is proof, which is why
+    nothing here reports success until the permission has been read back.
     """
     return client.insert_permission(
         spreadsheet_id,
@@ -250,7 +311,80 @@ def share_link_viewer(client, spreadsheet_id):
         perm_type='anyone',
         role='reader',
         notify=False,
+        with_link=True,
     )
+
+
+def list_permissions(client, spreadsheet_id):
+    """Read a file's permissions back, asking for the fields by name.
+
+    Goes through gspread's authorized HTTP client rather than its
+    `list_permissions` helper, purely to control the `fields` selection
+    (see `_PERMISSION_FIELDS`). Same session, same credentials, same
+    scope.
+    """
+    url = f'{DRIVE_FILES_API_V3_URL}/{spreadsheet_id}/permissions'
+    params = {
+        'supportsAllDrives': True,
+        'fields': f'nextPageToken,{_PERMISSION_FIELDS}',
+    }
+
+    permissions = []
+    token = ''
+    while token is not None:
+        if token:
+            params['pageToken'] = token
+        payload = client.http_client.request('get', url, params=params).json()
+        permissions.extend(payload.get('permissions') or [])
+        token = payload.get('nextPageToken')
+    return permissions
+
+
+def verify_link_viewer(permissions):
+    """Is this file actually anyone-with-the-link, viewer, and nothing
+    broader? Returns `None` when it is, or a problem sentence when it is
+    not.
+
+    Fails closed in three directions, because "share-ready" is a promise
+    and each of these breaks it differently:
+
+      - NOT SHARED: no `anyone` permission came back at all, so the
+        earlier call did not do what its lack of an exception implied.
+      - BROADER: role above reader, or `allowFileDiscovery` true, which
+        is not "anyone with the link" but "anyone can find this".
+      - UNVERIFIABLE: the field we need is missing from the response.
+        Absent is not the same as false, and treating it as false would
+        turn this whole function into decoration.
+    """
+    domain_grants = [p for p in permissions if p.get('type') == 'domain']
+    if domain_grants:
+        return ('the file carries a domain-wide permission this tool did not '
+                'create')
+
+    anyone = [p for p in permissions if p.get('type') == 'anyone']
+    if not anyone:
+        return ('Drive accepted the sharing call but no anyone-with-the-link '
+                'permission came back')
+    if len(anyone) > 1:
+        return (f'the file carries {len(anyone)} separate anyone-permissions, '
+                f'so what a stranger gets is ambiguous')
+
+    permission = anyone[0]
+
+    if 'role' not in permission:
+        return 'Drive did not report the role of the link permission'
+    if permission['role'] != 'reader':
+        return (f"the link permission is {permission['role']!r} rather than "
+                f"'reader'")
+
+    if 'allowFileDiscovery' not in permission:
+        return ('Drive did not report allowFileDiscovery, so link-only access '
+                'could not be confirmed')
+    if permission['allowFileDiscovery'] is not False:
+        return ('the link permission is discoverable (allowFileDiscovery is '
+                'not false), which is broader than anyone-with-the-link')
+
+    return None
 
 
 def publish_workbook(client, title, render, ledger=None, resume=True):
@@ -297,6 +431,18 @@ def publish_workbook(client, title, render, ledger=None, resume=True):
         result.shared = False
         result.share_error = str(exc)
         result.recovery = SHARE_RECOVERY_MESSAGE
+        return result
+
+    # A permission call that did not raise is not evidence that the file
+    # is link-viewable. Read it back and check, and treat "could not
+    # check" exactly like "wrong" -- this is the only thing standing
+    # behind the word share-ready.
+    problem = verify_link_viewer(list_permissions(client,
+                                                  result.spreadsheet_id))
+    if problem:
+        result.shared = False
+        result.share_error = f'sharing could not be verified: {problem}'
+        result.recovery = VERIFY_RECOVERY_MESSAGE
         return result
 
     result.shared = True

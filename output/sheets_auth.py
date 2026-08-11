@@ -210,13 +210,39 @@ def client_config_path(profile):
     return client_path
 
 
+def credential_scopes(creds):
+    """The scopes a freshly returned credential actually carries.
+
+    `granted_scopes` is what the token endpoint said it gave us, and it
+    is the field to trust. It is populated only on some paths, so
+    `scopes` -- the set that was REQUESTED -- is the deliberate fallback.
+    The fallback is weaker on purpose and is why the cached-token check
+    reads the token file instead: there, nothing is left to assume.
+    """
+    granted = getattr(creds, 'granted_scopes', None)
+    if granted:
+        return frozenset(granted)
+    return frozenset(getattr(creds, 'scopes', None) or ())
+
+
 def run_consent_flow(profile):
     """Open a browser for a fresh consent and return new credentials.
 
-    The grant is checked against the profile before it is handed back: a
-    user who unchecks a permission on the consent screen produces a token
-    that would otherwise 403 on the first real call, several steps away
-    from the cause.
+    The grant is judged by the SAME rule a cached token is judged by,
+    before it is handed back or written anywhere. Two ways this bites:
+
+      - a user unchecks a permission on the consent screen, and the
+        resulting token 403s on the first real call, several steps from
+        the cause;
+      - the flow comes back with MORE than was asked for (a previously
+        granted scope carried forward on re-consent). For the public
+        profile that is disqualifying rather than convenient -- an app
+        running on a wider grant than the one being measured makes the
+        measurement worthless, and caching it would make the next run
+        inherit the lie.
+
+    Raising here means the token cache is never written, so a refused
+    grant leaves nothing behind to be picked up later.
     """
     client_path = client_config_path(profile)
     flow = InstalledAppFlow.from_client_secrets_file(
@@ -225,14 +251,33 @@ def run_consent_flow(profile):
     # port=0 picks an arbitrary free port for the redirect handler.
     creds = flow.run_local_server(port=0)
 
-    granted = frozenset(creds.scopes or ())
-    missing = frozenset(profile.scopes) - granted
-    if missing:
-        raise RuntimeError(
-            f"Consent for the '{profile.name}' profile did not grant "
-            f"{sorted(missing)}. Re-run and leave every requested permission "
-            f"checked."
+    granted = credential_scopes(creds)
+    if not token_satisfies(profile, granted):
+        required = frozenset(profile.scopes)
+        missing = sorted(required - granted)
+        extra = sorted(granted - required)
+        detail = []
+        if missing:
+            detail.append(f"did not grant {missing}")
+        if extra and profile.exact_scopes:
+            detail.append(f"granted {extra} on top of what was requested")
+        if not detail:
+            detail.append('returned no usable scopes')
+
+        message = (
+            f"Consent for the '{profile.name}' profile "
+            f"{' and '.join(detail)}. Nothing was cached."
         )
+        if profile.exact_scopes:
+            message += (
+                f" This profile requires exactly {sorted(required)}. Re-run "
+                f"with every requested permission left checked; if the extra "
+                f"scope persists, revoke this app under the Google account's "
+                f"security settings and consent again from clean."
+            )
+        else:
+            message += ' Re-run and leave every requested permission checked.'
+        raise RuntimeError(message)
     return creds
 
 

@@ -33,10 +33,17 @@ DRIVE_FILE = sheets_auth.DRIVE_FILE_SCOPE
 
 
 class _FakeCreds:
-    """Just enough credential to travel through authorized_client."""
+    """Just enough credential to travel through authorized_client.
 
-    def __init__(self, scopes, valid=True, expired=False, refresh_token=None):
+    `granted_scopes` defaults to None so the fallback to `scopes` is what
+    most tests exercise; the tests that care set it explicitly.
+    """
+
+    def __init__(self, scopes, valid=True, expired=False, refresh_token=None,
+                 granted_scopes=None):
         self.scopes = list(scopes)
+        self.granted_scopes = (list(granted_scopes)
+                               if granted_scopes is not None else None)
         self.valid = valid
         self.expired = expired
         self.refresh_token = refresh_token
@@ -278,10 +285,9 @@ def test_each_profile_writes_only_its_own_cache(profiles, stub_consent):
 # Consent that grants less than it was asked for
 # ---------------------------------------------------------------------------
 
-def test_a_consent_that_withholds_a_scope_fails_at_the_consent(monkeypatch):
-    """A user who unchecks a box otherwise gets a token that 403s several
-    steps later, nowhere near the cause."""
+def _stub_flow(monkeypatch, returned_creds):
     monkeypatch.setenv('GOOGLE_PUBLIC_OAUTH_CLIENT_PATH', __file__)
+    monkeypatch.setenv('GOOGLE_OAUTH_CLIENT_PATH', __file__)
 
     class _Flow:
         @staticmethod
@@ -289,12 +295,77 @@ def test_a_consent_that_withholds_a_scope_fails_at_the_consent(monkeypatch):
             return _Flow()
 
         def run_local_server(self, port=0):
-            return _FakeCreds([])          # granted nothing
+            return returned_creds
 
     monkeypatch.setattr(sheets_auth, 'InstalledAppFlow', _Flow)
 
+
+def test_a_consent_that_withholds_a_scope_fails_at_the_consent(monkeypatch):
+    """A user who unchecks a box otherwise gets a token that 403s several
+    steps later, nowhere near the cause."""
+    _stub_flow(monkeypatch, _FakeCreds([]))          # granted nothing
+
     with pytest.raises(RuntimeError, match='did not grant'):
         sheets_auth.run_consent_flow(sheets_auth.PUBLIC)
+
+
+def test_a_fresh_grant_carrying_an_EXTRA_scope_is_refused(monkeypatch):
+    """The cached path already demanded exactness. The fresh path did
+    not, so a re-consent that carried a previously granted `spreadsheets`
+    forward would have been accepted and then CACHED -- and every later
+    run would inherit a grant wider than the one being measured."""
+    _stub_flow(monkeypatch, _FakeCreds(
+        [DRIVE_FILE], granted_scopes=[DRIVE_FILE, SPREADSHEETS]))
+
+    with pytest.raises(RuntimeError, match='on top of what was requested'):
+        sheets_auth.run_consent_flow(sheets_auth.PUBLIC)
+
+
+def test_a_refused_fresh_grant_is_never_written_to_the_token_cache(
+        profiles, monkeypatch):
+    _, public = profiles
+    _stub_flow(monkeypatch, _FakeCreds(
+        [DRIVE_FILE], granted_scopes=[DRIVE_FILE, SPREADSHEETS]))
+
+    with pytest.raises(RuntimeError):
+        sheets_auth.authorized_client(public)
+
+    assert not public.token_path.exists(), (
+        'a refused grant was cached, so the next run would inherit it'
+    )
+
+
+def test_the_granted_scopes_field_wins_over_the_requested_one(monkeypatch):
+    """`scopes` is what we ASKED for; `granted_scopes` is what Google
+    says it gave. Judging by the request would be judging our own input."""
+    creds = _FakeCreds([DRIVE_FILE],
+                       granted_scopes=[DRIVE_FILE, SPREADSHEETS])
+    assert sheets_auth.credential_scopes(creds) == {DRIVE_FILE, SPREADSHEETS}
+
+
+@pytest.mark.parametrize('granted', [None, []])
+def test_credential_scopes_falls_back_to_requested_when_unpopulated(granted):
+    """google-auth does not populate granted_scopes on every path."""
+    creds = _FakeCreds([DRIVE_FILE], granted_scopes=granted)
+    assert sheets_auth.credential_scopes(creds) == {DRIVE_FILE}
+
+
+def test_an_exact_fresh_public_grant_is_accepted(monkeypatch):
+    _stub_flow(monkeypatch, _FakeCreds(
+        [DRIVE_FILE], granted_scopes=[DRIVE_FILE]))
+
+    creds = sheets_auth.run_consent_flow(sheets_auth.PUBLIC)
+    assert sheets_auth.credential_scopes(creds) == {DRIVE_FILE}
+
+
+def test_the_maintainer_flow_still_tolerates_a_wider_grant(monkeypatch):
+    """Exactness is the PUBLIC profile's promise. Narrowing the
+    maintainer here would break a working setup for no gain."""
+    _stub_flow(monkeypatch, _FakeCreds(
+        [SPREADSHEETS], granted_scopes=[SPREADSHEETS, DRIVE_FILE]))
+
+    creds = sheets_auth.run_consent_flow(sheets_auth.MAINTAINER)
+    assert SPREADSHEETS in sheets_auth.credential_scopes(creds)
 
 
 def test_a_missing_client_config_names_the_env_var_not_a_secret(monkeypatch):

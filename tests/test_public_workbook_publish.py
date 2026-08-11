@@ -43,16 +43,50 @@ class _FakeSpreadsheet:
         return f'https://docs.google.com/spreadsheets/d/{self.id}/edit'
 
 
+def _permission_response(permissions):
+    """A Drive permissions.list body, as a real requests.Response."""
+    response = requests.Response()
+    response.status_code = 200
+    response._content = json.dumps({'permissions': permissions}).encode('utf-8')
+    return response
+
+
+# What Drive returns for a correctly shared, app-created workbook: the
+# owner, plus one link-only reader.
+LINK_VIEWER_PERMISSIONS = [
+    {'id': 'owner-1', 'type': 'user', 'role': 'owner'},
+    {'id': 'anyone-1', 'type': 'anyone', 'role': 'reader',
+     'allowFileDiscovery': False},
+]
+
+
+class _FakeHTTPClient:
+    """Stands in for gspread's authorized session for the read-back."""
+
+    def __init__(self, owner):
+        self._owner = owner
+
+    def request(self, method, url, params=None, **kwargs):
+        self._owner.permission_reads.append((method, url, dict(params or {})))
+        return _permission_response(self._owner.stored_permissions)
+
+
 class _FakeClient:
     """Records what would have been asked of Drive."""
 
-    def __init__(self, share_raises=None):
+    def __init__(self, share_raises=None, permissions_after_share=None):
         self.created = []
         self.permissions = []
         self.deleted = []
         self.calls = []
+        self.permission_reads = []
+        self.stored_permissions = []
+        self._permissions_after_share = (
+            LINK_VIEWER_PERMISSIONS if permissions_after_share is None
+            else permissions_after_share)
         self._share_raises = share_raises
         self._n = 0
+        self.http_client = _FakeHTTPClient(self)
 
     def create(self, title, folder_id=None):
         self._n += 1
@@ -69,8 +103,9 @@ class _FakeClient:
             raise self._share_raises
         self.permissions.append({
             'file_id': file_id, 'value': value, 'perm_type': perm_type,
-            'role': role, 'notify': notify,
+            'role': role, 'notify': notify, 'with_link': with_link,
         })
+        self.stored_permissions = list(self._permissions_after_share)
 
     def del_spreadsheet(self, file_id):          # must never be reached
         self.deleted.append(file_id)
@@ -147,6 +182,127 @@ def test_the_public_permission_is_viewer_and_never_writer(ledger):
     assert granted['role'] == 'reader'
     assert granted['role'] not in ('writer', 'owner', 'commenter')
     assert granted['notify'] is False
+
+
+def test_link_only_sharing_is_asked_for_explicitly(ledger):
+    """Not left to a library default that means something else in the
+    API version underneath."""
+    client = _FakeClient()
+    sheets_workbook.publish_workbook(
+        client, 'Almanac', lambda sid: None, ledger=ledger)
+
+    assert client.permissions[0]['with_link'] is True
+
+
+# ---------------------------------------------------------------------------
+# Sharing is PROVED, not assumed from a call that did not raise
+# ---------------------------------------------------------------------------
+
+def test_the_permission_is_read_back_before_success_is_claimed(ledger):
+    client = _FakeClient()
+    result = sheets_workbook.publish_workbook(
+        client, 'Almanac', lambda sid: None, ledger=ledger)
+
+    assert client.permission_reads, 'nothing read the permission back'
+    assert result.is_share_ready is True
+
+
+def test_the_read_back_asks_drive_for_the_fields_it_needs_by_name(ledger):
+    """gspread's own list_permissions asks for the default representation,
+    which omits allowFileDiscovery -- verifying against that could never
+    prove link-only."""
+    client = _FakeClient()
+    sheets_workbook.publish_workbook(
+        client, 'Almanac', lambda sid: None, ledger=ledger)
+
+    _, url, params = client.permission_reads[0]
+    assert url.endswith('/sheet-1/permissions')
+    assert 'allowFileDiscovery' in params['fields']
+    assert 'role' in params['fields']
+
+
+@pytest.mark.parametrize('permissions,expected_phrase', [
+    ([], 'no anyone-with-the-link permission'),
+    ([{'id': 'a', 'type': 'anyone', 'role': 'writer',
+       'allowFileDiscovery': False}], "rather than 'reader'"),
+    ([{'id': 'a', 'type': 'anyone', 'role': 'reader',
+       'allowFileDiscovery': True}], 'discoverable'),
+    ([{'id': 'a', 'type': 'anyone', 'role': 'reader'}],
+     'did not report allowFileDiscovery'),
+    ([{'id': 'a', 'type': 'anyone', 'allowFileDiscovery': False}],
+     'did not report the role'),
+    ([{'id': 'a', 'type': 'domain', 'role': 'reader',
+       'allowFileDiscovery': False}], 'domain-wide'),
+    ([{'id': 'a', 'type': 'anyone', 'role': 'reader',
+       'allowFileDiscovery': False},
+      {'id': 'b', 'type': 'anyone', 'role': 'reader',
+       'allowFileDiscovery': False}], 'ambiguous'),
+])
+def test_anything_broader_different_or_unverifiable_fails_closed(
+        ledger, permissions, expected_phrase):
+    client = _FakeClient(permissions_after_share=permissions)
+    result = sheets_workbook.publish_workbook(
+        client, 'Almanac', lambda sid: None, ledger=ledger)
+
+    assert result.shared is False
+    assert result.is_share_ready is False
+    assert expected_phrase in result.share_error
+    assert result.recovery == sheets_workbook.VERIFY_RECOVERY_MESSAGE
+    assert client.deleted == [], 'a failed verification deleted the workbook'
+    assert result.url, 'the user was not told where their workbook is'
+
+
+def test_a_missing_allow_file_discovery_is_not_treated_as_false():
+    """Absent is not false. Treating it as false would make the whole
+    verification decorative."""
+    problem = sheets_workbook.verify_link_viewer(
+        [{'id': 'a', 'type': 'anyone', 'role': 'reader'}])
+    assert problem is not None
+
+
+def test_a_verified_link_viewer_permission_passes():
+    assert sheets_workbook.verify_link_viewer(LINK_VIEWER_PERMISSIONS) is None
+
+
+def test_an_unverified_share_is_not_marked_shared_in_the_ledger(ledger):
+    client = _FakeClient(permissions_after_share=[])
+    result = sheets_workbook.publish_workbook(
+        client, 'Almanac', lambda sid: None, ledger=ledger)
+
+    entry = [e for e in ledger.entries()
+             if e['spreadsheet_id'] == result.spreadsheet_id][0]
+    assert entry['shared'] is False
+    assert entry['rendered'] is True
+
+
+def test_the_read_back_follows_pagination(ledger, monkeypatch):
+    """A file with enough permissions to paginate must not have the
+    anyone-permission fall off page one unnoticed."""
+    pages = [
+        {'permissions': [{'id': 'owner-1', 'type': 'user', 'role': 'owner'}],
+         'nextPageToken': 'page-2'},
+        {'permissions': [{'id': 'anyone-1', 'type': 'anyone',
+                          'role': 'reader', 'allowFileDiscovery': False}]},
+    ]
+    seen = []
+
+    class _PagingHTTP:
+        def request(self, method, url, params=None, **kwargs):
+            seen.append(dict(params or {}))
+            response = requests.Response()
+            response.status_code = 200
+            response._content = json.dumps(pages[len(seen) - 1]).encode()
+            return response
+
+    client = _FakeClient()
+    client.http_client = _PagingHTTP()
+
+    result = sheets_workbook.publish_workbook(
+        client, 'Almanac', lambda sid: None, ledger=ledger)
+
+    assert len(seen) == 2
+    assert seen[1]['pageToken'] == 'page-2'
+    assert result.is_share_ready is True
 
 
 def test_sharing_happens_only_after_the_render(ledger):

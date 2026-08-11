@@ -320,32 +320,11 @@ def publish_new_public_workbook(args, season_year, matchup_period,
 def report_publish_result(result):
     """Print the outcome.
 
-    The share-ready line is printed for EXACTLY one state: created and
-    rendered and shared. Every other state says plainly what is missing.
-    A workbook that exists but could not be shared is still the user's,
-    so its URL is printed too -- just never under a word that claims
-    anyone else can open it.
+    Delegates so the share-ready rule has one home (sheets_workbook):
+    this generator and the consent probe must not be able to disagree
+    about when the line is earned.
     """
-    if result.is_share_ready:
-        print(sheets_workbook.SHARE_READY_LINE.format(url=result.url))
-        return
-
-    if result.created and result.rendered:
-        print(
-            "[almanac] the almanac was written, but Google refused the "
-            "link-sharing step, so this workbook is NOT share-ready."
-        )
-        if result.share_error:
-            print(f"[almanac] Drive said: {result.share_error}")
-        if result.recovery:
-            print(f"[almanac] {result.recovery}")
-        print(f"[almanac] your workbook: {result.url}")
-        return
-
-    print(
-        "[almanac] the workbook was not completed, so there is nothing to "
-        "hand out yet. Re-run to resume the unfinished workbook."
-    )
+    sheets_workbook.report_result(result)
 
 
 def _run_points_league_almanac(args, parser):

@@ -17,7 +17,16 @@ db.init()
 import almanac_data
 import almanac_sheets
 import cbs_almanac_sheets
+import sheets_auth
 import sheets_target
+import sheets_workbook
+
+
+# The title an app-created workbook gets when the caller names none.
+# Deliberately generic: it is the first thing a stranger sees in their
+# own Drive, and a default carrying a league or owner name would publish
+# an identity nobody asked to publish.
+DEFAULT_PUBLIC_WORKBOOK_TITLE = 'Fantasy League Almanac'
 
 
 def main():
@@ -58,12 +67,34 @@ def main():
              'network-free; the Sheets write always includes the tab.',
     )
     parser.add_argument(
+        '--new-public-workbook', action='store_true',
+        help='STRANGER PATH (MLB-209). Create a BRAND-NEW Google workbook '
+             'under the public drive.file OAuth profile, render the almanac '
+             'into it, set it to anyone-with-the-link VIEWER, and print the '
+             'share URL. Does not read or touch any configured dev/prod '
+             'sheet, and cannot be combined with --prod.',
+    )
+    parser.add_argument(
+        '--public-workbook-title', default=None, metavar='TITLE',
+        help='Title for the workbook --new-public-workbook creates. '
+             'Defaults to a generic almanac title carrying no league or '
+             'owner identity.',
+    )
+    parser.add_argument(
+        '--new-public-workbook-force', action='store_true',
+        help='With --new-public-workbook, create a fresh workbook even if a '
+             'previous run left an unfinished one with the same title. '
+             'Default is to RESUME that one, so a retry after a partial '
+             'failure does not pile up spreadsheets.',
+    )
+    parser.add_argument(
         '--duckdb', nargs='?', const=True, default=None, metavar='PATH',
         help='Read from a local DuckDB file instead of Snowflake. PATH '
              'defaults to DBT_DUCKDB_PATH, then to the location the dbt '
              'profile writes. No Snowflake account or driver is needed.',
     )
     args = parser.parse_args()
+    _validate_public_workbook_args(args, parser)
     if args.duckdb:
         db.use_duckdb(None if args.duckdb is True else args.duckdb)
     db.set_league(args.league)
@@ -73,6 +104,14 @@ def main():
     # matchups exist, so the H2H almanac shape below cannot apply. The
     # ESPN league has no period-standings rows and flows on unchanged.
     if cbs_almanac_sheets.is_points_league():
+        if args.new_public_workbook:
+            # Wiring CBS as a stranger path is a separate, unrequested
+            # decision. Refusing here is better than rendering the points
+            # almanac into a workbook whose journey nobody has designed.
+            parser.error(
+                '--new-public-workbook is wired for the ESPN/H2H almanac '
+                'only. This league renders the points-league almanac.'
+            )
         _run_points_league_almanac(args, parser)
         return
 
@@ -158,6 +197,13 @@ def main():
     if args.preview_dir:
         _write_preview_dir(preview_tabs, args.preview_dir)
 
+    # The stranger path owns its own destination: it CREATES one. It
+    # deliberately returns before target resolution, so no configured
+    # dev/prod workbook is read, opened, or written on this path.
+    if args.new_public_workbook:
+        publish_new_public_workbook(args, season_year, matchup_period)
+        return
+
     if args.no_sheets:
         sheet_id, target_label = None, None
     else:
@@ -184,6 +230,121 @@ def main():
         sheet_id,
         season_year=season_year,
         matchup_period=matchup_period,
+    )
+
+
+def _validate_public_workbook_args(args, parser):
+    """Reject the flag combinations that would mean two different things
+    at once, before any work happens.
+
+    --prod and --new-public-workbook are opposite answers to the same
+    question (which workbook?), and letting one silently win is how a
+    stranger-path run ends up rewriting the live league book.
+    """
+    if args.new_public_workbook:
+        if args.prod:
+            parser.error(
+                '--new-public-workbook creates a brand-new workbook and '
+                '--prod writes to the configured production sheet; pick one.'
+            )
+        if args.no_sheets:
+            parser.error(
+                '--new-public-workbook writes to Sheets by definition; it '
+                'cannot be combined with --no-sheets.'
+            )
+        return
+
+    if args.public_workbook_title is not None:
+        parser.error(
+            '--public-workbook-title only applies with --new-public-workbook.'
+        )
+    if args.new_public_workbook_force:
+        parser.error(
+            '--new-public-workbook-force only applies with '
+            '--new-public-workbook.'
+        )
+
+
+def safe_workbook_title(raw):
+    """Normalize a caller-supplied workbook title.
+
+    Drive accepts almost anything, which is the problem: a title is the
+    one piece of this workbook visible before it is opened. Control
+    characters are stripped, whitespace collapsed, length capped, and an
+    empty result falls back to the generic default rather than creating
+    an untitled file.
+    """
+    if not raw:
+        return DEFAULT_PUBLIC_WORKBOOK_TITLE
+    cleaned = ' '.join(
+        ''.join(c for c in str(raw) if c.isprintable()).split()
+    )
+    return cleaned[:120] or DEFAULT_PUBLIC_WORKBOOK_TITLE
+
+
+def publish_new_public_workbook(args, season_year, matchup_period,
+                                client=None, publish=None):
+    """The stranger path (MLB-209): create a workbook, render into it,
+    share it, announce it.
+
+    Authorization comes from the PUBLIC profile -- `drive.file` only --
+    and the same client both creates the workbook and renders into it,
+    because under that scope no other client may open the file.
+
+    `client` / `publish` exist so the sequencing can be tested without
+    Google. Nothing here reads a configured sheet id.
+    """
+    title = safe_workbook_title(args.public_workbook_title)
+    if client is None:
+        client = sheets_auth.authorized_client(sheets_auth.PUBLIC)
+    if publish is None:
+        publish = sheets_workbook.publish_workbook
+
+    def _render(spreadsheet_id):
+        almanac_sheets.write_almanac(
+            spreadsheet_id,
+            season_year=season_year,
+            matchup_period=matchup_period,
+            client=client,
+        )
+
+    print(f"[almanac] creating a new workbook titled {title!r}")
+    result = publish(
+        client, title, _render,
+        resume=not args.new_public_workbook_force,
+    )
+    report_publish_result(result)
+    return result
+
+
+def report_publish_result(result):
+    """Print the outcome.
+
+    The share-ready line is printed for EXACTLY one state: created and
+    rendered and shared. Every other state says plainly what is missing.
+    A workbook that exists but could not be shared is still the user's,
+    so its URL is printed too -- just never under a word that claims
+    anyone else can open it.
+    """
+    if result.is_share_ready:
+        print(sheets_workbook.SHARE_READY_LINE.format(url=result.url))
+        return
+
+    if result.created and result.rendered:
+        print(
+            "[almanac] the almanac was written, but Google refused the "
+            "link-sharing step, so this workbook is NOT share-ready."
+        )
+        if result.share_error:
+            print(f"[almanac] Drive said: {result.share_error}")
+        if result.recovery:
+            print(f"[almanac] {result.recovery}")
+        print(f"[almanac] your workbook: {result.url}")
+        return
+
+    print(
+        "[almanac] the workbook was not completed, so there is nothing to "
+        "hand out yet. Re-run to resume the unfinished workbook."
     )
 
 

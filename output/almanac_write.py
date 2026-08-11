@@ -113,13 +113,20 @@ from sheets_writer import _get_authorized_client
 # below for backward compat.
 
 
-def write_almanac(sheet_id, season_year=None, matchup_period=None):
+def write_almanac(sheet_id, season_year=None, matchup_period=None, client=None):
     """Write the v1.1 almanac Home tab.
 
     If `season_year` / `matchup_period` are omitted, the latest loaded
     matchup_period is used. The Sheets writer is intentionally separate
     from `sheets_writer.write_records()` while the almanac surface is
     being built out, so the legacy records sink remains stable.
+
+    `client` (MLB-209) lets a caller supply an already-authorized gspread
+    client instead of the maintainer one. The stranger path needs this:
+    its workbook was created by the `drive.file` profile, and under that
+    scope ONLY the client that created a file may open it. Defaulting to
+    None keeps every existing caller on the maintainer profile, byte for
+    byte.
     """
     if season_year is None or matchup_period is None:
         season_year, matchup_period = get_latest_matchup_period()
@@ -188,7 +195,7 @@ def write_almanac(sheet_id, season_year=None, matchup_period=None):
     except Exception as exc:
         print(f"[almanac] Trades tab skipped -- live ESPN pull failed: {exc}")
         trades_tab_rows = None
-    client = _get_authorized_client()
+    client = client or _get_authorized_client()
     spreadsheet = client.open_by_key(sheet_id)
 
     # Two-pass write (#25). Pass 1: create/write every non-Home tab so

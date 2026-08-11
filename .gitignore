@@ -7,6 +7,13 @@ ESPN Fantasy Baseball Cookies.txt
 # Stored next to the script as .sheets_oauth_token.json; gitignored to
 # keep per-user credentials out of git.
 output/.sheets_oauth_token.json
+# MLB-209: the second OAuth profile (the published tool's drive.file
+# grant) caches separately, and the ledger of workbooks that profile
+# created holds spreadsheet ids -- which for a link-viewable book ARE the
+# capability. Both are per-user state, never committed. The OAuth client
+# JSON for either profile lives outside the repo entirely.
+output/.sheets_public_oauth_token.json
+output/.sheets_public_workbooks.json
 # Defensive: any private-key file shape, in case one ever ends up
 # inside the repo dir by accident. Keys are recommended to live in the
 # home directory (see SETUP.md key-pair auth section); these patterns

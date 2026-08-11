@@ -21,7 +21,10 @@ Auth: OAuth user-flow with desktop client (configured via the GCP project
 provisioned in Phase 6.3.1; see .env.example for the required env vars).
 First run opens a browser tab for consent; the resulting token is cached
 to output/.sheets_oauth_token.json (gitignored) and refreshed transparently
-on subsequent runs.
+on subsequent runs. The profile definitions themselves live in
+sheets_auth.py, which MLB-209 split out when a second, narrower profile
+was added for the published tool; this module stays pinned to the
+maintainer profile and its existing scope, token and open-by-id behavior.
 
 Opt-in: callers resolve the target via sheets_target.resolve_sheets_target()
 (the dev sheet by default, production with --prod) and skip this module
@@ -30,29 +33,26 @@ without the OAuth client config in place.
 """
 
 import functools
-import os
-from pathlib import Path
 
 import gspread
-from google.auth.exceptions import RefreshError
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
 
 import records as records_module
+import sheets_auth
 import stat_catalog
 from formatters import fmt_ip
 
 
-# Sheets scope is sufficient for opening a Sheet by ID and writing to its
-# tabs. Drive scope (drive.file etc.) would be needed for create/list/search
-# operations -- we don't do any of those.
-_OAUTH_SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
+# The maintainer profile: the sensitive `spreadsheets` scope, opening
+# EXISTING workbooks by id. The standing dev/prod books were created by
+# hand rather than by this app, so a narrower `drive.file` client could
+# never see them -- which is why MLB-209 added a second profile beside
+# this one instead of migrating this one. sheets_auth owns both.
+_PROFILE = sheets_auth.MAINTAINER
 
-# Cached user token. Lives next to this script (gitignored). Refresh
-# tokens stay valid until revoked; the first-run browser flow only fires
-# once unless the file is deleted.
-_TOKEN_PATH = Path(__file__).parent / '.sheets_oauth_token.json'
+# Kept as module-level names because three almanac modules and several
+# tools read them.
+_OAUTH_SCOPES = _PROFILE.scope_list
+_TOKEN_PATH = _PROFILE.token_path
 
 _HEADER = [
     'Scope', 'Grain', 'Stat', 'Direction', 'Rank',
@@ -324,47 +324,18 @@ def _replace_tab(spreadsheet, title, rows):
 
 def _run_consent_flow():
     """Open a browser for a fresh OAuth consent and return new credentials."""
-    client_path = os.getenv('GOOGLE_OAUTH_CLIENT_PATH')
-    if not client_path:
-        raise RuntimeError(
-            "GOOGLE_OAUTH_CLIENT_PATH env var not set. "
-            "Configure GCP OAuth client per the Phase 6.3.1 setup steps."
-        )
-    if not Path(client_path).exists():
-        raise RuntimeError(
-            f"OAuth client config not found at {client_path}. "
-            f"Check GOOGLE_OAUTH_CLIENT_PATH in .env."
-        )
-    flow = InstalledAppFlow.from_client_secrets_file(
-        client_path, _OAUTH_SCOPES,
-    )
-    # port=0 picks an arbitrary free port for the redirect handler.
-    return flow.run_local_server(port=0)
+    return sheets_auth.run_consent_flow(_PROFILE)
 
 
 def _get_authorized_client():
-    """Returns an authorized gspread client. First run opens a browser for
-    consent; subsequent runs use cached credentials and refresh transparently.
-    When the cached refresh token has expired or been revoked (Google expires
-    testing-mode tokens after ~7 days), fall back to a fresh consent flow
-    instead of crashing the weekly run."""
-    creds = None
-    if _TOKEN_PATH.exists():
-        creds = Credentials.from_authorized_user_file(
-            str(_TOKEN_PATH), _OAUTH_SCOPES,
-        )
+    """Returns an authorized gspread client for the MAINTAINER profile.
+    First run opens a browser for consent; subsequent runs use cached
+    credentials and refresh transparently. When the cached refresh token has
+    expired or been revoked (Google expires testing-mode tokens after ~7
+    days), fall back to a fresh consent flow instead of crashing the weekly
+    run.
 
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            try:
-                creds.refresh(Request())
-            except RefreshError:
-                # invalid_grant: refresh token expired/revoked -> re-consent
-                # rather than hard-fail the run.
-                creds = _run_consent_flow()
-        else:
-            creds = _run_consent_flow()
-        with open(_TOKEN_PATH, 'w') as f:
-            f.write(creds.to_json())
-
-    return gspread.authorize(creds)
+    Callers that need the stranger-facing `drive.file` identity ask
+    sheets_auth for it by name -- they never get it from here, and this
+    function can never reach that profile's cache."""
+    return sheets_auth.authorized_client(_PROFILE)

@@ -49,7 +49,7 @@ with per_week as (
     -- v1.1.0: is_abnormal is denormalized onto
     -- fct_team_weekly_active_performance, so the dim join is no longer
     -- needed for this filter.
-    where t.is_abnormal = false
+    where t.is_record_eligible
     group by 1, 2, 3
 )
 

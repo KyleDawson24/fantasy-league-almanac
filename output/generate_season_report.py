@@ -184,7 +184,7 @@ def get_biggest_hero(season_year):
                    (t.platform_points - t.opponent_points) AS margin
             FROM fct_team_weekly_active_performance t
             WHERE t.season_year = %s AND t.result = 'W'
-              AND t.is_abnormal = false
+              AND t.is_record_eligible
               AND {league_predicate('t')}
         ),
         ranked AS (
@@ -228,7 +228,7 @@ def get_biggest_blowout(season_year):
         SELECT matchup_period, team_name, opponent_name,
                calculated_points, opponent_calculated_points, calculated_margin
         FROM mart_team_matchup
-        WHERE season_year = %s AND is_abnormal = false AND NOT is_playoff
+        WHERE season_year = %s AND is_record_eligible AND is_playoff = false
           AND calculated_margin > 0
           AND {league_predicate()}
         ORDER BY calculated_margin DESC
@@ -250,7 +250,7 @@ def get_result_extreme(season_year, result, best):
         LEFT JOIN dim_team_owner tod
             ON t.league_key = tod.league_key
             AND t.season_year = tod.season_year AND t.team_id = tod.team_id
-        WHERE t.season_year = %s AND t.result = %s AND t.is_abnormal = false
+        WHERE t.season_year = %s AND t.result = %s AND t.is_record_eligible
           AND {league_predicate('t')}
         ORDER BY t.calculated_points {'DESC' if best else 'ASC'}
         LIMIT 1

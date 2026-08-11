@@ -228,6 +228,9 @@ def get_team_weeks(stat_specs):
             opponent_name,
             result,
             is_abnormal,
+            -- MLB-235: the gate the record/format decisions read.
+            -- is_abnormal rides along for display only.
+            is_record_eligible,
             calculated_hitting_pts,
             calculated_pitching_pts,
             calculated_points,
@@ -280,7 +283,7 @@ def get_team_week_record_marks(stat_specs):
                     {aggregate}({column}) OVER () AS record_value
                 FROM fct_team_weekly_active_performance
                 WHERE opponent_id IS NOT NULL
-                  AND is_abnormal = false
+                  AND is_record_eligible
                   AND {column} IS NOT NULL
                   AND {league_predicate()}
             )
@@ -1469,10 +1472,13 @@ def get_player_season_points(season_year):
 def _get_season_opener(season_year):
     """The season's first scoring-period date (dim_matchup_period), for
     converting a trade's execution date to an ESPN scoring period."""
-    rows = query_snowflake("""
+    rows = query_snowflake(f"""
         SELECT MIN(start_date) AS opener
         FROM dim_matchup_period
         WHERE season_year = %s
+          -- MLB-235: league-scoped dimension. Without this the opener could
+          -- come from another league's calendar entirely.
+          AND {league_predicate()}
     """, (season_year,))
     return rows[0]['opener'] if rows else None
 
@@ -1730,7 +1736,8 @@ def get_team_roster_history_stats(season_year):
                 ON d.season_year = ld.season_year
                 AND d.scoring_period = ld.scoring_period
             LEFT JOIN dim_matchup_period m
-                ON d.season_year = m.season_year
+                ON d.league_key = m.league_key
+                AND d.season_year = m.season_year
                 AND d.matchup_period = m.matchup_period
             WHERE d.team_id IS NOT NULL
               AND {league_predicate('d')}
@@ -2299,7 +2306,7 @@ def count_value_occurrences_for_scope(scope, grain, stat_name, value):
     rows = query_snowflake(f"""
         SELECT COUNT(*) AS n
         FROM {fct}
-        WHERE is_abnormal = false
+        WHERE is_record_eligible
           AND {league_predicate()}
           AND season_year = (
               SELECT MAX(season_year)
@@ -2392,13 +2399,14 @@ def get_lineup_slot_records(scope):
                 ) AS rank
             FROM fct_player_weekly_slot_performance p
             LEFT JOIN dim_matchup_period m
-                ON p.season_year = m.season_year
+                ON p.league_key = m.league_key
+                AND p.season_year = m.season_year
                 AND p.matchup_period = m.matchup_period
             INNER JOIN current_slots c
                 ON p.lineup_slot = c.lineup_slot
             WHERE p.performance_status = 'active'
               AND p.team_id IS NOT NULL
-              AND m.is_abnormal = false
+              AND m.is_record_eligible
               AND p.total_stat_pts IS NOT NULL
               AND {league_predicate('p')}
               {season_filter}
@@ -2514,7 +2522,7 @@ def get_franchise_hall_of_fame(limit=25):
     Substrate is fct_player_season_performance, the same career brick the
     per-team history tabs read (get_team_roster_history_stats' active_
     totals), so a Hall row equals that team page's number for the same
-    player. Deliberately NOT is_abnormal-filtered: the Records matrix
+    player. Deliberately NOT eligibility-filtered: the Records matrix
     filters short weeks because a PEAK mark from a 10-day week isn't
     comparable to one from a 7-day week, but a career total has no such
     problem -- every player-franchise pair is summed over the same
@@ -2664,7 +2672,7 @@ def get_wasted_hall_of_shame(limit=25):
                     AS DECIMAL(18, 6))) AS DOUBLE), 6) AS benched_hitting
             FROM fct_player_weekly_inactive_performance
             WHERE {league_predicate()}
-              AND is_abnormal = false
+              AND is_record_eligible
             GROUP BY player_id
         ),
 
@@ -2680,7 +2688,7 @@ def get_wasted_hall_of_shame(limit=25):
                     + ABS(COALESCE(calculated_hitting_pts, 0)) AS magnitude
             FROM fct_player_weekly_active_performance
             WHERE {league_predicate()}
-              AND is_abnormal = false
+              AND is_record_eligible
         ),
 
         active_parts AS (
@@ -2719,7 +2727,7 @@ def get_wasted_hall_of_shame(limit=25):
                     AS DOUBLE), 6) AS hitting_benched
             FROM fct_player_weekly_inactive_performance
             WHERE {league_predicate()}
-              AND is_abnormal = false
+              AND is_record_eligible
               AND wasted_bucket = 'ROSTERED_INACTIVE'
               AND team_id IS NOT NULL
             GROUP BY player_id, team_id
@@ -2787,13 +2795,13 @@ def get_wasted_career_total():
             SELECT ROUND(CAST(SUM(CAST(calculated_points AS DECIMAL(18, 6)))
                 AS DOUBLE), 6) AS pts
             FROM fct_player_weekly_inactive_performance
-            WHERE {league_predicate()} AND is_abnormal = false
+            WHERE {league_predicate()} AND is_record_eligible
         ),
         negative_total AS (
             SELECT ROUND(CAST(SUM(CAST(negative_points AS DECIMAL(18, 6)))
                 AS DOUBLE), 6) AS pts
             FROM fct_player_weekly_active_performance
-            WHERE {league_predicate()} AND is_abnormal = false
+            WHERE {league_predicate()} AND is_record_eligible
         )
         SELECT i.pts AS inactive_points,
                n.pts AS negative_points,

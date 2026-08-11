@@ -272,15 +272,22 @@ select
     -- source. Future: records.load_schedule_lookup() and the Python
     -- schedule_lookup dict can be dropped once all consumers migrate.
     s.is_abnormal,
+    -- MLB-235: the non-null gate. LEFT join, so an unanswered period
+    -- arrives NULL and must read FALSE -- unknown eligibility is not
+    -- ordinary, and leaving it NULL would hand the three-valued problem to
+    -- every consumer that reads fact rows directly.
+    coalesce(s.is_record_eligible, false) as is_record_eligible,
     s.is_playoff,
     s.playoff_round
 
 from active a
--- dim_matchup_period is seed-derived and (for now) unscoped: the schedule
--- seed is the ESPN league's. Platform/league scoping for the schedule
--- rides MLB-5; non-H2H leagues never reach this H2H fact anyway.
+-- MLB-235: dim_matchup_period is league-scoped and platform-derived now.
+-- Shape comes from ESPN's own matchup membership, the hand-maintained seed
+-- supplies the calendar and a fallback, and its rows are stamped espn-main
+-- so they reach no other league -- hence league_key in the join below.
 left join {{ ref('dim_matchup_period') }} s
-    on a.season_year = s.season_year
+    on a.league_key = s.league_key
+    and a.season_year = s.season_year
     and a.matchup_period = s.matchup_period
 
 {{ league_period_watermark('a') }}

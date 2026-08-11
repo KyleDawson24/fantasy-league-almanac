@@ -52,7 +52,14 @@ MODELS = [
 # Seed-derived dims carry no league_key (scoping rides MLB-4/MLB-5).
 # Everything else is league-scoped: count within the active league so the
 # baselines stay stable when a second league's rows land in the warehouse.
-_UNSCOPED_MODELS = {"dim_stat", "dim_matchup_period"}
+#
+# MLB-235 rung 4A moved dim_matchup_period OUT of this set: it is now keyed on
+# (league_key, season_year, matchup_period), so counting it unscoped would
+# grow the baseline the moment a second league lands -- which is exactly the
+# instability this scoping exists to prevent. Its espn-main count is unchanged
+# at 48, because the legacy seed still supplies every row the platform
+# derivation does not.
+_UNSCOPED_MODELS = {"dim_stat"}
 
 
 def snapshot() -> dict:

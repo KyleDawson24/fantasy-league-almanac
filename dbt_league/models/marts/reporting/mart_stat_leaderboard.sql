@@ -63,7 +63,10 @@
 -- {'all_time', 'current_season'}; record_direction in {'most', 'fewest'}.
 -- Rank 1..10 per partition.
 --
--- Excludes abnormal matchup periods via matchup_schedule.is_abnormal = false.
+-- Excludes matchup periods that are not record-eligible, via the facts'
+-- denormalized is_record_eligible (MLB-235). That gate is non-null and true
+-- only when abnormality is KNOWN and false, so an unknown period is excluded
+-- explicitly rather than dropped by three-valued logic.
 -- Ties broken by recency (newer season_year, then newer matchup_period)
 -- followed by team_id then player_id (Phase 7 B1 deterministic tiebreak).
 --
@@ -156,7 +159,7 @@ team_active_source as (
     from {{ ref('fct_team_weekly_active_performance') }} t
     -- v1.1.0: is_abnormal denormalized onto the weekly facts -- no
     -- need for the dim/seed JOIN to filter abnormal weeks.
-    where t.is_abnormal = false
+    where t.is_record_eligible
 ),
 
 -- MLB-135: negative-active for the team wasted sum, exposed as a narrow
@@ -173,7 +176,7 @@ team_negative_active as (
         team_id         as tna_team_id,
         negative_points as tna_negative_points
     from {{ ref('fct_team_weekly_active_performance') }}
-    where is_abnormal = false
+    where is_record_eligible
 ),
 
 team_inactive_source as (
@@ -233,7 +236,7 @@ team_inactive_source as (
         and ti.season_year    = tna.tna_season_year
         and ti.matchup_period = tna.tna_matchup_period
         and ti.team_id        = tna.tna_team_id
-    where ti.is_abnormal = false
+    where ti.is_record_eligible
 ),
 
 player_active_source as (
@@ -271,7 +274,7 @@ player_active_source as (
         {%- endif -%}
         {%- endfor %}
     from {{ ref('fct_player_weekly_active_performance') }} p
-    where p.is_abnormal = false
+    where p.is_record_eligible
 ),
 
 player_inactive_source as (
@@ -313,7 +316,7 @@ player_inactive_source as (
         {%- endif -%}
         {%- endfor %}
     from {{ ref('fct_player_weekly_inactive_performance') }} pi
-    where pi.is_abnormal = false
+    where pi.is_record_eligible
 ),
 
 -- MLB-135: the SAME three-term wasted definition at player grain -- and here
@@ -358,7 +361,7 @@ player_wasted_inactive_parts as (
         max(case when wasted_bucket = 'ROSTERED_INACTIVE'
                  then owner_name end)   as owner_name
     from {{ ref('fct_player_weekly_inactive_performance') }}
-    where is_abnormal = false
+    where is_record_eligible
     group by league_key, season_year, matchup_period, player_id
 ),
 
@@ -376,7 +379,7 @@ player_wasted_active_parts as (
         -- Stored as a positive magnitude upstream, so it ADDS to wasted.
         {{ stable_sum("negative_points", none) }} as negative_active_points
     from {{ ref('fct_player_weekly_active_performance') }}
-    where is_abnormal = false
+    where is_record_eligible
     group by league_key, season_year, matchup_period, player_id
 ),
 

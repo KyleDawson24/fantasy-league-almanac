@@ -320,16 +320,27 @@ with_rates as (
 
 select
     wr.*,
-    datediff('day', ms.start_date, ms.end_date) + 1 as days_in_period,
+    -- MLB-235: the platform's own scoring-period count when it has one,
+    -- and the seed's date arithmetic only as the legacy fallback. ESPN
+    -- serves no calendar, so a league with no hand-maintained schedule
+    -- still gets a day count.
+    ms.scoring_period_count as days_in_period,
     -- v1.1.0: schedule attributes denormalized onto the fact so
     -- format_week_label and is_abnormal-filter consumers can read
     -- them directly off fact rows.
     ms.is_abnormal,
+    -- MLB-235: the non-null gate. LEFT join, so an unanswered period
+    -- arrives NULL and must read FALSE -- unknown eligibility is not
+    -- ordinary, and leaving it NULL would hand the three-valued problem to
+    -- every consumer that reads fact rows directly.
+    coalesce(ms.is_record_eligible, false) as is_record_eligible,
+
     ms.is_playoff,
     ms.playoff_round
 from with_rates wr
 left join {{ ref('dim_matchup_period') }} ms
-    on wr.season_year = ms.season_year
+    on wr.league_key = ms.league_key
+    and wr.season_year = ms.season_year
     and wr.matchup_period = ms.matchup_period
 
 {{ league_period_watermark('wr') }}

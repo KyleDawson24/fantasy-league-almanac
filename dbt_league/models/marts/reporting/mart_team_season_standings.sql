@@ -62,21 +62,14 @@ matchup_scoring_days as (
     group by 1, 2, 3
 ),
 
--- The season's standard matchup length in gameplay days, derived from the
--- normal weeks only (abnormal weeks would skew the mode's neighborhood;
--- playoff weeks are out of scope for a standings entirely).
+-- MLB-235: the season's standard matchup length now has ONE owner.
+-- int_matchup_season_standard resolves platform-derived first with the legacy
+-- recomputation as the compatibility fallback, over a key universe built from
+-- both -- so a league-season with a derived standard and no fallback row
+-- keeps its standard instead of vanishing. This mart no longer recomputes it.
 season_standard_days as (
-    select
-        sd.league_key,
-        sd.season_year,
-        mode(sd.scoring_days) as standard_matchup_days
-    from matchup_scoring_days sd
-    inner join {{ ref('dim_matchup_period') }} mp
-        on sd.season_year = mp.season_year
-        and sd.matchup_period = mp.matchup_period
-    where not mp.is_abnormal
-      and not mp.is_playoff
-    group by 1, 2
+    select league_key, season_year, standard_matchup_days
+    from {{ ref('int_matchup_season_standard') }}
 ),
 
 team_season as (

@@ -2358,7 +2358,11 @@ def _apply_team_weeks_record_formats(spreadsheet, worksheet, stat_specs,
         if not mark or _is_zeroish(mark.get('value')):
             continue
         for source_index, source_row in enumerate(source_rows):
-            if source_row.get('is_abnormal'):
+            # MLB-235: an unknown period must not be marked as a
+            # record holder. `is_abnormal` is None when nothing can
+            # say, and `if None` is falsy -- so the old test let
+            # unknown through as though it were ordinary.
+            if not source_row.get('is_record_eligible'):
                 continue
             if not _numeric_values_equal(source_row.get(_fact_stat_column_name(spec.get('stat_name'))), mark.get('value')):
                 continue
@@ -2383,7 +2387,9 @@ def _team_weeks_standard_data_ranges(sheet_id, row_count, source_rows=None):
     start = None
     for source_index, source_row in enumerate(source_rows):
         row_index = source_index + 1
-        is_standard = not source_row.get('is_abnormal')
+        # MLB-235: `not None` is True, so the old expression shaded
+        # unknown periods as standard. The gate is non-null.
+        is_standard = bool(source_row.get('is_record_eligible'))
         if is_standard and start is None:
             start = row_index
         elif not is_standard and start is not None:

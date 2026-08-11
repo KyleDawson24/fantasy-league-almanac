@@ -399,10 +399,15 @@ models:
       scoring_days_played counts gameplay days (COUNT DISTINCT
       scoring_period per matchup, summed), not calendar days -- the
       14-calendar-day All-Star week contributes only its days with MLB
-      games. standard_matchup_days is the modal gameplay-day count across
-      the season's normal regular-season weeks (7 here; a 2-week-matchup
-      league would derive 14), so "per-week" = value * standard_matchup_days
-      / scoring_days_played with no hardcoded 7.
+      games. standard_matchup_days is DERIVED-FIRST (MLB-235): the platform's
+      own standard period length from ESPN's captured matchup membership when
+      the league-season has one, with the legacy modal gameplay-day
+      recomputation surviving as the compatibility fallback for an
+      installation that has only the seed and dates. Resolved once in
+      int_matchup_season_standard over a key universe built from both, so
+      neither source is a prerequisite for the other. 7 here; a
+      2-week-matchup league derives 14. "Per-week" = value *
+      standard_matchup_days / scoring_days_played with no hardcoded 7.
 
       Materialization: table -- float score sums feed the almanac
       byte-diff goldens (same determinism rationale as mart_team_matchup).

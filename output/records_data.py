@@ -357,7 +357,7 @@ def league_history_count(grain, stat_name, value, op='='):
     rows = query_snowflake(f"""
         SELECT COUNT(*) AS n
         FROM {fct} f
-        WHERE f.is_abnormal = false
+        WHERE f.is_record_eligible
           AND {league_predicate('f')}
           AND ({col_expr}) {op} %s
     """, (value,))
@@ -379,9 +379,13 @@ def load_schedule_lookup():
     (e.g., historical-record iterators in generate_records_report.py).
     Deletion candidate once all callers migrate.
     """
-    rows = query_snowflake("""
+    rows = query_snowflake(f"""
         SELECT season_year, matchup_period, is_playoff, playoff_round
         FROM dim_matchup_period
+        -- MLB-235: the dimension is keyed on league now, so an unscoped read
+        -- would collapse two leagues' periods onto one (season, period) key
+        -- and let whichever row arrived last win.
+        WHERE {league_predicate()}
     """)
     return {
         (r['season_year'], r['matchup_period']): {

@@ -157,9 +157,10 @@ def mismatch(ctx):
           SELECT ABS(t.platform_points - t.opponent_points) AS m
           FROM fct_team_weekly_active_performance t
           JOIN dim_matchup_period s
-            ON t.season_year = s.season_year
+            ON t.league_key = s.league_key
+           AND t.season_year = s.season_year
            AND t.matchup_period = s.matchup_period
-          WHERE s.is_abnormal = false
+          WHERE s.is_record_eligible
             AND t.opponent_id IS NOT NULL
             AND t.team_id < t.opponent_id
             AND {records.league_predicate('t')}
@@ -259,9 +260,10 @@ def hero(ctx):
                  (t.platform_points - t.opponent_points) AS margin
           FROM fct_team_weekly_active_performance t
           JOIN dim_matchup_period s
-            ON t.season_year = s.season_year
+            ON t.league_key = s.league_key
+           AND t.season_year = s.season_year
            AND t.matchup_period = s.matchup_period
-          WHERE t.result = 'W' AND s.is_abnormal = false
+          WHERE t.result = 'W' AND s.is_record_eligible
             AND {records.league_predicate('t')}
         ),
         ranked AS (
@@ -379,9 +381,10 @@ def scapegoat_net_negative(ctx):
                  (t.opponent_points - t.platform_points) AS margin
           FROM fct_team_weekly_active_performance t
           JOIN dim_matchup_period s
-            ON t.season_year = s.season_year
+            ON t.league_key = s.league_key
+           AND t.season_year = s.season_year
            AND t.matchup_period = s.matchup_period
-          WHERE t.result = 'L' AND s.is_abnormal = false
+          WHERE t.result = 'L' AND s.is_record_eligible
             AND {records.league_predicate('t')}
         )
         SELECT COUNT(*) AS n
@@ -456,9 +459,10 @@ def scapegoat_gross_negative(ctx):
                  (t.opponent_points - t.platform_points) AS margin
           FROM fct_team_weekly_active_performance t
           JOIN dim_matchup_period s
-            ON t.season_year = s.season_year
+            ON t.league_key = s.league_key
+           AND t.season_year = s.season_year
            AND t.matchup_period = s.matchup_period
-          WHERE t.result = 'L' AND s.is_abnormal = false
+          WHERE t.result = 'L' AND s.is_record_eligible
             AND {records.league_predicate('t')}
         )
         SELECT COUNT(*) AS n
@@ -656,9 +660,10 @@ def no_negative_days(ctx):
             COUNT(DISTINCT CASE WHEN d.games_played >= 1 THEN d.player_id END) AS fielded
           FROM fct_player_daily_performance d
           JOIN dim_matchup_period s
-            ON d.season_year = s.season_year
+            ON d.league_key = s.league_key
+           AND d.season_year = s.season_year
            AND d.matchup_period = s.matchup_period
-          WHERE s.is_abnormal = false
+          WHERE s.is_record_eligible
             AND d.is_active_slot = true
             AND {records.league_predicate('d')}
           GROUP BY 1, 2, 3
@@ -733,9 +738,10 @@ def baseblunders(ctx):
           SUM(CASE WHEN t.cs >= 1 AND t.sb = 0 THEN 1 ELSE 0 END) AS zero_sb_n
         FROM fct_team_weekly_active_performance t
         JOIN dim_matchup_period s
-          ON t.season_year = s.season_year
+          ON t.league_key = s.league_key
+         AND t.season_year = s.season_year
          AND t.matchup_period = s.matchup_period
-        WHERE s.is_abnormal = false
+        WHERE s.is_record_eligible
           AND {records.league_predicate('t')}
     """)[0]
     n_today         = len(teams)
@@ -818,13 +824,14 @@ def no_quality_starts(ctx):
         SELECT COUNT(*) AS n
         FROM fct_team_weekly_active_performance t
         JOIN dim_matchup_period s
-            ON t.season_year = s.season_year
+            ON t.league_key = s.league_key
+           AND t.season_year = s.season_year
            AND t.matchup_period = s.matchup_period
         JOIN team_mp_starts tms
             ON t.season_year = tms.season_year
            AND t.matchup_period = tms.matchup_period
            AND t.team_id = tms.team_id
-        WHERE s.is_abnormal = false
+        WHERE s.is_record_eligible
           AND tms.sp_starts >= 1
           AND t.qs = 0
           AND {records.league_predicate('t')}

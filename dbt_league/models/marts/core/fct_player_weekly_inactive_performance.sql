@@ -229,12 +229,18 @@ select
     -- v1.1.0: schedule attributes denormalized onto the fact. See
     -- fct_player_weekly_active_performance for the convention rationale.
     s.is_abnormal,
+    -- MLB-235: the non-null gate. LEFT join, so an unanswered period
+    -- arrives NULL and must read FALSE -- unknown eligibility is not
+    -- ordinary, and leaving it NULL would hand the three-valued problem to
+    -- every consumer that reads fact rows directly.
+    coalesce(s.is_record_eligible, false) as is_record_eligible,
     s.is_playoff,
     s.playoff_round
 
 from inactive i
 left join {{ ref('dim_matchup_period') }} s
-    on i.season_year = s.season_year
+    on i.league_key = s.league_key
+    and i.season_year = s.season_year
     and i.matchup_period = s.matchup_period
 
 {{ league_period_watermark('i') }}

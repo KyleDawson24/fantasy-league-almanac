@@ -34,10 +34,14 @@ with slot_weeks as (
     select p.*
     from {{ ref('fct_player_weekly_slot_performance') }} p
     inner join {{ ref('dim_matchup_period') }} mp
-        on p.season_year = mp.season_year
+        on p.league_key = mp.league_key
+        and p.season_year = mp.season_year
         and p.matchup_period = mp.matchup_period
     where p.team_id is not null
-      and not mp.is_playoff
+      -- Playoff-only filter, unchanged in meaning: this model never tested
+      -- abnormality. Spelled as an explicit false so an unknown flag fails
+      -- closed rather than passing through `not NULL`.
+      and mp.is_playoff = false
 ),
 
 team_slot as (

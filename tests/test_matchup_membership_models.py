@@ -294,7 +294,13 @@ def built(tmp_path_factory):
     """)
     con.close()
 
-    result = _run_dbt(["build", "--select", "stg_matchup_schedule+"], db_path)
+    # dim_matchup_period is a descendant but belongs to rung 4A's contract and
+    # needs the calendar + override SEEDS, which this fixture deliberately
+    # does not carry: these tests are about the derivation, not about how a
+    # consumer resolves it against manual decisions. It has its own build in
+    # tests/test_dim_matchup_period_contract.py.
+    result = _run_dbt(["build", "--select", "stg_matchup_schedule+",
+                       "--exclude", "dim_matchup_period+"], db_path)
     if result.returncode != 0:
         pytest.fail("dbt build over an EMPTY RAW.MATCHUP_SCHEDULE failed, so "
                     "present-but-empty is not a supported state:\n"

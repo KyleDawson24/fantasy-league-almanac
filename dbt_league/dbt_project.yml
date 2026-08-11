@@ -112,6 +112,20 @@ seeds:
         part_role: varchar
         order_tier: varchar
         note: varchar
+    # MLB-235 rung 4A. GENUINELY SPARSE: absence of a row means "use the
+    # platform derivation", so an ordinary period must NOT appear here. It
+    # exists for the commissioner-declared oddity whose scoring-period length
+    # is normal -- the one class derivation structurally cannot see, because
+    # nothing about the membership is unusual. Types are declared because the
+    # file is empty on a fresh install and an empty CSV has nothing to infer
+    # from.
+    matchup_period_overrides:
+      +column_types:
+        league_key: varchar
+        season_year: integer
+        matchup_period: integer
+        is_abnormal: boolean
+        abnormal_reason: varchar
     matchup_schedule:
       +column_types:
         season_year: integer

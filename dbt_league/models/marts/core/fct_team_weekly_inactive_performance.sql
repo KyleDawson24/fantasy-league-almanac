@@ -174,9 +174,15 @@ select
     -- consumer-side filter/label use. See fct_weekly_team_active for
     -- the convention rationale.
     s.is_abnormal,
+    -- MLB-235: the non-null gate. LEFT join, so an unanswered period
+    -- arrives NULL and must read FALSE -- unknown eligibility is not
+    -- ordinary, and leaving it NULL would hand the three-valued problem to
+    -- every consumer that reads fact rows directly.
+    coalesce(s.is_record_eligible, false) as is_record_eligible,
     s.is_playoff,
     s.playoff_round
 from team_rollup tr
 left join {{ ref('dim_matchup_period') }} s
-    on tr.season_year = s.season_year
+    on tr.league_key = s.league_key
+    and tr.season_year = s.season_year
     and tr.matchup_period = s.matchup_period

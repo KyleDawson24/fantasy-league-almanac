@@ -125,21 +125,55 @@ models:
 
   - name: dim_matchup_period
     description: >
-      Consumer-facing dimension for matchup-period calendar metadata.
-      Thin view over the matchup_schedule seed; gives output scripts
-      and external readers a stable contract layer.
+      Consumer-facing matchup-period contract, LEAGUE-SCOPED (MLB-235 rung
+      4A). The roadmapped calendar automation this model's note anticipated
+      has now landed: platform derivation owns membership, scoring-period
+      count and abnormality whenever it produces a verdict, a sparse
+      overrides seed carries manual decisions, and the hand-maintained
+      matchup_schedule seed is demoted to what only it can still answer --
+      the calendar, plus a fallback for periods the platform has not reached.
 
-      v1.1.0 DAG cleanup. Calendar-automation work (roadmapped) will
-      replace the hand-maintained seed with an extract-driven raw
-      table plus a thin overrides seed; once that lands, this dim
-      re-points at the new sources without consumer changes.
+      Resolution order is explicit override > derived verdict > espn-main
+      legacy seed > unknown. The seed's rows carry no league_key because they
+      predate the registry; they belong to espn-main, and are stamped with it
+      here so they reach no other league.
+
+      UNKNOWN IS NOT NORMAL: is_abnormal stays NULL when nothing can answer,
+      and is_record_eligible is the non-null gate consumers filter on.
     tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns:
+              - league_key
               - season_year
               - matchup_period
     columns:
+      - name: league_key
+        description: >
+          League registry key. NEW in MLB-235 rung 4A -- this dimension
+          previously carried no league at all, so espn-main's calendar joined
+          to any league sharing a season and period number.
+        tests:
+          - not_null
+      - name: is_record_eligible
+        description: >
+          Non-null consumer gate, defined exactly as
+          coalesce(is_abnormal = false, false) -- true only when abnormality
+          is KNOWN and false. Replaces the NULL-unsafe `is_abnormal = false`
+          filters, which silently dropped unknown rows. Concerns abnormality
+          ONLY: consumers excluding playoffs keep a separate predicate.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [true, false]
+      - name: effective_source
+        description: 'override | derived | legacy_seed | unknown -- which input produced is_abnormal.'
+      - name: scoring_period_count
+        description: >
+          Platform-derived count when available, else the legacy
+          datediff(start_date, end_date) + 1. A league with no calendar still
+          gets a count.
       - name: season_year
         description: 'MLB season year.'
         tests:
@@ -153,17 +187,35 @@ models:
       - name: end_date
         description: 'Last MLB scoring period day in this matchup_period.'
       - name: is_abnormal
-        description: 'Excluded from records (All-Star break, weather-shortened weeks, etc.).'
-        tests:
-          - not_null
+        description: >
+          Effective abnormality: override, else platform derivation, else the
+          espn-main legacy seed. INTENTIONALLY NULLABLE (MLB-235 rung 4A) --
+          NULL is "unknown", which is a real state now that derivation
+          declines for in-flight periods, malformed payloads and seasons
+          below the evidence floor. The old not_null declaration described a
+          world where a hand-maintained seed answered for every period.
+          Decision points must read is_record_eligible, which is non-null and
+          fails closed; this field stays for description and display.
       - name: abnormal_reason
-        description: 'Free-text explanation when is_abnormal=true.'
+        description: >
+          Free-text explanation, carried only when the effective verdict is
+          abnormal and taken from the source that produced it. A period the
+          platform has since called ordinary does not keep the seed's note.
       - name: is_playoff
-        description: 'True for playoff weeks. Drives playoff_round substitution in format_week_label().'
-        tests:
-          - not_null
+        description: >
+          Captured regular-season boundary when the league has settings, else
+          the espn-main legacy seed. NULLABLE for the same reason as
+          is_abnormal: a league with neither settings nor a legacy row has no
+          proven playoff status, and inventing false to preserve a stale
+          not_null test would silently admit unknown periods to
+          playoff-excluding consumers. Those consumers spell the predicate
+          `is_playoff = false`, which fails closed on NULL of its own accord.
+          Never inferred from an abnormal length.
       - name: playoff_round
-        description: '"Round 1" / "Semi-Finals" / "Finals" when is_playoff=true; NULL otherwise.'
+        description: >
+          The explicit legacy label when one exists ("Semi-Finals", "Finals"),
+          else a generic "Round N" where only the platform boundary is known.
+          NULL when the period is not a playoff or nothing can say.
 
   - name: dim_roster_slot_counts
     description: >
@@ -542,6 +594,21 @@ models:
               - team_id
               - player_id
     columns:
+      - name: is_record_eligible
+        description: >
+          NON-NULL eligibility gate (MLB-235 rung 4A), denormalized from
+          dim_matchup_period: true only when the matchup period's abnormality
+          is KNOWN and false. Based on matchup-period SHAPE only -- playoff
+          filtering is a separate, explicit predicate and is deliberately not
+          folded in. This is a LEFT join, so a period the dimension cannot
+          answer for arrives NULL and is coalesced to false here: unknown
+          shape is not ordinary. Decision points filter on this; is_abnormal
+          remains for description and display.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [true, false]
       - name: league_key
         description: 'League registry key. Part of the grain and the incremental merge key.'
         tests:
@@ -763,6 +830,21 @@ models:
               - player_id
               - wasted_bucket
     columns:
+      - name: is_record_eligible
+        description: >
+          NON-NULL eligibility gate (MLB-235 rung 4A), denormalized from
+          dim_matchup_period: true only when the matchup period's abnormality
+          is KNOWN and false. Based on matchup-period SHAPE only -- playoff
+          filtering is a separate, explicit predicate and is deliberately not
+          folded in. This is a LEFT join, so a period the dimension cannot
+          answer for arrives NULL and is coalesced to false here: unknown
+          shape is not ordinary. Decision points filter on this; is_abnormal
+          remains for description and display.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [true, false]
       - name: league_key
         description: 'League registry key. Part of the grain and the incremental merge key.'
         tests:
@@ -819,6 +901,21 @@ models:
               - matchup_period
               - team_id
     columns:
+      - name: is_record_eligible
+        description: >
+          NON-NULL eligibility gate (MLB-235 rung 4A), denormalized from
+          dim_matchup_period: true only when the matchup period's abnormality
+          is KNOWN and false. Based on matchup-period SHAPE only -- playoff
+          filtering is a separate, explicit predicate and is deliberately not
+          folded in. This is a LEFT join, so a period the dimension cannot
+          answer for arrives NULL and is coalesced to false here: unknown
+          shape is not ordinary. Decision points filter on this; is_abnormal
+          remains for description and display.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [true, false]
       - name: league_key
         description: 'League registry key. Part of the grain and the incremental merge key.'
         tests:
@@ -1060,6 +1157,21 @@ models:
               - team_id
               - wasted_bucket
     columns:
+      - name: is_record_eligible
+        description: >
+          NON-NULL eligibility gate (MLB-235 rung 4A), denormalized from
+          dim_matchup_period: true only when the matchup period's abnormality
+          is KNOWN and false. Based on matchup-period SHAPE only -- playoff
+          filtering is a separate, explicit predicate and is deliberately not
+          folded in. This is a LEFT join, so a period the dimension cannot
+          answer for arrives NULL and is coalesced to false here: unknown
+          shape is not ordinary. Decision points filter on this; is_abnormal
+          remains for description and display.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [true, false]
       - name: league_key
         description: 'League registry key. Part of the grain.'
         tests:

@@ -224,6 +224,58 @@ unnest(map_values(cast({{ expr }} as map(varchar, varchar))))
 {%- endmacro %}
 
 
+{% macro json_array_length(expr) -%}
+{#- "how many elements does this JSON ARRAY have" (MLB-235).
+
+    NOT array_length(). That macro is Snowflake ARRAY_SIZE / DuckDB LEN, and
+    LEN over a JSON value does not fail -- it casts to VARCHAR and returns the
+    STRING length. Measured: len('[1,2,3]'::json) = 7, the character count,
+    where the answer is 3. A silent wrong number, which is why this is its
+    own macro rather than a call site reusing the array one.
+
+    Verified on both engines:
+      [1,2,3] -> 3 / 3      [] -> 0 / 0      NULL -> NULL / NULL
+
+    ONE DIVERGENCE, on a shape that cannot reach here: a JSON OBJECT returns
+    NULL on Snowflake and 0 on DuckDB. The capture refuses a payload whose
+    `schedule` is not a list (matchup_schedule_snapshot), so the only caller
+    can never be handed one -- recorded because it is invisible, not because
+    it bites. -#}
+    {{ return(adapter.dispatch('json_array_length', 'dbt_league')(expr)) }}
+{%- endmacro %}
+
+{% macro default__json_array_length(expr) -%}
+array_size({{ expr }})
+{%- endmacro %}
+
+{% macro duckdb__json_array_length(expr) -%}
+json_array_length({{ expr }})
+{%- endmacro %}
+
+
+{% macro flatten_native_array(expr, alias) -%}
+{#- flatten_array's twin for a NATIVE array column -- the output of
+    array_agg, not a JSON document (MLB-235). Both expose `.value`, so a call
+    site reads the same either way.
+
+    The distinction is not cosmetic: flatten_array's DuckDB spelling is
+    `cast(x as json[])`, which raises on a native LIST. Verified on both
+    engines, same three cases -- a 3-element array yields its elements, and
+    an EMPTY array and a NULL array both yield zero rows rather than one NULL
+    row. That last property is what lets a caller left-join without
+    inventing membership for a period that has none. -#}
+    {{ return(adapter.dispatch('flatten_native_array', 'dbt_league')(expr, alias)) }}
+{%- endmacro %}
+
+{% macro default__flatten_native_array(expr, alias) -%}
+lateral flatten(input => {{ expr }}) {{ alias }}
+{%- endmacro %}
+
+{% macro duckdb__flatten_native_array(expr, alias) -%}
+unnest({{ expr }}) as {{ alias }}(value)
+{%- endmacro %}
+
+
 {% macro json_get(expr) -%}
 {#- Sub-document access: the value STAYS JSON, for feeding a flatten or a
     further path step. Snowflake `x:a:b`, DuckDB `x->'a'->'b'`. -#}

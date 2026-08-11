@@ -1180,3 +1180,55 @@ models:
         description: 'The verbatim points value as the rules feed lists it (3/inning for INN).'
         tests:
           - not_null
+
+  - name: stg_matchup_schedule
+    description: >
+      Latest captured mMatchupScore snapshot per league-season (MLB-235) --
+      the platform-owned answer to which scoring periods each matchup period
+      contains, selected but not yet interpreted. The schedule array passes
+      through as JSON; int_matchup_period_evidence reads it. Snapshot choice
+      uses the established total order (extracted_at desc, hash(raw_json)
+      desc), which matters more here than for its neighbours because
+      membership is RETROSPECTIVE: two snapshots of one season genuinely
+      differ, the later having closed a period the earlier had in flight.
+      Capture is opt-in, so PRESENT-AND-EMPTY is a supported state and yields
+      zero rows here and everywhere downstream.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - season_year
+    columns:
+      - name: league_key
+        description: League registry key (config/leagues.yml), stamped into RAW at extract time.
+        tests:
+          - not_null
+      - name: season_year
+        description: >
+          Season the LOADER filed this row under. declared_season_year is
+          ESPN's own answer; the two disagreeing is malformed.
+        tests:
+          - not_null
+      - name: declared_season_year
+        description: >
+          ESPN's seasonId from the captured payload -- the only season label
+          on the row this project did not stamp itself.
+      - name: current_matchup_period
+        description: >
+          status.currentMatchupPeriod. The closed-period policy in one number:
+          only periods strictly below it are eligible, because the period in
+          flight is still filling in and reads short. NULL when the payload
+          held something unreadable, which fails the season closed.
+      - name: schedule
+        description: >
+          The verbatim schedule array, still JSON. Interpreted by
+          int_matchup_period_evidence.
+      - name: scheduled_matchup_count
+        description: >
+          Number of ENTRIES in the schedule array, not periods -- one matchup
+          period holds several matchups. Reconciled downstream against the
+          entries that could actually be read, which is how an unreadable
+          matchupPeriodId is caught instead of silently shortening a season.
+      - name: captured_at
+        description: extracted_at of the winning snapshot.

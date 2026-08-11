@@ -688,3 +688,199 @@ models:
           different order. SQL guarantees no order without an order by.
         tests:
           - not_null
+
+  - name: int_matchup_period_evidence
+    description: >
+      What ESPN's payload says about each matchup period before any statistic
+      is computed over it (MLB-235) -- the ONLY model that flattens the
+      schedule, so the rule for which scoring periods a period contains is
+      written once. One row per readable matchup period, closed and open
+      alike. Closed periods are shape-checked (every participating side must
+      expose the same pointsByScoringPeriod key set, byes excepted); open ones
+      deliberately are not, matching the pure parser, which skips a period it
+      is not going to classify. The SQL twin of
+      extract/matchup_membership.py parse_matchup_membership, asserted against
+      it in tests/test_matchup_membership_models.py.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - season_year
+              - matchup_period
+    columns:
+      - name: league_key
+        description: League registry key.
+        tests:
+          - not_null
+      - name: season_year
+        description: Season the row was filed under.
+        tests:
+          - not_null
+      - name: matchup_period
+        description: >
+          ESPN's own matchupPeriodId. An entry whose id was unreadable
+          produces no row and is caught by the season model's entry
+          reconciliation.
+        tests:
+          - not_null
+      - name: is_closed
+        description: >
+          matchup_period < current_matchup_period. Structural, not
+          calendar-based.
+      - name: is_well_formed
+        description: >
+          Closed periods only (NULL for open ones, which are not checked).
+          False when a participating side carried no usable membership, when
+          sides disagreed about the key set, or when a key was not an ASCII
+          1..6-digit scoring-period id.
+      - name: scoring_period_count
+        description: >
+          Published only for a well-formed period -- a count over contested
+          evidence is a number about the disagreement.
+      - name: scoring_periods
+        description: >
+          The agreed key set as a sorted array, published only for a
+          well-formed period. int_matchup_period_membership expands it.
+      - name: participating_sides
+        description: >
+          Sides really present. A bye (absent or JSON-null side) is not a
+          missing side and does not fail the period.
+
+  - name: int_matchup_season_derivation
+    description: >
+      Can this season's matchup lengths be derived, and if so what is normal
+      (MLB-235). One row per league-season PRESENT IN RAW and never one more:
+      unavailable is a statement about the league (ESPN served an empty
+      schedule), so a season nobody captured has no row rather than a
+      fabricated verdict. Inverts the dependency mart_team_season_standings
+      has backwards today -- the mode is taken over EVERY eligible closed
+      period, with no reference to the hand-maintained is_abnormal seed.
+      Fails closed twice over: below the closed-period floor, and on a tied
+      modal length.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - season_year
+    columns:
+      - name: league_key
+        description: League registry key.
+        tests:
+          - not_null
+      - name: season_year
+        description: Season the row was filed under.
+        tests:
+          - not_null
+      - name: derivation_status
+        description: >
+          derived | insufficient_evidence | ambiguous_standard_length |
+          unavailable | malformed. Everything except derived means classify
+          nothing from this season.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - derived
+                  - insufficient_evidence
+                  - ambiguous_standard_length
+                  - unavailable
+                  - malformed
+      - name: standard_period_length
+        description: >
+          The modal scoring-period count over every eligible closed period.
+          NULL unless the status is derived -- NULL is the absence of a norm,
+          not a guess of seven.
+      - name: closed_period_count
+        description: >
+          Eligible closed periods in evidence. Below
+          min_closed_periods_required the season refuses to establish a
+          standard.
+      - name: malformed_period_count
+        description: >
+          Closed periods whose own evidence failed. Any of these makes the
+          whole season malformed, matching the pure parser, which raises on
+          the first one.
+
+  - name: int_matchup_period_shape
+    description: >
+      How long each closed matchup period was and whether that is abnormal for
+      its season (MLB-235) -- the point of the ticket in one column, computed
+      from ESPN's membership with no reference to the matchup_schedule seed.
+      A malformed season contributes no rows at all; an insufficient or
+      ambiguous one contributes rows whose is_abnormal_derived is NULL,
+      because their lengths are known facts and only the norm is missing.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - season_year
+              - matchup_period
+    columns:
+      - name: league_key
+        description: League registry key.
+        tests:
+          - not_null
+      - name: season_year
+        description: Season the row was filed under.
+        tests:
+          - not_null
+      - name: matchup_period
+        description: ESPN's own matchupPeriodId.
+        tests:
+          - not_null
+      - name: is_abnormal_derived
+        description: >
+          scoring_period_count <> standard_period_length, derived from the
+          platform payload. NULL -- never false -- when the season established
+          no standard. Nine downstream is_abnormal filter sites are
+          NULL-unsafe today (MLB-222), so this is not safe to hand them until
+          rung 4 decides the fallback; nothing consumes it yet.
+      - name: derivation_status
+        description: >
+          The season's status, carried so a consumer reading one row knows
+          whether to trust it without a second join.
+
+  - name: int_matchup_period_membership
+    description: >
+      Which scoring periods belong to which matchup period, according to ESPN
+      (MLB-235) -- the non-circular answer to the question the
+      matchup_schedule seed answers today. Every value came from the KEYS of
+      schedule[].home/away.pointsByScoringPeriod; no step between RAW and here
+      reads a seed, a date, or a matchup_period the extract stamped. Excludes
+      the in-flight period, any period whose sides disagreed, and every period
+      of a malformed season. Carries no team, owner or franchise identity:
+      which days a period contains is a property of the schedule, and the
+      sides are read only to prove they agree about it. Scoring-period IDS
+      only -- ESPN serves no calendar here, so dim_matchup_period's dates
+      still come from the seed.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - season_year
+              - matchup_period
+              - scoring_period
+    columns:
+      - name: league_key
+        description: League registry key.
+        tests:
+          - not_null
+      - name: season_year
+        description: Season the row was filed under.
+        tests:
+          - not_null
+      - name: matchup_period
+        description: ESPN's own matchupPeriodId.
+        tests:
+          - not_null
+      - name: scoring_period
+        description: >
+          A scoring period belonging to that matchup period. Zero-point days
+          are retained -- membership is the key set, never the values.
+        tests:
+          - not_null

@@ -16,10 +16,27 @@
 --
 -- THE CLOSED-PERIOD POLICY is structural, not calendar-based: a period is
 -- eligible only when its id is strictly below status.currentMatchupPeriod.
--- Periods at or after the current one are carried with is_closed = false and
--- are NOT shape-checked, exactly as the Python parser skips them -- an
--- unplayed period is shaped like an unplayed period, and refusing a season
--- over one would be a bug rather than a guard.
+-- Periods after the current one are carried with is_closed = false and are
+-- NOT shape-checked, exactly as the Python parser skips them -- an unplayed
+-- period is shaped like an unplayed period, and refusing a season over one
+-- would be a bug rather than a guard.
+--
+-- THE COMPLETION EXCEPTION. A finished season pins currentMatchupPeriod ON
+-- its final period rather than past it (2025 came back 26 of 26), so the
+-- strict rule alone discards the last completed week of every finished
+-- season. The period EQUAL to currentMatchupPeriod is promoted, but only on
+-- three proofs together: the season is over (latestScoringPeriod STRICTLY
+-- greater than finalScoringPeriod, computed in staging), the period is
+-- well-formed by the same side-agreement rules as any other, and its agreed
+-- membership ENDS at finalScoringPeriod. A period claiming to close a season
+-- it does not reach the end of is not the closing period, whatever the status
+-- block says.
+--
+-- Any proof failing falls back to the strict policy: the period is excluded
+-- and every earlier period stands, because those were never in question.
+-- That is why the candidate's shape failure demotes it rather than making the
+-- season malformed -- refusing to promote costs one period, refusing the
+-- season discards twenty-five.
 --
 -- MEMBERSHIP IS THE KEY SET, NEVER THE VALUES. Nothing here reads a point
 -- total, so a scoring period on which a team scored exactly zero stays in the
@@ -59,6 +76,8 @@ with entries as (
         s.league_key,
         s.season_year,
         s.current_matchup_period,
+        s.season_is_complete,
+        s.final_scoring_period,
 
         -- NULL when the id is unreadable or not 1-based. Such an entry drops
         -- out of every CTE below, and the season model catches the loss by
@@ -93,24 +112,34 @@ periods as (
         league_key,
         season_year,
         current_matchup_period,
+        season_is_complete,
+        final_scoring_period,
         matchup_period,
-        matchup_period < current_matchup_period as is_closed,
+        -- The period that MAY close a completed season. Whether it actually
+        -- does is decided below, after its shape and endpoint are known.
+        (season_is_complete and matchup_period = current_matchup_period)
+            as is_completion_candidate,
         count(*) as matchup_count
     from readable
-    group by 1, 2, 3, 4, 5
+    group by 1, 2, 3, 4, 5, 6, 7
 ),
 
--- Only CLOSED periods are shape-checked, matching the pure parser.
+-- Shape-checked: every period strictly below the current one, plus the
+-- completion candidate. Nothing else -- an unplayed period is not evidence.
 sides as (
     select league_key, season_year, matchup_period,
            home_text as side_text, home_side as side
     from readable
-    where matchup_period < current_matchup_period and home_text is not null
+    where (matchup_period < current_matchup_period
+           or (season_is_complete and matchup_period = current_matchup_period))
+      and home_text is not null
     union all
     select league_key, season_year, matchup_period,
            away_text as side_text, away_side as side
     from readable
-    where matchup_period < current_matchup_period and away_text is not null
+    where (matchup_period < current_matchup_period
+           or (season_is_complete and matchup_period = current_matchup_period))
+      and away_text is not null
 ),
 
 participating as (
@@ -148,6 +177,7 @@ side_membership as (
         league_key, season_year, matchup_period, side_text,
         count(*) as key_count,
         count(scoring_period) as valid_key_count,
+        max(scoring_period) as max_scoring_period,
         {{ listagg_ordered('cast(scoring_period as varchar)', ',', 'scoring_period') }}
             as key_signature
     from side_keys
@@ -163,7 +193,11 @@ period_membership as (
         -- rows on both engines. That difference IS the partial-period test.
         count(*) as sides_with_membership,
         count(distinct key_signature) as distinct_signatures,
-        sum(key_count - valid_key_count) as invalid_key_count
+        sum(key_count - valid_key_count) as invalid_key_count,
+        -- The endpoint proof for the completion candidate: the agreed
+        -- membership has to reach finalScoringPeriod, or this is not the
+        -- period the season ended on.
+        max(max_scoring_period) as max_scoring_period
     from side_membership
     group by 1, 2, 3
 ),
@@ -186,19 +220,24 @@ verdict as (
         p.season_year,
         p.current_matchup_period,
         p.matchup_period,
-        p.is_closed,
+        p.is_completion_candidate,
+        p.final_scoring_period,
         p.matchup_count,
         coalesce(pt.participating_sides, 0) as participating_sides,
         coalesce(pm.sides_with_membership, 0) as sides_with_membership,
         coalesce(pm.distinct_signatures, 0) as distinct_signatures,
         coalesce(pm.invalid_key_count, 0) as invalid_key_count,
+        pm.max_scoring_period,
         ak.scoring_periods,
-        case when p.is_closed then
+        -- Shape alone, computed for everything that was checked. Eligibility
+        -- is decided from it below, because the candidate's eligibility
+        -- DEPENDS on its shape while a sub-current period's does not.
+        (
             coalesce(pt.participating_sides, 0) >= 1
             and coalesce(pm.sides_with_membership, 0) = coalesce(pt.participating_sides, 0)
             and coalesce(pm.distinct_signatures, 0) = 1
             and coalesce(pm.invalid_key_count, 0) = 0
-        end as is_well_formed
+        ) as shape_ok
     from periods p
     left join participating pt
         on p.league_key = pt.league_key
@@ -212,6 +251,21 @@ verdict as (
         on p.league_key = ak.league_key
        and p.season_year = ak.season_year
        and p.matchup_period = ak.matchup_period
+),
+
+resolved as (
+    select
+        *,
+        (
+            matchup_period < current_matchup_period
+            -- The three proofs, together or not at all. coalesce because a
+            -- missing final_scoring_period must read "not proven" rather than
+            -- propagate NULL into a boolean the season model tests.
+            or coalesce(is_completion_candidate
+                        and shape_ok
+                        and max_scoring_period = final_scoring_period, false)
+        ) as is_closed
+    from verdict
 )
 
 select
@@ -220,7 +274,11 @@ select
     current_matchup_period,
     matchup_period,
     is_closed,
-    is_well_formed,
+    is_completion_candidate,
+    -- Published for eligible periods only, matching the pure parser: a period
+    -- that was skipped, or a candidate that failed to earn promotion, carries
+    -- no verdict rather than a false one.
+    case when is_closed then shape_ok end as is_well_formed,
     matchup_count,
     participating_sides,
     sides_with_membership,
@@ -228,7 +286,7 @@ select
     invalid_key_count,
     -- Published only for a period whose sides agreed. A count over contested
     -- evidence is a number about the disagreement.
-    case when is_well_formed then {{ array_length('scoring_periods') }} end::integer
+    case when is_closed then {{ array_length('scoring_periods') }} end::integer
         as scoring_period_count,
-    case when is_well_formed then scoring_periods end as scoring_periods
-from verdict
+    case when is_closed then scoring_periods end as scoring_periods
+from resolved

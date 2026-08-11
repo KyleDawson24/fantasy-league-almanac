@@ -68,8 +68,12 @@ def _matchup(period, scoring_periods, *, away=None, bye=False):
 
 
 def _payload(period_lengths, *, season_year, current=None, matchups_per_period=2,
-             points=0.0):
-    """Periods 1..N with consecutive scoring periods, N matchups each."""
+             points=0.0, latest_scoring_period=None, final_scoring_period=None):
+    """Periods 1..N with consecutive scoring periods, N matchups each.
+
+    Completion fields are omitted unless asked for, so every fixture written
+    before the completion exception existed still exercises the strict policy.
+    """
     schedule = []
     sp = 1
     for index, length in enumerate(period_lengths, start=1):
@@ -82,13 +86,29 @@ def _payload(period_lengths, *, season_year, current=None, matchups_per_period=2
                     entry[side]["pointsByScoringPeriod"] = {
                         str(m): points for m in members}
             schedule.append(entry)
-    return {"seasonId": season_year,
-            "status": {"currentMatchupPeriod": current or len(period_lengths) + 1},
-            "schedule": schedule}
+    status = {"currentMatchupPeriod": current or len(period_lengths) + 1}
+    if latest_scoring_period is not None:
+        status["latestScoringPeriod"] = latest_scoring_period
+    if final_scoring_period is not None:
+        status["finalScoringPeriod"] = final_scoring_period
+    return {"seasonId": season_year, "status": status, "schedule": schedule}
 
 
-# The shape both real leagues have: a long opening period, a short All-Star
-# period, sevens everywhere else.
+def _completed(period_lengths, *, season_year, **kwargs):
+    """A season ESPN has finished with, shaped like the measured 2025 payload:
+    the pointer rests ON the final period and latestScoringPeriod is strictly
+    past finalScoringPeriod."""
+    total = sum(period_lengths)
+    return _payload(period_lengths, season_year=season_year,
+                    current=len(period_lengths),
+                    final_scoring_period=total,
+                    latest_scoring_period=total + 1, **kwargs)
+
+
+# A SYNTHETIC season carrying two anomalies, one either side of the norm.
+# Deliberately not a transcript of a real one: the measured leagues have two
+# LONG anomalies (2025 periods 1 and 16 ran 13 and 14 days), and a fixture
+# with outliers on both sides proves the mode survives either.
 ORDINARY = [10] + [7] * 12 + [4] + [7] * 3
 
 
@@ -100,9 +120,9 @@ def _fixtures():
     rows.append((LEAGUE, 2020, _payload([7] * 8, season_year=2020),
                  "ordinary sevens"))
 
-    # The real shape: long opening (10) and short All-Star (4).
+    # Two synthetic anomalies, one long (10) and one short (4).
     rows.append((LEAGUE, 2021, _payload(ORDINARY, season_year=2021),
-                 "long opening + short all-star"))
+                 "outliers either side of the norm"))
 
     # Every value is exactly zero. Membership is the KEY set, so nothing moves.
     rows.append((LEAGUE, 2022, _payload([7] * 8, season_year=2022, points=0.0),
@@ -145,6 +165,70 @@ def _fixtures():
     # A second league, different shape, to prove league scoping.
     rows.append((OTHER_LEAGUE, 2020, _payload([5] * 6, season_year=2020),
                  "other league, five-day periods"))
+
+    # -- the completion exception ------------------------------------------
+    # Finished: pointer ON the final period, last scoring day passed, and the
+    # final period's membership ends exactly at finalScoringPeriod.
+    rows.append((LEAGUE, 2015, _completed([7] * 6, season_year=2015),
+                 "completed season promotes its final period"))
+
+    # The SAME schedule and pointer, still live. Only the completion evidence
+    # differs, and the final period must stay out.
+    rows.append((LEAGUE, 2014, _payload([7] * 6, season_year=2014, current=6,
+                                        latest_scoring_period=30,
+                                        final_scoring_period=42),
+                 "live season keeps the final period out"))
+
+    # Equal does not prove completion -- the final scoring day may be today.
+    rows.append((LEAGUE, 2013, _payload([7] * 6, season_year=2013, current=6,
+                                        latest_scoring_period=42,
+                                        final_scoring_period=42),
+                 "latest equal to final is not completion"))
+
+    # Completion is claimed, but this period does not reach the end of it.
+    rows.append((LEAGUE, 2012, _payload([7] * 6, season_year=2012, current=6,
+                                        latest_scoring_period=99,
+                                        final_scoring_period=98),
+                 "claimed completion, period stops short"))
+
+    # Completed, with periods ESPN scheduled beyond the pointer. Promotion
+    # reaches exactly one period and no further.
+    future = _completed([7] * 6, season_year=2011)
+    future["schedule"].append({"matchupPeriodId": 7, "home": {}, "away": {}})
+    rows.append((LEAGUE, 2011, future, "completed with future periods beyond"))
+
+    # Completed, but the candidate's own sides disagree -- demoted, and the
+    # season keeps every earlier period rather than turning malformed.
+    contested = _completed([7] * 6, season_year=2010)
+    contested["schedule"][-1]["away"] = _side([36, 37, 38])
+    rows.append((LEAGUE, 2010, contested, "completed but candidate contested"))
+
+    # -- completion evidence that is the right VALUE and the wrong TYPE -----
+    # These ride the parity suite deliberately. Unwrapping JSON to text makes
+    # the number 43 and the string "43" identical, so a numeric regex accepts
+    # both while the pure parser's isinstance(value, int) rejects the string.
+    # Only a JSON-TYPE test keeps the two implementations agreeing, and only a
+    # PARITY fixture proves they do.
+    string_latest = _completed([7] * 6, season_year=2009)
+    string_latest["status"]["latestScoringPeriod"] = "43"
+    rows.append((LEAGUE, 2009, string_latest, "latestScoringPeriod is a string"))
+
+    string_final = _completed([7] * 6, season_year=2008)
+    string_final["status"]["finalScoringPeriod"] = "42"
+    rows.append((LEAGUE, 2008, string_final, "finalScoringPeriod is a string"))
+
+    # The other JSON types, each representable in a stored payload.
+    for season, latest, final, note in (
+        (2007, True, 42, "boolean latest"),
+        (2006, 43.5, 42, "fractional latest"),
+        (2005, [43], 42, "array latest"),
+        (2004, 43, {"v": 42}, "object final"),
+        (2003, 43, None, "final is JSON null"),
+    ):
+        payload = _completed([7] * 6, season_year=season)
+        payload["status"]["latestScoringPeriod"] = latest
+        payload["status"]["finalScoringPeriod"] = final
+        rows.append((LEAGUE, season, payload, note))
 
     return rows
 
@@ -379,6 +463,103 @@ def test_leagues_do_not_bleed_into_each_other(built):
     """Same season year, different league, different standard."""
     assert _sql_report(built, 2020, OTHER_LEAGUE)["standard"] == 5
     assert _sql_report(built, 2020, LEAGUE)["standard"] == 7
+
+
+# ---------------------------------------------------------------------------
+# The completion exception
+# ---------------------------------------------------------------------------
+def _promoted(built, season, league=LEAGUE):
+    rows = built("select promoted_final_period from "
+                 "ANALYTICS.int_matchup_season_derivation "
+                 "where league_key = ? and season_year = ?", [league, season])
+    return rows[0][0] if rows else None
+
+
+def test_a_completed_season_includes_the_period_its_pointer_rests_on(built):
+    """The measured case: 2025 came back with the pointer ON period 26 of 26
+    and the last scoring day passed, so the final completed week is provable
+    rather than lost."""
+    report = _sql_report(built, 2015)
+
+    assert report["status"] == "derived"
+    assert _promoted(built, 2015) == 6
+    assert [p for p, _c, _a in report["periods"]] == [1, 2, 3, 4, 5, 6]
+    assert (6, 42) in report["membership"]
+
+
+def test_the_same_pointer_in_a_live_season_excludes_the_period(built):
+    """Same schedule, same pointer. Only the completion evidence differs."""
+    report = _sql_report(built, 2014)
+
+    assert _promoted(built, 2014) is None
+    assert [p for p, _c, _a in report["periods"]] == [1, 2, 3, 4, 5]
+    assert 6 not in {m for m, _s in report["membership"]}
+
+
+def test_latest_equal_to_final_does_not_prove_completion(built):
+    """Equal means the final scoring day may be the day in progress."""
+    assert _promoted(built, 2013) is None
+    assert len(_sql_report(built, 2013)["periods"]) == 5
+
+
+def test_a_claimed_completion_that_stops_short_is_not_promoted(built):
+    """The status block says the season is over; the schedule says this period
+    is not where it ended."""
+    assert _promoted(built, 2012) is None
+    assert len(_sql_report(built, 2012)["periods"]) == 5
+
+
+def test_periods_beyond_the_pointer_stay_excluded_when_promoting(built):
+    """Promotion reaches exactly one period."""
+    report = _sql_report(built, 2011)
+
+    assert _promoted(built, 2011) == 6
+    assert max(p for p, _c, _a in report["periods"]) == 6
+
+
+def test_a_contested_candidate_demotes_rather_than_condemning_the_season(built):
+    """The difference between the candidate and every other period: failing
+    its shape check costs one period, not twenty-five."""
+    report = _sql_report(built, 2010)
+
+    assert report["status"] == "derived"
+    assert _promoted(built, 2010) is None
+    assert [p for p, _c, _a in report["periods"]] == [1, 2, 3, 4, 5]
+
+
+def test_a_numeric_string_is_not_completion_evidence(built):
+    """The value is right and the TYPE is wrong. Unwrapping JSON to text makes
+    the number 43 and the string "43" identical, so the regex form this
+    replaced accepted both -- and promoted a period in SQL that the pure
+    parser refused. Only a JSON-type test keeps them agreeing."""
+    for season in (2009, 2008):
+        assert _promoted(built, season) is None, season
+        report = _sql_report(built, season)
+        assert report["status"] == "derived", "earlier periods must survive"
+        assert [p for p, _c, _a in report["periods"]] == [1, 2, 3, 4, 5], season
+
+
+@pytest.mark.parametrize("season, note", [
+    (2007, "boolean"), (2006, "fractional"), (2005, "array"),
+    (2004, "object"), (2003, "json null"),
+])
+def test_other_wrong_typed_completion_values_stay_strict(built, season, note):
+    assert _promoted(built, season) is None, note
+    assert len(_sql_report(built, season)["periods"]) == 5
+
+
+def test_a_genuine_json_integer_still_promotes(built):
+    """The control for every rejection above -- the type gate must not have
+    closed the door on the case it exists to admit."""
+    assert _promoted(built, 2015) == 6
+    assert _promoted(built, 2011) == 6
+
+
+def test_a_strict_fallback_season_reports_no_promotion(built):
+    """Every fixture written before the exception existed must still take the
+    strict path, which is what keeps the fallback under test."""
+    for season in (2020, 2021, 2022, 2023, 2025, 2026):
+        assert _promoted(built, season) is None, season
 
 
 # ---------------------------------------------------------------------------

@@ -1230,5 +1230,24 @@ models:
           period holds several matchups. Reconciled downstream against the
           entries that could actually be read, which is how an unreadable
           matchupPeriodId is caught instead of silently shortening a season.
+      - name: latest_scoring_period
+        description: >
+          status.latestScoringPeriod. Half of the completion proof; NULL when
+          the payload held something unreadable, which leaves the strict
+          policy in force.
+      - name: final_scoring_period
+        description: >
+          status.finalScoringPeriod -- the season's last scheduled scoring
+          day. The promoted period's membership must END here, or it is not
+          the period the season closed on.
+      - name: season_is_complete
+        description: >
+          latestScoringPeriod STRICTLY greater than finalScoringPeriod.
+          Equal does not prove completion, because the final scoring day can
+          be the day in progress (measured 2025: 196 > 195; 2026: 140 < 187).
+          Non-null on purpose: a missing or malformed field is "completion not
+          proven", which every consumer treats identically to false. isActive
+          is deliberately NOT used -- it was True for both the finished season
+          and the live one.
       - name: captured_at
         description: extracted_at of the winning snapshot.

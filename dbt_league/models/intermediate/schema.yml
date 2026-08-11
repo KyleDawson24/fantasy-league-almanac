@@ -746,6 +746,14 @@ models:
         description: >
           Sides really present. A bye (absent or JSON-null side) is not a
           missing side and does not fail the period.
+      - name: is_completion_candidate
+        description: >
+          The period EQUAL to currentMatchupPeriod on a season the status
+          block proves finished. Whether it is actually eligible depends on
+          its own shape and on its membership ending at finalScoringPeriod --
+          failing either DEMOTES it to excluded rather than making the season
+          malformed, because refusing to promote costs one period while
+          refusing the season discards every other.
 
   - name: int_matchup_season_derivation
     description: >
@@ -802,7 +810,13 @@ models:
         description: >
           Closed periods whose own evidence failed. Any of these makes the
           whole season malformed, matching the pure parser, which raises on
-          the first one.
+          the first one. A demoted completion candidate is NOT counted here --
+          it was never eligible, so it never failed.
+      - name: promoted_final_period
+        description: >
+          The closing period a completed season was proven to have finished
+          on, or NULL when the strict policy applied. Widens the expected
+          closed run by exactly one, and is the only thing that may.
 
   - name: int_matchup_period_shape
     description: >

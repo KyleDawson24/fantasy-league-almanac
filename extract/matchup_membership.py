@@ -155,7 +155,12 @@ class MembershipParse:
     season_year: int
     current_matchup_period: int
     closed: tuple      # PeriodMembership, ascending by matchup_period
-    excluded: tuple    # matchup period ids at or after the current one
+    excluded: tuple    # matchup period ids not eligible
+    # The period EQUAL to current_matchup_period, when the status block proved
+    # the season over and this period proved it was the one that ended it.
+    # None on every live season, and on a completed one whose closing period
+    # could not back the claim up.
+    promoted_period: object = None
 
     @property
     def rows(self):
@@ -206,6 +211,9 @@ class DerivationReport:
     periods: tuple                     # DerivedPeriod, ascending
     rows: tuple                        # MembershipRow, ascending
     excluded_periods: tuple            # matchup period ids not eligible
+    # Provenance for the completion exception: the closing period this season
+    # was proven to have finished on, or None when the strict policy applied.
+    promoted_final_period: object = None
 
     @property
     def is_derived(self):
@@ -355,6 +363,21 @@ def _require_positive_int(value, what):
     return value
 
 
+def _optional_scoring_period(value):
+    """A completion field, or None -- and NEVER an exception.
+
+    Absent, non-integer, boolean or non-positive all return None, which the
+    caller reads as "completion is not proven" and falls back to the strict
+    policy. That is deliberate and it is the difference between this and
+    `_require_positive_int`: a malformed COMPLETION field must not condemn a
+    season whose earlier periods are independently provable. Refusing to
+    promote costs one period; refusing the season discards twenty-five.
+    """
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value if value >= 1 else None
+
+
 def _scoring_period_key(key, matchup_period):
     """One `pointsByScoringPeriod` key as a scoring-period id.
 
@@ -447,22 +470,40 @@ def parse_matchup_membership(payload, *, league_key, season_year):
     a matchup period is eligible only when its id is strictly less than
     `status.currentMatchupPeriod`. Membership is retrospective -- the period
     in flight is still filling in, and reading it gives a short count that
-    looks exactly like a real abnormality. (Measured: 2026's period 18 read 6
+    looks exactly like a real abnormality. (Measured: 2026's period 19 read 2
     scoring periods against the seed's 7, because it was the current period.
     Restricted to closed periods, membership matched the hand-maintained seed
-    on every period of both seasons on file.)
+    on every period of both seasons on file, 43 periods, zero mismatches.)
 
-    `currentMatchupPeriod` is the ONE status field MLB-235 actually recorded,
-    so it is the only one this policy uses. A completed season whose
-    `currentMatchupPeriod` sits ON its final period would therefore leave that
-    final period unclassified rather than misclassified -- fail-closed, and
-    resolvable by one read-only probe of a closed season's status block. No
-    other status field is consulted, because a synthetic test asserting on a
-    field name nobody has seen on the wire would only launder a guess.
+    THE COMPLETION EXCEPTION, added once it could be measured rather than
+    guessed. A finished season pins `currentMatchupPeriod` ON its final period
+    rather than past it -- 2025 came back with 26 of 26 -- so the strict rule
+    alone discards the last completed week of every finished season. A period
+    equal to `currentMatchupPeriod` is therefore promoted, but only on proof
+    that the season is over and that this period is the one that ended it:
 
-    Periods at or after the current one are skipped WITHOUT shape validation:
-    they are structurally out of scope, and refusing the whole season because
-    an unplayed period is shaped like an unplayed period would be a bug.
+      * `status.latestScoringPeriod` > `status.finalScoringPeriod`, strictly.
+        Equal does NOT prove completion -- the final scoring day can be the
+        day in progress. 2025 read 196 > 195; 2026 read 140 < 187.
+      * the period is itself well-formed, by the same side-agreement rules as
+        any closed period;
+      * and its agreed membership ENDS at `finalScoringPeriod`. A period
+        claiming to close a season it does not reach the end of is not the
+        closing period, whatever the status block says.
+
+    Any of those failing falls back to the strict policy -- the period is
+    excluded and the season keeps every earlier period, because those were
+    never in question. Completion is never inferred and never invented.
+
+    WHAT IS DELIBERATELY NOT CONSULTED: `isActive`, `isExpired`, `isViewable`,
+    calendar dates, the seed, and the wall clock. `isActive` is the tempting
+    one and it is measurably wrong for this purpose -- it was True for BOTH
+    the finished 2025 season and the live 2026 one, so a policy built on it
+    would have promoted the in-flight period every week of the season.
+
+    Periods after the current one are skipped WITHOUT shape validation: they
+    are structurally out of scope, and refusing the whole season because an
+    unplayed period is shaped like an unplayed period would be a bug.
     """
     if not isinstance(payload, dict):
         raise MatchupMembershipError(
@@ -485,6 +526,17 @@ def parse_matchup_membership(payload, *, league_key, season_year):
     current = _require_positive_int(status.get("currentMatchupPeriod"),
                                     "status.currentMatchupPeriod")
 
+    # Completion evidence. Both must be present, integral and STRICTLY
+    # ordered; anything else leaves season_complete False and the strict
+    # policy in force.
+    latest_scoring_period = _optional_scoring_period(
+        status.get("latestScoringPeriod"))
+    final_scoring_period = _optional_scoring_period(
+        status.get("finalScoringPeriod"))
+    season_complete = (latest_scoring_period is not None
+                       and final_scoring_period is not None
+                       and latest_scoring_period > final_scoring_period)
+
     schedule = payload.get("schedule")
     if schedule is None:
         raise MatchupMembershipError(
@@ -496,6 +548,10 @@ def parse_matchup_membership(payload, *, league_key, season_year):
     # {matchup_period: [key set per participating side]}
     observed = {}
     excluded = set()
+    # Entries for the period EQUAL to current, held aside rather than parsed
+    # inline: a shape problem there must demote the promotion, not condemn a
+    # season whose earlier periods are independently provable.
+    candidate_entries = []
     for index, entry in enumerate(schedule, start=1):
         if not isinstance(entry, dict):
             raise MatchupMembershipError(
@@ -505,8 +561,15 @@ def parse_matchup_membership(payload, *, league_key, season_year):
             entry.get("matchupPeriodId"),
             f"schedule entry #{index}: matchupPeriodId")
 
-        if matchup_period >= current:
+        if matchup_period > current:
             excluded.add(matchup_period)
+            continue
+
+        if matchup_period == current:
+            if season_complete:
+                candidate_entries.append((entry, index))
+            else:
+                excluded.add(matchup_period)
             continue
 
         sides = observed.setdefault(matchup_period, [])
@@ -516,11 +579,24 @@ def parse_matchup_membership(payload, *, league_key, season_year):
             if membership is not None:
                 sides.append(membership)
 
-    closed = tuple(
+    closed = [
         _agree(matchup_period, observed[matchup_period])
         for matchup_period in sorted(observed)
-    )
-    _require_no_gaps(closed, current)
+    ]
+
+    promoted = None
+    if candidate_entries:
+        promoted = _promote_final_period(
+            candidate_entries, current, final_scoring_period)
+        if promoted is None:
+            excluded.add(current)
+        else:
+            # Appends last, and correctly: every other closed period is
+            # strictly below it.
+            closed.append(promoted)
+
+    closed = tuple(closed)
+    _require_no_gaps(closed, current, promoted is not None)
 
     return MembershipParse(
         league_key=league_key,
@@ -528,7 +604,38 @@ def parse_matchup_membership(payload, *, league_key, season_year):
         current_matchup_period=current,
         closed=closed,
         excluded=tuple(sorted(excluded)),
+        promoted_period=promoted.matchup_period if promoted else None,
     )
+
+
+def _promote_final_period(entries, matchup_period, final_scoring_period):
+    """The season's closing period, or None if it cannot be shown to be one.
+
+    Returns rather than raises for every failure, which is the whole reason
+    this is a function: the caller has already proven the season complete from
+    the status block, and a period that does not back that claim up demotes
+    itself to excluded. The alternative -- letting the shape error escape --
+    would turn "we could not promote the last week" into "this season is
+    malformed", discarding twenty-five periods to avoid over-claiming one.
+    """
+    sides = []
+    try:
+        for entry, index in entries:
+            for position in ("home", "away"):
+                membership = _side_membership(
+                    entry.get(position), matchup_period, position, index)
+                if membership is not None:
+                    sides.append(membership)
+        agreed = _agree(matchup_period, sides)
+    except MatchupMembershipError:
+        return None
+
+    # The status block says the season is over; this proves THIS period is
+    # where it ended. A period that stops short is not the closing one, and
+    # promoting it would publish a short week as a complete one.
+    if agreed.scoring_periods[-1] != final_scoring_period:
+        return None
+    return agreed
 
 
 def _agree(matchup_period, side_memberships):
@@ -561,8 +668,9 @@ def _agree(matchup_period, side_memberships):
                             tuple(sorted(distinct.pop())))
 
 
-def _require_no_gaps(closed, current):
-    """Closed periods must be the unbroken run 1..current-1.
+def _require_no_gaps(closed, current, promoted=False):
+    """Closed periods must be the unbroken run 1..current-1, or 1..current
+    when the season's closing period was promoted.
 
     A hole means ESPN served a schedule this module does not understand, and
     a mode computed over a gapped set is a statistic about the gap. Refusing
@@ -582,20 +690,21 @@ def _require_no_gaps(closed, current):
     sorted dict keys), so position i holding period i+1 for every entry, plus
     a length of exactly current-1, is the whole contiguity proof.
     """
+    expected = current if promoted else current - 1
     for index, period in enumerate(closed, start=1):
         if period.matchup_period != index:
             raise MatchupMembershipError(
-                f"matchup period {index} is before the current period "
-                f"({current}) but carries no membership in the payload; "
-                f"{len(closed)} closed period(s) observed where {current - 1} "
-                f"were expected")
+                f"matchup period {index} is eligible against the current "
+                f"period ({current}) but carries no membership in the "
+                f"payload; {len(closed)} eligible period(s) observed where "
+                f"{expected} were expected")
 
-    if len(closed) != current - 1:
+    if len(closed) != expected:
         raise MatchupMembershipError(
-            f"matchup period {len(closed) + 1} is before the current period "
-            f"({current}) but carries no membership in the payload; "
-            f"{len(closed)} closed period(s) observed where {current - 1} "
-            f"were expected")
+            f"matchup period {len(closed) + 1} is eligible against the "
+            f"current period ({current}) but carries no membership in the "
+            f"payload; {len(closed)} eligible period(s) observed where "
+            f"{expected} were expected")
 
 
 # ---------------------------------------------------------------------------
@@ -630,6 +739,7 @@ def derive_period_shape(parse):
         current_matchup_period=parse.current_matchup_period,
         rows=parse.rows,
         excluded_periods=parse.excluded,
+        promoted_final_period=parse.promoted_period,
     )
 
     if not parse.closed and not parse.excluded:

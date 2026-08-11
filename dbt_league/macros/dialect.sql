@@ -253,6 +253,52 @@ json_array_length({{ expr }})
 {%- endmacro %}
 
 
+{% macro json_is_integer(expr) -%}
+{#- "is this JSON scalar genuinely an integer NUMBER" -- not a numeric-looking
+    string, boolean, float, array or object (MLB-235).
+
+    WHY IT EXISTS. The obvious spelling is to pull the value out as text and
+    regex it, and that is silently wrong: `json_unwrap_text` turns both the
+    JSON number 196 and the JSON STRING "196" into '196', so a numeric regex
+    accepts them identically. The pure parser does not -- `isinstance(value,
+    int)` rejects "196" -- so the two implementations disagreed about whether
+    malformed completion evidence counts, and SQL was the lax one.
+
+    MEASURED, not inferred, and the first guess was wrong in both directions:
+
+      DuckDB  json_type(196)   -> 'UBIGINT', NOT 'BIGINT'
+              json_type(-196)  -> 'BIGINT'
+      so the test is membership in BOTH names; `= 'BIGINT'` would have
+      rejected every genuine non-negative integer, which is all of them here.
+
+      Snowflake  is_integer(parse_json('196'))    -> true
+                 is_integer(parse_json('"196"'))  -> false
+
+    Both engines agree on every shape that matters: a numeric string, a
+    boolean, a fractional number, an array, an object, a JSON null and a SQL
+    NULL are all rejected.
+
+    ONE DIVERGENCE, and it is a STORAGE-layer fact rather than a choice this
+    macro can make. Snowflake's PARSE_JSON normalises `196.0` to the integer
+    196 as it lands in RAW, so `is_integer` answers true and the original
+    fractional spelling no longer exists to be detected; DuckDB keeps the JSON
+    text and answers 'DOUBLE', matching Python. An integral float would
+    therefore qualify as completion evidence on Snowflake and not on DuckDB.
+    Unreachable through the capture -- ESPN sends integers -- and it cannot
+    promote a period on its own, since the endpoint and shape proofs still
+    have to pass. Recorded because it is invisible. -#}
+    {{ return(adapter.dispatch('json_is_integer', 'dbt_league')(expr)) }}
+{%- endmacro %}
+
+{% macro default__json_is_integer(expr) -%}
+is_integer({{ expr }})
+{%- endmacro %}
+
+{% macro duckdb__json_is_integer(expr) -%}
+json_type({{ expr }}) in ('BIGINT', 'UBIGINT')
+{%- endmacro %}
+
+
 {% macro flatten_native_array(expr, alias) -%}
 {#- flatten_array's twin for a NATIVE array column -- the output of
     array_agg, not a JSON document (MLB-235). Both expose `.value`, so a call

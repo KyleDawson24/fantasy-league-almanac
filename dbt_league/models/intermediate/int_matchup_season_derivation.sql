@@ -79,7 +79,12 @@ per_season as (
         sum(matchup_count) as entries_accounted,
         sum(case when is_closed then 1 else 0 end) as closed_period_count,
         sum(case when is_closed and not is_well_formed then 1 else 0 end)
-            as malformed_period_count
+            as malformed_period_count,
+        -- 1 when the completion exception fired: the period EQUAL to
+        -- currentMatchupPeriod earned promotion. Widens the expected closed
+        -- run by exactly one, and is the only thing that may.
+        sum(case when is_closed and matchup_period = current_matchup_period
+                 then 1 else 0 end) as promoted_period_count
     from evidence
     group by 1, 2
 ),
@@ -127,6 +132,7 @@ assessed as (
         s.scheduled_matchup_count,
         coalesce(ps.closed_period_count, 0) as closed_period_count,
         coalesce(ps.malformed_period_count, 0) as malformed_period_count,
+        coalesce(ps.promoted_period_count, 0) as promoted_period_count,
         m.tied_lengths,
         m.modal_length,
         m.modal_period_count,
@@ -142,8 +148,11 @@ assessed as (
             -- a closed period whose sides disagreed, or that had no usable
             -- membership at all
             or coalesce(ps.malformed_period_count, 0) > 0
-            -- a hole in the closed run: see the contiguity note above
-            or coalesce(ps.closed_period_count, 0) <> s.current_matchup_period - 1
+            -- a hole in the closed run: see the contiguity note above. The
+            -- run is 1..current-1, widened by one when the completion
+            -- exception promoted the closing period.
+            or coalesce(ps.closed_period_count, 0)
+               <> s.current_matchup_period - 1 + coalesce(ps.promoted_period_count, 0)
         ) as is_malformed
     from seasons s
     left join per_season ps
@@ -179,6 +188,10 @@ select
     closed_period_count,
     malformed_period_count,
     derivation_status,
+    -- Provenance for the completion exception: the closing period this season
+    -- was proven to have finished on, or NULL when the strict policy applied.
+    case when promoted_period_count = 1 then current_matchup_period end::integer
+        as promoted_final_period,
     -- Published ONLY when the season earned it. NULL is not "we think it is
     -- seven": it is the absence of a norm, and every consumer has to treat it
     -- that way.

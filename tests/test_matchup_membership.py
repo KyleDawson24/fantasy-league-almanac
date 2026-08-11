@@ -13,10 +13,18 @@ from `status.currentMatchupPeriod`. Nothing is asserted about a status field
 MLB-235 did not record -- a green test over a guessed field name would be
 worse than no test, because it would read as verification.
 
-The real numbers the fixtures echo, for anyone checking the shapes are not
-invented: 2025 carried 26 matchup periods and 2026 eighteen at capture time,
-every season has one long opening period and one short All-Star period, and
-195 of 3,120 point values were exactly 0.0 with their keys intact.
+THE FIXTURES ARE SYNTHETIC AND SAY SO. Their period lengths are chosen to
+exercise the derivation -- a long opening period and a short All-Star one --
+and that is NOT the observed league shape. Measured on the real payloads,
+BOTH anomalies are long and the All-Star period is the longest of all
+(2025: period 1 = 13 days, period 16 = 14; 2026: period 1 = 12, period 15 =
+14). A synthetic shape is fine here; describing it as the real one was not,
+and the seed has always agreed with the measurement -- its own note on those
+rows reads "All-Star break (14 days)".
+
+The real numbers worth echoing: 2025 carried 26 matchup periods and 2026
+twenty-two, and 195 of 3,120 point values were exactly 0.0 with their keys
+intact.
 """
 
 import sys
@@ -76,11 +84,17 @@ def _matchup(matchup_period, scoring_periods, *, bye=False, away=None):
 
 
 def _season(period_lengths, *, current=None, season_year=SEASON,
-            matchups_per_period=2, first_scoring_period=1):
+            matchups_per_period=2, first_scoring_period=1,
+            latest_scoring_period=None, final_scoring_period=None):
     """Periods 1..N with consecutive scoring periods and N matchups each.
 
     `current` defaults to one past the last period, i.e. every period built is
     closed. Pass a lower value to model a season still in flight.
+
+    The completion fields are OMITTED unless asked for, so every fixture
+    written before the completion exception existed still exercises the strict
+    policy -- which is the fallback, and therefore the thing most worth
+    keeping under test by default.
     """
     schedule = []
     scoring_period = first_scoring_period
@@ -89,12 +103,32 @@ def _season(period_lengths, *, current=None, season_year=SEASON,
         scoring_period += length
         for _ in range(matchups_per_period):
             schedule.append(_matchup(index, members))
+    status = {"currentMatchupPeriod": current or len(period_lengths) + 1}
+    if latest_scoring_period is not None:
+        status["latestScoringPeriod"] = latest_scoring_period
+    if final_scoring_period is not None:
+        status["finalScoringPeriod"] = final_scoring_period
     return {
         "id": 999,
         "seasonId": season_year,
-        "status": {"currentMatchupPeriod": current or len(period_lengths) + 1},
+        "status": status,
         "schedule": schedule,
     }
+
+
+def _completed(period_lengths, *, season_year=SEASON, **kwargs):
+    """A season ESPN has finished with: the pointer rests ON the final period
+    and the status block proves the last scoring day has passed.
+
+    The numbers mirror the measured 2025 payload -- currentMatchupPeriod 26 of
+    26, latestScoringPeriod 196 > finalScoringPeriod 195, and period 26's
+    membership ending exactly at 195.
+    """
+    total = sum(period_lengths)
+    return _season(period_lengths, current=len(period_lengths),
+                   season_year=season_year,
+                   final_scoring_period=total,
+                   latest_scoring_period=total + 1, **kwargs)
 
 
 def _parse(payload, season_year=SEASON):
@@ -107,8 +141,11 @@ def _derive(payload, season_year=SEASON):
         payload, league_key=LEAGUE, season_year=season_year)
 
 
-# The shape both leagues on file actually have: a long opening period, an
-# All-Star break period shorter than the rest, sevens everywhere else.
+# A SYNTHETIC season with two anomalies, not a transcript of a real one:
+# a long opening period, a short All-Star period, sevens elsewhere. The
+# real leagues have two LONG anomalies (see the module docstring); what
+# this fixture is for is proving the mode survives outliers on both
+# sides of it, which the real shape cannot exercise.
 ORDINARY_SEASON = [10] + [7] * 12 + [4] + [7] * 3
 
 
@@ -159,8 +196,10 @@ def test_ordering_is_deterministic():
 
 
 def test_a_long_opening_and_a_short_all_star_period_are_both_abnormal():
-    """The real shape. 7 is the norm; the opening 10 and the All-Star 4 are
-    the two exceptions the hand-maintained seed flags today."""
+    """Two exceptions either side of the norm. 7 is standard; the synthetic
+    opening 10 and All-Star 4 are the outliers, and both must be caught
+    without either dragging the mode. The real seasons flag the same two
+    period POSITIONS, though both of their lengths run long."""
     report = _derive(_season(ORDINARY_SEASON))
 
     assert report.status == DERIVED
@@ -243,17 +282,158 @@ def test_a_completed_season_classifies_every_period_it_carries():
     assert report.abnormal_periods == (1, 26)
 
 
-def test_a_season_pointing_at_its_own_final_period_leaves_it_unclassified():
-    """The honest limit of the recorded evidence, pinned rather than papered
-    over: `currentMatchupPeriod` is the only status field MLB-235 measured, so
-    a completed season whose pointer rests ON the final period loses that
-    period from the derivation. Fail-closed -- unclassified, never guessed --
-    and one read-only probe of a closed season's status block resolves it."""
+def test_a_pointer_on_the_final_period_without_completion_proof_excludes_it():
+    """THE FALLBACK, and the case that used to be the only behaviour. With no
+    completion evidence in the status block, a pointer resting on the final
+    period is indistinguishable from a season in its last week -- so the
+    strict rule stands and the period is excluded rather than guessed."""
     report = _derive(_season([7] * 26, current=26))
 
     assert report.status == DERIVED
     assert report.excluded_periods == (26,)
+    assert report.promoted_final_period is None
     assert 26 not in {p.matchup_period for p in report.periods}
+
+
+# ---------------------------------------------------------------------------
+# The completion exception
+# ---------------------------------------------------------------------------
+def test_a_completed_season_includes_the_period_its_pointer_rests_on():
+    """The measured case. 2025 came back with currentMatchupPeriod 26 of 26
+    and latestScoringPeriod 196 > finalScoringPeriod 195, so the last
+    completed week is provable rather than lost."""
+    report = _derive(_completed([7] * 26))
+
+    assert report.status == DERIVED
+    assert report.promoted_final_period == 26
+    assert report.excluded_periods == ()
+    assert [p.matchup_period for p in report.periods] == list(range(1, 27))
+    assert report.periods[-1].scoring_period_count == 7
+    assert report.periods[-1].is_abnormal_derived is False
+    assert (26, 182) in {(r.matchup_period, r.scoring_period) for r in report.rows}
+
+
+def test_the_same_pointer_in_a_live_season_still_excludes_the_period():
+    """Same currentMatchupPeriod, same schedule -- the ONLY difference is that
+    the last scoring day has not passed. 2026 read latest 140 < final 187."""
+    live = _season([7] * 26, current=26,
+                   latest_scoring_period=100, final_scoring_period=182)
+    report = _derive(live)
+
+    assert report.promoted_final_period is None
+    assert report.excluded_periods == (26,)
+    assert 26 not in {p.matchup_period for p in report.periods}
+
+
+def test_latest_equal_to_final_does_not_prove_completion():
+    """Equal means the final scoring day may be the day IN PROGRESS. Only
+    strictly greater proves ESPN has moved past it."""
+    edge = _season([7] * 26, current=26,
+                   latest_scoring_period=182, final_scoring_period=182)
+    report = _derive(edge)
+
+    assert report.promoted_final_period is None
+    assert report.excluded_periods == (26,)
+
+
+@pytest.mark.parametrize("latest, final", [
+    (None, 182),        # latestScoringPeriod absent
+    (183, None),        # finalScoringPeriod absent
+    (None, None),       # neither
+])
+def test_a_missing_completion_field_preserves_the_strict_fallback(latest, final):
+    report = _derive(_season([7] * 26, current=26,
+                             latest_scoring_period=latest,
+                             final_scoring_period=final))
+
+    assert report.status == DERIVED, "the earlier periods must survive"
+    assert report.promoted_final_period is None
+    assert len(report.periods) == 25
+
+
+@pytest.mark.parametrize("latest, final", [
+    ("183", 182), (183, "182"), (True, 182), (183.5, 182), (-1, 182), (183, 0),
+    ([183], 182), (183, {"v": 182}),
+])
+def test_a_malformed_completion_field_preserves_the_strict_fallback(latest, final):
+    """A malformed COMPLETION field must not condemn a season whose earlier
+    periods are independently provable: refusing to promote costs one period,
+    refusing the season discards twenty-five."""
+    report = _derive(_season([7] * 26, current=26,
+                             latest_scoring_period=latest,
+                             final_scoring_period=final))
+
+    assert report.status == DERIVED
+    assert report.promoted_final_period is None
+    assert len(report.periods) == 25
+
+
+def test_a_claimed_completion_whose_last_period_stops_short_is_not_promoted():
+    """The status block says the season is over; the schedule says this period
+    is not where it ended. A period that stops short is not the closing one,
+    whatever the status block claims."""
+    payload = _season([7] * 26, current=26,
+                      latest_scoring_period=250, final_scoring_period=249)
+    report = _derive(payload)
+
+    assert report.promoted_final_period is None
+    assert report.excluded_periods == (26,)
+    assert report.status == DERIVED
+    assert len(report.periods) == 25
+
+
+def test_a_claimed_completion_whose_last_period_is_contested_is_not_promoted():
+    """The candidate must be well-formed on its own terms -- and failing that
+    DEMOTES it rather than condemning the season, which is the difference
+    between the candidate and any other period."""
+    payload = _completed([7] * 26)
+    payload["schedule"][-1]["away"] = _side([176, 177, 178])
+    report = _derive(payload)
+
+    assert report.status == DERIVED, "a contested candidate must not be malformed"
+    assert report.promoted_final_period is None
+    assert report.excluded_periods == (26,)
+    assert len(report.periods) == 25
+
+
+def test_periods_past_the_current_one_stay_excluded_on_a_completed_season():
+    """Promotion reaches exactly one period. Anything ESPN scheduled beyond
+    the pointer is still unplayed."""
+    payload = _completed([7] * 26)
+    payload["schedule"].append(
+        {"matchupPeriodId": 27, "home": {}, "away": {}})
+    payload["schedule"].append(
+        {"matchupPeriodId": 28, "home": {}, "away": {}})
+    report = _derive(payload)
+
+    assert report.promoted_final_period == 26
+    assert report.excluded_periods == (27, 28)
+    assert max(p.matchup_period for p in report.periods) == 26
+
+
+def test_the_promoted_period_counts_toward_the_standard():
+    """It is evidence like any other closed period once promoted -- not a
+    second-class row exempt from the mode."""
+    report = _derive(_completed([13] + [7] * 24 + [14]))
+
+    assert report.status == DERIVED
+    assert report.standard_period_length == 7
+    assert report.abnormal_periods == (1, 26)
+    assert report.promoted_final_period == 26
+
+
+def test_completion_never_consults_the_activity_flags():
+    """isActive was True for BOTH the finished 2025 season and the live 2026
+    one, so a policy built on it would promote the in-flight period every
+    week. Setting every activity flag to a completed-looking value must change
+    nothing."""
+    payload = _season([7] * 26, current=26)
+    payload["status"].update({"isActive": False, "isExpired": True,
+                              "isViewable": True})
+    report = _derive(payload)
+
+    assert report.promoted_final_period is None
+    assert report.excluded_periods == (26,)
 
 
 # ---------------------------------------------------------------------------

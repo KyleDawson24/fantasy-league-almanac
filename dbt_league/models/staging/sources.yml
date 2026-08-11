@@ -98,6 +98,32 @@ sources:
             warn_after: {count: 210, period: day}
             error_after: {count: 420, period: day}
 
+      # The platform's own matchup-period membership (MLB-235). Its own
+      # table rather than part of schedule_settings because the two have
+      # different cadences: scheduleSettings is a once-a-season block, this
+      # one gains a closed period every week.
+      - name: matchup_schedule
+        description: >
+          Raw ESPN mMatchupScore snapshot, append-only: {seasonId, status,
+          schedule} captured verbatim (never the schedule array alone --
+          status.currentMatchupPeriod IS the closed-period policy, and
+          seasonId is the only cross-check on the season a row was filed
+          under that the loader did not stamp itself). The KEYS of
+          schedule[].home/away.pointsByScoringPeriod are the scoring periods
+          belonging to each matchupPeriodId -- the platform-owned membership
+          that makes matchup length, and therefore is_abnormal, derivable
+          without the hand-maintained matchup_schedule seed. Distinct from
+          schedule_settings, whose matchupPeriods is a degenerate identity
+          map carrying no membership. MEMBERSHIP IS RETROSPECTIVE: the
+          current matchup period is still filling in and reads short, so
+          only periods below status.currentMatchupPeriod are eligible.
+          Scoring-period IDS ONLY -- ESPN serves no start/end dates here, so
+          the seed remains the source of period calendars. Capture is opt-in
+          (extract.py --include-matchup-schedule / --matchup-schedule-only),
+          so this table is present-and-empty until a run enables it; no
+          freshness thresholds for that reason, same as box_scores. Staging
+          picks the latest snapshot per league + season.
+
       # CBS raw archives (MLB-59 loader, extract/cbs_load.py) -- same
       # warehouse, same RAW schema, platform-prefixed tables. Payloads land
       # VERBATIM in a `payload` VARIANT with envelope-lineage columns

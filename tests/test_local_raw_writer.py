@@ -147,6 +147,13 @@ def test_written_parquet_matches_the_contract_schema_exactly(sink, contract):
     sink.write_acquisition_settings({"acquisitionLimit": -1}, 2026, LEAGUE)
     sink.write_trade_settings({"max": -1}, 2026, LEAGUE)
     sink.write_team_standings([{"id": 1, "playoffSeed": 1}], 2026, LEAGUE)
+    # MLB-235 -- {seasonId, status, schedule}, never the schedule alone.
+    sink.write_matchup_schedule(
+        {"seasonId": 2026,
+         "status": {"currentMatchupPeriod": 4},
+         "schedule": [{"matchupPeriodId": 1,
+                       "home": {"pointsByScoringPeriod": {"1": 0.0}}}]},
+        2026, LEAGUE)
 
     for table in ESPN_RAW_TABLES:
         path = sink.path_for(table)
@@ -261,9 +268,13 @@ def test_a_different_league_is_not_touched(sink):
     (lambda s, n: s.write_acquisition_settings({"n": n}, 2026, LEAGUE), "ACQUISITION_SETTINGS"),
     (lambda s, n: s.write_trade_settings({"n": n}, 2026, LEAGUE), "TRADE_SETTINGS"),
     (lambda s, n: s.write_team_standings([{"n": n}], 2026, LEAGUE), "TEAM_STANDINGS"),
+    # MLB-235 -- append matters MORE here than for its neighbours: membership
+    # is retrospective, so each capture closes one more period than the last
+    # and an overwrite would keep only the newest currentMatchupPeriod.
+    (lambda s, n: s.write_matchup_schedule({"n": n}, 2026, LEAGUE), "MATCHUP_SCHEDULE"),
 ])
 def test_snapshot_tables_are_append_only(sink, write, table):
-    """These ten keep every snapshot on purpose.
+    """These eleven keep every snapshot on purpose.
 
     Collapsing them to overwrite still runs and still returns one row from
     staging, so nothing looks broken -- it just silently discards the

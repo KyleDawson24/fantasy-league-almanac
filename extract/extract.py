@@ -32,6 +32,8 @@ Usage:
   py extract/extract.py --year 2025 --all --backfill-club-of-game
                                                      -> add club-of-game to 2025 in place
   py extract/extract.py --raw-target local            -> write RAW as parquet, no warehouse
+  py extract/extract.py --matchup-schedule-only --year 2025
+                                                     -> capture 2025's matchup-period membership (one request)
 
 WHERE RAW LANDS (MLB-208). `--raw-target snowflake` is the default and is
 unchanged. `--raw-target local` writes the parquet + _manifest.json artifacts
@@ -77,6 +79,8 @@ from config.league_registry import LeagueRegistryError, get_league, league_keys
 # insert makes the bare name work when imported as `extract.extract` too.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from raw_sink import LocalParquetSink
+from matchup_membership import (
+    SNAPSHOT_KEYS, MatchupMembershipError, matchup_schedule_snapshot)
 
 
 # ---------------------------------------------------------------------------
@@ -1398,15 +1402,20 @@ def load_scoring_settings_to_snowflake(conn, scoring_items, year, league_key):
 # every team's row) and gets its own table for that reason, exactly as
 # TEAM_OWNERS does.
 #
-# All five are append-only snapshots with the shape the other snapshot tables
-# use, so staging picks the latest per (league_key, season_year) by
-# extracted_at with no new convention to learn.
+# Every one of them is an append-only snapshot with the shape the other
+# snapshot tables use, so staging picks the latest per (league_key,
+# season_year) by extracted_at with no new convention to learn.
 SNAPSHOT_TABLES = (
     "SCHEDULE_SETTINGS",
     "DRAFT_SETTINGS",
     "ACQUISITION_SETTINGS",
     "TRADE_SETTINGS",
     "TEAM_STANDINGS",
+    # MLB-235. Its own table for the same readability reason, and one more:
+    # SCHEDULE_SETTINGS is a once-a-season block, while this changes every
+    # week a matchup period closes. Sharing a table would mean one cadence
+    # overwriting the other's freshness story.
+    "MATCHUP_SCHEDULE",
 )
 
 # Every RAW table whose CREATE sits INSIDE a conditional write. A league
@@ -1420,7 +1429,7 @@ SNAPSHOT_TABLES = (
 # tables() seeds an empty parquet for every contract table before any
 # write. This is the same instinct on the warehouse path.
 #
-# All seven share the snapshot shape, which is why one DDL covers them.
+# They all share the snapshot shape, which is why one DDL covers them.
 # The loaders keep their own CREATE TABLE IF NOT EXISTS: those are on the
 # path Kyle's weekly run depends on, and consolidating proven DML for
 # symmetry is how a settled write acquires a new bug (see the note in
@@ -1881,6 +1890,11 @@ class SnowflakeSink:
         load_snapshot_to_snowflake(self.conn, "TEAM_STANDINGS", payload,
                                    year, league_key, "team standings")
 
+    # -- MLB-235 -----------------------------------------------------------
+    def write_matchup_schedule(self, payload, year, league_key):
+        load_snapshot_to_snowflake(self.conn, "MATCHUP_SCHEDULE", payload,
+                                   year, league_key, "matchup schedule")
+
     def backfill_club_of_game(self, year, league_key, periods):
         backfill_club_of_game(self.conn, year, league_key, periods)
 
@@ -1981,6 +1995,85 @@ def extract_team_standings(sink, year, league_key):
     _write_team_standings(sink, payload, year, league_key)
 
 
+def fetch_matchup_schedule(year):
+    """Pull the mMatchupScore document for one season.
+
+    ONE REQUEST, and it is the whole acquisition half of MLB-235. The view
+    carries `schedule[]` -- whose `home/away.pointsByScoringPeriod` KEYS are
+    each matchup period's scoring periods -- alongside the base document's
+    `status` and `seasonId`, so a single unfiltered call returns everything
+    the derivation needs for the season. Period-filtered requests are not
+    required; the evidence returned all 26 periods of one season and all 18
+    of another in one response each.
+
+    NOTHING IN THIS PATH READS THE SEED, which is the entire point. The
+    current schedule chain is circular -- load_schedule() reads
+    matchup_schedule.csv, get_scoring_periods() turns its dates into scoring
+    periods, and the extract stamps that answer onto RAW.BOX_SCORES -- so
+    the warehouse cannot independently prove the mapping it was handed. This
+    request takes a season and a league id and nothing else.
+    """
+    return fetch_league_payload(year, ["mMatchupScore"])
+
+
+def refuse_matchup_schedule_capture(year, why):
+    """The message for a membership capture that must not be written.
+
+    A refusal rather than a skip, and the distinction is the point: a skip
+    says "there was nothing here", which is a claim about the league. Every
+    condition that reaches this function says something different -- the
+    document is not the one we asked for, or is not shaped like the thing
+    this capture stores. Writing it anyway files evidence that cannot be
+    derived from, or worse, files the wrong season's periods under a
+    season_year the loader stamped itself, with nothing on the row to
+    contradict it.
+
+    Stops the run rather than continuing to the next step for the same
+    reason `refuse_settled_overwrite` does: the run's remaining writes are
+    stamped with the same `year`, and a season identity that just failed a
+    check is not a good foundation for them.
+    """
+    return (
+        f"\n[matchup schedule] REFUSING to capture {year}: {why}.\n"
+        f"\nNothing was written. The capture stores "
+        f"{{{', '.join(SNAPSHOT_KEYS)}}} from ESPN's mMatchupScore view and "
+        f"requires all three -- status carries currentMatchupPeriod, which "
+        f"decides which periods are closed, and seasonId is the only season "
+        f"label on the row that this project did not stamp itself.\n"
+        f"\nCheck that --year names a season this league played, then re-run. "
+        f"If ESPN has genuinely changed the shape of this view, that is a "
+        f"finding: the derivation reads these three blocks and nothing else."
+    )
+
+
+def extract_matchup_schedule(sink, year, league_key):
+    """Capture the season's matchup-period membership snapshot.
+
+    Fetch here, validate and narrow in matchup_membership.py, write to the
+    sink -- the three stay apart so everything except the fetch is
+    exercisable with no credentials and no network.
+
+    Nothing is written unless the document passes the storage contract:
+    all three blocks present, shaped right, and ESPN's own seasonId equal to
+    the year about to be stamped on the row.
+    """
+    print(f"\nMatchup schedule for {year}:")
+    payload = fetch_matchup_schedule(year)
+    try:
+        snapshot = matchup_schedule_snapshot(payload, season_year=year)
+    except MatchupMembershipError as exc:
+        raise SystemExit(refuse_matchup_schedule_capture(year, str(exc)))
+
+    periods = {entry.get("matchupPeriodId")
+               for entry in snapshot["schedule"]
+               if isinstance(entry, dict)}
+    current = snapshot["status"].get("currentMatchupPeriod")
+    print(f"  Retrieved {len(snapshot['schedule'])} scheduled matchup(s) "
+          f"across {len(periods)} matchup period(s) for {year} "
+          f"(current period {current})")
+    sink.write_matchup_schedule(snapshot, year, league_key)
+
+
 def extract_league_settings(sink, year, league_key):
     """Pull scoring + roster settings from ESPN and load them to the sink.
 
@@ -2072,6 +2165,21 @@ if __name__ == "__main__":
              "weekly, unlike the settings they used to ride along with.",
     )
     parser.add_argument(
+        "--include-matchup-schedule", action="store_true",
+        help="Also capture the season's matchup-period membership from "
+             "ESPN's mMatchupScore view (MLB-235) -- the platform's own "
+             "answer to which scoring periods each matchup period contains, "
+             "captured without reading matchup_schedule.csv. Opt-in: nothing "
+             "consumes it yet, so it is one extra request the weekly runbook "
+             "does not need to pay for until the derived models land.",
+    )
+    parser.add_argument(
+        "--matchup-schedule-only", action="store_true",
+        help="Capture the matchup-period membership only (skip box scores, "
+             "settings and standings). The cheapest way to backfill a season "
+             "of membership -- one request, no box-score work.",
+    )
+    parser.add_argument(
         "--include-transactions", action="store_true",
         help="Also extract the season transaction log (adds/drops/trades) "
              "from the ESPN message board (MLB-16)",
@@ -2152,16 +2260,26 @@ if __name__ == "__main__":
           f"(league_key={league_key}, platform={target_league.platform})")
 
     # Determine what to extract
-    do_box_scores = not args.settings_only and not args.transactions_only
-    do_settings = args.settings_only or args.include_settings
-    do_transactions = args.transactions_only or args.include_transactions
+    do_box_scores = (not args.settings_only and not args.transactions_only
+                     and not args.matchup_schedule_only)
+    do_settings = ((args.settings_only or args.include_settings)
+                   and not args.matchup_schedule_only)
+    do_transactions = ((args.transactions_only or args.include_transactions)
+                       and not args.matchup_schedule_only)
+    # MLB-235. Opt-in on purpose: nothing consumes the capture yet, so
+    # putting it on the default path would add a request per run to store
+    # rows no model reads. It moves to the default the way standings did --
+    # when something downstream goes stale without it.
+    do_matchup_schedule = (args.matchup_schedule_only
+                           or args.include_matchup_schedule)
     # Standings run on every invocation, including --transactions-only:
     # "as up to date as possible" is the whole point, and one mTeam request
     # is cheap enough that gating it on what else the run is doing would
     # only recreate the staleness this split exists to remove. The settings
     # path already carries mTeam, so it writes them itself and this stands
     # down rather than fetching twice.
-    do_standings = not args.no_standings and not do_settings
+    do_standings = (not args.no_standings and not do_settings
+                    and not args.matchup_schedule_only)
 
     with open_sink(raw_target, args.parquet_dir) as sink:
         print(f"RAW target: {sink.describe()}")
@@ -2173,6 +2291,10 @@ if __name__ == "__main__":
         # --- Team standings (MLB-227 capture, split out 2026-08-09) ---
         if do_standings:
             extract_team_standings(sink, year, league_key)
+
+        # --- Matchup-period membership (MLB-235) ---
+        if do_matchup_schedule:
+            extract_matchup_schedule(sink, year, league_key)
 
         # --- Transactions (MLB-16) ---
         if do_transactions:

@@ -35,7 +35,7 @@ staging models are written against those semantics:
 
   BOX_SCORES        delete-then-insert scoped to (season_year, matchup_period,
                     league_key) -- so re-running a period replaces it
-  the other five    APPEND-ONLY snapshots. stg_* picks the latest per
+  all the others    APPEND-ONLY snapshots. stg_* picks the latest per
                     (league_key, season_year) via ROW_NUMBER() ORDER BY
                     extracted_at DESC. Collapsing these to overwrite still
                     runs, still returns one row, and silently discards the
@@ -78,6 +78,12 @@ ESPN_RAW_TABLES = (
     "ACQUISITION_SETTINGS",
     "TRADE_SETTINGS",
     "TEAM_STANDINGS",
+    # MLB-235: the mMatchupScore snapshot that carries matchup-period ->
+    # scoring-period membership. Same snapshot shape as the five above; it is
+    # a separate table rather than part of SCHEDULE_SETTINGS because
+    # scheduleSettings is a once-a-season block and this one changes every
+    # week a period closes.
+    "MATCHUP_SCHEDULE",
 )
 
 # Contract type -> pyarrow type. Deliberately NOT the same mapping as the
@@ -484,6 +490,17 @@ class LocalParquetSink:
 
     def write_team_standings(self, payload, year, league_key):
         self._write_snapshot("TEAM_STANDINGS", payload, year, league_key)
+
+    # -- MLB-235 ----------------------------------------------------------
+    # The {seasonId, status, schedule} snapshot, append-only like its
+    # neighbours. Append matters more here than anywhere else in this class:
+    # membership is RETROSPECTIVE, so each capture closes one more period
+    # than the last, and an overwrite would leave exactly one snapshot whose
+    # currentMatchupPeriod is whenever it was last run -- discarding the
+    # evidence that a period was already closed when an earlier capture saw
+    # it. The append-only history IS the audit trail for a derived flag.
+    def write_matchup_schedule(self, payload, year, league_key):
+        self._write_snapshot("MATCHUP_SCHEDULE", payload, year, league_key)
 
     # -- deliberately unimplemented ---------------------------------------
     def backfill_club_of_game(self, year, league_key, periods):

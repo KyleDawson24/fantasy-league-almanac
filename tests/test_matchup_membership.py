@@ -39,7 +39,7 @@ from matchup_membership import (  # noqa: E402
     AMBIGUOUS_STANDARD_LENGTH, DERIVED, INSUFFICIENT_EVIDENCE, MALFORMED,
     MAX_SCORING_PERIOD_KEY_LENGTH, MIN_CLOSED_PERIODS_FOR_STANDARD, UNAVAILABLE,
     MatchupMembershipError, derive_matchup_periods, derive_period_shape,
-    parse_matchup_membership, seasons_to_request,
+    matchup_schedule_snapshot, parse_matchup_membership, seasons_to_request,
 )
 
 LEAGUE = "espn-main"
@@ -594,6 +594,122 @@ def test_derive_period_shape_can_be_called_on_a_parse_directly():
 
     assert report.status == DERIVED
     assert report.rows == parse.rows
+
+
+# ---------------------------------------------------------------------------
+# What RAW stores
+# ---------------------------------------------------------------------------
+def _snapshot(payload, season_year=SEASON):
+    return matchup_schedule_snapshot(payload, season_year=season_year)
+
+
+def test_the_snapshot_keeps_the_three_keys_a_derivation_needs():
+    payload = _season([7, 7, 7])
+    payload["draftDetail"] = {"drafted": True}
+
+    snapshot = _snapshot(payload)
+
+    assert set(snapshot) == {"seasonId", "status", "schedule"}
+    assert snapshot["schedule"] is payload["schedule"]
+    assert snapshot["status"] is payload["status"]
+
+
+def test_a_stored_snapshot_round_trips_through_the_parser():
+    """The load-bearing property: what RAW keeps is enough to derive from,
+    with no access to the original response. If this ever fails, every row
+    already captured is undecodable and ESPN will not re-serve the payload."""
+    report = derive_matchup_periods(
+        _snapshot(_season(ORDINARY_SEASON)),
+        league_key=LEAGUE, season_year=SEASON)
+
+    assert report.status == DERIVED
+    assert report.standard_period_length == 7
+    assert report.abnormal_periods == (1, 14)
+
+
+def test_the_snapshot_survives_a_json_round_trip():
+    """RAW stores it as JSON text in a VARIANT, so the object that comes back
+    is not the object that went in -- integer keys would become strings and
+    tuples would become lists. Derivation has to hold across that."""
+    import json
+
+    snapshot = json.loads(json.dumps(_snapshot(_season(ORDINARY_SEASON))))
+    report = derive_matchup_periods(
+        snapshot, league_key=LEAGUE, season_year=SEASON)
+
+    assert report.status == DERIVED
+    assert report.standard_period_length == 7
+
+
+@pytest.mark.parametrize("drop", ["seasonId", "status", "schedule"])
+def test_a_snapshot_missing_any_required_block_is_refused(drop):
+    """All three are required. Finding this out at read time -- possibly a
+    season later, with the live payload long gone -- is strictly worse than
+    finding it out now."""
+    payload = _season([7, 7, 7])
+    del payload[drop]
+
+    with pytest.raises(MatchupMembershipError, match=drop):
+        _snapshot(payload)
+
+
+def test_the_schedule_array_alone_is_not_a_snapshot():
+    """Named explicitly because it is the shape someone would reach for
+    first: it is the membership, and it is still not enough."""
+    payload = _season([7, 7, 7])
+
+    with pytest.raises(MatchupMembershipError, match="status"):
+        _snapshot({"schedule": payload["schedule"]})
+
+
+def test_a_season_id_that_disagrees_with_the_stamp_is_refused():
+    """The row's season_year comes from the loader, so a document filed
+    under the wrong season agrees with itself perfectly -- ESPN's own
+    seasonId is the only thing that can contradict it, and only if it is
+    checked before the write."""
+    payload = _season([7, 7, 7], season_year=2025)
+
+    with pytest.raises(MatchupMembershipError, match="season 2025"):
+        _snapshot(payload, season_year=SEASON)
+
+
+@pytest.mark.parametrize("bad_season", ["2026", 2026.0, True, [2026]])
+def test_a_non_integer_season_id_is_refused(bad_season):
+    """'2026' == 2026 is False, so a string season would fail the equality
+    check with a confusing message about a mismatch rather than a shape."""
+    payload = _season([7, 7, 7])
+    payload["seasonId"] = bad_season
+
+    with pytest.raises(MatchupMembershipError, match="season year|season 2026"):
+        _snapshot(payload)
+
+
+@pytest.mark.parametrize("bad_status", ["18", 18, ["currentMatchupPeriod"], 1.5])
+def test_a_non_object_status_is_refused(bad_status):
+    payload = _season([7, 7, 7])
+    payload["status"] = bad_status
+
+    with pytest.raises(MatchupMembershipError, match="status is"):
+        _snapshot(payload)
+
+
+@pytest.mark.parametrize("bad_schedule", [{}, "schedule", 7, {"1": []}])
+def test_a_non_list_schedule_is_refused(bad_schedule):
+    payload = _season([7, 7, 7])
+    payload["schedule"] = bad_schedule
+
+    with pytest.raises(MatchupMembershipError, match="schedule is"):
+        _snapshot(payload)
+
+
+def test_an_empty_schedule_list_is_still_a_valid_capture():
+    """Structural checks only. A league ESPN has not scheduled yet returns
+    an empty list, which is a real answer about the league -- refusing it
+    would confuse 'nothing scheduled' with 'document not understood'."""
+    payload = _season([7, 7, 7])
+    payload["schedule"] = []
+
+    assert _snapshot(payload)["schedule"] == []
 
 
 # ---------------------------------------------------------------------------

@@ -91,7 +91,7 @@ def test_the_two_named_tables_are_in_the_conditional_set():
 
 
 def test_every_conditionally_written_table_is_covered():
-    """The five snapshot tables share the identical defect -- their CREATE
+    """Every snapshot table shares the identical defect -- their CREATE
     is inside load_snapshot_to_snowflake, which a `block is None` skip
     never reaches. Fixing only the two named ones would leave a league
     whose payload omits tradeSettings failing the same way."""
@@ -113,8 +113,8 @@ def test_all_conditional_tables_are_in_the_raw_schema_contract():
 # The behaviour
 # ---------------------------------------------------------------------------
 def test_first_run_creates_every_conditional_table():
-    """A league with nothing but box scores still ends up with all seven
-    relations present and empty."""
+    """A league with nothing but box scores still ends up with every
+    conditionally-written relation present and empty."""
     conn = _FakeConn(existing=())
     created = extract.SnowflakeSink(conn).ensure_contract_tables()
 
@@ -125,7 +125,7 @@ def test_first_run_creates_every_conditional_table():
 
 
 def test_repeat_run_reports_nothing_created_but_still_issues_idempotent_ddl():
-    """Kyle's warehouse already has all seven. The run must stay quiet --
+    """Kyle's warehouse already has them all. The run must stay quiet --
     and must not depend on the catalog probe for correctness, since the
     DDL is IF NOT EXISTS either way."""
     conn = _FakeConn(existing=extract.CONDITIONAL_RAW_TABLES)
@@ -149,7 +149,7 @@ def test_league_key_column_is_ensured_on_every_table():
 
 
 def test_ddl_carries_the_snapshot_shape():
-    """All seven are append-only VARIANT snapshots; the staging models pick
+    """They are all append-only VARIANT snapshots; the staging models pick
     the latest row per league+season via extracted_at."""
     conn = _FakeConn()
     extract.SnowflakeSink(conn).ensure_contract_tables()

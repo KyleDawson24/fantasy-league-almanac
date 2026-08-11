@@ -223,6 +223,88 @@ class DerivationReport:
 
 
 # ---------------------------------------------------------------------------
+# What RAW stores
+# ---------------------------------------------------------------------------
+# The three top-level keys a captured snapshot must carry -- ALL THREE,
+# REQUIRED, and never the schedule array alone (Kyle's ruling, 2026-08-11).
+# Stored without any one of them the capture is unusable, and nothing about
+# the stored row says so:
+#
+#   status    holds currentMatchupPeriod, which IS the closed-period policy.
+#             Without it a stored snapshot cannot tell a settled period from
+#             one that was still filling in when it was captured -- and a
+#             short in-flight period is indistinguishable from a real
+#             abnormality, which is the one mistake this whole ticket exists
+#             to avoid making.
+#   seasonId  is ESPN's own answer to which season this document describes,
+#             and it is the ONLY independent one on the row. RAW's
+#             season_year column is stamped by the loader, so a row filed
+#             under the wrong season agrees with itself perfectly. Season
+#             identity is part of the storage contract, not a nicety: a 2025
+#             document written as 2026 would silently supply 2026's periods
+#             from the wrong year's schedule, and the derived flags would be
+#             confidently wrong rather than absent.
+#   schedule  is the membership.
+#
+# It is an assembly of three verbatim blocks, not a transformation: nothing
+# inside any of them is reshaped, renamed, filtered or sorted.
+SNAPSHOT_KEYS = ("seasonId", "status", "schedule")
+
+
+def matchup_schedule_snapshot(payload, *, season_year):
+    """The narrow object RAW stores, out of a full mMatchupScore response.
+
+    Narrow rather than whole because the rest of the league document is
+    already captured elsewhere or is not ours to keep -- and because a RAW
+    row that is mostly unrelated payload invites the next reader to build on
+    the parts nobody verified. Everything the derivation needs is here, and
+    the module docstring's traced request is what produces it.
+
+    REFUSES RATHER THAN STORING SOMETHING THAT CANNOT BE DERIVED FROM. All
+    three keys are required, their basic shapes are checked, and ESPN's
+    `seasonId` must equal `season_year` -- the value the loader is about to
+    stamp on the row. Deferring any of these to read time means discovering
+    them possibly a season later, with the live payload long gone and no way
+    to re-fetch it; ESPN does not re-serve what it has moved on from. The
+    checks here are structural only. Whether the CONTENTS make sense is the
+    parser's job, and deliberately not duplicated: RAW captures, staging
+    interprets.
+    """
+    if not isinstance(payload, dict):
+        raise MatchupMembershipError(
+            f"payload is {type(payload).__name__}, not an ESPN league document")
+
+    missing = [key for key in SNAPSHOT_KEYS if payload.get(key) is None]
+    if missing:
+        raise MatchupMembershipError(
+            f"payload carries no {' and no '.join(missing)}; all of "
+            f"{', '.join(SNAPSHOT_KEYS)} are required (request the "
+            f"mMatchupScore view)")
+
+    declared = payload["seasonId"]
+    if isinstance(declared, bool) or not isinstance(declared, int):
+        raise MatchupMembershipError(
+            f"seasonId is {declared!r} ({type(declared).__name__}), not a "
+            f"season year")
+    if declared != season_year:
+        raise MatchupMembershipError(
+            f"ESPN says this document is season {declared} but it is being "
+            f"captured as {season_year}; the row's season_year is stamped by "
+            f"the loader, so storing it would file the wrong season's "
+            f"membership under {season_year} with nothing to contradict it")
+
+    if not isinstance(payload["status"], dict):
+        raise MatchupMembershipError(
+            f"status is {type(payload['status']).__name__}, not an object; "
+            f"the closed-period policy reads currentMatchupPeriod out of it")
+    if not isinstance(payload["schedule"], list):
+        raise MatchupMembershipError(
+            f"schedule is {type(payload['schedule']).__name__}, not a list")
+
+    return {key: payload[key] for key in SNAPSHOT_KEYS}
+
+
+# ---------------------------------------------------------------------------
 # Which seasons a backfill asks for
 # ---------------------------------------------------------------------------
 def seasons_to_request(first_season, final_season, through_season):

@@ -296,22 +296,38 @@ def share_link_viewer(client, spreadsheet_id):
     is off because there is no recipient to email -- the grantee is the
     link itself.
 
-    `with_link=True` states the link-only intent explicitly rather than
-    leaning on a default. Worth knowing what it does and does not buy:
-    gspread 6.2.1 sends it as `withLink`, which is the Drive **v2** field
-    name, into a **v3** endpoint that does not define it. v3's own switch
-    is `allowFileDiscovery`, and v3 defaults it to false, which is what
-    link-only means. So the flag is the honest expression of intent and
-    the default happens to agree -- but neither is proof, which is why
-    nothing here reports success until the permission has been read back.
+    This posts to Drive v3 directly rather than going through gspread's
+    `insert_permission`, which is not a stylistic choice. That helper
+    sends `{"type", "role", "withLink"}`, and `withLink` is the Drive
+    **v2** field name; the v3 Permission resource defines
+    `allowFileDiscovery` instead. So the helper's link-only argument
+    lands on a field this endpoint does not define, and the one field
+    that actually controls discoverability never gets sent. Rather than
+    let the first live consent run discover what v3 does with an
+    obsolete key, the correct field is sent explicitly.
+
+    `allowFileDiscovery: false` IS the meaning of "anyone with the link":
+    anyone holding it can open the file, and nobody can find it by
+    searching. `true` would be "anyone on the internet can find and
+    read", which is a different and broader product.
+
+    No `notify` is sent because there is no recipient to email -- the
+    grantee is the link itself, and Drive only accepts notification
+    parameters for `user`/`group` grants.
+
+    Sending the right field is still not proof that Drive applied it.
+    That is what the read-back in `verify_link_viewer` is for.
     """
-    return client.insert_permission(
-        spreadsheet_id,
-        value=None,
-        perm_type='anyone',
-        role='reader',
-        notify=False,
-        with_link=True,
+    url = f'{DRIVE_FILES_API_V3_URL}/{spreadsheet_id}/permissions'
+    payload = {
+        'type': 'anyone',
+        'role': 'reader',
+        'allowFileDiscovery': False,
+    }
+    return client.http_client.request(
+        'post', url,
+        json=payload,
+        params={'supportsAllDrives': True},
     )
 
 

@@ -343,11 +343,33 @@ def test_the_granted_scopes_field_wins_over_the_requested_one(monkeypatch):
     assert sheets_auth.credential_scopes(creds) == {DRIVE_FILE, SPREADSHEETS}
 
 
-@pytest.mark.parametrize('granted', [None, []])
-def test_credential_scopes_falls_back_to_requested_when_unpopulated(granted):
-    """google-auth does not populate granted_scopes on every path."""
-    creds = _FakeCreds([DRIVE_FILE], granted_scopes=granted)
+def test_credential_scopes_falls_back_to_requested_when_NOT_REPORTED():
+    """google-auth does not populate granted_scopes on every path. None
+    means 'we were not told', which is what the fallback is for."""
+    creds = _FakeCreds([DRIVE_FILE], granted_scopes=None)
     assert sheets_auth.credential_scopes(creds) == {DRIVE_FILE}
+
+
+@pytest.mark.parametrize('empty', [[], (), set()])
+def test_an_explicitly_EMPTY_grant_is_not_replaced_by_what_we_asked_for(empty):
+    """None and empty are different answers and must not be conflated.
+    Empty means Google reported granting nothing; substituting the
+    requested scopes there would turn a refusal into an approval."""
+    creds = _FakeCreds([DRIVE_FILE], granted_scopes=empty)
+    assert sheets_auth.credential_scopes(creds) == frozenset()
+    assert not sheets_auth.token_satisfies(sheets_auth.PUBLIC,
+                                           sheets_auth.credential_scopes(creds))
+
+
+def test_a_consent_reporting_an_empty_grant_fails_closed(profiles,
+                                                         monkeypatch):
+    _, public = profiles
+    _stub_flow(monkeypatch, _FakeCreds([DRIVE_FILE], granted_scopes=[]))
+
+    with pytest.raises(RuntimeError, match='did not grant'):
+        sheets_auth.authorized_client(public)
+
+    assert not public.token_path.exists()
 
 
 def test_an_exact_fresh_public_grant_is_accepted(monkeypatch):

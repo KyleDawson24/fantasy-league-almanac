@@ -43,11 +43,17 @@ class _FakeSpreadsheet:
         return f'https://docs.google.com/spreadsheets/d/{self.id}/edit'
 
 
+def _encode(payload):
+    """`json` is shadowed by the request kwarg inside the fakes, so
+    encoding lives out here."""
+    return json.dumps(payload).encode('utf-8')
+
+
 def _permission_response(permissions):
     """A Drive permissions.list body, as a real requests.Response."""
     response = requests.Response()
     response.status_code = 200
-    response._content = json.dumps({'permissions': permissions}).encode('utf-8')
+    response._content = _encode({'permissions': permissions})
     return response
 
 
@@ -61,14 +67,32 @@ LINK_VIEWER_PERMISSIONS = [
 
 
 class _FakeHTTPClient:
-    """Stands in for gspread's authorized session for the read-back."""
+    """Stands in for gspread's authorized session.
+
+    Deliberately the ONLY sharing seam these tests offer. An earlier
+    version of this file faked `client.insert_permission` instead, and
+    that is exactly what let the pinned library's wire-format mismatch
+    (a Drive v2 `withLink` posted to a v3 endpoint) sail through a full
+    green suite: mocking the helper meant nothing ever looked at the
+    bytes. Assert on the request, not on the convenience wrapper.
+    """
 
     def __init__(self, owner):
         self._owner = owner
 
-    def request(self, method, url, params=None, **kwargs):
-        self._owner.permission_reads.append((method, url, dict(params or {})))
-        return _permission_response(self._owner.stored_permissions)
+    def request(self, method, url, params=None, json=None, **kwargs):
+        owner = self._owner
+        owner.http_calls.append({
+            'method': method, 'url': url,
+            'params': dict(params or {}), 'body': json,
+        })
+        if method == 'post':
+            owner.calls.append(('share', url))
+            if owner.share_raises is not None:
+                raise owner.share_raises
+            owner.stored_permissions = list(owner.permissions_after_share)
+            return _permission_response([])
+        return _permission_response(owner.stored_permissions)
 
 
 class _FakeClient:
@@ -76,15 +100,14 @@ class _FakeClient:
 
     def __init__(self, share_raises=None, permissions_after_share=None):
         self.created = []
-        self.permissions = []
         self.deleted = []
         self.calls = []
-        self.permission_reads = []
+        self.http_calls = []
         self.stored_permissions = []
-        self._permissions_after_share = (
+        self.permissions_after_share = (
             LINK_VIEWER_PERMISSIONS if permissions_after_share is None
             else permissions_after_share)
-        self._share_raises = share_raises
+        self.share_raises = share_raises
         self._n = 0
         self.http_client = _FakeHTTPClient(self)
 
@@ -95,20 +118,24 @@ class _FakeClient:
         self.calls.append(('create', title))
         return _FakeSpreadsheet(spreadsheet_id, title)
 
-    def insert_permission(self, file_id, value=None, perm_type=None,
-                          role=None, notify=True, email_message=None,
-                          with_link=False):
-        self.calls.append(('share', file_id))
-        if self._share_raises is not None:
-            raise self._share_raises
-        self.permissions.append({
-            'file_id': file_id, 'value': value, 'perm_type': perm_type,
-            'role': role, 'notify': notify, 'with_link': with_link,
-        })
-        self.stored_permissions = list(self._permissions_after_share)
+    def insert_permission(self, *args, **kwargs):
+        raise AssertionError(
+            'sharing went through gspread insert_permission, which posts the '
+            'Drive v2 field `withLink` to a v3 endpoint'
+        )
 
     def del_spreadsheet(self, file_id):          # must never be reached
         self.deleted.append(file_id)
+
+    # -- conveniences over the recorded traffic -----------------------
+    @property
+    def share_posts(self):
+        return [c for c in self.http_calls if c['method'] == 'post']
+
+    @property
+    def permission_reads(self):
+        return [(c['method'], c['url'], c['params'])
+                for c in self.http_calls if c['method'] == 'get']
 
 
 def _api_error(code, message, reason=None):
@@ -176,22 +203,51 @@ def test_the_public_permission_is_viewer_and_never_writer(ledger):
     sheets_workbook.publish_workbook(
         client, 'Almanac', lambda sid: None, ledger=ledger)
 
-    assert len(client.permissions) == 1
-    granted = client.permissions[0]
-    assert granted['perm_type'] == 'anyone'
-    assert granted['role'] == 'reader'
-    assert granted['role'] not in ('writer', 'owner', 'commenter')
-    assert granted['notify'] is False
+    assert len(client.share_posts) == 1
+    body = client.share_posts[0]['body']
+    assert body['type'] == 'anyone'
+    assert body['role'] == 'reader'
+    assert body['role'] not in ('writer', 'owner', 'commenter')
 
 
-def test_link_only_sharing_is_asked_for_explicitly(ledger):
-    """Not left to a library default that means something else in the
-    API version underneath."""
+def test_the_sharing_request_is_a_drive_v3_permissions_post(ledger):
+    """Method, endpoint and params, not just the payload."""
     client = _FakeClient()
     sheets_workbook.publish_workbook(
         client, 'Almanac', lambda sid: None, ledger=ledger)
 
-    assert client.permissions[0]['with_link'] is True
+    post = client.share_posts[0]
+    assert post['method'] == 'post'
+    assert post['url'] == (
+        'https://www.googleapis.com/drive/v3/files/sheet-1/permissions')
+    assert post['params'] == {'supportsAllDrives': True}
+
+
+def test_link_only_is_sent_as_the_drive_v3_field(ledger):
+    """`allowFileDiscovery: false` IS anyone-with-the-link. Anything
+    else is either discoverable or unstated."""
+    client = _FakeClient()
+    sheets_workbook.publish_workbook(
+        client, 'Almanac', lambda sid: None, ledger=ledger)
+
+    body = client.share_posts[0]['body']
+    assert body['allowFileDiscovery'] is False
+    assert body == {'type': 'anyone', 'role': 'reader',
+                    'allowFileDiscovery': False}
+
+
+def test_the_obsolete_v2_link_field_is_never_sent(ledger):
+    """THE regression. gspread 6.2.1's insert_permission posts
+    `withLink` -- a Drive v2 field -- to a v3 endpoint that does not
+    define it, so the one field controlling discoverability never got
+    sent at all. Faking the helper hid this behind a green suite."""
+    client = _FakeClient()
+    sheets_workbook.publish_workbook(
+        client, 'Almanac', lambda sid: None, ledger=ledger)
+
+    body = client.share_posts[0]['body']
+    assert 'withLink' not in body
+    assert 'with_link' not in body
 
 
 # ---------------------------------------------------------------------------
@@ -287,11 +343,13 @@ def test_the_read_back_follows_pagination(ledger, monkeypatch):
     seen = []
 
     class _PagingHTTP:
-        def request(self, method, url, params=None, **kwargs):
+        def request(self, method, url, params=None, json=None, **kwargs):
+            if method == 'post':
+                return _permission_response([])
             seen.append(dict(params or {}))
             response = requests.Response()
             response.status_code = 200
-            response._content = json.dumps(pages[len(seen) - 1]).encode()
+            response._content = _encode(pages[len(seen) - 1])
             return response
 
     client = _FakeClient()
@@ -330,7 +388,8 @@ def test_a_render_failure_never_shares_anything(ledger):
         sheets_workbook.publish_workbook(
             client, 'Almanac', _boom, ledger=ledger)
 
-    assert client.permissions == []
+    assert client.share_posts == []
+    assert client.http_calls == []
     assert [k for k, _ in client.calls] == ['create']
 
 

@@ -218,9 +218,16 @@ def credential_scopes(creds):
     `scopes` -- the set that was REQUESTED -- is the deliberate fallback.
     The fallback is weaker on purpose and is why the cached-token check
     reads the token file instead: there, nothing is left to assume.
+
+    `is None` rather than a truthiness test, and the difference matters:
+    None means Google did not report a grant, which is the case the
+    fallback exists for, while an empty collection means Google reported
+    granting NOTHING. Truthiness conflates the two, and would answer "we
+    were told nothing was granted" by substituting the scopes we asked
+    for -- turning a refusal into an approval.
     """
     granted = getattr(creds, 'granted_scopes', None)
-    if granted:
+    if granted is not None:
         return frozenset(granted)
     return frozenset(getattr(creds, 'scopes', None) or ())
 

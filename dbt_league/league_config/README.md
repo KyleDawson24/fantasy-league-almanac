@@ -23,13 +23,21 @@ The distinction matters more than it looks, because it decides what
 happens when you leave a file blank.
 
 **REQUIRED -- blank means the surfaces that need it come out empty.**
-These carry the facts nothing else can supply: your league's calendar, and
-who your franchises and owners are. A model reads them directly, so an
-empty file is not a neutral default, it is an absence.
+These carry the facts nothing else can supply: who your franchises and
+owners are. A model reads them directly, so an empty file is not a
+neutral default, it is an absence.
+
+`matchup_schedule.csv` **used to head this table and no longer does**
+(MLB-235). An ESPN league's weeks come from ESPN's own `mMatchupScore`
+response, captured on every box-score run, and the dates follow from it
+by arithmetic -- ESPN's scoring periods are days, so scoring period N is
+the season's first scoring date plus N-1 days, and that opening date is
+MLB's published regular-season start, fetched from the free public MLB
+Stats API. The file survives as an optional correction and labelling
+surface, listed below with the other optional ones.
 
 | file | what it supplies | blank means |
 |---|---|---|
-| `matchup_schedule.csv` | week boundaries per season | every weekly surface is empty |
 | `cbs_franchises.csv` | CBS franchise id -> name/abbrev | CBS franchises unnamed |
 | `cbs_team_owners.csv` | CBS franchise -> current owner | no CBS current-owner display |
 | `team_owner_by_year.csv` | who owned which franchise, per season | no CBS owner history |
@@ -91,12 +99,23 @@ your league has never renumbered a team, leave it empty.
 `matchup_schedule.csv` --
 `season_year,matchup_period,start_date,end_date,is_abnormal,abnormal_reason,is_playoff,playoff_round`
 
-    2026,1,2026-03-26,2026-04-05,false,,false,
+    2026,1,2026-03-25,2026-04-05,false,,false,
 
-One row per scoring period per season. `is_abnormal` flags a week that is
-not the usual length (All-Star break, a doubled-up week) and
-`abnormal_reason` says why in plain text. Playoff weeks set `is_playoff`
-and name the round.
+One row per matchup period per season. **Optional, and normally blank.**
+An ESPN league's week membership and dates are both derived now, so a row
+here is a *correction or a label*, not a source: an explicit override of a
+derived date for a commissioner-declared oddity, or human text the platform
+does not serve. `abnormal_reason` is the clearest case -- the derivation can
+say a week ran 14 scoring periods, but only a person can write "All-Star
+break (14 days)", and that written reason is preferred over the generated
+one wherever both agree the week was abnormal. Playoff weeks set
+`is_playoff` and name the round; ESPN's captured `scheduleSettings` supplies
+the regular-season boundary on its own when it has been captured.
+
+Note that `is_abnormal` here is now the *last* word consulted, not the
+first: an explicit `matchup_period_overrides.csv` row beats it, and the
+platform-derived verdict beats it too. That ordering is deliberate -- a
+hand-maintained flag should not silently outrank what the platform says.
 
 `owner_nicknames.csv` -- `owner_id,first_name,last_name,preferred_name`
 

@@ -1364,6 +1364,28 @@ def format_trades_row(row):
     ]
 
 
+# What a since-trade points cell says when the season's opener could not be
+# resolved (MLB-235 rung 4B-2). ASCII, and the house dash style.
+#
+# THE CELL THIS REPLACES SAID `0`, via a permissive `cutoff_sp = 1` fallback
+# that admitted every scoring period of the season -- so an unresolved opener
+# published whole-season production under a "since the trade" heading. A wrong
+# number that looks right is worse than no number, and this is the smallest
+# state the existing tab already supports: the row, the player and the date
+# still render, only the four point cells decline to answer.
+TRADE_POINTS_UNAVAILABLE = '--'
+
+
+def _trade_points_cell(value):
+    """A since-trade points cell: the number, or the unavailable marker.
+
+    None means the opener did not resolve. Zero is a REAL total and must keep
+    rendering as 0 -- collapsing the two is exactly the confusion this
+    distinction exists to prevent.
+    """
+    return TRADE_POINTS_UNAVAILABLE if value is None else value
+
+
 def format_trade_record_row(leg, team_sums=None, date_display=None):
     """One Trade Record leg row, in TRADE_RECORD_HEADER order.
 
@@ -1380,8 +1402,10 @@ def format_trade_record_row(leg, team_sums=None, date_display=None):
         _bref_link(name, name),
         leg.get('sending_abbrev') or '',
         '',
-        leg.get('total_pts') or 0,
-        leg.get('active_pts') or 0,
+        # `or 0` would turn an unavailable cell into a confident zero, which
+        # is the same class of mistake as the fallback this rung removed.
+        _trade_points_cell(leg.get('total_pts')),
+        _trade_points_cell(leg.get('active_pts')),
         sum_total,
         sum_active,
         date_display or '',

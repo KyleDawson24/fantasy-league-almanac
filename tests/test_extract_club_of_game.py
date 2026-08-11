@@ -6,19 +6,31 @@ by path here rather than added to conftest's sys.path, so the rest of the
 suite keeps its current import surface.
 
 Nothing in this file opens a connection. `settled_loaded_periods` takes its
-warehouse read through a SINK (MLB-208) and its calendar through
-`load_schedule` (a seed CSV), so both are substitutable and the guard's
-decision logic is testable without Snowflake. The sink here is the real
-`SnowflakeSink` over a fake connection, so the cursor-level behaviour these
-tests were written for is still the thing being exercised.
+warehouse read through a SINK (MLB-208) and, since MLB-235 rung 4B-1, its
+AGES through a parsed `mMatchupScore` payload rather than through
+`load_schedule` (a seed CSV) -- so both are substitutable and the guard's
+decision logic is testable without Snowflake and without a calendar. The sink
+here is the real `SnowflakeSink` over a fake connection, so the cursor-level
+behaviour these tests were written for is still the thing being exercised.
+
+WHAT CHANGED UNDERNEATH THESE TESTS. "Ended more than
+LIVE_CAPTURE_WINDOW_DAYS ago" used to be an end DATE out of
+matchup_schedule.csv compared to `today`. It is now the last scoring-period
+ID of the period compared to that season's `status.latestScoringPeriod`. The
+substitution is exact because an ESPN scoring period is one day, so the
+fixture below expresses the same four periods in the platform's units and
+every verdict these tests assert is unchanged.
 
 The LOCAL sink's half of the same guard is covered in
-tests/test_local_raw_writer.py, which needs no connection at all.
+tests/test_local_raw_writer.py, which needs no connection at all. The shared
+recency policy itself, and the selection half that consumes it, are in
+tests/test_extract_membership_selection.py.
 """
 
 import importlib.util
 import json
 import os
+import sys
 from datetime import date, datetime
 from pathlib import Path
 
@@ -53,6 +65,9 @@ _spec = importlib.util.spec_from_file_location(
     "extract_under_test", _REPO_ROOT / "extract" / "extract.py")
 extract = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(extract)
+
+sys.path.insert(0, str(_REPO_ROOT / "extract"))
+from matchup_membership import parse_matchup_membership  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -155,37 +170,69 @@ def _programming_error(msg):
 
 @pytest.fixture
 def schedule(monkeypatch):
-    """Two settled periods, two inside the 21-day window, one with no
-    schedule row at all."""
-    matchups = [
-        (1, date(2026, 3, 30), date(2026, 4, 5)),    # settled, 120d old
-        (14, date(2026, 6, 29), date(2026, 7, 5)),   # settled, 29d old
-        (16, date(2026, 7, 20), date(2026, 7, 26)),  # 8d old, in window
-        (17, date(2026, 7, 27), date(2026, 8, 2)),   # 1d old, in window
-    ]
-    monkeypatch.setattr(extract, "load_schedule",
-                        lambda year: (date(2026, 3, 30), matchups))
-    return matchups
+    """The same four verdicts as the old seed fixture, in ESPN's own units.
+
+    Seventeen closed 7-day periods (period N ends at scoring period 7N),
+    period 18 in flight, `latestScoringPeriod` 120. The window is 21 scoring
+    periods, so the cutoff is 99:
+
+        period  1  ends at   7  -- settled, and long settled
+        period 14  ends at  98  -- settled by ONE scoring period
+        period 16  ends at 112  -- inside the window
+        period 17  ends at 119  -- inside the window
+
+    Contiguous rather than sparse because the membership parser refuses a
+    gapped closed run -- a hole means ESPN served a schedule it does not
+    understand. The old fixture could be sparse; a real payload cannot.
+
+    The seed is BOOBY-TRAPPED rather than merely unused: if the guard ever
+    reaches for a calendar again, these tests say so.
+    """
+    def _seed_is_gone(*args, **kwargs):
+        raise AssertionError(
+            "the settled-history guard read matchup_schedule.csv, which "
+            "MLB-235 rung 4B-1 removed from every extraction path")
+
+    monkeypatch.setattr(extract, "load_schedule", _seed_is_gone)
+
+    def _side(scoring_periods):
+        return {"teamId": 987654,
+                "pointsByScoringPeriod": {str(sp): 0.0 for sp in scoring_periods}}
+
+    payload = {
+        "seasonId": 2026,
+        "status": {"currentMatchupPeriod": 18, "latestScoringPeriod": 120},
+        "schedule": [{"matchupPeriodId": mp,
+                      "home": _side(range(7 * mp - 6, 7 * mp + 1)),
+                      "away": _side(range(7 * mp - 6, 7 * mp + 1))}
+                     for mp in range(1, 18)],
+    }
+    return parse_matchup_membership(
+        payload, league_key="espn-main", season_year=2026)
 
 
-def _settled(conn, periods):
+def _settled(conn, periods, parse):
     """Drive the guard through the REAL SnowflakeSink over a fake connection.
 
-    MLB-208 split the guard: `settled_loaded_periods` now takes a sink and
-    asks it what is loaded, so the fake connection goes in one layer lower.
+    MLB-208 split the guard: `settled_loaded_periods` takes a sink and asks
+    it what is loaded, so the fake connection goes in one layer lower.
     Wrapping rather than faking the sink keeps the adapter's own catalog
     probe and legacy-column self-heal under test -- those are the parts
     MLB-199/W-02 was about, and a fake sink would have skipped straight past
     them.
+
+    MLB-235 rung 4B-1 added the third input: the parsed membership the run
+    already captured, which supplies the ages the seed's dates used to.
     """
     return extract.settled_loaded_periods(
-        extract.SnowflakeSink(conn), 2026, "espn-main", periods, today=TODAY)
+        extract.SnowflakeSink(conn), 2026, "espn-main", periods, parse,
+        today=TODAY)
 
 
 def test_never_loaded_period_is_allowed(schedule):
     """A first extract invents no history, so a genuinely new period is
     unaffected however old it is."""
-    assert _settled(_FakeConn(loaded_periods=[]), [1, 14]) == []
+    assert _settled(_FakeConn(loaded_periods=[]), [1, 14], schedule) == []
 
 
 def test_loaded_period_inside_the_window_is_allowed(schedule):
@@ -193,19 +240,19 @@ def test_loaded_period_inside_the_window_is_allowed(schedule):
     that captures the stamps at all. A guard the routine path had to bypass
     would be bypassed permanently by the second week."""
     conn = _FakeConn(loaded_periods=[16, 17])
-    assert _settled(conn, [16, 17]) == []
+    assert _settled(conn, [16, 17], schedule) == []
 
 
 def test_loaded_and_settled_period_is_refused(schedule):
     conn = _FakeConn(loaded_periods=[1, 14, 16, 17])
-    assert [mp for mp, _end, _at in _settled(conn, [14])] == [14]
+    assert [mp for mp, _end, _at in _settled(conn, [14], schedule)] == [14]
 
 
 def test_refusal_names_only_the_offenders(schedule):
     """Mixed sets refuse as a whole, but the report has to be precise about
     which periods are the problem."""
     conn = _FakeConn(loaded_periods=[1, 14, 16, 17])
-    got = _settled(conn, [1, 14, 16, 17, 99])
+    got = _settled(conn, [1, 14, 16, 17, 99], schedule)
     assert [mp for mp, _end, _at in got] == [1, 14]
 
 
@@ -213,7 +260,7 @@ def test_period_with_no_schedule_row_fails_closed(schedule):
     """No schedule row means no knowable age. A guard that waved those
     through would be defeated by a schedule gap."""
     conn = _FakeConn(loaded_periods=[42])
-    assert [mp for mp, _end, _at in _settled(conn, [42])] == [42]
+    assert [mp for mp, _end, _at in _settled(conn, [42], schedule)] == [42]
 
 
 # ---------------------------------------------------------------------------
@@ -231,7 +278,7 @@ def test_absent_table_is_still_allowed(schedule):
     """A first install has nothing to overwrite. Still true, now asked of
     the catalog rather than inferred from a failure."""
     conn = _FakeConn(loaded_periods=[1, 14], table_exists=False)
-    assert _settled(conn, [1, 14]) == []
+    assert _settled(conn, [1, 14], schedule) == []
 
 
 def test_legacy_table_without_league_key_is_migrated_not_bypassed(schedule):
@@ -243,7 +290,7 @@ def test_legacy_table_without_league_key_is_migrated_not_bypassed(schedule):
     upgraded and then guarded rather than used as an escape hatch.
     """
     conn = _FakeConn(loaded_periods=[1, 14], has_league_key=False)
-    got = _settled(conn, [14])
+    got = _settled(conn, [14], schedule)
     assert [mp for mp, _end, _at in got] == [14], (
         "a legacy-shaped table bypassed the settled-history guard"
     )
@@ -266,7 +313,7 @@ def test_any_unanswerable_guard_refuses(schedule, failing_sql, message):
     conn = _FakeConn(loaded_periods=[1, 14],
                      raise_on={failing_sql: _programming_error(message)})
     with pytest.raises(SystemExit) as excinfo:
-        _settled(conn, [14])
+        _settled(conn, [14], schedule)
     assert "REFUSING TO EXTRACT" in str(excinfo.value)
     assert message in str(excinfo.value), "the underlying error must be surfaced"
 
@@ -507,14 +554,46 @@ def test_extract_refusal_is_ascii_and_explains_the_stakes():
 # ---------------------------------------------------------------------------
 # The riders
 # ---------------------------------------------------------------------------
-def test_lookback_and_guard_window_are_the_same_constant():
+def test_lookback_and_guard_window_are_the_same_policy():
     """The weekly lookback and the guard's exemption must not drift apart:
     a second hardcoded 21 would silently widen or narrow the guard the day
-    someone tuned one of them (MLB-175)."""
-    import inspect
-    default = inspect.signature(
-        extract.get_recent_matchup_periods).parameters["lookback_days"].default
-    assert default == extract.LIVE_CAPTURE_WINDOW_DAYS
+    someone tuned one of them (MLB-175).
+
+    Rung 4B-1 raised this from "the same constant" to "the same function".
+    There used to be two calendar walks reading one number; there is now one
+    `classify_recency`, and both callers pass LIVE_CAPTURE_WINDOW_DAYS into
+    it. Asserted period-by-period rather than by inspecting a default,
+    because agreeing on the constant while disagreeing on the comparison was
+    always the failure mode worth catching.
+    """
+    from matchup_membership import RECENT, classify_recency
+
+    payload = {
+        "seasonId": 2026,
+        "status": {"currentMatchupPeriod": 18, "latestScoringPeriod": 120},
+        "schedule": [{"matchupPeriodId": mp,
+                      "home": {"pointsByScoringPeriod": {
+                          str(sp): 0.0
+                          for sp in range(7 * mp - 6, 7 * mp + 1)}}}
+                     for mp in range(1, 18)],
+    }
+    parse = parse_matchup_membership(
+        payload, league_key="espn-main", season_year=2026)
+
+    selected = set(extract.select_matchup_periods(
+        parse, requested=[], want_all=False, year=2026, today=TODAY)[0])
+    exempt = {
+        mp for mp in parse.closed_periods
+        if not _settled(_FakeConn(loaded_periods=[mp]), [mp], parse)
+    }
+    expected = {mp for mp, verdict in classify_recency(
+        parse, window=extract.LIVE_CAPTURE_WINDOW_DAYS,
+        is_current_season=True).items() if verdict == RECENT}
+
+    assert selected == exempt == expected
+    assert selected == {15, 16, 17}, (
+        "the window moved; if that was deliberate, move it here too"
+    )
 
 
 def test_refusal_message_says_what_to_do_next():

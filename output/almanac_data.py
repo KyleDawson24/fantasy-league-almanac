@@ -1470,8 +1470,21 @@ def get_player_season_points(season_year):
 
 
 def _get_season_opener(season_year):
-    """The season's first scoring-period date (dim_matchup_period), for
-    converting a trade's execution date to an ESPN scoring period."""
+    """The season's first scoring-period date, for converting a trade's
+    execution date to an ESPN scoring period.
+
+    STILL dim_matchup_period, and that is the point of MLB-235 rung 4B-2
+    rather than an omission: the dimension's start_date is now DERIVED --
+    ESPN's daily scoring-period ids anchored to MLB's published
+    regular-season start -- and falls back to the hand-maintained seed only
+    where the platform has not answered. So this reads the automatic opener
+    without knowing that it is one, and a stranger with a blank
+    matchup_schedule.csv gets a real answer here for the first time.
+
+    Returns None when NOTHING resolved: no captured anchor and no seed. That
+    is a genuine state and the caller must treat it as one -- see the note in
+    get_trades_tab_data on what used to happen instead.
+    """
     rows = query_snowflake(f"""
         SELECT MIN(start_date) AS opener
         FROM dim_matchup_period
@@ -1481,6 +1494,33 @@ def _get_season_opener(season_year):
           AND {league_predicate()}
     """, (season_year,))
     return rows[0]['opener'] if rows else None
+
+
+def since_trade_cutoff(exec_date, opener):
+    """The first scoring period whose production counts as "since the trade".
+
+    PURE, AND PUBLIC, so the rule is reachable by a test. It used to be an
+    inline expression inside `get_trades_tab_data` -- which is a live ESPN +
+    warehouse read and therefore excluded from the pure suite -- so the one
+    place the wrong answer was born was the one place nothing could exercise.
+
+    THE FALLBACK THAT IS NOT HERE. This read `... if opener else 1`, and a
+    floor of 1 admits EVERY scoring period of the season, so a season whose
+    opener could not be resolved published each player's whole-season
+    production under a column headed "since the trade". That is not a
+    slightly-wrong number, it is a different statistic wearing the right
+    label, and it looked entirely plausible.
+
+    None means "cannot be computed", and every caller must render it as
+    unavailable rather than as a total.
+
+    `max(1, ...)` is retained for a trade executed BEFORE the season opened:
+    a draft-day deal has no pre-trade production to exclude, and a zero or
+    negative floor would be a scoring period that does not exist.
+    """
+    if opener is None:
+        return None
+    return max(1, (exec_date - opener).days + 1)
 
 
 def _get_since_trade_points(season_year, player_ids):
@@ -1602,16 +1642,33 @@ def get_trades_tab_data(season_year):
         trade['date_display'] = (
             f"{exec_date.month}/{exec_date.day}/{exec_date.year}"
         )
-        cutoff_sp = max(1, (exec_date - opener).days + 1) if opener else 1
+        # NO FALLBACK TO SCORING PERIOD 1 (MLB-235 rung 4B-2). This read
+        # `if opener else 1`, and a scoring-period floor of 1 admits EVERY
+        # day of the season -- so a season whose opener could not be resolved
+        # published each player's whole-season production under a column
+        # headed "since the trade". That is not a slightly-wrong number; it is
+        # a different statistic wearing the right label, and it looked
+        # perfectly plausible.
+        #
+        # An unresolved opener is now unavailable, and says so. The ordinary
+        # path is unaffected: the opener is derived automatically, so this
+        # arithmetic and its values are exactly what they were.
+        cutoff_sp = since_trade_cutoff(exec_date, opener)
         for leg in trade['legs']:
             pid = leg.get('player_id')
             receiver = leg.get('receiving_team_id')
-            total = active = 0.0
-            for r in daily_rows.get(pid, ()):
-                if (r['team_id'] == receiver
-                        and (r['scoring_period'] or 0) >= cutoff_sp):
-                    total += r['total_pts'] or 0
-                    active += r['active_pts'] or 0
+            if cutoff_sp is None:
+                # None, not 0. A zero would render as a real total of zero
+                # points, which is a claim; None is the absence of one, and
+                # the formatter turns it into an explicit unavailable marker.
+                total = active = None
+            else:
+                total = active = 0.0
+                for r in daily_rows.get(pid, ()):
+                    if (r['team_id'] == receiver
+                            and (r['scoring_period'] or 0) >= cutoff_sp):
+                        total += r['total_pts'] or 0
+                        active += r['active_pts'] or 0
             card_player = (cards.get(pid) or {}).get('player') or {}
             rostered = players.get(pid) or {}
             leg.update({

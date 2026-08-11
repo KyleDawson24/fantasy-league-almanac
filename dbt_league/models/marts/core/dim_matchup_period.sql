@@ -40,11 +40,30 @@
 -- playoffs must keep saying so. Folding the two together would make it
 -- impossible to ask for a normal playoff week.
 --
--- DATES ARE LEGACY METADATA AND STAY NULLABLE. ESPN serves scoring-period
--- ids and no calendar, so a new league can establish that a period held seven
--- scoring periods without any date ever existing. Consumers wanting a day
--- count read scoring_period_count and fall back to the date arithmetic only
--- when the platform has not answered.
+-- DATES ARE NOW DERIVED TOO (rung 4B-2), and the seed is no longer their
+-- only source. ESPN serves no ISO date, but its scoring-period ids are DAILY,
+-- so one anchor turns membership into a calendar:
+--
+--     start_date = season_opener + (min scoring period - 1) days
+--     end_date   = season_opener + (max scoring period - 1) days
+--
+-- The anchor is MLB's own published regular-season start
+-- (stg_mlb__season_calendar), not a value anybody typed. Resolution mirrors
+-- the abnormality contract -- derived first, legacy seed second, NULL third --
+-- and dates stay nullable because "no anchor captured" is a real state that
+-- must look like absence rather than a guess.
+--
+-- DERIVED AND LEGACY MUST NOT DISAGREE, and that is enforced rather than
+-- hoped for: schema.yml carries a test that fails the build when a period has
+-- both and they differ. On the pioneer league they agree on all 44 closed
+-- periods of 2025 and 2026, so this coalesce moves no current byte; the test
+-- is what makes a future divergence stop the build instead of silently
+-- shifting the calendar.
+--
+-- ONLY CLOSED PERIODS GET DERIVED DATES. int_matchup_period_evidence gates
+-- the bounds on is_closed, so an in-flight period keeps the seed's dates if
+-- it has them and none otherwise -- its membership is still filling in, and
+-- dating it would publish a week that ends today and moves tomorrow.
 
 {{ config(materialized='view') }}
 
@@ -95,6 +114,38 @@ settings as (
     from {{ ref('stg_schedule_settings') }}
 ),
 
+-- The calendar, derived (rung 4B-2). Joined on season_year ALONE: MLB's
+-- regular season starts when it starts, so the anchor is not league-scoped
+-- and a second ESPN league in the same warehouse reads the same one rather
+-- than needing its own capture.
+derived_dates as (
+    select
+        e.league_key,
+        e.season_year,
+        e.matchup_period,
+        -- WRAPPED IN to_date_of BECAUSE THE ENGINES DISAGREE, and silently.
+        -- Snowflake's DATEADD(day, n, <date>) returns a DATE; DuckDB's
+        -- `<date> + to_days(n)` returns a TIMESTAMP. Left alone, the derived
+        -- half of the coalesce below would be a timestamp on one engine and a
+        -- date on the other, while the legacy half is a date on both -- so a
+        -- consumer formatting start_date would render midnight on DuckDB and
+        -- not on Snowflake. Measured, not theorised: the blank-seed build in
+        -- tests/test_derived_calendar_build.py returned datetime objects
+        -- before this cast.
+        {{ to_date_of(date_add_unit('day', 'e.min_scoring_period - 1',
+                                    'c.season_opener')) }}
+            as derived_start_date,
+        {{ to_date_of(date_add_unit('day', 'e.max_scoring_period - 1',
+                                    'c.season_opener')) }}
+            as derived_end_date
+    from {{ ref('int_matchup_period_evidence') }} e
+    join {{ ref('stg_mlb__season_calendar') }} c
+        on e.season_year = c.season_year
+    where e.min_scoring_period is not null
+      and e.max_scoring_period is not null
+      and c.season_opener is not null
+),
+
 -- Every period any source knows about. An override for a period nothing else
 -- carries still produces a row: a decision that silently vanished would be
 -- worse than one that looks odd.
@@ -112,8 +163,15 @@ resolved as (
         u.season_year,
         u.matchup_period,
 
-        l.start_date,
-        l.end_date,
+        -- Derived first, seed second, NULL third. coalesce keys on NULL
+        -- rather than falsehood, so a period the platform has not closed
+        -- keeps whatever the seed knew rather than being blanked.
+        coalesce(dd.derived_start_date, l.start_date) as start_date,
+        coalesce(dd.derived_end_date, l.end_date) as end_date,
+        dd.derived_start_date,
+        dd.derived_end_date,
+        l.start_date as legacy_start_date,
+        l.end_date as legacy_end_date,
 
         d.is_abnormal_derived,
         o.is_abnormal_override,
@@ -163,6 +221,10 @@ resolved as (
         on u.league_key = d.league_key
        and u.season_year = d.season_year
        and u.matchup_period = d.matchup_period
+    left join derived_dates dd
+        on u.league_key = dd.league_key
+       and u.season_year = dd.season_year
+       and u.matchup_period = dd.matchup_period
     left join overrides o
         on u.league_key = o.league_key
        and u.season_year = o.season_year
@@ -181,11 +243,23 @@ select
     season_year,
     matchup_period,
 
-    -- Legacy calendar metadata. Nullable, seed-owned, and never invented:
-    -- ESPN does not serve dates, so a league without a hand-maintained
-    -- schedule simply has none.
+    -- The calendar. Derived from ESPN's daily scoring-period ids anchored to
+    -- MLB's published regular-season start, falling back to the seed, and
+    -- NULL when neither exists -- never invented.
     start_date,
     end_date,
+
+    -- Both inputs, kept so the standing agreement test can compare them and
+    -- so a reader can tell which answered without re-deriving anything.
+    derived_start_date,
+    derived_end_date,
+    legacy_start_date,
+    legacy_end_date,
+    case
+        when derived_start_date is not null then 'derived'
+        when legacy_start_date is not null then 'legacy_seed'
+        else 'unresolved'
+    end as calendar_source,
 
     is_abnormal,
     -- THE NON-NULL GATE. True only when abnormality is KNOWN and false, so an

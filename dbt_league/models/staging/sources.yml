@@ -117,12 +117,38 @@ sources:
           map carrying no membership. MEMBERSHIP IS RETROSPECTIVE: the
           current matchup period is still filling in and reads short, so
           only periods below status.currentMatchupPeriod are eligible.
-          Scoring-period IDS ONLY -- ESPN serves no start/end dates here, so
-          the seed remains the source of period calendars. Capture is opt-in
-          (extract.py --include-matchup-schedule / --matchup-schedule-only),
-          so this table is present-and-empty until a run enables it; no
-          freshness thresholds for that reason, same as box_scores. Staging
-          picks the latest snapshot per league + season.
+          Scoring-period IDS ONLY -- ESPN serves no start/end dates here.
+          That is not the same as the calendar being unavailable: the ids are
+          DAILY, so mlb_season_calendar's anchor turns them into start/end
+          dates by ordinary day arithmetic (MLB-235 rung 4B-2). Captured
+          automatically on every box-score run (rung 4B-1) because selection
+          reads it, so this table is present-and-empty only until the first
+          run; no freshness thresholds for that reason, same as box_scores.
+          Staging picks the latest snapshot per league + season.
+
+      # The opener anchor (MLB-235 rung 4B-2). NOT ESPN, and deliberately not
+      # folded into matchup_schedule -- that snapshot is ESPN's three blocks
+      # verbatim, and a second vendor's measurement inside it would make
+      # "what did ESPN serve" unanswerable from the row.
+      - name: mlb_season_calendar
+        description: >
+          MLB's own public season record for one year, narrowed and
+          provenance-bearing: {seasonId, regularSeasonStartDate,
+          regularSeasonEndDate, source, anchor_field} from
+          statsapi.mlb.com/api/v1/seasons?sportId=1&season=YYYY. Append-only.
+          regularSeasonStartDate IS ESPN scoring period 1, which is the anchor
+          that makes every matchup-period date derivable without the
+          hand-maintained matchup_schedule seed -- measured, not assumed:
+          2025-03-18 and 2026-03-25, reproducing the seed on all 44 closed
+          periods of both seasons. It is the REGULAR-season start on purpose:
+          MLB opens with a special or standalone game before the conventional
+          full-slate Opening Day, and not the same way twice (2025 the Tokyo
+          Series, 2026 a single Yankees-Giants night in San Francisco), while
+          seasonStartDate is spring training. The row carries a league_key
+          because the snapshot shape is uniform, but the calendar is a fact
+          about BASEBALL, not a league: staging keys it on season_year alone.
+          Present-and-empty until a run reaches MLB's API; dates then stay
+          NULL rather than being guessed.
 
       # CBS raw archives (MLB-59 loader, extract/cbs_load.py) -- same
       # warehouse, same RAW schema, platform-prefixed tables. Payloads land

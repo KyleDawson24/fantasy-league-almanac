@@ -74,31 +74,41 @@ a single afternoon.
   contention would let records filter or annotate accordingly. Scoped
   as v1.x for now; may slide to v2.0 depending on what playoff-bracket
   data the ESPN API exposes (discovery TBD).
-- **Auto-populate `matchup_schedule` from ESPN settings API.** Currently
-  `matchup_schedule.csv` is a hand-maintained seed (~25 rows per season:
-  date ranges, `is_playoff`, `playoff_round`, `is_abnormal`). Most fields
-  are derivable from the espn-api wrapper's `league.settings`:
-  - `season_year`, `matchup_period`, `start_date`, `end_date` from
-    `settings.matchup_periods` (dict of mp → scoring_period list)
-  - `is_playoff`: anything past `settings.regular_season_count`
-  - `playoff_round`: derived from `settings.playoff_team_count` plus
-    position of mp within the playoff range
+- ~~**Auto-populate `matchup_schedule` from ESPN settings API.**~~
+  **DONE (MLB-235).** `matchup_schedule.csv` is no longer a required
+  input for an ESPN league, and no longer supplies membership, length,
+  abnormality, extraction selection or the ordinary calendar.
 
-  `is_abnormal` (All-Star break, weather-shortened weeks, commissioner-
-  declared anomalies) is the only genuinely manual field -- no ESPN API
-  concept for it.
+  What actually landed differs from the sketch above in two ways worth
+  recording, because both were wrong turns the work had to find:
 
-  Proposed shape: `extract.py` writes a new `raw.matchup_schedule`
-  (append-only with `extracted_at`); a new `stg_matchup_schedule` model
-  takes the latest snapshot and joins to a tiny
-  `matchup_schedule_overrides.csv` seed carrying only `is_abnormal`
-  patches (default false; commissioner adds rows when needed). Reduces
-  new-user setup friction from "populate 25 rows per season" to
-  "occasionally flag a weird week." Estimated effort: 1-2 days.
+  - **`settings.matchupPeriods` does not carry membership.** It is a
+    degenerate identity map (`{'1': [1], '2': [2], ...}`) in ESPN's own
+    payload -- verified against RAW, with no wrapper in the path. The
+    real membership is the KEYS of
+    `schedule[].home/away.pointsByScoringPeriod` on the `mMatchupScore`
+    view, which is what `RAW.MATCHUP_SCHEDULE` now stores and what the
+    extract selects its weeks and scoring periods from.
+  - **Dates were the hard part, and they are not in the payload at all.**
+    ESPN serves scoring-period ids and no ISO dates. But the ids are
+    daily, so one anchor produces the whole calendar: scoring period N is
+    the season's first scoring date plus N-1 days, and a matchup period's
+    start/end are its first and last scoring period. The anchor is MLB's
+    own published `regularSeasonStartDate`
+    (`statsapi.mlb.com/api/v1/seasons`), captured to
+    `RAW.MLB_SEASON_CALENDAR`. Measured against the hand-maintained seed
+    it reproduces all 44 closed periods of 2025 and 2026 exactly; a
+    standing dbt test fails the build if the two ever disagree.
 
-  Before starting: maintainer has additional automation heuristics in
-  mind (particularly around `is_abnormal` detection and the override-
-  seed shape). Confirm scope before writing code.
+  `is_abnormal` is derived from the modal period length rather than
+  typed, with `matchup_period_overrides.csv` remaining the sparse escape
+  hatch for a genuinely odd week whose length looks ordinary. New-user
+  setup friction went from "populate ~25 rows per season" to nothing.
+
+  Still open, and deliberately not claimed: a live season-long
+  points/rotisserie ESPN league. Zero- and one-matchup-period shapes are
+  accepted without fabricating weeks, but that acquisition route is
+  unproven until a real payload establishes it.
 
 ### New analytics surfaces (data already exists)
 

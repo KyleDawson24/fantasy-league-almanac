@@ -25,7 +25,7 @@ Usage:
   py extract/extract.py --year 2025                  -> recent box scores, 2025
   py extract/extract.py 5                            -> box scores for matchup period 5
   py extract/extract.py --year 2025 1 2 3            -> box scores for specific periods, 2025
-  py extract/extract.py --year 2026 --all            -> all COMPLETED matchup periods for 2026 (full backfill)
+  py extract/extract.py --year 2026 --all            -> all CLOSED matchup periods for 2026 (full backfill)
   py extract/extract.py --include-settings           -> recent box scores + league settings
   py extract/extract.py --settings-only              -> league settings only, no box scores
   py extract/extract.py --settings-only --year 2025  -> league settings for 2025 only
@@ -33,7 +33,33 @@ Usage:
                                                      -> add club-of-game to 2025 in place
   py extract/extract.py --raw-target local            -> write RAW as parquet, no warehouse
   py extract/extract.py --matchup-schedule-only --year 2025
-                                                     -> capture 2025's matchup-period membership (one request)
+                                                     -> capture 2025's matchup-period membership only
+                                                        (that season only, one request)
+  py extract/extract.py --matchup-schedule-only --all-seasons
+                                                     -> the same capture for every season the
+                                                        registry bounds; NO historical box scores
+
+NO SCHEDULE SEED IS REQUIRED (MLB-235). A box-score run captures the
+season's `mMatchupScore` document once and reads BOTH the eligible matchup
+periods and the scoring-period ids inside each one out of it -- ESPN's own
+`schedule[].home/away.pointsByScoringPeriod` keys. Selecting periods used to
+mean reading dbt_league/league_config/matchup_schedule.csv, which a new user
+had to hand-maintain before the first extract would run at all, and which
+made the `matchup_period` stamped on every RAW row originate in the seed
+rather than in anything the platform said. That CSV is now optional: an
+override surface for a commissioner-declared exception and for human labels
+ESPN does not serve. Only CLOSED periods are eligible; the period in flight
+is excluded because its membership is still filling in.
+
+AND NEITHER IS A CALENDAR (rung 4B-2). ESPN serves no ISO date in that view,
+but its scoring periods are DAYS -- so scoring period N is the season's first
+scoring date plus N-1, and a matchup period's start/end are its first and
+last scoring period. The anchor is MLB's own published regular-season start
+(statsapi.mlb.com, public and key-free), captured to RAW.MLB_SEASON_CALENDAR
+on the same run and turned into dates by dim_matchup_period. Nobody types a
+calendar. If that anchor cannot be established the capture warns and the run
+continues -- box scores need no dates at all -- and the dates stay absent
+rather than being guessed.
 
 WHERE RAW LANDS (MLB-208). `--raw-target snowflake` is the default and is
 unchanged. `--raw-target local` writes the parquet + _manifest.json artifacts
@@ -44,11 +70,12 @@ Both targets share the schedule, the settle window, the refusals and the
 league_key stamp -- only the write differs. See extract/raw_sink.py.
 
 Re-extracting a matchup period that has already been loaded and has settled
-(ended more than LIVE_CAPTURE_WINDOW_DAYS ago) replaces its rows with a
-thinner answer than the one already stored — club-of-game labels ESPN will
-not serve again, and free agents kona has aged out — and is refused; see
-`settled_loaded_periods` (MLB-188). To put a new field on settled periods,
-use --backfill-club-of-game, which updates in place.
+(closed more than LIVE_CAPTURE_WINDOW_DAYS scoring periods ago, an ESPN
+scoring period being one day) replaces its rows with a thinner answer than
+the one already stored — club-of-game labels ESPN will not serve again, and
+free agents kona has aged out — and is refused; see `settled_loaded_periods`
+(MLB-188). To put a new field on settled periods, use
+--backfill-club-of-game, which updates in place.
 """
 
 import argparse
@@ -57,7 +84,8 @@ import json
 import os
 import sys
 from contextlib import contextmanager
-from datetime import date, timedelta
+from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 
 import requests
@@ -80,7 +108,11 @@ from config.league_registry import LeagueRegistryError, get_league, league_keys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from raw_sink import LocalParquetSink
 from matchup_membership import (
-    SNAPSHOT_KEYS, MatchupMembershipError, matchup_schedule_snapshot)
+    RECENT, SNAPSHOT_KEYS, MatchupMembershipError, classify_recency,
+    matchup_schedule_snapshot, parse_matchup_membership, recent_periods,
+    seasons_to_request)
+from season_calendar import (
+    SeasonCalendarError, season_calendar_snapshot, season_calendar_url)
 
 
 # ---------------------------------------------------------------------------
@@ -166,6 +198,24 @@ PRO_TEAM_MAP = getattr(espn_baseball_constant, "PRO_TEAM_MAP", {})
 LIVE_CAPTURE_WINDOW_DAYS = 21
 
 # ---------------------------------------------------------------------------
+# The public MLB calendar request (MLB-235 rung 4B-2)
+# ---------------------------------------------------------------------------
+# How long to wait for MLB's season record before giving up on the anchor.
+#
+# Finite because this rides EVERY ordinary box-score run. requests' default is
+# no timeout at all, which means a host that accepts the connection and then
+# stalls hangs the weekly extract forever -- on a call whose entire failure
+# plan is "warn and carry on". Ten seconds is generous for one small JSON
+# document and short enough that a stalled host costs a pause rather than a
+# run. There is deliberately no retry: the next run picks it up, and dates
+# stay visibly absent in between.
+SEASON_CALENDAR_TIMEOUT_SECONDS = 10
+
+# Identifies the project to a free public API that owes nobody anything --
+# the same courtesy extract/mlb_stats.py already extends to the same host.
+PUBLIC_API_USER_AGENT = "espn-league-manager/extract"
+
+# ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
 load_dotenv()
@@ -198,8 +248,27 @@ else:
 ESPN_API_BASE = "https://lm-api-reads.fantasy.espn.com/apis/v3/games/flb/seasons"
 
 # ---------------------------------------------------------------------------
-# Schedule loading
+# Schedule loading -- LEGACY, AND NO LONGER ON ANY RUN PATH (MLB-235 rung 4B-1)
 # ---------------------------------------------------------------------------
+# Everything in this section used to be a prerequisite for extracting a box
+# score: `load_schedule` read matchup_schedule.csv, `get_scoring_periods`
+# turned its start/end dates into a scoring-period range, and the extract
+# stamped that answer onto every RAW.BOX_SCORES row. A stranger who had not
+# hand-typed the season's calendar could not run the extract at all, and the
+# `matchup_period` in the warehouse originated in the seed rather than in
+# anything ESPN said.
+#
+# Period membership now comes from the platform's own mMatchupScore document
+# (see `acquire_matchup_membership`), so NOTHING here is called by the
+# default weekly run, --all, an explicit period list, --backfill-club-of-game
+# or the settled-history guard. Two tests assert that directly, and mutating
+# `extract_matchup_period` to call `get_scoring_periods()` again fails them.
+#
+# They are KEPT rather than deleted because the CSV survives as the optional
+# override/label surface -- a commissioner-declared exception, and human
+# names for periods the platform does not label -- and because the season
+# opener these dates anchor is what rung 4B-2 replaces with a derived one.
+# Deleting the readers before that lands would remove the seam it needs.
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # The schedule is USER CONFIG, so it lives in league_config/ -- not seeds/,
@@ -227,6 +296,10 @@ def load_schedule(year):
 
     season_opener is derived as the earliest start date for that year,
     rather than being stored separately — one fewer thing to keep in sync.
+
+    LEGACY as of MLB-235 rung 4B-1: no extraction path calls this. See the
+    section comment above. It still raises on an empty seed, which is now a
+    property of the override surface rather than of the run.
     """
     matchups = []
     with open(SEED_PATH, newline="") as f:
@@ -254,7 +327,13 @@ def date_to_scoring_period(d, season_opener):
 
 
 def get_scoring_periods(matchup_period, year):
-    """Return the list of scoring periods for a given matchup period."""
+    """Return the list of scoring periods for a given matchup period.
+
+    LEGACY as of MLB-235 rung 4B-1, and the single most important call site
+    to keep retired: this is where the seed's dates became the membership the
+    extract then stamped onto RAW. `MembershipParse.scoring_periods_for` is
+    the platform-owned replacement.
+    """
     season_opener, matchups = load_schedule(year)
     for mp, start, end in matchups:
         if mp == matchup_period:
@@ -810,13 +889,29 @@ def refuse_unverifiable_guard(exc, year):
     ])
 
 
-def settled_loaded_periods(sink, year, league_key, periods, today=None):
+def settled_loaded_periods(sink, year, league_key, periods, parse, today=None):
     """
     MLB-188 guard. Of `periods`, return the ones a re-extract would damage:
-    already loaded, and ended longer than LIVE_CAPTURE_WINDOW_DAYS ago.
+    already loaded, and no longer inside the live-capture window.
 
-    Returns [(matchup_period, end_date, last_loaded_at)] sorted by period.
-    Empty means the requested set is safe to extract.
+    Returns [(matchup_period, last_scoring_period, last_loaded_at)] sorted by
+    period. Empty means the requested set is safe to extract.
+
+    IT NO LONGER READS A CALENDAR (MLB-235 rung 4B-1). "Ended more than
+    LIVE_CAPTURE_WINDOW_DAYS ago" used to mean an end date out of
+    matchup_schedule.csv against `today`; it now means a last scoring-period
+    id out of `parse` -- ESPN's own membership -- against that season's
+    `latestScoringPeriod`. `classify_recency` is the one place that
+    arithmetic lives, shared with the weekly default so the guard's exemption
+    and the default's reach cannot drift apart. An ESPN scoring period is one
+    day, so this is the same set the dates produced, without requiring a
+    stranger to have typed them.
+
+    `today` still decides ONE thing: whether `year` is the current season.
+    An earlier season is settled outright, however close a period sits to
+    that season's own final scoring period -- kona answers about today's
+    player universe, and last year's last week is as unreachable as its
+    first.
 
     WHAT IS PROTECTED. Settled rows as a class, because a re-extract is
     delete-then-insert and the answer it inserts is thinner than the one it
@@ -855,8 +950,11 @@ def settled_loaded_periods(sink, year, league_key, periods, today=None):
         everyone to bypass it, and the flag would be permanently on by the
         second week.
 
-    Fails closed, in two senses. A period with no schedule row has no
-    knowable age, so it counts as settled rather than being waved through.
+    Fails closed, in two senses. A period the membership cannot place -- not
+    in the closed set at all, or in a season whose `latestScoringPeriod` ESPN
+    did not send -- has no knowable age, so it counts as settled rather than
+    being waved through. That is the same rule the seed version applied to a
+    period with no schedule row, restated over the platform's evidence.
     And an error evaluating the guard AT ALL refuses the run (MLB-199): the
     previous version caught every ProgrammingError as "no table yet", so a
     pre-registry table missing `league_key` -- the exact legacy shape this
@@ -881,10 +979,13 @@ def settled_loaded_periods(sink, year, league_key, periods, today=None):
     clone behind the parquet, so the file IS the history.
     """
     today = today or date.today()
-    cutoff = today - timedelta(days=LIVE_CAPTURE_WINDOW_DAYS)
-
-    _, matchups = load_schedule(year)
-    end_by_period = {mp: end for mp, _start, end in matchups}
+    verdicts = classify_recency(
+        parse,
+        window=LIVE_CAPTURE_WINDOW_DAYS,
+        is_current_season=year >= today.year,
+    )
+    last_scoring_period = {p.matchup_period: p.scoring_periods[-1]
+                           for p in parse.closed if p.scoring_periods}
 
     try:
         last_loaded = sink.loaded_box_score_periods(year, league_key)
@@ -902,10 +1003,12 @@ def settled_loaded_periods(sink, year, league_key, periods, today=None):
     for mp in periods:
         if mp not in last_loaded:
             continue
-        end_date = end_by_period.get(mp)
-        if end_date is not None and end_date >= cutoff:
+        # RECENT is the ONLY verdict that exempts. UNKNOWN does not, which is
+        # the fail-closed half: a period the payload could not place is
+        # protected, not waived.
+        if verdicts.get(mp) == RECENT:
             continue
-        settled.append((mp, end_date, last_loaded[mp]))
+        settled.append((mp, last_scoring_period.get(mp), last_loaded[mp]))
     return sorted(settled)
 
 
@@ -926,14 +1029,21 @@ def refuse_settled_overwrite(settled, year, flag):
         f"REFUSING TO EXTRACT -- {len(settled)} settled matchup period(s) in {year}",
         "=" * 72,
         "",
-        "These periods already hold RAW rows and ended more than "
-        f"{LIVE_CAPTURE_WINDOW_DAYS} days ago:",
+        "These periods already hold RAW rows and closed more than "
+        f"{LIVE_CAPTURE_WINDOW_DAYS} scoring periods ago (an ESPN scoring "
+        "period is one day):",
         "",
-        f"  {'period':>7}  {'ended':<12} {'last loaded':<20}",
+        f"  {'period':>7}  {'last day':<28} {'last loaded':<20}",
     ]
-    for mp, end_date, loaded_at in settled:
-        ended = str(end_date) if end_date else "UNKNOWN (no schedule row)"
-        lines.append(f"  {mp:>7}  {ended:<12} {str(loaded_at)[:19]:<20}")
+    for mp, last_scoring_period, loaded_at in settled:
+        # The id, not a date: this refusal no longer consults a calendar, and
+        # printing one would be inventing the very thing the seed used to
+        # supply. UNKNOWN is a real verdict here -- see the fail-closed note
+        # on settled_loaded_periods.
+        closed_on = (f"scoring period {last_scoring_period}"
+                     if last_scoring_period is not None
+                     else "UNKNOWN (not in ESPN's membership)")
+        lines.append(f"  {mp:>7}  {closed_on:<28} {str(loaded_at)[:19]:<20}")
     lines += [
         "",
         "WHAT IS PROTECTED",
@@ -1058,9 +1168,18 @@ def load_box_scores_to_snowflake(conn, records, matchup_period, year, league_key
         cursor.close()
 
 
-def extract_matchup_period(sink, league, matchup_period, year, league_key):
+def extract_matchup_period(sink, league, matchup_period, year, league_key,
+                           scoring_periods):
     """
     Extract all scoring periods for a matchup period and load them to the sink.
+
+    `scoring_periods` IS THE PLATFORM'S ANSWER and is passed in rather than
+    looked up (MLB-235 rung 4B-1). This line used to read
+    `get_scoring_periods(matchup_period, year)`, i.e. the seed's start/end
+    dates -- so the `matchup_period` stamped onto every RAW.BOX_SCORES row
+    below originated in a CSV a human maintained, and the warehouse could not
+    independently prove the mapping it had been handed. It now comes from the
+    keys of `pointsByScoringPeriod` in ESPN's own mMatchupScore document.
 
     W-03 / MLB-199 FAIL-CLOSED, AND IT IS STRUCTURAL RATHER THAN CHECKED:
     every scoring period is serialized into `records` BEFORE the single write
@@ -1070,8 +1189,6 @@ def extract_matchup_period(sink, league, matchup_period, year, league_key):
     null, which the delete-then-insert would have committed over a good one.
     The ordering is the guarantee; keep the write after the loop.
     """
-    scoring_periods = get_scoring_periods(matchup_period, year)
-
     print(f"  Matchup period {matchup_period} spans {len(scoring_periods)} days "
           f"(scoring periods {scoring_periods[0]}-{scoring_periods[-1]})")
 
@@ -1261,28 +1378,6 @@ def backfill_club_of_game(conn, year, league_key, periods):
         cursor.close()
 
 
-def get_recent_matchup_periods(year, lookback_days=LIVE_CAPTURE_WINDOW_DAYS):
-    """
-    Return matchup periods for the given year whose end date falls within
-    the last `lookback_days` days (inclusive of today).
-
-    This means:
-    - Completed matchup periods are re-extracted (catches scoring adjustments)
-    - Very old periods are skipped (no unnecessary API calls)
-    - The current in-progress period is included if its end date is within range
-    """
-    _, matchups = load_schedule(year)
-    today = date.today()
-    cutoff = today - timedelta(days=lookback_days)
-
-    recent = []
-    for mp, start, end in matchups:
-        if end >= cutoff and end <= today:
-            recent.append(mp)
-
-    return sorted(recent)
-
-
 # ---------------------------------------------------------------------------
 # ESPN extraction — scoring settings
 # ---------------------------------------------------------------------------
@@ -1416,6 +1511,18 @@ SNAPSHOT_TABLES = (
     # week a matchup period closes. Sharing a table would mean one cadence
     # overwriting the other's freshness story.
     "MATCHUP_SCHEDULE",
+    # MLB-235 rung 4B-2. The season's first scoring DATE, from MLB's own
+    # public season record -- the anchor that turns ESPN's daily
+    # scoring-period ids into a calendar. Deliberately its own narrow table
+    # rather than fields grafted onto MATCHUP_SCHEDULE: that snapshot is
+    # ESPN's three blocks verbatim, and mixing a second vendor's measurement
+    # into it would make "what did ESPN serve" unanswerable from the row.
+    #
+    # It carries a league_key like every other snapshot because the shape is
+    # uniform and both sinks already write it, but the CALENDAR IS NOT
+    # LEAGUE-SCOPED -- MLB's season is a fact about baseball. Staging keys it
+    # on season_year alone; see stg_mlb__season_calendar.
+    "MLB_SEASON_CALENDAR",
 )
 
 # Every RAW table whose CREATE sits INSIDE a conditional write. A league
@@ -1895,6 +2002,10 @@ class SnowflakeSink:
         load_snapshot_to_snowflake(self.conn, "MATCHUP_SCHEDULE", payload,
                                    year, league_key, "matchup schedule")
 
+    def write_season_calendar(self, payload, year, league_key):
+        load_snapshot_to_snowflake(self.conn, "MLB_SEASON_CALENDAR", payload,
+                                   year, league_key, "MLB season calendar")
+
     def backfill_club_of_game(self, year, league_key, periods):
         backfill_club_of_game(self.conn, year, league_key, periods)
 
@@ -2006,14 +2117,82 @@ def fetch_matchup_schedule(year):
     required; the evidence returned all 26 periods of one season and all 18
     of another in one response each.
 
-    NOTHING IN THIS PATH READS THE SEED, which is the entire point. The
-    current schedule chain is circular -- load_schedule() reads
-    matchup_schedule.csv, get_scoring_periods() turns its dates into scoring
-    periods, and the extract stamps that answer onto RAW.BOX_SCORES -- so
-    the warehouse cannot independently prove the mapping it was handed. This
-    request takes a season and a league id and nothing else.
+    NOTHING IN THIS PATH READS THE SEED, which is the entire point. The old
+    schedule chain was circular -- load_schedule() read matchup_schedule.csv,
+    get_scoring_periods() turned its dates into scoring periods, and the
+    extract stamped that answer onto RAW.BOX_SCORES -- so the warehouse could
+    not independently prove the mapping it had been handed. This request takes
+    a season and a league id and nothing else, and as of rung 4B-1 its answer
+    is what the extract actually pulls.
     """
     return fetch_league_payload(year, ["mMatchupScore"])
+
+
+def fetch_season_calendar(year):
+    """Pull MLB's own season record for one year.
+
+    PUBLIC, KEY-FREE AND NOT ESPN. statsapi.mlb.com is the same host the
+    project's baseball layer already sources player production from
+    (extract/mlb_stats.py), so this adds no vendor, no credential and no
+    cookie. It is deliberately a separate request from the ESPN document
+    rather than something inferred out of it -- see the module docstring in
+    extract/season_calendar.py for why `latestScoringPeriod` paired with the
+    capture date was rejected as the anchor.
+
+    BOUNDED, because this now runs on EVERY ordinary box-score extract. A
+    `requests.get` with no timeout waits forever by default, so a third-party
+    host that accepts the connection and then stalls would hang the weekly
+    run indefinitely -- on a request whose whole failure story is "warn and
+    carry on". The timeout turns that into the warning it was designed to be.
+    Deliberately no retry machinery: this is enrichment, the next run picks
+    it up, and one request per season stays one request per season.
+
+    The User-Agent identifies the project to a free public API that owes
+    nobody anything, which is the same courtesy extract/mlb_stats.py already
+    extends to the same host.
+    """
+    response = requests.get(
+        season_calendar_url(year),
+        timeout=SEASON_CALENDAR_TIMEOUT_SECONDS,
+        headers={"User-Agent": PUBLIC_API_USER_AGENT},
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def capture_season_calendar(sink, year, league_key, payload=None):
+    """Store the season's opener anchor. Warns rather than stops on failure.
+
+    NOT FATAL, and that is the deliberate half. Rung 4B-1 made box-score
+    extraction need no dates at all, so a public API being briefly unreachable
+    must not block the weekly pull -- the run proceeds and the season simply
+    has no derived calendar until a later run lands one. What it must NOT do
+    is store an anchor it cannot vouch for: a wrong opener does not produce
+    missing dates, it produces confident wrong ones for every period in the
+    season, so the snapshot refuses on shape and writes nothing.
+
+    The consequence of no anchor is visible rather than silent: dates stay
+    NULL in dim_matchup_period, and points-since-trade renders unavailable
+    instead of quietly reporting whole-season production.
+    """
+    try:
+        payload = fetch_season_calendar(year) if payload is None else payload
+        snapshot = season_calendar_snapshot(payload, season_year=year)
+    except SeasonCalendarError as exc:
+        print(f"  [warn] MLB's season calendar for {year} was not usable, so "
+              f"no opener was stored: {exc}")
+        return None
+    except Exception as exc:
+        print(f"  [warn] could not reach MLB's public season calendar for "
+              f"{year} ({type(exc).__name__}: {exc}); dates for this season "
+              f"stay unresolved until a later run.")
+        return None
+
+    print(f"  Season calendar for {year}: scoring period 1 = "
+          f"{snapshot['regularSeasonStartDate']} "
+          f"(MLB {snapshot['anchor_field']})")
+    sink.write_season_calendar(snapshot, year, league_key)
+    return snapshot
 
 
 def refuse_matchup_schedule_capture(year, why):
@@ -2046,19 +2225,75 @@ def refuse_matchup_schedule_capture(year, why):
     )
 
 
-def extract_matchup_schedule(sink, year, league_key):
-    """Capture the season's matchup-period membership snapshot.
+@dataclass(frozen=True)
+class AcquiredMembership:
+    """One mMatchupScore acquisition, as both consumers see it.
 
-    Fetch here, validate and narrow in matchup_membership.py, write to the
-    sink -- the three stay apart so everything except the fetch is
-    exercisable with no credentials and no network.
+    `snapshot` is the {seasonId, status, schedule} object RAW stored, and
+    `parse` is the membership derived FROM THAT SAME OBJECT. Both are always
+    present: an acquisition that could not derive membership raises rather
+    than returning, so there is no "acquired but unusable" value to forget to
+    check.
 
-    Nothing is written unless the document passes the storage contract:
-    all three blocks present, shaped right, and ESPN's own seasonId equal to
-    the year about to be stamped on the row.
+    Holding both is the whole reason this type exists. A run that fetched the
+    document twice -- once to store and once to select -- could store one
+    week's schedule and extract against another's, and nothing on either row
+    would say so.
+    """
+
+    snapshot: dict
+    parse: object
+
+
+def acquire_matchup_membership(sink, year, league_key, payload=None):
+    """ONE mMatchupScore document -> the RAW snapshot AND the membership.
+
+    ONE ACQUISITION, TWO CONSUMERS (Kyle's ruling). The fetch happens here,
+    exactly once per requested season; the snapshot is written to RAW; and the
+    membership is parsed out of THE SAME in-memory object, never re-fetched
+    and never read back from the row just written. `payload` exists so a test
+    can supply the document without a network, not so a caller can pass a
+    second one.
+
+    THE TWO TIERS, kept distinct because they protect different things:
+
+      1. STRUCTURE (`matchup_schedule_snapshot`). All three blocks present and
+         shaped right, and ESPN's own seasonId equal to the year about to be
+         stamped. Failing this writes NOTHING -- an unstorable document is not
+         evidence, and filing it would put the wrong season's periods under a
+         label the loader supplied itself.
+
+      2. MEMBERSHIP (`parse_matchup_membership`). Side agreement, closed-run
+         contiguity, scoring-period key validity, completion proof. Failing
+         this KEEPS the snapshot -- it is structurally valid, so it is real
+         diagnostic evidence of what ESPN served, and ESPN does not re-serve
+         what it has moved on from -- and THEN REFUSES.
+
+    THE REFUSAL IS UNCONDITIONAL AND LIVES HERE, in every acquisition mode
+    (Kyle's ruling, rung 4B-1). It was briefly the caller's decision, so
+    --matchup-schedule-only stored the unusable document and exited 0. That
+    is wrong: capturing usable matchup membership is what the command is FOR,
+    and preserving evidence of an unusable response is not the same as
+    succeeding at it. A zero-status exit there would tell a script, a cron
+    job and a stranger alike that the season's membership had been captured.
+    Refusing from inside the acquisition means no caller can forget, and no
+    two modes can disagree about it.
+
+    Zero CLOSED periods is a different fact and is NOT this. That parses
+    cleanly, returns normally, and only an ordinary box-score run refuses on
+    it -- see refuse_no_closed_periods.
+
+    The order is the guarantee: the write happens between the two checks, so
+    "preserved but unusable" cannot be reached by a document that failed the
+    storage contract, and the refusal cannot be reached before the preserve.
+    Both sinks make that write in one shot (Snowflake INSERT + commit, local
+    atomic parquet rename), so the behaviour is identical on either engine
+    rather than engine-dependent. And because this runs FIRST in `run()`, the
+    snapshot really is the only thing written when it refuses, whatever else
+    the invocation asked for.
     """
     print(f"\nMatchup schedule for {year}:")
-    payload = fetch_matchup_schedule(year)
+    payload = fetch_matchup_schedule(year) if payload is None else payload
     try:
         snapshot = matchup_schedule_snapshot(payload, season_year=year)
     except MatchupMembershipError as exc:
@@ -2072,6 +2307,394 @@ def extract_matchup_schedule(sink, year, league_key):
           f"across {len(periods)} matchup period(s) for {year} "
           f"(current period {current})")
     sink.write_matchup_schedule(snapshot, year, league_key)
+
+    try:
+        parse = parse_matchup_membership(
+            snapshot, league_key=league_key, season_year=year)
+    except MatchupMembershipError as exc:
+        raise SystemExit(refuse_membership_unusable(year, str(exc)))
+
+    print(f"  {len(parse.closed)} closed matchup period(s) in {year} "
+          f"(latest scoring period "
+          f"{parse.latest_scoring_period if parse.latest_scoring_period is not None else 'unknown'})")
+    return AcquiredMembership(snapshot, parse)
+
+
+# ---------------------------------------------------------------------------
+# Which periods this invocation extracts (MLB-235 rung 4B-1)
+# ---------------------------------------------------------------------------
+def refuse_membership_unusable(year, why):
+    """The snapshot was storable but not derivable-from.
+
+    The middle case, and the one that must not produce a half-run OR a
+    successful-looking one: a document shaped like the thing RAW stores but
+    that the membership parser cannot read leaves the extract with no
+    non-circular answer to "which scoring periods are in period N".
+
+    Raised in EVERY acquisition mode, including --matchup-schedule-only. See
+    the ruling recorded on acquire_matchup_membership.
+
+    Says what WAS written, because "nothing was written" would be false here
+    and a refusal that misreports its own side effects is worse than none.
+    """
+    return "\n".join([
+        "",
+        "=" * 72,
+        f"REFUSING -- {year} matchup membership could not be derived",
+        "=" * 72,
+        "",
+        f"  {why}",
+        "",
+        "  The schedule snapshot WAS preserved in RAW.MATCHUP_SCHEDULE: it",
+        "  passed the storage contract, so it is real evidence of what ESPN",
+        "  served, and ESPN does not re-serve a document it has moved on",
+        "  from. Keeping it is how this becomes diagnosable later.",
+        "",
+        "  THAT SNAPSHOT IS THE ONLY THING THIS RUN WROTE. No box scores, no",
+        "  settings, no standings, no transactions -- whatever else was asked",
+        "  for, membership is acquired first and this refusal lands before",
+        "  any of it.",
+        "",
+        "  This exits non-zero even when the schedule was all you asked for.",
+        "  Capturing USABLE matchup membership is the point of the capture,",
+        "  and storing evidence of an unusable response is not the same as",
+        "  succeeding at it. Which scoring periods belong to a matchup period",
+        "  is read out of this document; nothing that cannot read it has a",
+        "  non-circular answer, and falling back to matchup_schedule.csv is",
+        "  the dependency MLB-235 removed.",
+        "",
+        "  A season with ZERO closed matchup periods is a different thing and",
+        "  does not reach here -- that parses cleanly and is reported as zero.",
+        "",
+        "  If ESPN has genuinely changed this view's shape, that is a",
+        "  finding: the stored snapshot is the evidence for it.",
+        "",
+        "=" * 72,
+        "",
+    ])
+
+
+# The status fields that MIGHT identify a non-H2H scoring format, reported
+# verbatim and interpreted nowhere. Their MEANING is unverified in this repo
+# -- the two seasons on file are both H2H points and both read
+# currentLeagueType=0, createdAsLeagueType=2, so the values are measured but
+# the map from value to format is not. Printing what was measured is useful;
+# hard-coding "0 means H2H" from a sample of one league is the unverified
+# format map the standing rule forbids.
+FORMAT_EVIDENCE_FIELDS = ("currentLeagueType", "createdAsLeagueType")
+
+
+def refuse_no_closed_periods(year, snapshot, current_matchup_period):
+    """A box-score run that found zero closed matchup periods.
+
+    ZERO IS A VALID CARDINALITY, not malformed data (Kyle's ruling). A
+    season-long points or roto league may plausibly expose no H2H schedule at
+    all, and a season asked about before its first period closes has none yet.
+    Neither is a reason to fabricate matchup period 0 or 1.
+
+    But it IS a reason to refuse rather than exit 0. A run that selects
+    nothing, writes no player rows and prints "Done." is indistinguishable
+    from a successful weekly pull, and that is how an unsupported league shape
+    becomes a silent empty warehouse.
+
+    Identity-free: no team, owner or league name appears here, only the
+    season and the measured status fields.
+    """
+    status = snapshot.get("status") or {}
+    evidence = [f"    status.{field} = {status.get(field)!r}"
+                for field in FORMAT_EVIDENCE_FIELDS if field in status]
+
+    lines = [
+        "",
+        "=" * 72,
+        f"REFUSING TO EXTRACT -- no closed matchup periods in {year}",
+        "=" * 72,
+        "",
+        f"  ESPN's schedule for {year} yielded zero CLOSED matchup periods",
+        f"  (current matchup period: {current_matchup_period}).",
+        "",
+        "  The schedule snapshot WAS preserved in RAW.MATCHUP_SCHEDULE.",
+        "  Nothing else was written, and nothing was fabricated: no matchup",
+        "  period 0 or 1 was invented to make the H2H-shaped models",
+        "  non-empty.",
+        "",
+        "WHAT THIS USUALLY MEANS",
+        "",
+        "  * the season has not finished its first matchup period yet, so",
+        "    there is genuinely nothing settled to pull; or",
+        "  * this league does not play head-to-head at all. A season-long",
+        "    points or rotisserie league may expose no matchup schedule, or",
+        "    one season-spanning period that stays current until the season",
+        "    ends. This extractor's box-score route is H2H-shaped and has",
+        "    never been run against a real league of that kind, so it",
+        "    refuses rather than guessing at the acquisition.",
+    ]
+    if evidence:
+        lines += [
+            "",
+            "  Measured from this season's own status block and reported",
+            "  verbatim. This project has NOT established what these values mean;",
+            "  the two H2H seasons on file both read 0 and 2:",
+            "",
+        ] + evidence
+    lines += [
+        "",
+        "WHAT YOU CAN STILL DO",
+        "",
+        "  --matchup-schedule-only   capture the membership snapshot alone;",
+        "                            it succeeds and reports 0 closed periods",
+        "  --settings-only           settings without box scores",
+        "",
+        "=" * 72,
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def refuse_unextractable_periods(year, parse, offenders):
+    """Explicitly requested periods that ESPN has not closed.
+
+    Named individually and classified, because "period 19 is not available"
+    and "period 40 was never scheduled" send a user to different places. The
+    classification is read off the parse, never guessed.
+    """
+    lines = [
+        "",
+        "=" * 72,
+        f"REFUSING TO EXTRACT -- {len(offenders)} requested matchup period(s) "
+        f"are not closed in {year}",
+        "=" * 72,
+        "",
+        f"  ESPN's current matchup period for {year} is "
+        f"{parse.current_matchup_period}.",
+        "",
+    ]
+    for mp in offenders:
+        if mp == parse.current_matchup_period:
+            # Deliberately does not claim the season is live: a finished
+            # season whose closing period failed the completion proofs lands
+            # here too. Both mean the same thing to the caller -- ESPN has
+            # not shown this period closed -- and only one of them is
+            # "in flight", so the message says neither.
+            why = ("is the CURRENT matchup period, and ESPN has not shown it "
+                   "CLOSED. A period still filling in stores a short week "
+                   "that reads as a real one")
+        elif mp in parse.excluded:
+            why = "has not been played yet"
+        else:
+            why = ("carries no membership in ESPN's schedule for this season "
+                   "-- it was never scheduled")
+        lines.append(f"  period {mp} {why}.")
+
+    closed = parse.closed_periods
+    lines += [
+        "",
+        f"  Closed and extractable: "
+        f"{list(closed) if closed else 'none'}",
+        "",
+        "  Nothing was written. Which periods are closed is ESPN's answer,",
+        "  read from the mMatchupScore document this run already captured --",
+        "  not from matchup_schedule.csv, and not from the wall clock.",
+        "",
+        "=" * 72,
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def refuse_history_calendar_unavailable(year, why):
+    """An `--all-seasons` run whose calendar anchor could not be captured.
+
+    THE ASYMMETRY WITH THE ORDINARY RUN IS DELIBERATE, and it is about what
+    the command PROMISED. A weekly box-score extract does not need dates at
+    all, so a briefly unreachable public API there is a warning: the box
+    scores land, the calendar arrives on a later run, and nothing claimed
+    otherwise. `--all-seasons` promises a season range, and a range delivered
+    with some anchors missing is a half-answer that reports success -- the
+    next reader has no way to tell which seasons are dated because they were
+    captured and which are undated because a request timed out.
+
+    So this refuses, and nothing is written. Re-running is cheap and
+    idempotent; the whole command is one small request per season.
+    """
+    return "\n".join([
+        "",
+        "=" * 72,
+        f"REFUSING -- {year}'s season calendar could not be captured",
+        "=" * 72,
+        "",
+        f"  {why}",
+        "",
+        "  NOTHING WAS WRITTEN. No schedule history, no calendars: this is a",
+        "  history command, and a range delivered with some anchors missing",
+        "  reports success while leaving no way to tell a season that has no",
+        "  dates from one whose request happened to fail.",
+        "",
+        "  The anchor is MLB's own published regular-season start, from the",
+        "  free public MLB Stats API. It is what turns ESPN's daily",
+        "  scoring-period ids into calendar dates.",
+        "",
+        "  Re-run when it answers again. One small request per season, and",
+        "  re-running costs nothing -- every write here is append-only.",
+        "",
+        "  An ordinary box-score run is NOT blocked by this: it needs no",
+        "  dates, so it warns and carries on.",
+        "",
+        "=" * 72,
+        "",
+    ])
+
+
+@dataclass(frozen=True)
+class MatchupHistoryPlan:
+    """Every season of a history capture, fully validated and not yet written.
+
+    `seasons` is ((year, schedule_snapshot, calendar_snapshot), ...) ascending
+    when the whole set passed. `failure` is (year, snapshot, reason) for the
+    ONE season that was storable but not derivable-from -- the only case where
+    anything is written at all, and then only that snapshot.
+
+    The two are mutually exclusive by construction: a failure stops the plan.
+    """
+
+    seasons: tuple = ()
+    failure: object = None
+
+
+def plan_matchup_history(seasons, league_key, fetch=None, fetch_calendar=None):
+    """Fetch and validate an entire history range, WITHOUT WRITING ANYTHING.
+
+    NO SINK, and that is the correction this function exists for. The first
+    version validated every ESPN document up front and then wrote season by
+    season, parsing membership during each write -- so an underivable 2025
+    left 2023 and 2024 successfully written, which contradicted the CLI's own
+    promise, the no-partial-history ruling, and the refusal message's claim
+    that the diagnostic snapshot was the only thing written. Taking the sink
+    away is what makes those three true rather than aspirational: this
+    function cannot write, so a caller cannot half-write.
+
+    FOUR GATES, ALL OF THEM BEFORE ANY WRITE:
+
+      1. every ESPN document fetched, exactly once, ascending;
+      2. every one structurally valid (all three blocks, right shapes,
+         seasonId agreeing with the year) -- a failure raises, nothing is
+         written, and no sink is ever opened;
+      3. every one parsed into membership -- the FIRST failure returns a plan
+         carrying only that season's snapshot, so the caller preserves that
+         one diagnostic row and refuses;
+      4. every season's MLB calendar fetched, exactly once, and validated --
+         a failure raises, nothing is written.
+
+    The calendars are fetched only after membership has passed for the whole
+    range, so a range that is going to refuse never touches MLB's API at all.
+    """
+    fetch = fetch or fetch_matchup_schedule
+    fetch_calendar = fetch_calendar or fetch_season_calendar
+
+    print(f"\nMatchup schedule history: {len(seasons)} season(s) "
+          f"{seasons[0]}-{seasons[-1]}")
+    print("  validating the whole range before writing any of it")
+
+    # 1 + 2. Structure.
+    snapshots = []
+    for year in seasons:
+        try:
+            snapshot = matchup_schedule_snapshot(fetch(year), season_year=year)
+        except MatchupMembershipError as exc:
+            raise SystemExit(refuse_matchup_schedule_capture(year, str(exc)))
+        snapshots.append((year, snapshot))
+        print(f"  {year}: {len(snapshot['schedule'])} scheduled matchup(s), "
+              f"structurally valid")
+
+    # 3. Membership. The first failure is the whole answer: one diagnostic
+    # snapshot is preserved by the caller and the range is abandoned.
+    for year, snapshot in snapshots:
+        try:
+            parse_matchup_membership(snapshot, league_key=league_key,
+                                     season_year=year)
+        except MatchupMembershipError as exc:
+            return MatchupHistoryPlan(failure=(year, snapshot, str(exc)))
+
+    # 4. Calendars.
+    planned = []
+    for year, snapshot in snapshots:
+        try:
+            calendar = season_calendar_snapshot(fetch_calendar(year),
+                                                season_year=year)
+        except SeasonCalendarError as exc:
+            raise SystemExit(refuse_history_calendar_unavailable(year, str(exc)))
+        except Exception as exc:
+            raise SystemExit(refuse_history_calendar_unavailable(
+                year, f"{type(exc).__name__}: {exc}"))
+        planned.append((year, snapshot, calendar))
+
+    print(f"  all {len(planned)} season(s) validated, schedule and calendar")
+    return MatchupHistoryPlan(seasons=tuple(planned))
+
+
+def write_matchup_history(sink, plan, league_key):
+    """Write a validated plan, or preserve the one diagnostic snapshot.
+
+    Nothing is fetched here and nothing is re-derived: every snapshot in the
+    plan already passed every gate, so this is the only place a history
+    capture touches the sink and it either writes the whole range or writes
+    exactly one row and refuses.
+    """
+    if plan.failure:
+        year, snapshot, reason = plan.failure
+        # The single exception to "no sink until the preflight passes": a
+        # structurally valid document is real evidence of what ESPN served,
+        # and ESPN does not re-serve what it has moved on from.
+        sink.write_matchup_schedule(snapshot, year, league_key)
+        raise SystemExit(refuse_membership_unusable(year, reason))
+
+    for year, snapshot, calendar in plan.seasons:
+        print(f"\nMatchup schedule for {year}:")
+        sink.write_matchup_schedule(snapshot, year, league_key)
+        print(f"  Season calendar for {year}: scoring period 1 = "
+              f"{calendar['regularSeasonStartDate']} "
+              f"(MLB {calendar['anchor_field']})")
+        sink.write_season_calendar(calendar, year, league_key)
+    return plan.seasons
+
+
+def select_matchup_periods(parse, *, requested, want_all, year, today=None):
+    """The matchup periods to extract, entirely from platform membership.
+
+    THE THREE SPELLINGS, and none of them opens the seed:
+
+      --all            every closed period, exactly as ESPN closed them. A
+                       final period promoted by the completion proof is in;
+                       the live current period is not, because the parser
+                       already excluded it.
+      explicit ids     checked against the closed set. Anything not in it
+                       refuses and is named -- silently dropping a requested
+                       period would look like a successful narrower run.
+      default          the closed periods still inside the live-capture
+                       window, via the shared `recent_periods` policy the
+                       settled-history guard also uses.
+
+    Returns (periods, description). An empty default selection is a normal
+    answer -- nothing new has closed -- and is NOT the zero-closed-periods
+    shape, which the caller has already refused on by this point.
+    """
+    today = today or date.today()
+
+    if want_all:
+        return list(parse.closed_periods), "all closed matchup periods"
+
+    if requested:
+        closed = set(parse.closed_periods)
+        offenders = [mp for mp in requested if mp not in closed]
+        if offenders:
+            raise SystemExit(
+                refuse_unextractable_periods(year, parse, offenders))
+        return list(requested), "specified matchup periods"
+
+    periods = list(recent_periods(parse,
+                                  window=LIVE_CAPTURE_WINDOW_DAYS,
+                                  is_current_season=year >= today.year))
+    return periods, "recent matchup periods"
 
 
 def extract_league_settings(sink, year, league_key):
@@ -2126,7 +2749,12 @@ def extract_league_settings(sink, year, league_key):
 # ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
-if __name__ == "__main__":
+# THE ARGUMENT PARSING, THE FLAG RESOLUTION AND THE RUN ARE THREE FUNCTIONS
+# rather than one `if __name__` block (MLB-235 rung 4B-1). They were inline,
+# and that made the most important thing this ticket changed -- which matchup
+# periods a given invocation selects, and from what evidence -- the one part
+# of the extract no test could reach. Every selection test drives `run()`.
+def build_parser():
     parser = argparse.ArgumentParser(
         description="Extract ESPN Fantasy Baseball data into Snowflake.",
         epilog=(
@@ -2144,10 +2772,13 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--all", action="store_true",
-        help="Extract all COMPLETED matchup periods for the year (end_date on or before "
-             "today; full backfill). Overrides positional periods and the recent-only "
-             "default. In-progress and future periods are skipped — the API has no "
-             "stable data for them yet.",
+        help="Extract every CLOSED matchup period for the year (full "
+             "backfill). Overrides positional periods and the recent-only "
+             "default. Closed is ESPN's own answer, read from the "
+             "mMatchupScore document this run captures: the period in flight "
+             "and everything after it are skipped, because their membership "
+             "is still filling in and a short in-progress period is "
+             "indistinguishable from a genuinely short one.",
     )
     parser.add_argument(
         "--include-settings", action="store_true",
@@ -2166,18 +2797,33 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--include-matchup-schedule", action="store_true",
-        help="Also capture the season's matchup-period membership from "
-             "ESPN's mMatchupScore view (MLB-235) -- the platform's own "
-             "answer to which scoring periods each matchup period contains, "
-             "captured without reading matchup_schedule.csv. Opt-in: nothing "
-             "consumes it yet, so it is one extra request the weekly runbook "
-             "does not need to pay for until the derived models land.",
+        help="ACCEPTED AND NO LONGER NEEDED (MLB-235). Capturing the "
+             "season's matchup-period membership from ESPN's mMatchupScore "
+             "view is now automatic on any box-score run, because the "
+             "extract selects periods and scoring periods FROM it -- "
+             "matchup_schedule.csv is no longer read. Kept so existing "
+             "runbooks and scripts keep working; on a box-score run it "
+             "changes nothing. Combined with --settings-only or "
+             "--transactions-only it still adds the capture to a run that "
+             "would not otherwise pay for it.",
     )
     parser.add_argument(
         "--matchup-schedule-only", action="store_true",
         help="Capture the matchup-period membership only (skip box scores, "
              "settings and standings). The cheapest way to backfill a season "
-             "of membership -- one request, no box-score work.",
+             "of membership -- ONE request for the season named by --year, "
+             "and no box-score work. --year Y means Y only; it is not a "
+             "history backfill. Use --all-seasons for that.",
+    )
+    parser.add_argument(
+        "--all-seasons", action="store_true",
+        help="With --matchup-schedule-only: capture membership for EVERY "
+             "season the league registry bounds, ascending, one request each "
+             "(config/leagues.yml first_season through final_season, capped "
+             "at --year). This is the schedule history and NOTHING ELSE -- it "
+             "downloads no historical box scores. The whole set is fetched "
+             "and validated before any of it is written, so a failure part "
+             "way through cannot leave what looks like a complete backfill.",
     )
     parser.add_argument(
         "--include-transactions", action="store_true",
@@ -2198,8 +2844,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--overwrite-day-accurate-history", action="store_true",
         help="DESTRUCTIVE. Permit re-extracting matchup periods that are "
-             "already loaded and ended more than "
-             f"{LIVE_CAPTURE_WINDOW_DAYS} days ago. Their stored club-of-game "
+             "already loaded and closed more than "
+             f"{LIVE_CAPTURE_WINDOW_DAYS} scoring periods ago (an ESPN "
+             "scoring period is one day). Their stored club-of-game "
              "labels and their free-agent rows are replaced with whatever kona "
              "still returns for that period today, which is less, and ESPN "
              "will not serve the originals again. Snapshot RAW before using "
@@ -2224,8 +2871,20 @@ if __name__ == "__main__":
         help="Output directory for --raw-target local "
              "(default: data/parquet/raw, where the DuckDB loader looks).",
     )
-    args = parser.parse_args()
+    return parser
 
+
+def run(args):
+    """Do what `args` asks for. Returns the process exit code.
+
+    THE ORDER OF THIS FUNCTION IS PART OF THE CONTRACT (rung 4B-1). Matchup
+    membership is acquired FIRST, before settings, standings, transactions or
+    any box score, because two refusals have to happen before any of those
+    writes: a structurally valid document the membership parser cannot read,
+    and a season with zero closed matchup periods. Both mean the box-score
+    route has no non-circular answer, and letting settings land first would
+    produce exactly the partial run the two-tier rule exists to prevent.
+    """
     year = args.year
 
     # Target resolution: explicit flag beats ambient shell state, and the
@@ -2266,12 +2925,19 @@ if __name__ == "__main__":
                    and not args.matchup_schedule_only)
     do_transactions = ((args.transactions_only or args.include_transactions)
                        and not args.matchup_schedule_only)
-    # MLB-235. Opt-in on purpose: nothing consumes the capture yet, so
-    # putting it on the default path would add a request per run to store
-    # rows no model reads. It moves to the default the way standings did --
-    # when something downstream goes stale without it.
+    # MLB-235 rung 4B-1. AUTOMATIC ON ANY BOX-SCORE RUN, and no longer opt-in:
+    # the capture is what the extract now SELECTS FROM, so a box-score run
+    # without it has no non-circular answer to which scoring periods a matchup
+    # period contains. It moved to the default exactly the way standings did
+    # -- when something downstream stopped working without it.
+    #
+    # --settings-only and --transactions-only still do not pay for it. The
+    # automatic behaviour is load-bearing for box scores specifically, not a
+    # licence to add a request to every invocation; the compatibility flag is
+    # how those two modes opt in.
     do_matchup_schedule = (args.matchup_schedule_only
-                           or args.include_matchup_schedule)
+                           or args.include_matchup_schedule
+                           or do_box_scores)
     # Standings run on every invocation, including --transactions-only:
     # "as up to date as possible" is the whole point, and one mTeam request
     # is cheap enough that gating it on what else the run is doing would
@@ -2281,8 +2947,97 @@ if __name__ == "__main__":
     do_standings = (not args.no_standings and not do_settings
                     and not args.matchup_schedule_only)
 
+    # Contradictions refuse rather than being silently dropped. Every flag
+    # below asks for box-score work that --matchup-schedule-only exists to
+    # skip, so accepting the pair would run something other than what was
+    # typed and say nothing about it.
+    if args.matchup_schedule_only:
+        conflicting = [name for name, given in (
+            ("matchup periods as positional arguments", bool(args.periods)),
+            ("--all", args.all),
+            ("--backfill-club-of-game", args.backfill_club_of_game),
+            ("--overwrite-day-accurate-history",
+             args.overwrite_day_accurate_history),
+        ) if given]
+        if conflicting:
+            raise SystemExit(
+                f"[cli] --matchup-schedule-only captures the season's "
+                f"matchup-period membership and writes no box scores, so it "
+                f"cannot be combined with {', '.join(conflicting)}. Drop "
+                f"--matchup-schedule-only to extract box scores, or drop the "
+                f"other flag(s) to capture the schedule alone."
+            )
+
+    # --all-seasons is history capture, and history capture is the ONLY thing
+    # it does. Requiring the pairing keeps `--year` unsurprising: a season
+    # named on an ordinary run still means that season, never a silent
+    # backfill of twenty more.
+    history_seasons = None
+    if args.all_seasons:
+        if not args.matchup_schedule_only:
+            raise SystemExit(
+                "[cli] --all-seasons captures matchup-period membership for "
+                "every season the registry bounds and writes nothing else, so "
+                "it must be combined with --matchup-schedule-only. It does "
+                "NOT download historical box scores; extract those a season "
+                "at a time with --year.")
+        try:
+            history_seasons = seasons_to_request(
+                target_league.first_season, target_league.final_season, year)
+        except ValueError as exc:
+            raise SystemExit(f"[league registry] {exc}")
+        if not history_seasons:
+            # Exits BEFORE open_sink, so an empty range creates no warehouse
+            # connection, no parquet directory and no manifest. "There is
+            # nothing to capture" must not leave artifacts behind that suggest
+            # otherwise.
+            print(f"\nThe registry bounds no seasons at or before {year} for "
+                  f"{league_key}, so there is no membership history to "
+                  f"capture. Nothing was opened or written.")
+            return 0
+
+    # --- Registry-bounded schedule history (MLB-235 rung 4B-2) ---
+    # THE WHOLE RANGE IS VALIDATED BEFORE THE SINK IS EVEN OPENED. Every ESPN
+    # document and every MLB calendar is fetched once and checked here, with
+    # no sink in scope, so a failure part way through cannot leave a warehouse
+    # holding what looks like a complete backfill. The one exception is a
+    # season that is storable but not derivable-from: that snapshot is real
+    # evidence and is preserved, which is the only reason the sink opens on a
+    # failing plan at all.
+    if history_seasons:
+        plan = plan_matchup_history(history_seasons, league_key)
+        with open_sink(raw_target, args.parquet_dir) as sink:
+            print(f"RAW target: {sink.describe()}")
+            write_matchup_history(sink, plan, league_key)
+        print("\nDone.")
+        return 0
+
     with open_sink(raw_target, args.parquet_dir) as sink:
         print(f"RAW target: {sink.describe()}")
+
+        # --- Matchup-period membership (MLB-235) ---
+        # FIRST, and the position is load-bearing. This is the only
+        # acquisition of the season's mMatchupScore document, and it refuses
+        # on an underivable one from inside itself -- so that refusal lands
+        # before any other surface is written, in every mode, and the
+        # message's "the snapshot is the only thing this run wrote" is true
+        # by construction rather than by each caller remembering.
+        membership = None
+        if do_matchup_schedule:
+            membership = acquire_matchup_membership(sink, year, league_key)
+            # The opener anchor rides the same run: one cheap public MLB
+            # request per season, no credentials, and it is what turns the
+            # membership just captured into a calendar. Non-fatal by design --
+            # see capture_season_calendar.
+            capture_season_calendar(sink, year, league_key)
+
+        # Zero closed periods parsed CLEANLY and is a valid cardinality, so
+        # it is not the refusal above. Only a run that owes the user player
+        # data refuses on it -- see refuse_no_closed_periods.
+        if do_box_scores and not membership.parse.closed:
+            raise SystemExit(refuse_no_closed_periods(
+                year, membership.snapshot,
+                membership.parse.current_matchup_period))
 
         # --- League settings ---
         if do_settings:
@@ -2292,59 +3047,59 @@ if __name__ == "__main__":
         if do_standings:
             extract_team_standings(sink, year, league_key)
 
-        # --- Matchup-period membership (MLB-235) ---
-        if do_matchup_schedule:
-            extract_matchup_schedule(sink, year, league_key)
-
         # --- Transactions (MLB-16) ---
         if do_transactions:
             extract_transactions(sink, year, league_key)
 
         # --- Box scores ---
         if do_box_scores:
-            if args.all:
-                _, all_matchups = load_schedule(year)
-                today = date.today()
-                periods = sorted(mp for mp, _, end in all_matchups if end <= today)
-                print(f"\nExtracting all completed matchup periods for {year}: {periods}")
-            elif args.periods:
-                periods = args.periods
-                print(f"\nExtracting specified matchup periods for {year}: {periods}")
-            else:
-                periods = get_recent_matchup_periods(year)
-                if not periods:
-                    print(f"\nNo completed matchup periods found in the last 21 days for {year}.")
-                    if not do_settings:
-                        # Only exit if we didn't already do something useful
-                        import sys
-                        sys.exit(0)
-                    else:
-                        print("Done.")
-                        import sys
-                        sys.exit(0)
-                print(f"\nExtracting recent matchup periods for {year}: {periods}")
+            parse = membership.parse
+            periods, described = select_matchup_periods(
+                parse, requested=args.periods, want_all=args.all, year=year)
+            print(f"\nExtracting {described} for {year}: {periods}")
+
+            if not periods:
+                # A normal answer, and distinct from the zero-closed-periods
+                # refusal above: this season HAS closed periods, none of them
+                # is inside the live-capture window. Nothing new to pull.
+                print(f"\nNo closed matchup periods inside the last "
+                      f"{LIVE_CAPTURE_WINDOW_DAYS} scoring periods for {year}.")
+                print("\nDone.")
+                return 0
 
             if args.backfill_club_of_game:
                 # Enrichment, not extraction: updates in place, deletes
                 # nothing, so it is not what the guard below is guarding.
+                #
+                # THE SPLIT HERE IS A RULING (Kyle, rung 4B-1), not an
+                # oversight. The PERIODS come from ESPN's derived membership,
+                # which is what took the seed off this path. The SCORING
+                # PERIODS visited inside each one are still the rows actually
+                # stored, and that is what keeps the enrichment additive: it
+                # can only add a key to a row that already exists. Narrowing
+                # it to the derived scoring-period ids instead would silently
+                # skip any stored row the payload does not list, turning an
+                # additive pass into one that quietly covers less. Do not
+                # "fix" this to match the selection.
                 print(f"\nBackfilling club-of-game for {year}: {periods}")
                 try:
                     sink.backfill_club_of_game(year, league_key, periods)
                 except NotImplementedError as exc:
                     raise SystemExit(f"[raw target] {exc}")
                 print("\nDone.")
-                sys.exit(0)
+                return 0
 
             # MLB-188: decide on the whole requested set before touching any
             # of it. A per-period check would half-finish — three periods
             # overwritten, the fourth refused — which is a worse state to be
             # handed than a clean refusal.
             if not args.overwrite_day_accurate_history:
-                settled = settled_loaded_periods(sink, year, league_key, periods)
+                settled = settled_loaded_periods(
+                    sink, year, league_key, periods, parse)
                 if settled:
                     raise SystemExit(refuse_settled_overwrite(
                         settled, year, "--overwrite-day-accurate-history"))
-            elif periods:
+            else:
                 print("\n!! --overwrite-day-accurate-history: for already-loaded "
                       "settled periods, the stored club-of-game labels and the "
                       "free-agent rows will be replaced by whatever kona still "
@@ -2356,8 +3111,19 @@ if __name__ == "__main__":
             for mp in periods:
                 print(f"\nMatchup period {mp}:")
                 try:
-                    extract_matchup_period(sink, league, mp, year, league_key)
+                    extract_matchup_period(
+                        sink, league, mp, year, league_key,
+                        parse.scoring_periods_for(mp))
                 except KonaUnavailable as exc:
                     raise SystemExit(refuse_extract_without_stats(year, mp, str(exc)))
 
     print("\nDone.")
+    return 0
+
+
+def main(argv=None):
+    return run(build_parser().parse_args(argv))
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -178,6 +178,7 @@ side_membership as (
         count(*) as key_count,
         count(scoring_period) as valid_key_count,
         max(scoring_period) as max_scoring_period,
+        min(scoring_period) as min_scoring_period,
         {{ listagg_ordered('cast(scoring_period as varchar)', ',', 'scoring_period') }}
             as key_signature
     from side_keys
@@ -197,7 +198,12 @@ period_membership as (
         -- The endpoint proof for the completion candidate: the agreed
         -- membership has to reach finalScoringPeriod, or this is not the
         -- period the season ended on.
-        max(max_scoring_period) as max_scoring_period
+        max(max_scoring_period) as max_scoring_period,
+        -- The other bound, for the calendar (rung 4B-2). start_date and
+        -- end_date are opener + (min - 1) and opener + (max - 1) days, so the
+        -- endpoints are what a date needs -- not the count, which cannot tell
+        -- WHERE a period sat.
+        min(min_scoring_period) as min_scoring_period
     from side_membership
     group by 1, 2, 3
 ),
@@ -228,6 +234,7 @@ verdict as (
         coalesce(pm.distinct_signatures, 0) as distinct_signatures,
         coalesce(pm.invalid_key_count, 0) as invalid_key_count,
         pm.max_scoring_period,
+        pm.min_scoring_period,
         ak.scoring_periods,
         -- Shape alone, computed for everything that was checked. Eligibility
         -- is decided from it below, because the candidate's eligibility
@@ -288,5 +295,15 @@ select
     -- evidence is a number about the disagreement.
     case when is_closed then {{ array_length('scoring_periods') }} end::integer
         as scoring_period_count,
+    -- The membership BOUNDS, published under the same is_closed gate and for
+    -- the same reason as the count: an in-flight period's membership is still
+    -- filling in, so its max is wherever ESPN has got to -- dating a period
+    -- from it would publish a week that ends today and moves tomorrow.
+    -- (Measured: 2026 period 19 read ids 139..140 against the seed's
+    -- seven-day 2026-08-10..16.)
+    case when is_closed then min_scoring_period end::integer
+        as min_scoring_period,
+    case when is_closed then max_scoring_period end::integer
+        as max_scoring_period,
     case when is_closed then scoring_periods end as scoring_periods
 from resolved

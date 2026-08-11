@@ -1181,6 +1181,61 @@ models:
         tests:
           - not_null
 
+  - name: stg_mlb__season_calendar
+    description: >
+      The season's first ESPN scoring DATE, from MLB's own public season
+      record (MLB-235 rung 4B-2) -- the anchor that turns ESPN's daily
+      scoring-period ids into a calendar. ESPN serves no ISO date in
+      mMatchupScore, but its scoring periods are days, so scoring period N is
+      season_opener + (N - 1) days and a matchup period's start/end are the
+      min and max of its membership. Before this, that anchor came from the
+      earliest start_date in the hand-maintained matchup_schedule seed, which
+      is the input MLB-235 exists to stop requiring.
+
+      GRAIN IS (season_year) ALONE, deliberately unlike every other staging
+      model. MLB's regular season starts when it starts; the league_key on
+      the RAW row records which league's run fetched it, which is provenance
+      rather than a key. Keying on it would let two ESPN leagues in one
+      warehouse hold disagreeing calendars.
+
+      It is the REGULAR-season start: MLB opens with a special or standalone
+      game days before the conventional full-slate Opening Day, and not the
+      same way twice (2025 the Tokyo Series, 2026 a single Yankees-Giants
+      night in San Francisco), so anchoring to "the day everyone plays" would
+      have been wrong in both seasons on file. The endpoint's seasonStartDate
+      is spring training. Present-and-empty is supported -- dates then stay
+      NULL rather than being guessed.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - season_year
+    columns:
+      - name: season_year
+        description: Season the LOADER filed this row under.
+        tests:
+          - not_null
+      - name: declared_season_year
+        description: >
+          MLB's own seasonId from the captured payload. The capture refuses a
+          document whose season disagrees with the year being stamped, so a
+          row where these differ should not exist.
+      - name: season_opener
+        description: >
+          The date of ESPN scoring period 1, from MLB's
+          regularSeasonStartDate. NULL when nothing parseable was captured,
+          which leaves every derived date NULL rather than guessed.
+      - name: regular_season_end
+        description: MLB's published last regular-season date, carried as measured context.
+      - name: source_url
+        description: The exact URL that answered, stored so the row explains itself.
+      - name: anchor_field
+        description: >
+          Which of the endpoint's several date fields was taken as scoring
+          period 1 -- regularSeasonStartDate. Recorded because seasonStartDate
+          (spring training) and domestic Opening Day are both plausible-looking
+          wrong answers.
+
   - name: stg_matchup_schedule
     description: >
       Latest captured mMatchupScore snapshot per league-season (MLB-235) --

@@ -273,3 +273,165 @@ def test_groups_ignore_notice_rows_before_first_trade():
     rows = build_trades_tab_rows(_data(), 2026)
     _, _, record_hdr, record_end = _trades_section_bounds(rows)
     assert _trade_record_groups(rows, record_hdr, record_end) == []
+
+
+# ---------------------------------------------------------------------------
+# The since-trade points anchor (MLB-235 rung 4B-2)
+#
+# THE BUG THESE CLOSE. get_trades_tab_data computed
+# `cutoff_sp = max(1, (exec_date - opener).days + 1) if opener else 1`. A
+# scoring-period floor of 1 admits EVERY day of the season -- so a season
+# whose opener could not be resolved published each player's whole-season
+# production in a column headed "since the trade". Not a slightly-wrong
+# number: a different statistic wearing the right label, and it looked
+# entirely plausible.
+#
+# The ordinary path is unaffected and is asserted first: with an opener, every
+# value and every cell is exactly what it was.
+# ---------------------------------------------------------------------------
+from datetime import date, timedelta  # noqa: E402
+
+from almanac_data import since_trade_cutoff  # noqa: E402
+from almanac_render import TRADE_POINTS_UNAVAILABLE  # noqa: E402
+
+_POINTS_COLUMNS = (6, 7)          # Total Points, Active Points
+_SUM_COLUMNS = (8, 9)             # Total / Active Points Gained
+
+
+def _unavailable_leg(**overrides):
+    """A leg as almanac_data builds it when the opener did not resolve."""
+    return _leg(total_pts=None, active_pts=None, **overrides)
+
+
+def test_a_resolved_opener_renders_points_exactly_as_before():
+    """The byte-equivalence half of the correction: nothing about an ordinary
+    trade row moves."""
+    row = format_trade_record_row(_leg(total_pts=50.0, active_pts=25.0))
+
+    assert [row[i] for i in _POINTS_COLUMNS] == [50.0, 25.0]
+
+
+def test_zero_points_still_render_as_zero_not_as_unavailable():
+    """A real total of zero and an uncomputable one are different facts, and
+    collapsing them is the confusion this whole distinction exists to stop."""
+    row = format_trade_record_row(_leg(total_pts=0.0, active_pts=0))
+
+    assert [row[i] for i in _POINTS_COLUMNS] == [0.0, 0]
+    assert TRADE_POINTS_UNAVAILABLE not in row
+
+
+def test_an_unresolved_opener_renders_unavailable_not_zero():
+    row = format_trade_record_row(_unavailable_leg())
+
+    assert [row[i] for i in _POINTS_COLUMNS] == [TRADE_POINTS_UNAVAILABLE] * 2
+    # The rest of the row still renders: the smallest unavailable state the
+    # tab supports is four cells declining to answer, not a missing row.
+    assert row[0] == 'Atomic Alpacas Assuming Position'
+    assert 'Tommy Edman' in row[3]
+
+
+def test_an_unresolved_opener_never_reports_whole_season_points():
+    """The regression itself. If the fallback came back, these cells would
+    carry the player's season totals under a since-trade heading."""
+    trades = [{'date_display': '7/1/2026',
+               'legs': [_unavailable_leg(player_name='Tommy Edman'),
+                        _unavailable_leg(player_name='Bo Bichette')]}]
+    rows = build_trades_tab_rows(_data(trades=trades), 2026)
+    record = _section_rows(rows, TRADE_RECORD_HEADER)
+
+    assert record, 'no trade record rows were produced'
+    for row in record:
+        for column in _POINTS_COLUMNS:
+            assert row[column] == TRADE_POINTS_UNAVAILABLE
+            assert row[column] != 0
+            assert not isinstance(row[column], (int, float))
+
+
+def test_the_side_sum_is_unavailable_rather_than_zero():
+    """`sum(x or 0 for ...)` over unavailable legs would publish 0.0 as a
+    real total -- the same class of confident-wrong-number as the fallback."""
+    trades = [{'date_display': '7/1/2026',
+               'legs': [_unavailable_leg(), _unavailable_leg(
+                   player_name='Bo Bichette')]}]
+    rows = build_trades_tab_rows(_data(trades=trades), 2026)
+    record = _section_rows(rows, TRADE_RECORD_HEADER)
+
+    assert [record[0][i] for i in _SUM_COLUMNS] == \
+        [TRADE_POINTS_UNAVAILABLE] * 2
+
+
+def test_a_resolved_side_sum_still_totals_normally():
+    trades = [{'date_display': '7/1/2026',
+               'legs': [_leg(total_pts=50.0, active_pts=25.0),
+                        _leg(player_name='Bo Bichette', total_pts=10.0,
+                             active_pts=5.0)]}]
+    rows = build_trades_tab_rows(_data(trades=trades), 2026)
+    record = _section_rows(rows, TRADE_RECORD_HEADER)
+
+    assert [record[0][i] for i in _SUM_COLUMNS] == [60.0, 30.0]
+
+
+def test_the_tab_explains_the_unavailable_state_when_it_happens():
+    """A column of dashes with no explanation leaves the reader unable to
+    tell 'no points' from 'not computed'."""
+    trades = [{'date_display': '7/1/2026', 'legs': [_unavailable_leg()]}]
+    rows = build_trades_tab_rows(_data(trades=trades), 2026)
+    text = ' '.join(str(cell) for row in rows for cell in row)
+
+    assert 'unavailable' in text
+    assert 'first scoring date' in text
+    assert 'Whole-season totals are NOT shown' in text
+
+
+def test_an_ordinary_tab_says_nothing_about_unavailability():
+    """The note is conditional, so ordinary output is unchanged."""
+    trades = [{'date_display': '7/1/2026', 'legs': [_leg()]}]
+    rows = build_trades_tab_rows(_data(trades=trades), 2026)
+    record = _section_rows(rows, TRADE_RECORD_HEADER)
+
+    # The tab's own prose uses ' -- ' as its dash style, so this asserts on
+    # the CELLS rather than on the joined text.
+    assert not any(cell == TRADE_POINTS_UNAVAILABLE
+                   for row in record for cell in row)
+    assert not any('unavailable' in str(cell).lower()
+                   for row in rows for cell in row)
+
+
+# --- the cutoff rule itself ------------------------------------------------
+#
+# MUTATION TARGET B. `since_trade_cutoff` was an inline expression inside
+# get_trades_tab_data -- a live ESPN + warehouse read, excluded from this
+# suite by the conftest scope -- so the one place the wrong number was born
+# was the one place no test could reach. It is a pure function now, and these
+# exercise it directly rather than asserting on source text.
+
+def test_a_resolved_opener_gives_the_trade_days_scoring_period():
+    """The existing calculation, preserved exactly: trade date - opener + 1,
+    with scoring period 1 being the opener itself."""
+    opener = date(2026, 3, 25)
+
+    assert since_trade_cutoff(date(2026, 3, 25), opener) == 1
+    assert since_trade_cutoff(date(2026, 3, 26), opener) == 2
+    assert since_trade_cutoff(date(2026, 7, 6), opener) == 104
+
+
+def test_a_trade_before_the_opener_floors_at_the_first_scoring_period():
+    """A draft-day deal has no pre-trade production to exclude, and a zero or
+    negative floor would name a scoring period that does not exist."""
+    assert since_trade_cutoff(date(2026, 3, 1), date(2026, 3, 25)) == 1
+
+
+def test_an_unresolved_opener_yields_no_cutoff_rather_than_one():
+    """THE REGRESSION. A cutoff of 1 admits every scoring period of the
+    season, so an unresolved anchor would publish whole-season production
+    under a since-trade heading -- a different statistic wearing the right
+    label."""
+    assert since_trade_cutoff(date(2026, 7, 1), None) is None
+
+
+def test_no_trade_date_produces_a_cutoff_of_one_when_the_opener_is_missing():
+    """Swept across a year of plausible trade dates, because the failure was
+    not date-specific: with no opener, NONE of them may resolve to 1."""
+    for day in range(1, 366, 17):
+        exec_date = date(2026, 1, 1) + timedelta(days=day)
+        assert since_trade_cutoff(exec_date, None) is None

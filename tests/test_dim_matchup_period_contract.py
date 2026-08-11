@@ -73,7 +73,13 @@ def dim(tmp_path_factory):
     db = tmp_path_factory.mktemp("mlb235_4a") / "ESPN_FANTASY.duckdb"
     con = duckdb.connect(str(db))
     con.execute("create schema if not exists RAW")
-    for table in ("MATCHUP_SCHEDULE", "SCHEDULE_SETTINGS"):
+    # MLB_SEASON_CALENDAR joins the fixture at rung 4B-2: dim_matchup_period
+    # derives start/end dates from it, so `+dim_matchup_period` now selects
+    # stg_mlb__season_calendar and the source has to exist. Left EMPTY here on
+    # purpose -- every assertion below about the legacy seed owning the
+    # calendar is measured with no anchor captured, which is the state that
+    # made those answers legacy-only in the first place.
+    for table in ("MATCHUP_SCHEDULE", "SCHEDULE_SETTINGS", "MLB_SEASON_CALENDAR"):
         con.execute(f"""
             create table RAW.{table} (
                 SEASON_YEAR decimal(38,0), RAW_JSON json,

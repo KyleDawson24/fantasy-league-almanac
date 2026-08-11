@@ -84,6 +84,14 @@ ESPN_RAW_TABLES = (
     # scheduleSettings is a once-a-season block and this one changes every
     # week a period closes.
     "MATCHUP_SCHEDULE",
+    # MLB-235 rung 4B-2: the season's first scoring DATE, from MLB's public
+    # season record. Not ESPN's, and deliberately not folded into the
+    # snapshot above -- that one is ESPN's three blocks verbatim, and a
+    # second vendor's measurement inside it would make "what did ESPN serve"
+    # unanswerable from the row. The ESPN extract produces it because the
+    # ESPN extract is what needs it: ESPN serves daily scoring-period ids and
+    # no calendar, and this is the anchor that turns one into the other.
+    "MLB_SEASON_CALENDAR",
 )
 
 # Contract type -> pyarrow type. Deliberately NOT the same mapping as the
@@ -501,6 +509,13 @@ class LocalParquetSink:
     # it. The append-only history IS the audit trail for a derived flag.
     def write_matchup_schedule(self, payload, year, league_key):
         self._write_snapshot("MATCHUP_SCHEDULE", payload, year, league_key)
+
+    # The opener anchor (rung 4B-2). Append-only like its neighbours, and for
+    # a plainer reason than the one above: MLB republishes a season's dates
+    # if a schedule changes, and keeping the history means a calendar that
+    # shifted can be seen to have shifted.
+    def write_season_calendar(self, payload, year, league_key):
+        self._write_snapshot("MLB_SEASON_CALENDAR", payload, year, league_key)
 
     # -- deliberately unimplemented ---------------------------------------
     def backfill_club_of_game(self, year, league_key, periods):

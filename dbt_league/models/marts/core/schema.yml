@@ -183,9 +183,36 @@ models:
         tests:
           - not_null
       - name: start_date
-        description: 'First MLB scoring period day in this matchup_period.'
+        description: >
+          First MLB scoring period day in this matchup_period. DERIVED FIRST
+          (MLB-235 rung 4B-2): ESPN's daily scoring-period ids anchored to
+          MLB's published regular-season start, i.e. season_opener + (min
+          scoring period - 1) days. Falls back to the legacy seed for periods
+          the platform has not closed, and stays NULL when neither answers --
+          "no anchor captured" must look like absence, not a guess.
       - name: end_date
-        description: 'Last MLB scoring period day in this matchup_period.'
+        description: >
+          Last MLB scoring period day in this matchup_period, on the same
+          derived-first rule as start_date (season_opener + max scoring
+          period - 1 days).
+      - name: derived_start_date
+        description: >
+          The platform-derived date alone, before fallback. NULL for periods
+          ESPN has not closed and for seasons with no captured anchor.
+      - name: derived_end_date
+        description: The platform-derived end date alone, before fallback.
+      - name: legacy_start_date
+        description: >
+          The hand-maintained seed's date alone, before fallback. Kept so the
+          two sources can be compared -- assert_derived_calendar_matches_legacy
+          fails the build if a period carries both and they disagree, which is
+          what keeps an automatic anchor from silently moving the calendar.
+      - name: legacy_end_date
+        description: The seed's end date alone, before fallback.
+      - name: calendar_source
+        description: >
+          Which source supplied start_date/end_date: derived, legacy_seed, or
+          unresolved. Provenance, so a reader never has to re-derive it.
       - name: is_abnormal
         description: >
           Effective abnormality: override, else platform derivation, else the

@@ -11,6 +11,13 @@ snapshot machinery is shared, so "it writes a row" is not the risk. The risks
 are that the capture stores something a later reader cannot derive from --
 the schedule array without the status block beside it -- and that it acquires
 a dependency on the seed it exists to replace. Both are asserted directly.
+
+RUNG 4B-1 renamed the entry point: `extract_matchup_schedule` became
+`acquire_matchup_membership`, because the same one document now feeds RAW
+capture AND the box-score selection instead of only being stored. Everything
+below still tests the CAPTURE half -- what gets stored, and every refusal
+that must store nothing. The selection half lives in
+tests/test_extract_membership_selection.py.
 """
 
 import importlib.util
@@ -137,7 +144,7 @@ def test_the_capture_never_reads_the_schedule_seed(no_network, monkeypatch):
     monkeypatch.setattr(extract, "load_schedule", _boom)
     monkeypatch.setattr(extract, "get_scoring_periods", _boom)
 
-    extract.extract_matchup_schedule(_RecordingSink(), 2026, LEAGUE)
+    extract.acquire_matchup_membership(_RecordingSink(), 2026, LEAGUE)
 
 
 # ---------------------------------------------------------------------------
@@ -149,7 +156,7 @@ def test_the_stored_snapshot_carries_status_and_season_not_just_schedule(no_netw
     in when it was captured, and without seasonId the only season label is
     the one the loader stamped itself."""
     sink = _RecordingSink()
-    extract.extract_matchup_schedule(sink, 2026, LEAGUE)
+    extract.acquire_matchup_membership(sink, 2026, LEAGUE)
 
     stored, year, league_key = sink.written[0]
     assert set(stored) == {"seasonId", "status", "schedule"}
@@ -162,7 +169,7 @@ def test_the_blocks_are_stored_verbatim(no_network):
     """An assembly of three keys, not a transformation: nothing inside any
     block is reshaped, filtered or sorted."""
     sink = _RecordingSink()
-    extract.extract_matchup_schedule(sink, 2026, LEAGUE)
+    extract.acquire_matchup_membership(sink, 2026, LEAGUE)
     stored = sink.written[0][0]
 
     original = _payload()
@@ -172,7 +179,7 @@ def test_the_blocks_are_stored_verbatim(no_network):
 
 def test_unrelated_league_document_fields_do_not_ride_along(no_network):
     sink = _RecordingSink()
-    extract.extract_matchup_schedule(sink, 2026, LEAGUE)
+    extract.acquire_matchup_membership(sink, 2026, LEAGUE)
 
     assert "draftDetail" not in sink.written[0][0]
     assert "scoringPeriodId" not in sink.written[0][0]
@@ -182,7 +189,7 @@ def test_the_valid_three_block_capture_writes_unchanged(no_network):
     """The control for every refusal below: a good document still writes,
     once, with all three blocks intact."""
     sink = _RecordingSink()
-    extract.extract_matchup_schedule(sink, 2026, LEAGUE)
+    extract.acquire_matchup_membership(sink, 2026, LEAGUE)
 
     assert len(sink.written) == 1
     stored, year, league_key = sink.written[0]
@@ -201,7 +208,7 @@ def _refuses(monkeypatch, payload, year=2026):
     sink = _RecordingSink()
 
     with pytest.raises(SystemExit) as excinfo:
-        extract.extract_matchup_schedule(sink, year, LEAGUE)
+        extract.acquire_matchup_membership(sink, year, LEAGUE)
 
     assert sink.written == [], "a refused capture wrote to the sink anyway"
     return str(excinfo.value)
@@ -310,14 +317,49 @@ def test_an_unregistered_table_name_is_still_refused():
 # ---------------------------------------------------------------------------
 # The CLI contract
 # ---------------------------------------------------------------------------
-def test_the_capture_is_opt_in():
-    """Nothing consumes it yet, so it must not add a request to the weekly
-    runbook. This is the assertion that would fail if it were made default
-    by accident."""
-    source = (_REPO_ROOT / "extract" / "extract.py").read_text()
+def test_the_capture_is_automatic_on_a_box_score_run():
+    """The inversion rung 4B-1 landed.
 
-    assert '"--include-matchup-schedule", action="store_true"' in source
-    assert "do_matchup_schedule = (args.matchup_schedule_only" in source
+    Rung 2 asserted the OPPOSITE -- that the capture stayed opt-in, because
+    nothing consumed it and it would have added a request per run to store
+    rows no model read. Something consumes it now: the extract selects its
+    matchup periods and their scoring-period ids out of this document, so a
+    box-score run without it has no non-circular answer at all.
+
+    The flag survives as an accepted spelling for backwards compatibility,
+    and its help must no longer claim the feature is unconsumed -- a stranger
+    reading `--help` would otherwise be told to skip the thing the run
+    depends on.
+    """
+    parser = extract.build_parser()
+    flag = [a for a in parser._actions
+            if "--include-matchup-schedule" in a.option_strings][0]
+
+    assert "no longer needed" in flag.help.lower()
+    assert "automatic" in flag.help.lower()
+    assert "nothing consumes it" not in flag.help.lower()
+
+    args = parser.parse_args([])
+    assert args.include_matchup_schedule is False, (
+        "the default run must not need the flag set"
+    )
+
+
+def test_a_box_score_run_asks_for_the_membership_without_the_flag():
+    """Behaviour, not source text: the default Namespace reaches the capture.
+
+    tests/test_extract_membership_selection.py drives the whole run; this is
+    the narrow "did the flag stop being required" assertion, kept next to the
+    opt-in claim it replaces.
+    """
+    parser = extract.build_parser()
+    default = parser.parse_args([])
+    schedule_only = parser.parse_args(["--matchup-schedule-only"])
+
+    do_box_scores = not (default.settings_only or default.transactions_only
+                         or default.matchup_schedule_only)
+    assert do_box_scores is True
+    assert schedule_only.matchup_schedule_only is True
 
 
 def test_the_narrowing_helper_is_the_pure_one():

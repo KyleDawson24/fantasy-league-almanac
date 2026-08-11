@@ -100,6 +100,119 @@ vars:
 
 seeds:
   dbt_league:
+    # ==================================================================
+    # EVERY league_config SEED DECLARES ITS TYPES (MLB-235 rung 4B-2)
+    # ==================================================================
+    # Not a style preference -- a fresh clone does not build without it.
+    #
+    # The committed league_config templates are ALL header-only: a stranger
+    # gets fourteen files with a header row and no data. An empty CSV has
+    # nothing to infer a type FROM, so an undeclared column arrives as
+    # whatever the loader guesses -- measured: `league_key` landing INTEGER,
+    # then dying against the VARCHAR one from stg_box_scores. Three models
+    # failed that way on the exact all-blank installation (int_franchise_
+    # registry, int_cbs__team_owner_season, stg_cbs__mlbam_crosswalk), while
+    # the maintainer's populated files inferred correctly and hid it. So
+    # QUICKSTART could truthfully say "these can all stay blank" and the
+    # unscoped `dbt seed && dbt run` it tells a stranger to type would not
+    # run. tests/test_weekly_chain_without_seed.py builds that exact state.
+    #
+    # TYPES COME FROM DOWNSTREAM, NOT FROM TASTE. Every id that a model
+    # casts to varchar before use is declared varchar here (franchise_id,
+    # canonical_franchise_id, owner_id); every id that is coalesced with a
+    # RAW-derived integer is declared integer (mlbam_id, player_id). The
+    # populated demo fixture is the cross-check: same types, so a populated
+    # install produces exactly what it did before.
+    #
+    # The COMMITTED PUBLIC TEMPLATE IS THE WHOLE SCHEMA. No column is
+    # declared here that the template does not carry -- a private local
+    # column would be a private local column documented in a public file.
+    # tests/test_league_config_templates.py asserts both directions.
+    #
+    # Empty stays empty: nothing below gives an unfilled CBS seed ESPN
+    # meaning, and no row is invented. These tables load EMPTY and correctly
+    # typed, which is what lets the CBS-side models build to zero rows
+    # instead of erroring.
+
+    # -- CBS franchise / owner registries --------------------------------
+    # Every franchise id is cast to varchar before it is used (see
+    # int_franchise_registry and dim_franchise), so varchar is the type it
+    # already had by the time anything compared it.
+    cbs_franchises:
+      +column_types:
+        league_key: varchar
+        franchise_id: varchar
+        abbrev: varchar
+        franchise_name: varchar
+    cbs_team_owners:
+      +column_types:
+        league_key: varchar
+        franchise_id: varchar
+        owner_id: varchar
+    team_owner_by_year:
+      +column_types:
+        league_key: varchar
+        season_year: integer
+        franchise_id: varchar
+        owner_name: varchar
+    # season_year is deliberately nullable: a lineage row with no season
+    # means "always", and dim_franchise reads exactly that
+    # (`nullif(cast(season_year as varchar), '') is null`).
+    franchise_lineage:
+      +column_types:
+        league_key: varchar
+        franchise_id: varchar
+        season_year: integer
+        canonical_franchise_id: varchar
+        canonical_name: varchar
+        canonical_abbrev: varchar
+    owner_alias:
+      +column_types:
+        league_key: varchar
+        owner_id: varchar
+        canonical_owner_id: varchar
+        preferred_name: varchar
+
+    # -- player identity -------------------------------------------------
+    # mlbam_id is integer because every consumer coalesces it with the
+    # crosswalk's own RAW-derived mlbam_id.
+    player_alias:
+      +column_types:
+        name_key: varchar
+        mlbam_id: integer
+        note: varchar
+    player_identity_overrides:
+      +column_types:
+        platform: varchar
+        cbs_name_key: varchar
+        mlbam_id: integer
+        mlbam_name: varchar
+        note: varchar
+    player_identity_context_overrides:
+      +column_types:
+        league_key: varchar
+        season_year: integer
+        franchise_id: varchar
+        cbs_name_key: varchar
+        mlbam_id: integer
+        note: varchar
+
+    # -- the early-anchor worklist ---------------------------------------
+    # No model reads this one, and it is typed anyway: `dbt seed` loads every
+    # seed whether a model refs it or not, so an untyped empty file fails the
+    # stranger's very first command. `cbs_player_id` is varchar because CBS
+    # ids include the synthetic `ui-only-*` form.
+    cbs_early_anchors_backfill:
+      +column_types:
+        season: integer
+        tier: varchar
+        cbs_player_id: varchar
+        player: varchar
+        points: integer
+        hr: integer
+        team_abbrev_FILL_ME: varchar
+        active_status: varchar
+
     # MLB-90: which recording of each draft season to trust, and how to
     # stitch the ones that ran two drafts. Curation, so it is data.
     draft_assembly_plan:

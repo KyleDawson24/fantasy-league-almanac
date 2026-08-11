@@ -1281,6 +1281,32 @@
         "scale": null
       }
     ],
+    "MLB_SEASON_CALENDAR": [
+      {
+        "name": "SEASON_YEAR",
+        "snowflake_type": "NUMBER",
+        "precision": 38,
+        "scale": 0
+      },
+      {
+        "name": "RAW_JSON",
+        "snowflake_type": "VARIANT",
+        "precision": null,
+        "scale": null
+      },
+      {
+        "name": "EXTRACTED_AT",
+        "snowflake_type": "TIMESTAMP_NTZ",
+        "precision": null,
+        "scale": null
+      },
+      {
+        "name": "LEAGUE_KEY",
+        "snowflake_type": "TEXT",
+        "precision": null,
+        "scale": null
+      }
+    ],
     "MLB_SEASON_STATS": [
       {
         "name": "MLBAM_ID",

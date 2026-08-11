@@ -154,6 +154,17 @@ def test_written_parquet_matches_the_contract_schema_exactly(sink, contract):
          "schedule": [{"matchupPeriodId": 1,
                        "home": {"pointsByScoringPeriod": {"1": 0.0}}}]},
         2026, LEAGUE)
+    # MLB-235 rung 4B-2 -- the opener anchor. Not ESPN's, and deliberately
+    # its own table: the snapshot above is ESPN's three blocks verbatim, and
+    # a second vendor's measurement inside it would make "what did ESPN
+    # serve" unanswerable from the row.
+    sink.write_season_calendar(
+        {"seasonId": 2026,
+         "source": "https://statsapi.mlb.com/api/v1/seasons?sportId=1&season=2026",
+         "anchor_field": "regularSeasonStartDate",
+         "regularSeasonStartDate": "2026-03-25",
+         "regularSeasonEndDate": "2026-09-27"},
+        2026, LEAGUE)
 
     for table in ESPN_RAW_TABLES:
         path = sink.path_for(table)

@@ -105,6 +105,7 @@ from almanac_render import (
     format_standings_row,
     format_trade_record_row,
     format_trades_row,
+    TRADE_POINTS_UNAVAILABLE,
     home_nav_link,
     standings_header,
     format_record_matrix_row,
@@ -1665,11 +1666,30 @@ def build_trades_tab_rows(trade_data, season_year):
     rows.append([])
     rows.append([])
     rows.append([TRADE_RECORD_LABEL])
-    rows.append(list(TRADE_RECORD_HEADER))
+
     trades = trade_data.get('trades') or []
+
+    # Said ONLY when the season's opener could not be resolved, so ordinary
+    # output is unchanged. Without it the reader sees a column of dashes and
+    # has no way to learn whether that means "no points" or "not computed".
+    #
+    # ABOVE THE HEADER on purpose: everything below the header row is a data
+    # row, and the write layer's section parsers walk that block. A one-cell
+    # note inside it would be read as a malformed trade leg.
+    if any(leg.get('total_pts') is None
+           for t in trades for leg in t.get('legs') or []):
+        rows.append([
+            f"Points since each trade are unavailable ({TRADE_POINTS_UNAVAILABLE}): "
+            "this season's first scoring date could not be established, so a "
+            "trade date cannot be placed on the scoring-period calendar. "
+            "Whole-season totals are NOT shown here -- they would not be "
+            "points since the trade."])
+
+    rows.append(list(TRADE_RECORD_HEADER))
     if not trades:
         rows.append(['No trades have been executed yet this season.'])
         return rows
+
     for trade in trades:
         sides = defaultdict(list)
         for leg in trade.get('legs') or []:
@@ -1679,8 +1699,16 @@ def build_trades_tab_rows(trade_data, season_year):
             side = sides[team]
             side.sort(key=lambda l: (-(l.get('total_pts') or 0),
                                      (l.get('player_name') or '').lower()))
-            sums = (round(sum(l.get('total_pts') or 0 for l in side), 1),
-                    round(sum(l.get('active_pts') or 0 for l in side), 1))
+            # A side sum over unavailable legs is not zero, it is unavailable
+            # (MLB-235 rung 4B-2). `sum(... or 0)` would quietly publish 0.0
+            # as a real total -- the same "a wrong number that looks right"
+            # failure as the cutoff_sp = 1 fallback this rung removed.
+            sums = tuple(
+                TRADE_POINTS_UNAVAILABLE
+                if all(l.get(key) is None for l in side)
+                else round(sum(l.get(key) or 0 for l in side), 1)
+                for key in ('total_pts', 'active_pts')
+            )
             for i, leg in enumerate(side):
                 rows.append(format_trade_record_row(
                     leg,

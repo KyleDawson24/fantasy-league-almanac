@@ -46,10 +46,13 @@ nobody has ever seen fail. The registry is explicit, already loaded by every
 edge script, and is not the matchup_schedule seed, so it breaks the
 circularity just as cleanly.
 
-WHAT THIS STILL CANNOT TELL YOU: dates. Membership is scoring-period IDS, and
-ESPN serves no start/end calendar here. `dim_matchup_period` and the
-`days_in_period` arithmetic downstream of it still need the seed's dates. This
-module retires the LENGTH question, not the calendar.
+WHAT THIS DOES NOT SPELL OUT: ISO dates. Membership is scoring-period IDS,
+and ESPN serves no start/end calendar in this view. That is not the same as
+the calendar being unknowable -- an ESPN scoring period is one day, so
+anchoring period 1 to the season's first scoring date turns membership into a
+calendar by ordinary day arithmetic. Automating that anchor is rung 4B-2's
+job; this module retires the LENGTH and the RECENCY questions, and leaves the
+opener to it.
 
 WHY IT IS A SEPARATE MODULE and not a function in extract.py: extract.py reads
 LEAGUE_ID at import and raises without it, so a fresh clone cannot import it.
@@ -161,6 +164,34 @@ class MembershipParse:
     # None on every live season, and on a completed one whose closing period
     # could not back the claim up.
     promoted_period: object = None
+    # `status.latestScoringPeriod`, or None when ESPN did not send a usable
+    # one. The recency policy's only clock (see `classify_recency`), carried
+    # here rather than re-read from the payload so selection and the settled-
+    # history guard cannot end up looking at two different documents.
+    latest_scoring_period: object = None
+
+    @property
+    def closed_periods(self):
+        """Just the eligible matchup-period ids, ascending.
+
+        What `--all` extracts, and the set every explicit request is checked
+        against. `closed` is already sorted, so this is a projection.
+        """
+        return tuple(period.matchup_period for period in self.closed)
+
+    def scoring_periods_for(self, matchup_period):
+        """This period's scoring-period ids, or None if it is not eligible.
+
+        The replacement for `get_scoring_periods()`, which turned the seed's
+        start/end dates into a range. None rather than () for an ineligible
+        period, because "ESPN did not serve this as closed" and "this period
+        contains no days" must not be the same answer to a caller about to
+        decide what to pull.
+        """
+        for period in self.closed:
+            if period.matchup_period == matchup_period:
+                return period.scoring_periods
+        return None
 
     @property
     def rows(self):
@@ -605,6 +636,7 @@ def parse_matchup_membership(payload, *, league_key, season_year):
         closed=closed,
         excluded=tuple(sorted(excluded)),
         promoted_period=promoted.matchup_period if promoted else None,
+        latest_scoring_period=latest_scoring_period,
     )
 
 
@@ -705,6 +737,83 @@ def _require_no_gaps(closed, current, promoted=False):
             f"current period ({current}) but carries no membership in the "
             f"payload; {len(closed)} eligible period(s) observed where "
             f"{expected} were expected")
+
+
+# ---------------------------------------------------------------------------
+# How recent a closed period is, without a calendar
+# ---------------------------------------------------------------------------
+# The three answers, and the third is not a decoration. A period the evidence
+# cannot place is NOT the same as one placed outside the window: the weekly
+# default must not revisit it, and the settled-history guard must not wave it
+# through. Collapsing UNKNOWN into either of the other two makes one of those
+# two callers wrong, and it is always the destructive one that loses.
+RECENT = "recent"
+SETTLED = "settled"
+UNKNOWN = "unknown"
+
+RECENCY_VERDICTS = (RECENT, SETTLED, UNKNOWN)
+
+
+def classify_recency(parse, *, window, is_current_season):
+    """{matchup_period: RECENT|SETTLED|UNKNOWN} over this parse's closed set.
+
+    THE ONE DEFINITION OF "RECENT", and it has two consumers that must never
+    disagree: the weekly default picks the RECENT periods to re-extract, and
+    the MLB-188 settled-history guard refuses a rewrite of any loaded period
+    that is NOT recent. Two copies of this arithmetic is precisely the
+    drifting-twin shape MLB-175 was bitten by, so there is one.
+
+    IT COUNTS SCORING PERIODS, NOT DAYS ON A WALL CLOCK. The old rule read
+    each period's calendar end date out of matchup_schedule.csv and compared
+    it to `today - LIVE_CAPTURE_WINDOW_DAYS`; the platform payload serves
+    scoring-period ids and no dates. The substitution is exact rather than
+    approximate BECAUSE an ESPN scoring period is one day: with `latest` being
+    the newest scoring period ESPN has scored, `last_sp >= latest - window` is
+    the same set the date comparison produced. Measured on the preserved 2026
+    payload -- latest 140, window 21 -- both spellings select periods 16, 17
+    and 18 and settle 15, because scoring period 119 IS the cutoff date.
+
+    THE BOUNDARY IS INCLUSIVE, matching the `end_date >= cutoff` it replaces:
+    a period whose last scoring period is exactly `window` behind `latest` is
+    still recent.
+
+    A SEASON EARLIER THAN THE CURRENT ONE IS ENTIRELY SETTLED, however close
+    its final period sits to that season's own `latest`. The window is about
+    what kona can still answer for TODAY, and last year's last week is as
+    unreachable as its first -- an in-season distance says nothing about it.
+
+    FAILS CLOSED ON MISSING EVIDENCE. No usable `latestScoringPeriod`, or a
+    period carrying no scoring periods, returns UNKNOWN rather than a guess.
+
+    `window` is required, deliberately: LIVE_CAPTURE_WINDOW_DAYS lives in
+    extract.py and a default here would be the second copy of it.
+    """
+    latest = _optional_scoring_period(parse.latest_scoring_period)
+
+    verdicts = {}
+    for period in parse.closed:
+        if not is_current_season:
+            verdicts[period.matchup_period] = SETTLED
+        elif latest is None or not period.scoring_periods:
+            verdicts[period.matchup_period] = UNKNOWN
+        elif period.scoring_periods[-1] >= latest - window:
+            verdicts[period.matchup_period] = RECENT
+        else:
+            verdicts[period.matchup_period] = SETTLED
+    return verdicts
+
+
+def recent_periods(parse, *, window, is_current_season):
+    """The closed periods the weekly default revisits, ascending.
+
+    RECENT only. An UNKNOWN period is not re-extracted on a routine run: the
+    guard would have to be satisfied about it anyway, and quietly extracting
+    what could not be dated is how a fail-closed guard becomes decorative.
+    """
+    verdicts = classify_recency(parse, window=window,
+                                is_current_season=is_current_season)
+    return tuple(sorted(mp for mp, verdict in verdicts.items()
+                        if verdict == RECENT))
 
 
 # ---------------------------------------------------------------------------

@@ -18,7 +18,14 @@ This is not yet the whole of v2.0. That goal is a stranger with an ESPN
 **or CBS** league getting an almanac with no warehouse accounts, and the
 CBS half is not here: its ingestion still runs on browser-extracted
 credentials, and one CBS data test does not yet no-op on an
-ESPN-only install (noted in step 5). The ESPN half is done and walked.
+ESPN-only install (noted in step 5).
+
+The ESPN half is walked end to end, and as of this release it needs one
+fewer thing from you: **there is no schedule to fill in**. What is still
+outstanding on the ESPN side is packaging rather than data -- there is
+no single bootstrap command and no guided fields file yet, so the five
+commands in step 5 are still five commands, and writing to a live Google
+Sheet still needs your own OAuth client.
 
 ## What you need
 
@@ -85,18 +92,31 @@ the same account details you just put in `.env`.
 If you have not created the Snowflake database and warehouse yet, that is
 [SETUP.md section 4, "Snowflake setup"](SETUP.md#4-snowflake-setup).
 
-## 4. Tell it when your weeks start and end
+## 4. Nothing. There is no step 4 any more
 
-Open `dbt_league/league_config/matchup_schedule.csv` and add your season's
-week boundaries. This is the one file an ESPN league genuinely has to
-fill in: nothing else in the pipeline knows when your weeks began and
-ended, so leaving it blank leaves every weekly surface empty.
+**This used to be "tell it when your weeks start and end".** You had to
+open `dbt_league/league_config/matchup_schedule.csv` and type every
+week's boundaries before anything worked, and leaving it blank left
+every weekly surface empty.
 
-Everything else in that directory can stay blank. Those files only
-rename, merge or repoint things, and they all reach the pipeline through
-a left join, so blank means "change nothing". See
+You do not any more, and there is nothing to do here. The extract asks
+ESPN which scoring periods belong to each matchup period and reads the
+answer straight out of the response, so your weeks come from your
+league rather than from a file you maintain.
+
+The dates come automatically too. ESPN does not spell out calendar dates
+in that response, but its scoring periods are **days** -- so once the
+season's first scoring date is known, scoring period N is that date plus
+N-1 days, and each matchup period's start and end are just the first and
+last scoring period in it. The opener comes from MLB's own published
+regular-season start date, fetched from the free public MLB Stats API
+that this project already uses. Nobody types a calendar.
+
+Every file in `dbt_league/league_config/` can now stay blank. They only
+rename, merge, relabel or correct things, and they all reach the
+pipeline through a left join, so blank means "change nothing". See
 [SETUP.md section 7](SETUP.md#7-tell-it-about-your-league) for the file
-by file breakdown.
+by file breakdown, including when you would still want to fill one in.
 
 ## 5. Run it
 
@@ -139,7 +159,16 @@ edge rather than a preference: `dbt build` also runs the CBS data tests,
 and one of them (`assert_cbs_scoring_feed_matches_seed`) compares the CBS
 scoring feed against a seed that documents it. On an ESPN-only install
 the feed is legitimately empty, so the test fails and skips everything
-downstream of it. The ESPN models themselves build clean -- 74 of 74.
+downstream of it.
+
+`dbt seed` and `dbt run` themselves are clean on exactly the installation
+described above -- every `league_config` file left blank, nothing but ESPN
+data in RAW. All 20 seeds load and all 85 models build; the CBS-side models
+come out empty, which is the true thing to say about a league with no CBS
+configuration. That is checked by a test, not by memory, because it was
+briefly untrue: an empty CSV has no data to infer a column type from, so a
+few CBS columns used to arrive as the wrong type and take three models down
+with them. The types are declared explicitly now.
 
 ### The Snowflake path
 
@@ -192,6 +221,23 @@ Said plainly, because finding out later is worse:
   weeks you want, as in `python extract/extract.py --raw-target local
   --year 2025 5`, or `--year 2025 --all` for the season. The other feeds
   have no such route.
+
+  Three things that sound alike and are not. An ordinary run captures the
+  **current** season's weeks by itself. `--matchup-schedule-only --year
+  2025` captures **2025's weeks only**, in one request. `--all-seasons
+  --matchup-schedule-only` captures the weeks for **every season your
+  league registry bounds** -- and only the weeks: it downloads no
+  historical box scores, which are the slow part and still go a season
+  at a time.
+
+- **Season-long points and rotisserie leagues are not proven.** The
+  extract accepts a league that reports no head-to-head matchup periods,
+  or one season-spanning period, without inventing weeks that do not
+  exist -- but its box-score route is head-to-head shaped and has never
+  been run against a real league of that kind. Rather than guess, it
+  stops and says so, and reports what your league's settings actually
+  said. If that is your league, an issue with what it printed is genuinely
+  useful.
 
 ## Something hurt?
 

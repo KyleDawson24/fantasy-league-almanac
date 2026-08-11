@@ -23,6 +23,7 @@ Fast and pure: no warehouse, no dbt invocation, no network.
 from __future__ import annotations
 
 import os
+import pathlib
 import subprocess
 
 import pytest
@@ -216,6 +217,124 @@ def test_dbt_project_types_only_public_owner_columns():
                 f"seed has four columns; typing a fifth publishes the name of "
                 f"a column that only exists in a file which is never committed."
             )
+
+
+def _declared_column_types():
+    """{seed name: [declared column names]} from the committed dbt_project.yml.
+
+    A small hand parser rather than a YAML load: yaml is not a test
+    dependency, and the shape it walks is fixed --
+
+        seeds:
+          dbt_league:
+            <seed>:
+              +column_types:
+                <column>: <type>
+
+    READ FROM THE WORKING TREE, and that is a deliberate difference from
+    every other reader in this file. The templates are read through git
+    because they are skip-worktree and the path on disk holds real league
+    data; dbt_project.yml is ordinary tracked config with no private content,
+    it is not skip-worktree, and it is the copy dbt ACTUALLY APPLIES. Reading
+    the committed one instead would make this pass on a stale commit and,
+    worse, make it impossible to satisfy while the fix is being written.
+
+    test_dbt_project_types_only_public_owner_columns keeps reading the
+    committed bytes on purpose -- that one is about what a clone RECEIVES.
+    """
+    project = (pathlib.Path(REPO) / "dbt_league" / "dbt_project.yml").read_text(
+        encoding="utf-8")
+    body = project.split("\nseeds:", 1)
+    assert len(body) == 2, "dbt_project.yml has no seeds: block"
+
+    declared, seed, in_types = {}, None, False
+    for line in body[1].splitlines():
+        if line and not line.startswith(" ") and line.rstrip().endswith(":"):
+            break                                    # a new top-level block
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip())
+        if indent == 4 and stripped.endswith(":") and not stripped.startswith("+"):
+            seed, in_types = stripped[:-1], False
+            declared.setdefault(seed, [])
+        elif indent == 6 and stripped == "+column_types:":
+            in_types = True
+        elif indent >= 8 and in_types and ":" in stripped:
+            declared[seed].append(stripped.split(":", 1)[0].strip())
+    return declared
+
+
+def test_every_blank_template_column_has_a_declared_type():
+    """MLB-235 rung 4B-2. An empty CSV has nothing to infer a type FROM.
+
+    THE FAILURE THIS CLOSES, and it was published rather than theoretical:
+    QUICKSTART says every league_config file may stay blank, then prints an
+    unscoped `dbt seed && dbt run`. On the exact all-blank state an undeclared
+    column arrived as whatever the loader guessed -- `league_key` landed
+    INTEGER and died against the VARCHAR one from stg_box_scores, taking
+    int_franchise_registry, int_cbs__team_owner_season and
+    stg_cbs__mlbam_crosswalk with it. The maintainer's populated files
+    inferred correctly and hid it, which is exactly why this is a test over
+    the COMMITTED template rather than the working tree.
+    """
+    declared = _declared_column_types()
+    missing = {}
+    for path in TEMPLATES:
+        seed = os.path.basename(path)[:-len(".csv")]
+        header, _rows_ = _rows(path)
+        absent = [c for c in header if c not in declared.get(seed, [])]
+        if absent:
+            missing[seed] = absent
+
+    assert missing == {}, (
+        f"these committed blank templates have undeclared column types: "
+        f"{missing}. A fresh clone cannot infer a type from an empty CSV, so "
+        f"an undeclared column makes `dbt seed && dbt run` fail on exactly "
+        f"the installation QUICKSTART describes."
+    )
+
+
+def test_no_declared_type_names_a_column_the_public_template_lacks():
+    """The other direction, and it is the privacy half.
+
+    dbt_project.yml is tracked config. Declaring a type for a column that
+    the committed template does not carry publishes the NAME of something
+    that exists only in a file which is never committed -- the precise
+    mistake test_dbt_project_types_only_public_owner_columns was written
+    about, generalised from owner_nicknames to every league_config seed.
+
+    It also catches the ordinary version: a type left behind after a column
+    was renamed or dropped, which silently stops applying.
+    """
+    declared = _declared_column_types()
+    template_columns = {
+        os.path.basename(path)[:-len(".csv")]: _rows(path)[0]
+        for path in TEMPLATES
+    }
+
+    stray = {}
+    for seed, columns in declared.items():
+        if seed not in template_columns:
+            continue                     # reference vocabulary, not user config
+        extra = [c for c in columns if c not in template_columns[seed]]
+        if extra:
+            stray[seed] = extra
+
+    assert stray == {}, (
+        f"dbt_project.yml types columns absent from the committed template: "
+        f"{stray}. The public template header is the whole allowed schema."
+    )
+
+
+def test_every_league_config_seed_appears_in_the_type_map():
+    """Named separately from the column check so the failure reads right: a
+    seed with NO block at all is a different mistake from a seed missing one
+    column, and it is the one that takes down `dbt seed` outright."""
+    declared = _declared_column_types()
+    seeds = [os.path.basename(p)[:-len(".csv")] for p in TEMPLATES]
+
+    assert [s for s in seeds if s not in declared] == []
 
 
 def test_seed_directories_are_allowlisted_in_gitignore():

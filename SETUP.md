@@ -398,14 +398,37 @@ Two kinds of file live there, and they behave differently when left blank.
 **Required** -- something reads these directly, so blank means the
 surfaces that depend on them come out empty:
 
-- `matchup_schedule.csv` -- your week boundaries per season. **This is the
-  one to start with.** Leave it blank and every weekly surface (recaps,
-  weekly records, standings by week) is empty, because nothing else in the
-  pipeline knows when your weeks began and ended.
 - `cbs_franchises.csv`, `cbs_team_owners.csv`, `team_owner_by_year.csv`,
   `draft_assembly_plan.csv` -- CBS leagues only. ESPN serves this
   information through its own API, so an ESPN-only league leaves them
   blank.
+
+`matchup_schedule.csv` **used to be on that list and is not any more.**
+An ESPN league no longer fills it in at all:
+
+- **Which scoring periods each matchup period contains** comes from
+  ESPN's own `mMatchupScore` response, captured automatically on every
+  box-score run. That is what the extract now selects weeks from, so it
+  is not optional data that happens to be nice to have -- it is the
+  thing the run reads.
+- **The dates** come from arithmetic, not from you. ESPN's scoring
+  periods are calendar days, so scoring period N is the season's first
+  scoring date plus N-1 days, and a matchup period's start and end are
+  its first and last scoring period. The anchor is MLB's own published
+  regular-season start date, fetched from the free public MLB Stats API
+  (`statsapi.mlb.com/api/v1/seasons`) on the same run -- no key, no
+  account. Measured against the maintainer's hand-maintained calendar it
+  reproduces all 44 closed periods of 2025 and 2026 exactly, long opening
+  weeks and 14-day All-Star weeks included, and a standing dbt test fails
+  the build if the two ever disagree rather than letting the calendar
+  move quietly.
+
+  If that anchor cannot be established -- if MLB's API were unreachable on
+  every run you have made, say -- dates stay empty rather than being
+  guessed, and the surfaces that need one say so instead of showing a
+  number that means something else. A single failed run costs nothing: the
+  extract warns, box scores still land, and the next successful run fills
+  the calendar in.
 
 **Optional** -- these only rename, merge, or repoint things. Every one of
 them reaches the pipeline through a left join, so blank means "change
@@ -418,10 +441,18 @@ nothing" and everything still builds:
 - `player_nicknames.csv`, `player_alias.csv`,
   `player_identity_overrides.csv`,
   `player_identity_context_overrides.csv` -- player naming and identity.
+- `matchup_schedule.csv` -- now a **correction and labelling** surface
+  rather than a source. Fill in a row only when you want to override a
+  derived date for a commissioner-declared oddity, or to carry a human
+  label the platform does not serve (a playoff round name, a written
+  reason a week was unusual). A blank file is the normal state.
+- `matchup_period_overrides.csv` -- the sparse escape hatch for a week
+  that is genuinely abnormal but whose *length* looks ordinary, which
+  derivation cannot see. Still the right tool for that, and still sparse.
 
-So the honest minimum for an ESPN league is **one file**:
-`matchup_schedule.csv`. Everything else can stay blank until something
-displays in a way you want to change.
+So the honest minimum for an ESPN league is now **no files at all**.
+Everything in this directory can stay blank until something displays in
+a way you want to change.
 
 ### Seeing it work before you fill anything in
 
@@ -690,13 +721,16 @@ both `espn_s2` and `SWID` from a fresh browser session.
 Use the full `<account>.<region>` (e.g., `abc12345.us-east-1`), not
 just `abc12345`.
 
-**Everything builds green but the weekly surfaces are empty.** Almost
-always a blank `dbt_league/league_config/matchup_schedule.csv`. That seed
-is the only thing that knows when your weeks started and ended, and it
-ships blank on purpose -- so an unfilled one is not an error, it is a
-league with no calendar. Nothing fails, because there is nothing wrong;
-there is just no week to report on. Fill it in (section 7) and re-run
-`dbt seed && dbt build`.
+**Everything builds green but the weekly surfaces are empty.** This used
+to mean a blank `dbt_league/league_config/matchup_schedule.csv`, and it
+no longer does -- weeks come from ESPN's own response now, so a blank
+seed is the normal state and not a cause. Check instead that the extract
+actually captured a matchup schedule: an ordinary box-score run prints
+`Matchup schedule for <year>` followed by how many closed matchup periods
+it found. Zero closed periods early in a season is real and simply means
+nothing has finished yet. Then confirm `dbt seed && dbt build` ran after
+the extract -- a week present in RAW but missing downstream is usually a
+build that has not caught up.
 
 The same shape explains a green build with unnamed CBS franchises or no
 CBS owner history: `cbs_franchises.csv`, `cbs_team_owners.csv` and

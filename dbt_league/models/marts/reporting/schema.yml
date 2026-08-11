@@ -1261,3 +1261,180 @@ models:
           the pairing is losing real picks.
         tests:
           - not_null
+
+  - name: mart_franchise_head_to_head
+    description: >
+      The rivalry ledger (MLB-229 rung 1). One row per ORDERED pair of
+      canonical franchises, aggregating every completed meeting between them
+      from the row franchise's perspective.
+
+      LONG, NOT WIDE. The consumer surface is a matrix; the matrix is a
+      render, not a grain. A wide table would need one column per franchise,
+      so its schema would change whenever a league gained or lost one --
+      dynamic SQL, an undocumentable contract, nothing downstream can join to.
+      Pivoting is the renderer's job.
+
+      IDENTITY. Matchup facts keep their real platform team ids; resolution
+      happens here through dim_franchise_season, the season-aware lineage
+      machinery. A franchise whose platform id was re-minted is one rival
+      across both eras; a live id handed to a new manager is two franchises,
+      which only the season-grain dim can express. Aggregation keys on
+      canonical_franchise_id and never on name text, so two unrelated
+      franchises sharing a display name stay separate rows. Display resolves
+      to the configured canonical_name when the lineage seed gives one, else
+      the resolved franchise's latest observed platform name.
+
+      WHAT COUNTS. A meeting needs an opponent (byes excluded), two distinct
+      platform teams, and a platform score on BOTH sides. The last is not
+      defensive: the fact derives result as W / L / else 'T', so a NULL score
+      on either side would enter this ledger as a TIE. Requiring both scores
+      also makes the filter symmetric -- one team's platform_points is the
+      other's opponent_points -- which is what guarantees reciprocity.
+
+      SCOPE CHOICES, ALL DELIBERATE. Playoff meetings are IN (a rivalry is not
+      a standings). Abnormal-length weeks are IN (is_record_eligible gates
+      per-week extremes, and a head-to-head result is not an extreme). The
+      holding pen is OUT on both sides, before aggregation, so a season-scoped
+      lineage row parking a team-season on it removes that meeting from both
+      directions. There is NO activity filter -- defunct franchises are
+      included, because the project has no authoritative definition of "still
+      active"; see docs/decisions/HEAD_TO_HEAD_RIVALS_CONTRACT.md.
+
+      THE DIAGONAL IS ABSENT, NOT ZERO. A franchise has no row against itself,
+      so a renderer draws a blank cell rather than a 0-0 that reads as a played
+      series. Self-pairs are removed after resolution, which is the only place
+      two platform ids collapsing to one franchise is visible.
+
+      Populated wherever a league delivers scored matchups (H2H, any platform)
+      and empty for a pure points league -- the same data-presence toggle
+      fct_team_season_performance uses, never a platform check.
+
+      Grain: one row per (league_key, row_canonical_franchise_id,
+      opponent_canonical_franchise_id).
+      Materialization: table -- float score sums, and a view would re-sum them
+      in a nondeterministic order on every read.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - row_canonical_franchise_id
+              - opponent_canonical_franchise_id
+    columns:
+      - name: league_key
+        description: 'League registry key (config/leagues.yml). First-class dimension in the grain -- rivalries never blend across leagues.'
+        tests:
+          - not_null
+      - name: row_canonical_franchise_id
+        description: >
+          Canonical franchise id of the perspective franchise, resolved
+          through dim_franchise_season. Every measure on the row is stated
+          from this franchise's point of view.
+        tests:
+          - not_null
+      - name: opponent_canonical_franchise_id
+        description: >
+          Canonical franchise id of the opposing franchise. Never equal to
+          row_canonical_franchise_id -- the diagonal is absent by construction
+          (assert_head_to_head_has_no_diagonal).
+        tests:
+          - not_null
+      - name: row_franchise_name
+        description: >
+          Display name of the row franchise: the configured canonical_name
+          when the lineage seed gives one, else its latest observed platform
+          name. A LABEL only -- nothing aggregates on it.
+        tests:
+          - not_null
+      - name: row_franchise_abbrev
+        description: 'Display abbreviation of the row franchise, resolved on the same precedence as row_franchise_name.'
+      - name: opponent_franchise_name
+        description: 'Display name of the opponent franchise, resolved on the same precedence as row_franchise_name.'
+        tests:
+          - not_null
+      - name: opponent_franchise_abbrev
+        description: 'Display abbreviation of the opponent franchise.'
+      - name: meetings
+        description: >
+          Completed meetings between the two franchises. Always equals
+          wins + losses + ties (assert_head_to_head_results_partition_meetings)
+          and always at least 1 -- a pair with no meetings has no row.
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 1
+                inclusive: true
+      - name: wins
+        description: 'Meetings the row franchise won, on the platform lens.'
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+      - name: losses
+        description: >
+          Meetings the row franchise lost. Reciprocally equal to the opponent
+          row's wins.
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+      - name: ties
+        description: >
+          Meetings that finished level. A genuine tie only -- a meeting
+          missing a score on either side is excluded upstream rather than
+          falling through the fact's else-branch into this column.
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+      - name: points_for
+        description: >
+          Platform points scored by the row franchise across these meetings.
+          Platform lens deliberately -- the same lens result is derived from,
+          so points_for > points_against can never contradict a losing record.
+        tests:
+          - not_null
+      - name: points_against
+        description: >
+          Platform points conceded to the opponent franchise. Reciprocally
+          equal to the opponent row's points_for.
+        tests:
+          - not_null
+      - name: points_margin
+        description: >
+          points_for - points_against, differenced in exact decimal rather
+          than from the cast-back doubles. Exactly the negation of the
+          opponent row's margin (assert_head_to_head_reciprocity).
+        tests:
+          - not_null
+      - name: win_pct
+        description: >
+          (wins + 0.5 * ties) / meetings -- the project's own winning
+          percentage, matching the all-time ordering in
+          output/almanac_data.py. Unrounded: display precision is the
+          renderer's call.
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+                inclusive: true
+      - name: first_meeting_season
+        description: >
+          Earliest season the two franchises met. Carried so a consumer can
+          age a rivalry without a second query -- and so whatever activity
+          rule Kyle rules on later can be applied without changing this grain.
+        tests:
+          - not_null
+      - name: last_meeting_season
+        description: 'Most recent season the two franchises met. Never earlier than first_meeting_season.'
+        tests:
+          - not_null

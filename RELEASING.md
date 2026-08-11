@@ -15,8 +15,20 @@ lands), not on a calendar. Hard backstop: if `[Unreleased]` exceeds
 - [ ] `git symbolic-ref -q HEAD` -- on `main`, not detached.
 - [ ] `pytest tests/` -- unit suite green.
 - [ ] `pytest tests/ -m warehouse` -- goldens byte-identical (any diff
-      needs a reviewed cause + `REGENERATE_BASELINES=1`; record the
-      anchor MP in the commit message).
+      needs a reviewed cause + `REGENERATE_BASELINES=1`). Record in the
+      commit message **the anchor matchup period AND the warehouse state
+      behind it** -- how far every platform and source feeding the render
+      was extracted or loaded. The harness pins one MP, but the render
+      reads whole-season marts, so the MP alone names the slice and says
+      nothing about the data underneath it: two cuts can pin the same MP
+      and still differ byte-for-byte because one of them had another week
+      loaded. At v1.8.0 that state was **ESPN extracted through matchup
+      period 18, CBS loaded through period 20** -- record whichever
+      platforms and sources feed the render at the time, not those two by
+      name, since the set changes as platforms and inputs are added.
+      Recording the MP alone is what failed the first re-anchor attempt
+      on 2026-08-09: there was no way to tell a real regression from a
+      fuller warehouse.
 - [ ] `dbt build` -- clean, including tests.
 - [ ] Skim `BRAINTHOUGHTS.md`; mark superseded items OBSOLETE.
       **Local and untracked**, like `RELEASE PLAN.md` below: a fresh clone

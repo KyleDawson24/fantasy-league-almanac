@@ -85,14 +85,15 @@ The payoff is measurable: both leagues' team pages render through the *same* bui
 Four layers, one warehouse, two platforms:
 
 ```
-ESPN + CBS extract  ->  Snowflake RAW (append-only, platform-native shape)
+ESPN + CBS extract  ->  RAW (append-only, platform-native shape) --
+                        Snowflake, or parquet on disk loaded into DuckDB
                     ->  dbt staging (canonicalized to one vocabulary)
                     ->  dbt intermediate (identity resolution, walk-backs)
                     ->  dbt marts (core contracts + reporting)
                     ->  weekly recap · records report · Google Sheets almanac
 ```
 
-Built on dbt + Snowflake + Python: extract scripts land raw JSON, dbt owns everything from staging through marts, and the Python output layer reads the marts to produce the recap, the records report, and the almanac. Four of those consumers are formally declared as dbt exposures, so the lineage graph runs source → deliverable; the declared set is hand-maintained and currently incomplete, which is stated plainly in [dbt_league/README.md](dbt_league/README.md#exposures). A full lineage/DAG image is coming once the current model-renaming refactor settles; drawing one today would be stale within weeks. The [hosted dbt catalog](https://kyledawson24.github.io/fantasy-league-almanac/) has the real, current lineage and column-level docs if you want that today; it's regenerated manually and regularly, so treat it as approximate rather than live (as we approach final state, I will update this doc accordingly).
+Built on dbt + Python over Snowflake or DuckDB: extract scripts land raw JSON, dbt owns everything from staging through marts, and the Python output layer reads the marts to produce the recap, the records report, and the almanac. Four of those consumers are formally declared as dbt exposures, so the lineage graph runs source → deliverable; the declared set is hand-maintained and currently incomplete, which is stated plainly in [dbt_league/README.md](dbt_league/README.md#exposures). A full lineage/DAG image is coming once the current model-renaming refactor settles; drawing one today would be stale within weeks. The [hosted dbt catalog](https://kyledawson24.github.io/fantasy-league-almanac/) has the real, current lineage and column-level docs if you want that today; it's regenerated manually and regularly, so treat it as approximate rather than live (as we approach final state, I will update this doc accordingly).
 
 ---
 
@@ -195,9 +196,9 @@ That comparison -- not his career line, the line for what he actually did *for t
 
 ## What's next
 
-**v2.0 has one goal: a stranger with an ESPN or CBS league enters some credentials, runs some things, and gets an almanac their league can open.** That last clause is literal -- a workbook in their own Drive with sharing set, because a league almanac the league cannot open is a demo rather than a product. ESPN end to end is the hard requirement and the gate; CBS is a first-class goal currently being priced rather than promised.
+**v2.0 has one goal: a stranger with an ESPN or CBS league enters some credentials, runs some things, and gets an almanac their league can open.** That last clause is literal -- a workbook in their own Drive with sharing set, because a league almanac the league cannot open is a demo rather than a product. ESPN end to end is the hard requirement and the gate. CBS has since been priced, and the answer was *probably too expensive for the 2.0 critical path* -- so the shared machinery keeps the CBS path alive, and if ESPN is release-ready while the measured CBS remainder is short and adds no new risk, CBS can still ride along. Otherwise it is an urgent fast-follow rather than a gate.
 
-It is a failure-cost argument, not a feature list: bugs are certain in something this young, and someone who filled in a few fields and hit one stays interested, while someone who provisioned a cloud warehouse first leaves annoyed. So the upfront demand has to be near zero, and the keystones are teaching the extract to write raw data locally (MLB-208 -- the engine port shipped in v1.7.0, but ingestion's front door was never in its scope, which is why the quickstart still asks for a warehouse today) and ending the journey in a shareable workbook (MLB-209). The charter is MLB-210.
+It is a failure-cost argument, not a feature list: bugs are certain in something this young, and someone who filled in a few fields and hit one stays interested, while someone who provisioned a cloud warehouse first leaves annoyed. So the upfront demand has to be near zero. The first keystone -- teaching the extract to write raw data locally -- **shipped in v1.8.0** (MLB-208): a fresh clone with league credentials and no warehouse account of any kind now reaches rendered preview files, so the quickstart no longer asks for one. The second keystone -- ending the journey in a shareable workbook (MLB-209) -- now has its **service foundation on `main`**: an isolated `drive.file` OAuth profile that asks for less, an app-created workbook with its own lifecycle, link sharing proved rather than assumed, and a consent screen measured on a clean consumer account. What remains is wiring and documenting that into the complete stranger orchestration, and walking the real almanac journey end to end. So 2.0 is closer, not done. The charter is MLB-210.
 
 Beyond that: the platform half -- Yahoo and Sleeper adapters, to prove the platform-agnostic design against a third and fourth vendor -- and a player-entity layer (`dim_player` / `fct_player_career`) with more analytics surfaces on data the pipeline already has. Full detail (including what's been explicitly decided against) is in [ROADMAP.md](ROADMAP.md).
 
@@ -211,7 +212,7 @@ Beyond that: the platform half -- Yahoo and Sleeper adapters, to prove the platf
 
 - **The engine port has landed.** The transform layer builds on DuckDB as well as Snowflake: engine-specific SQL sits behind adapter-dispatch macros, and the output layer can point at either. That is done and exercised locally, not planned.
 - **`tools/demo.sh` is a build-and-render wrapper, not a demo you can run from a clean clone.** It builds the chain and renders the almanac off the tracked demo fixture in its own local warehouse, with no Snowflake account and no Google credentials -- but it does not land raw data and will not invent any, so on a clone that has never run an extract it says so and stops. It is maintainer scaffolding until the packaged sample exists.
-- **A credential-free clone-and-run demo does not exist yet.** The missing pieces -- a packaged sample league, and onboarding that needs no `.env` edit and no flags -- are tracked together as MLB-11 and scoped to v2.1. Until then, running this means bringing your own league and your own warehouse: [SETUP.md](SETUP.md) is the walkthrough (~30-45 minutes, mostly Snowflake provisioning).
+- **A credential-free clone-and-run demo does not exist yet.** The missing pieces -- a packaged sample league, and onboarding that needs no `.env` edit and no flags -- are tracked together as MLB-11 and scoped to v2.1. Until then, running this means bringing your own league -- but, since v1.8.0, no longer your own warehouse: `extract.py --raw-target local` lands RAW as parquet on disk for DuckDB, so [QUICKSTART.md](QUICKSTART.md) needs no cloud account (ESPN only; CBS capture still needs the browser-credential route). [SETUP.md](SETUP.md) remains the walkthrough for the Snowflake path (~30-45 minutes, mostly provisioning).
 
 The portability spike that sized the transform-layer port, including the traps it found, is written up in [docs/duckdb-portability-audit.md](docs/duckdb-portability-audit.md).
 
@@ -221,9 +222,9 @@ The portability spike that sized the transform-layer port, including the traps i
 
 ## What this demonstrates
 
-The current shape of the transform layer: **74 dbt models** (32 views, 39 tables, 3 incremental), **18 seeds**, **544 data tests**, **22 sources**, and **4 declared exposures**. These counts are regenerated from the parsed manifest at each release cut; if you are reading them mid-cycle, `dbt parse` and the manifest are the truth.
+The current shape of the transform layer: **78 dbt models** (36 views, 39 tables, 3 incremental), **19 seeds**, **573 data tests**, **27 sources**, and **4 declared exposures**. These counts are regenerated from the parsed manifest at each release cut; if you are reading them mid-cycle, `dbt parse` and the manifest are the truth.
 
-Most of that needs a warehouse to exercise, but not all of it: with no account and no credentials, `pytest tests/` runs **515 tests green** (24 warehouse-marked tests deselect, and the tests that need private regression corpora skip rather than fail), and `dbt deps && dbt parse` compiles the project. Counts drift between releases; `pytest tests/ -q` is the truth.
+Most of that needs a warehouse to exercise, but not all of it: with no account and no credentials, `dbt deps && dbt parse` compiles the project and `pytest tests/` passes. On CI's clean Linux checkout of `main` that reads **749 passed, 3 skipped, 27 deselected** -- the warehouse-marked goldens deselect, and the tests wanting private regression corpora skip rather than fail. Your own checkout will print different totals: some tests need a POSIX shell and skip on Windows, and any untracked work of your own is collected too. Counts drift between releases; `pytest tests/ -q` on your machine is the truth.
 
 - **Modeling that survived a second implementation.** Wide convergence facts at consumer grain; a symmetric active/inactive split ("active is fantasy reality, inactive is MLB reality") that is what makes wasted-production analysis possible at all; a seed-driven UNPIVOT mart where adding a tracked stat is a CSV row rather than a five-file SQL change.
 - **Reproducibility.** Floating-point sums are not associative, and SQL engines do not promise summation order, so rebuilding with no code change could move a rendered cell by one, and oh boy it often did. Sums now run in exact decimal with pinned tie-breaks, and a byte-diff harness pins a known week so any drift fails loudly.
@@ -254,7 +255,22 @@ Most of that needs a warehouse to exercise, but not all of it: with no account a
 
 ## Status
 
-- **v1.7.0** -- current, 2026-08-05. The first public release, and three
+- **v1.8.0** -- current, 2026-08-10. The engine runs locally, end to
+  end: `extract.py --raw-target local` lands RAW as parquet plus a
+  manifest, so a fresh clone with league credentials and **no warehouse
+  account of any kind** reaches rendered previews. ESPN only -- CBS
+  bring-your-own is not in this release. ESPN's own settings and
+  standings are now captured from views every run already fetched and
+  discarded, and the head-to-head standings render in **the platform's
+  own seed order** rather than a wins-then-points sort, which no sort
+  over wins or points recovers. The podium is marked on both books
+  (🏆 champion, 🥈 runner-up, 🥉 third), keyed on the post-playoff
+  finish rather than the seed where a league has a bracket. Underneath:
+  eight crash paths a stranger's first run would have hit, and a
+  lineup-slot fallthrough that was silently deleting pitcher
+  production. Full notes:
+  [RELEASE NOTES v1.8.0.md](RELEASE%20NOTES%20v1.8.0.md).
+- **v1.7.0** -- 2026-08-05. The first public release, and three
   things at once: the **DuckDB engine port** lands (the transform layer
   builds on either engine, though nothing lands raw data outside
   Snowflake yet), production is credited to the **club of the game**
@@ -264,14 +280,14 @@ Most of that needs a warehouse to exercise, but not all of it: with no account a
   book. New on-ramp: [QUICKSTART.md](QUICKSTART.md), interim and honest
   about it. **Existing installs must run the club-of-game backfill**, and
   the build fails until they do. Full notes:
-  [RELEASE NOTES v1.7.0.md](RELEASE%20NOTES%20v1.7.0.md).
+  [RELEASE NOTES v1.7.0.md](docs/releases/RELEASE%20NOTES%20v1.7.0.md).
 - **v1.6.0** -- 2026-07-30. The pre-port anchor release: the Points Glossary settles on the Total-Points lenses, Advanced Standings moves its era and scope text into the section banners, and a re-render hygiene gap that had been quietly layering each render over the last one is closed across every ESPN writer. Underneath, a determinism sweep pins every row-selection tie so no database engine gets to choose a value -- groundwork for the DuckDB port, and the last stable point before it.
 - **v1.5.1** -- 2026-07-25. A correctness pass on the CBS record book: fixed non-deterministic rebuilds, a silent transaction-capture gap (~408 rows dropped across 26 seasons of history), records that were rounded twice, and player identity that gave up whenever a name had two candidates. Patch, not minor -- everything in it corrects an existing surface rather than adding one.
 - **v1.5.0** -- 2026-07-21. The multi-league release: a league registry and a `league_key` re-grain of every layer, and the CBS points league (2001-2026) ships end to end through the same tab builders as ESPN. Advanced Standings, Trades, Baseball Reference links, and a reworked Draft Recap land on the ESPN side in the same release.
 - **v1.2.0** -- 2026-05-30. Home became a navigation-hub dashboard, and a net-new Draft Recap tab (draft board plus draft-value analysis) landed. (1.3 and 1.4 were internal working labels during an unreleased stretch, skipped deliberately to keep the docs unambiguous.)
 - **v1.0.0 - v1.1.2** -- the original single-league ESPN foundation: the weekly BBCode recap, the all time records report, and the first Google Sheets almanac. Full per-release history in [CHANGELOG.md](CHANGELOG.md).
 - **License**: MIT (see [LICENSE](LICENSE)).
-- **Built with**: dbt 1.11 · Snowflake · Python 3.13 · `espn-api` wrapper · `gspread`.
+- **Built with**: dbt 1.11 · Snowflake or DuckDB · Python 3.13 · `espn-api` wrapper · `gspread`.
 
 ## Contact
 

@@ -8,11 +8,17 @@ dbt-architecture cleanup; refactor-only), and v1.1.0 on 2026-05-22
 (a correctness pass over the CBS record book, 2026-07-25), and v1.6.0
 (2026-07-30, the pre-port anchor release: Total-Points vocabulary,
 Advanced Standings banners, a re-render hygiene fix, and a determinism
-sweep). See CHANGELOG.md for the per-release entries.
+sweep). Most recently, v1.8.0 (2026-08-10) proved the warehouse-free
+local journey end to end: a fresh clone with league credentials and no
+warehouse account of any kind reaches rendered preview files on disk --
+ESPN only, not yet a shareable workbook, and not yet stranger-proof.
+See CHANGELOG.md for the per-release entries.
 
-**In flight right now:** the DuckDB engine port (MLB-10) -- the work that
-makes the "runs without a cloud warehouse" item below real rather than
-planned.
+**In flight right now:** the stranger's Google-workbook journey (MLB-209)
+-- the service foundation is on `main`, and what remains is wiring it
+into the full onboarding path -- and deriving the matchup schedule from
+the platform's own settings instead of a hand-maintained seed (the "Data
+wiring" item below).
 
 The items below are what's still on deck, organized by
 priority and ambition. v1.x = incremental polish on the current
@@ -25,11 +31,11 @@ a single afternoon.
 
 ### Almanac refactor (v1.1.1)
 
-> **Overtaken by events (noted 2026-07-31).** This block was written when
-> v1.1.0 was the current release; the project is now at v1.6.0 with the
-> engine port in flight. The individual items below are still wanted, but
-> "the next release" no longer describes any of them. Re-prioritizing this
-> section is its own pass.
+> **Overtaken by events (noted 2026-07-31, refreshed 2026-08-11).** This
+> block was written when v1.1.0 was the current release; the project is
+> now at v1.8.0 and the engine port has shipped. The items below are
+> still wanted, but "the next release" no longer describes any of them.
+> Re-prioritizing this section is its own pass.
 
 - **Byte-identical almanac refactor.** v1.1.0 shipped the product surface
   first so the league can review it. This would be a pure
@@ -119,9 +125,11 @@ a single afternoon.
 
 Larger changes that would re-shape parts of the project.
 
-> **Scoping note:** Yahoo eligibility and DuckDB target are both v2.0
-> candidates, but realistically only one would ship per major version --
-> they're roughly equivalent in scope and effort. Final pick TBD.
+> **Scoping note (resolved).** This read as a choice between Yahoo
+> eligibility and the DuckDB target -- roughly equivalent in scope, and
+> realistically only one per major version. The DuckDB half shipped
+> early (the engine port in v1.7.0, parquet-on-disk RAW in v1.8.0), so
+> Yahoo/Sleeper is what remains of the pair.
 
 ### Cross-platform portability
 
@@ -145,11 +153,15 @@ Larger changes that would re-shape parts of the project.
 
 ### Warehouse / target flexibility
 
-- **dbt-bigquery target.** Snowflake is the only configured target. SQL
-  is fairly portable; bigquery should require minimal model changes.
-- **DuckDB target with parquet-on-disk extract.** A `dbt-duckdb` target
-  plus parquet artifacts in `extract/` would let the project run without
-  a cloud warehouse, lowering the bar for new users.
+- **dbt-bigquery target.** Snowflake and DuckDB are the configured
+  targets. SQL is fairly portable; bigquery should require minimal model
+  changes.
+- **DuckDB target with parquet-on-disk extract -- shipped.** The
+  `dbt-duckdb` target landed in v1.7.0 and `extract.py --raw-target
+  local` in v1.8.0, so the project runs with no cloud warehouse at all
+  on the ESPN path. Kept here as the record of a "Next" item that
+  graduated, and because it is what makes the bigquery item above a
+  third target rather than a second.
 
 ### New data sources
 

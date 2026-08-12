@@ -57,9 +57,11 @@ scoring date plus N-1, and a matchup period's start/end are its first and
 last scoring period. The anchor is MLB's own published regular-season start
 (statsapi.mlb.com, public and key-free), captured to RAW.MLB_SEASON_CALENDAR
 on the same run and turned into dates by dim_matchup_period. Nobody types a
-calendar. If that anchor cannot be established the capture warns and the run
-continues -- box scores need no dates at all -- and the dates stay absent
-rather than being guessed.
+calendar. If that anchor cannot be established ordinary weekly capture warns
+and continues -- box scores need no dates at all -- and the dates stay absent
+rather than being guessed. Complete-history public orchestration supplies
+``--require-season-calendar`` and refuses that season instead of continuing to
+a plausible partial workbook.
 
 WHERE RAW LANDS (MLB-208). `--raw-target snowflake` is the default and is
 unchanged. `--raw-target local` writes the parquet + _manifest.json artifacts
@@ -2160,7 +2162,8 @@ def fetch_season_calendar(year):
     return response.json()
 
 
-def capture_season_calendar(sink, year, league_key, payload=None):
+def capture_season_calendar(sink, year, league_key, payload=None,
+                            required=False):
     """Store the season's opener anchor. Warns rather than stops on failure.
 
     NOT FATAL, and that is the deliberate half. Rung 4B-1 made box-score
@@ -2179,10 +2182,27 @@ def capture_season_calendar(sink, year, league_key, payload=None):
         payload = fetch_season_calendar(year) if payload is None else payload
         snapshot = season_calendar_snapshot(payload, season_year=year)
     except SeasonCalendarError as exc:
+        if required:
+            raise SystemExit(
+                f"[season calendar] REFUSING complete-history extraction for "
+                f"{year}: MLB's season calendar response was not usable "
+                f"({exc}). Membership was preserved for diagnosis, but no "
+                f"settings, transactions, box scores, or workbook will be "
+                f"produced. Retry when the calendar source is available."
+            ) from exc
         print(f"  [warn] MLB's season calendar for {year} was not usable, so "
               f"no opener was stored: {exc}")
         return None
     except Exception as exc:
+        if required:
+            raise SystemExit(
+                f"[season calendar] REFUSING complete-history extraction for "
+                f"{year}: could not retrieve a verifiable MLB season calendar "
+                f"({type(exc).__name__}: {exc}). Membership was preserved for "
+                f"diagnosis, but no settings, transactions, box scores, or "
+                f"workbook will be produced. Retry when the calendar source "
+                f"is available."
+            ) from exc
         print(f"  [warn] could not reach MLB's public season calendar for "
               f"{year} ({type(exc).__name__}: {exc}); dates for this season "
               f"stay unresolved until a later run.")
@@ -2871,6 +2891,12 @@ def build_parser():
         help="Output directory for --raw-target local "
              "(default: data/parquet/raw, where the DuckDB loader looks).",
     )
+    parser.add_argument(
+        "--require-season-calendar", action="store_true",
+        help="Fail closed when the season's MLB calendar cannot be verified. "
+             "Used by the complete-history public orchestration; ordinary "
+             "weekly extraction retains its warn-and-continue behavior.",
+    )
     return parser
 
 
@@ -3029,7 +3055,10 @@ def run(args):
             # request per season, no credentials, and it is what turns the
             # membership just captured into a calendar. Non-fatal by design --
             # see capture_season_calendar.
-            capture_season_calendar(sink, year, league_key)
+            capture_season_calendar(
+                sink, year, league_key,
+                required=getattr(args, "require_season_calendar", False),
+            )
 
         # Zero closed periods parsed CLEANLY and is a valid cardinality, so
         # it is not the refusal above. Only a run that owes the user player

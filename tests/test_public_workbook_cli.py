@@ -26,12 +26,17 @@ class _Args:
     """The subset of the parsed namespace these paths read."""
 
     def __init__(self, new_public_workbook=False, prod=False, no_sheets=False,
-                 public_workbook_title=None, new_public_workbook_force=False):
+                 public_workbook_title=None, new_public_workbook_force=False,
+                 confirm_link_sharing=False, advanced_snowflake=False,
+                 duckdb=None):
         self.new_public_workbook = new_public_workbook
         self.prod = prod
         self.no_sheets = no_sheets
         self.public_workbook_title = public_workbook_title
         self.new_public_workbook_force = new_public_workbook_force
+        self.confirm_link_sharing = confirm_link_sharing
+        self.advanced_snowflake = advanced_snowflake
+        self.duckdb = duckdb
 
 
 class _Parser:
@@ -67,6 +72,38 @@ def test_force_without_the_flag_is_rejected_rather_than_ignored():
     with pytest.raises(SystemExit, match='only applies with'):
         gas._validate_public_workbook_args(
             _Args(new_public_workbook_force=True), _Parser())
+
+
+def test_automation_confirmation_without_public_flag_is_rejected():
+    with pytest.raises(SystemExit, match='only applies with'):
+        gas._validate_public_workbook_args(
+            _Args(confirm_link_sharing=True), _Parser())
+
+
+def test_snowflake_override_and_duckdb_are_mutually_exclusive():
+    with pytest.raises(SystemExit, match='pick one'):
+        gas._validate_public_workbook_args(
+            _Args(new_public_workbook=True, advanced_snowflake=True,
+                  duckdb=True), _Parser())
+
+
+def test_public_path_forces_default_duckdb_without_a_duckdb_flag(monkeypatch):
+    seen = []
+    monkeypatch.setattr(gas.db, 'use_duckdb', lambda path: seen.append(path))
+
+    gas._configure_data_source(_Args(new_public_workbook=True))
+
+    assert seen == [None]
+
+
+def test_advanced_snowflake_is_the_only_public_opt_out_of_duckdb(monkeypatch):
+    seen = []
+    monkeypatch.setattr(gas.db, 'use_duckdb', lambda path: seen.append(path))
+
+    gas._configure_data_source(
+        _Args(new_public_workbook=True, advanced_snowflake=True))
+
+    assert seen == []
 
 
 def test_the_ordinary_maintainer_invocations_still_validate():
@@ -122,11 +159,14 @@ def stub_publish(monkeypatch):
     """Capture what publish_workbook would have been asked to do."""
     seen = {}
 
-    def _publish(client, title, render, resume=True):
+    def _publish(client, title, render, resume=True, confirm_share=None):
         seen['client'] = client
         seen['title'] = title
         seen['resume'] = resume
+        seen['confirm_share'] = confirm_share
         render('created-sheet-id')
+        assert confirm_share is not None
+        seen['confirmed'] = confirm_share()
         return sheets_workbook.PublishResult(
             spreadsheet_id='created-sheet-id', url='THE-URL', title=title,
             created=True, rendered=True, shared=True)
@@ -148,7 +188,8 @@ def test_the_publish_path_never_resolves_a_configured_target(
         no_target_resolution, stub_publish, stub_render, capsys):
     gas.publish_new_public_workbook(
         _Args(new_public_workbook=True), 2026, 7,
-        client='PUBLIC-CLIENT', publish=stub_publish['publish'])
+        client='PUBLIC-CLIENT', publish=stub_publish['publish'],
+        input_fn=lambda prompt: 'YES')
 
     assert stub_publish['title'] == 'Fantasy League Almanac'
 
@@ -157,7 +198,8 @@ def test_the_renderer_gets_the_new_id_and_the_public_client(
         no_target_resolution, stub_publish, stub_render):
     gas.publish_new_public_workbook(
         _Args(new_public_workbook=True), 2026, 7,
-        client='PUBLIC-CLIENT', publish=stub_publish['publish'])
+        client='PUBLIC-CLIENT', publish=stub_publish['publish'],
+        input_fn=lambda prompt: 'YES')
 
     assert len(stub_render) == 1
     sheet_id, kwargs = stub_render[0]
@@ -179,7 +221,7 @@ def test_authorization_goes_through_the_public_profile(
 
     gas.publish_new_public_workbook(
         _Args(new_public_workbook=True), 2026, 7,
-        publish=stub_publish['publish'])
+        publish=stub_publish['publish'], input_fn=lambda prompt: 'YES')
 
     assert asked == [sheets_auth.PUBLIC]
     assert stub_publish['client'] == 'PUBLIC-CLIENT'
@@ -189,7 +231,8 @@ def test_a_custom_title_reaches_the_publisher(
         no_target_resolution, stub_publish, stub_render):
     gas.publish_new_public_workbook(
         _Args(new_public_workbook=True, public_workbook_title='  My  Book '),
-        2026, 7, client='C', publish=stub_publish['publish'])
+        2026, 7, client='C', publish=stub_publish['publish'],
+        input_fn=lambda prompt: 'YES')
 
     assert stub_publish['title'] == 'My Book'
 
@@ -198,12 +241,14 @@ def test_force_turns_resume_off(no_target_resolution, stub_publish,
                                 stub_render):
     gas.publish_new_public_workbook(
         _Args(new_public_workbook=True, new_public_workbook_force=True),
-        2026, 7, client='C', publish=stub_publish['publish'])
+        2026, 7, client='C', publish=stub_publish['publish'],
+        input_fn=lambda prompt: 'YES')
     assert stub_publish['resume'] is False
 
     gas.publish_new_public_workbook(
         _Args(new_public_workbook=True), 2026, 7,
-        client='C', publish=stub_publish['publish'])
+        client='C', publish=stub_publish['publish'],
+        input_fn=lambda prompt: 'YES')
     assert stub_publish['resume'] is True
 
 
@@ -211,16 +256,53 @@ def test_the_share_ready_line_is_printed_on_the_happy_path(
         no_target_resolution, stub_publish, stub_render, capsys):
     gas.publish_new_public_workbook(
         _Args(new_public_workbook=True), 2026, 7,
-        client='C', publish=stub_publish['publish'])
+        client='C', publish=stub_publish['publish'],
+        input_fn=lambda prompt: 'YES')
 
     out = capsys.readouterr().out
     assert sheets_workbook.SHARE_READY_LINE.format(url='THE-URL') in out
 
 
+def test_link_sharing_requires_the_exact_affirmative_answer(
+        no_target_resolution, stub_publish, stub_render):
+    gas.publish_new_public_workbook(
+        _Args(new_public_workbook=True), 2026, 7,
+        client='C', publish=stub_publish['publish'],
+        input_fn=lambda prompt: 'y')
+    assert stub_publish['confirmed'] is False
+
+    gas.publish_new_public_workbook(
+        _Args(new_public_workbook=True), 2026, 7,
+        client='C', publish=stub_publish['publish'],
+        input_fn=lambda prompt: 'YES')
+    assert stub_publish['confirmed'] is True
+
+
+def test_automation_flag_is_an_explicit_affirmative_without_a_prompt(
+        no_target_resolution, stub_publish, stub_render):
+    def _no_prompt(prompt):
+        raise AssertionError('automation flag still prompted')
+
+    gas.publish_new_public_workbook(
+        _Args(new_public_workbook=True, confirm_link_sharing=True), 2026, 7,
+        client='C', publish=stub_publish['publish'], input_fn=_no_prompt)
+    assert stub_publish['confirmed'] is True
+
+
+def test_sharing_disclosure_names_the_information_and_public_audience():
+    text = sheets_workbook.LINK_SHARING_DISCLOSURE
+    for phrase in ('league and team names', 'member/display names',
+                   'standings', 'matchups', 'scores', 'rosters',
+                   'draft results', 'transactions',
+                   'anyone who receives the link'):
+        assert phrase in text
+
+
 def test_a_policy_blocked_publish_prints_no_success_line(
         no_target_resolution, stub_render, capsys):
-    def _blocked(client, title, render, resume=True):
+    def _blocked(client, title, render, resume=True, confirm_share=None):
         render('created-sheet-id')
+        assert confirm_share()
         return sheets_workbook.PublishResult(
             spreadsheet_id='created-sheet-id', url='THE-URL', title=title,
             created=True, rendered=True, shared=False,
@@ -229,7 +311,7 @@ def test_a_policy_blocked_publish_prints_no_success_line(
 
     gas.publish_new_public_workbook(
         _Args(new_public_workbook=True), 2026, 7,
-        client='C', publish=_blocked)
+        client='C', publish=_blocked, input_fn=lambda prompt: 'YES')
 
     out = capsys.readouterr().out
     assert '-- share-ready.' not in out

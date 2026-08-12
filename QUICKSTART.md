@@ -193,9 +193,26 @@ python output/generate_almanac_sheet.py --no-sheets --preview-dir out/almanac_pr
 Everything above writes files. This step writes your almanac into a
 **brand-new Google Sheet in your own Drive** and hands you a link.
 
+After the fields and registry setup in steps 1–2, the supported
+**post-configuration** release path is one command. It is not yet the complete
+fields-file onboarding journey tracked by MLB-31/MLB-207.
+
+The command reads the selected registry entry's existing `first_season` /
+`final_season` bounds. It requests each applicable season exactly once with
+full closed-period box scores, season settings, transactions, matchup
+membership, and calendar; any underivable season stops before a workbook can
+be generated. It then loads local Parquet, builds DuckDB, and creates the
+workbook:
+
 ```bash
-python output/generate_almanac_sheet.py --duckdb --new-public-workbook
+python tools/create_public_almanac.py
 ```
+
+Snowflake is never selected by accident. It is available only through the
+deliberate `--advanced-snowflake` option. If you already completed the local
+build above, the lower-level workbook-only command is
+`python output/generate_almanac_sheet.py --new-public-workbook`; that command
+also forces DuckDB unless `--advanced-snowflake` is present.
 
 **You do not need a Google Cloud project, an enabled API, or an OAuth
 client of your own.** The released build ships its own Google identity,
@@ -222,13 +239,16 @@ afterwards. So:
 
 What happens, in order:
 
-1. It prints what it is about to ask Google for, and that the workbook it
-   creates will be shared as anyone-with-the-link viewer.
+1. It prints what it is about to ask Google for.
 2. Your browser opens Google's normal consent screen. You pick an account
    and approve.
-3. It creates a new spreadsheet, renders the full almanac into it, sets it
-   to anyone-with-the-link **viewer**, reads that permission back to
-   confirm, and only then prints `Your almanac: <link> -- share-ready.`
+3. It creates a new spreadsheet and renders the full almanac into it while
+   the workbook is still private.
+4. Immediately before sharing, it names the league/member information in the
+   workbook and asks you to type `YES`. Only then does it set
+   anyone-with-the-link **viewer**, read that permission back to confirm, and
+   print `Your almanac: <link> -- share-ready.` Automation must deliberately
+   pass `--confirm-link-sharing` to make the same affirmation without a prompt.
 
 If any of those three steps does not happen, you do not get that line --
 you get the workbook's URL and a plain sentence about what went wrong.
@@ -239,13 +259,16 @@ non-sensitive: **it can only see files it creates itself.** It cannot
 list, open, or read anything else in your Drive. Only the new workbook is
 shared; nothing already in your Drive changes.
 
-Later runs reuse a token cached at `output/.sheets_public_oauth_token.json`
-and do not open a browser. That file, the ledger of workbooks this tool
-created, your DuckDB file and your ESPN cookies are all ordinary local
-files -- protected by your operating system's file permissions and kept
-out of git by `.gitignore`, and by nothing else. Nothing is uploaded
-anywhere except the almanac you asked to be written. Delete the token file
-to forget the grant locally, and revoke it for real at
+Later runs reuse the public Google grant stored by Windows Credential Locker
+and do not normally open a browser. The v1.9 public release supports this
+flow on Windows only and refuses to fall back to plaintext if Credential
+Locker is unavailable. A legacy `output/.sheets_public_oauth_token.json` is
+migrated only after a secure write is verified, then its plaintext copy is
+removed. The workbook ledger, DuckDB/Parquet data and ESPN cookies remain
+ordinary local files protected by OS/file permissions and `.gitignore`.
+Nothing is uploaded anywhere except the almanac you asked to be written (or
+your own Snowflake account if you deliberately choose the advanced path).
+Revoke the Google grant at
 [myaccount.google.com](https://myaccount.google.com/permissions) --
 whenever you choose, since nothing here expires it for you.
 
@@ -258,7 +281,7 @@ That means:
   screen -- everyone else is turned away by Google, not by this tool;
 - grants issued in testing mode **expire after about a week**, so you
   would be asked to consent again;
-- the consent screen shows an unverified app.
+- the consent experience may differ from the eventual production branding.
 
 Moving it to production needs a published homepage, privacy policy, terms
 and branding review. That work is tracked and is a release gate. Until it

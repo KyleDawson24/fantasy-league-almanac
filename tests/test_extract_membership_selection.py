@@ -215,7 +215,8 @@ def _args(**overrides):
                 include_transactions=False, transactions_only=False,
                 backfill_club_of_game=False,
                 overwrite_day_accurate_history=False, league=None,
-                raw_target="local", parquet_dir=None)
+                raw_target="local", parquet_dir=None,
+                require_season_calendar=False)
     base.update(overrides)
     return Namespace(**base)
 
@@ -1784,6 +1785,28 @@ def test_an_unreachable_calendar_warns_and_the_run_still_extracts(
     assert sink.season_calendars == []
     assert [mp for mp, _sps in sink.box_scores] == [1, 2, 3]
     assert "stay unresolved" in capsys.readouterr().out
+
+
+def test_complete_history_requires_a_verifiable_calendar_before_other_feeds(
+        run_extract, monkeypatch):
+    def _boom(year):
+        raise ConnectionError("statsapi unreachable")
+
+    monkeypatch.setattr(extract, "fetch_season_calendar", _boom)
+    monkeypatch.setattr(
+        extract, "extract_league_settings",
+        lambda *args: (_ for _ in ()).throw(
+            AssertionError("settings ran after calendar refusal")))
+    monkeypatch.setattr(
+        extract, "extract_transactions",
+        lambda *args: (_ for _ in ()).throw(
+            AssertionError("transactions ran after calendar refusal")))
+    payload = _payload((7, 7, 7), current=4, latest=21)
+
+    with pytest.raises(SystemExit, match="REFUSING complete-history"):
+        run_extract(
+            payload, all=True, include_settings=True,
+            include_transactions=True, require_season_calendar=True)
 
 
 def test_a_malformed_calendar_stores_no_anchor(run_extract, monkeypatch,

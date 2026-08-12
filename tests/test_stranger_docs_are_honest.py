@@ -200,8 +200,7 @@ def test_both_docs_say_no_google_cloud_project_is_required(path):
 def test_the_quickstart_gives_the_exact_command(path=None):
     text = _text(QUICKSTART)
 
-    assert ("python output/generate_almanac_sheet.py --duckdb "
-            "--new-public-workbook") in text
+    assert "python tools/create_public_almanac.py" in text
 
 
 @pytest.mark.parametrize("path", (QUICKSTART, SETUP), ids=lambda p: p.name)

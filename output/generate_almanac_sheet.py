@@ -88,6 +88,18 @@ def main():
              'failure does not pile up spreadsheets.',
     )
     parser.add_argument(
+        '--confirm-link-sharing', action='store_true',
+        help='With --new-public-workbook, affirm the anyone-with-the-link '
+             'disclosure non-interactively. Intended for automation; without '
+             'it the app prompts immediately before changing sharing.',
+    )
+    parser.add_argument(
+        '--advanced-snowflake', action='store_true',
+        help='With --new-public-workbook, deliberately use the advanced '
+             'Snowflake source. The public path otherwise forces local '
+             'DuckDB; this flag cannot be combined with --duckdb.',
+    )
+    parser.add_argument(
         '--duckdb', nargs='?', const=True, default=None, metavar='PATH',
         help='Read from a local DuckDB file instead of Snowflake. PATH '
              'defaults to DBT_DUCKDB_PATH, then to the location the dbt '
@@ -95,9 +107,21 @@ def main():
     )
     args = parser.parse_args()
     _validate_public_workbook_args(args, parser)
-    if args.duckdb:
-        db.use_duckdb(None if args.duckdb is True else args.duckdb)
+    _configure_data_source(args)
     db.set_league(args.league)
+    _generate(args, parser)
+
+
+def _configure_data_source(args):
+    """Keep the stranger default local; Snowflake requires an opt-in."""
+    if args.new_public_workbook and not args.advanced_snowflake:
+        db.use_duckdb(None if args.duckdb in (None, True) else args.duckdb)
+    elif args.duckdb:
+        db.use_duckdb(None if args.duckdb is True else args.duckdb)
+
+
+def _generate(args, parser):
+    """Generate after argument validation and data-source selection."""
 
     # Format dispatch by DATA PRESENCE (the format-modularity rule): a
     # league with delivered period standings is a points league -- no
@@ -252,6 +276,11 @@ def _validate_public_workbook_args(args, parser):
                 '--new-public-workbook writes to Sheets by definition; it '
                 'cannot be combined with --no-sheets.'
             )
+        if args.advanced_snowflake and args.duckdb:
+            parser.error(
+                '--advanced-snowflake deliberately selects Snowflake and '
+                '--duckdb selects local DuckDB; pick one.'
+            )
         return
 
     if args.public_workbook_title is not None:
@@ -262,6 +291,14 @@ def _validate_public_workbook_args(args, parser):
         parser.error(
             '--new-public-workbook-force only applies with '
             '--new-public-workbook.'
+        )
+    if args.confirm_link_sharing:
+        parser.error(
+            '--confirm-link-sharing only applies with --new-public-workbook.'
+        )
+    if args.advanced_snowflake:
+        parser.error(
+            '--advanced-snowflake only applies with --new-public-workbook.'
         )
 
 
@@ -283,7 +320,7 @@ def safe_workbook_title(raw):
 
 
 def publish_new_public_workbook(args, season_year, matchup_period,
-                                client=None, publish=None):
+                                client=None, publish=None, input_fn=None):
     """The stranger path (MLB-209): create a workbook, render into it,
     share it, announce it.
 
@@ -294,14 +331,14 @@ def publish_new_public_workbook(args, season_year, matchup_period,
     `client` / `publish` exist so the sequencing can be tested without
     Google. Nothing here reads a configured sheet id.
 
-    The disclosure is printed FIRST, before anything can open a browser,
-    and it is printed on the injected-client path too -- a disclosure
-    that only appears when a real consent happens is not a disclosure,
-    it is a side effect.
+    The OAuth-scope disclosure is printed before anything can open a browser.
+    The separate data-sharing disclosure is printed after rendering and
+    immediately before the permission call, where an affirmative answer is
+    required.
     """
     title = safe_workbook_title(args.public_workbook_title)
+    input_fn = input_fn or input
     print(f'[almanac] {sheets_auth.consent_disclosure(sheets_auth.PUBLIC)}')
-    print(f'[almanac] {sheets_workbook.LINK_SHARING_DISCLOSURE}')
     if client is None:
         client = _authorize_public_client()
     if publish is None:
@@ -315,10 +352,23 @@ def publish_new_public_workbook(args, season_year, matchup_period,
             client=client,
         )
 
+    def _confirm_share():
+        print(f'[almanac] {sheets_workbook.LINK_SHARING_DISCLOSURE}')
+        if args.confirm_link_sharing:
+            print('[almanac] link sharing affirmed by '
+                  '--confirm-link-sharing')
+            return True
+        answer = input_fn(
+            '[almanac] Set this workbook to anyone-with-the-link VIEWER? '
+            'Type YES to continue: '
+        )
+        return answer.strip().casefold() == 'yes'
+
     print(f"[almanac] creating a new workbook titled {title!r}")
     result = publish(
         client, title, _render,
         resume=not args.new_public_workbook_force,
+        confirm_share=_confirm_share,
     )
     report_publish_result(result)
     return result

@@ -167,6 +167,16 @@ def no_google_setup(monkeypatch, tmp_path, events):
         sheets_auth, 'PUBLIC',
         dataclasses.replace(sheets_auth.PUBLIC,
                             token_path=tmp_path / 'public-token.json'))
+    secure = {'token': None}
+    monkeypatch.setattr(
+        sheets_auth.secure_token_store, 'load_public_token',
+        lambda: secure['token'])
+    monkeypatch.setattr(
+        sheets_auth.secure_token_store, 'store_public_token',
+        lambda serialized: secure.__setitem__('token', serialized))
+    monkeypatch.setattr(
+        sheets_auth.secure_token_store, 'delete_public_token',
+        lambda: secure.__setitem__('token', None) or True)
     monkeypatch.setattr(sheets_workbook, 'LEDGER_PATH', tmp_path / 'ledger.json')
     monkeypatch.setattr(public_oauth_client, 'BUNDLED_PUBLIC_CLIENT',
                         SYNTHETIC_CLIENT)
@@ -284,6 +294,7 @@ def no_warehouse(monkeypatch, events):
 
 def _run(monkeypatch, *argv):
     monkeypatch.setattr('sys.argv', ['generate_almanac_sheet.py', *argv])
+    monkeypatch.setattr('builtins.input', lambda prompt: 'YES')
     return gas.main()
 
 
@@ -365,9 +376,8 @@ def test_the_render_gets_the_app_created_id_and_the_same_client(
 
 def test_the_disclosure_comes_before_consent_and_before_any_workbook(
         monkeypatch, events, no_google_setup, fake_google, no_warehouse):
-    """A disclosure printed after the browser opened is not a disclosure.
-    Both halves -- what is being requested, and that the result will be
-    link-readable -- have to land while the user can still stop."""
+    """Scope disclosure precedes consent; sharing disclosure is timely at
+    the separate decision point immediately before the permission call."""
     _run(monkeypatch, '--duckdb', '--new-public-workbook')
 
     scope_line = _index(events, lambda e: e[0] == 'print'
@@ -376,10 +386,12 @@ def test_the_disclosure_comes_before_consent_and_before_any_workbook(
                           and 'anyone-with-the-link VIEWER' in e[1])
     consent = _index(events, lambda e: e[0].startswith('consent-'))
     create = _index(events, lambda e: e[0] == 'create')
+    render = _index(events, lambda e: e[0] == 'render')
+    share = _index(events, lambda e: e[0] == 'post')
 
     assert 0 <= scope_line < consent
-    assert 0 <= sharing_line < consent
     assert consent < create
+    assert render < sharing_line < share
 
 
 def test_the_disclosure_says_it_cannot_enumerate_the_drive(
@@ -388,7 +400,7 @@ def test_the_disclosure_says_it_cannot_enumerate_the_drive(
 
     printed = ' '.join(text for tag, text in events if tag == 'print')
     assert 'cannot list, open, or read anything else' in printed
-    assert 'nothing already in your Drive changes' in printed
+    assert 'nothing else in your Drive is shared or changed' in printed
 
 
 def test_sharing_happens_last_and_is_read_back_before_the_success_line(

@@ -73,18 +73,23 @@ _SHARING_POLICY_REASONS = frozenset({
 # safe test; "does it contain this line" is.
 SHARE_READY_LINE = 'Your almanac: {url} -- share-ready.'
 
-# Said BEFORE consent, not after. `--new-public-workbook` is already an
-# explicit request to create and link-share a file, so this is not a
-# second confirmation prompt -- adding one would break every automated
-# invocation. It is the plain statement of what the flag means, printed
-# while the user can still hit Ctrl-C, because "anyone with the link can
-# read this" is the kind of thing people should meet before the browser
-# opens rather than in the URL they have just been handed.
+# Printed immediately before the sharing call.  The interactive public path
+# then requires an affirmative answer; automation must supply its explicit
+# confirmation flag.
 LINK_SHARING_DISCLOSURE = (
-    "The workbook this creates will be set to anyone-with-the-link VIEWER, "
-    "so whoever you send the link to can read it (it stays unlisted -- "
-    "nobody can find it by searching). Only this new workbook is affected; "
-    "nothing already in your Drive changes."
+    "This workbook contains fantasy-league information such as league and "
+    "team names, member/display names, standings, matchups, scores, rosters, "
+    "draft results, transactions, and historical performance derived from "
+    "your local data. If you continue, this new workbook will be set to "
+    "anyone-with-the-link VIEWER: anyone who receives the link can read all "
+    "of that information without signing in. The workbook stays unlisted, "
+    "and nothing else in your Drive is shared or changed."
+)
+
+SHARE_NOT_APPROVED_MESSAGE = (
+    "Link sharing was not approved. The rendered workbook remains private in "
+    "your Google Drive. Re-run this command and approve the disclosure if you "
+    "want the app to set anyone-with-the-link viewer access."
 )
 
 SHARE_RECOVERY_MESSAGE = (
@@ -417,7 +422,8 @@ def verify_link_viewer(permissions):
     return None
 
 
-def publish_workbook(client, title, render, ledger=None, resume=True):
+def publish_workbook(client, title, render, ledger=None, resume=True,
+                     confirm_share=None):
     """Create (or resume) a workbook, render into it, then share it.
 
     `render` is called with the spreadsheet id and does the caller's
@@ -452,6 +458,12 @@ def publish_workbook(client, title, render, ledger=None, resume=True):
     render(result.spreadsheet_id)
     result.rendered = True
     ledger.mark_rendered(result.spreadsheet_id)
+
+    if confirm_share is not None and not confirm_share():
+        result.shared = False
+        result.share_error = 'anyone-with-the-link sharing was not approved'
+        result.recovery = SHARE_NOT_APPROVED_MESSAGE
+        return result
 
     try:
         share_link_viewer(client, result.spreadsheet_id)

@@ -378,6 +378,40 @@ def test_sharing_happens_only_after_the_render(ledger):
     assert client.calls[-1][0] == 'share'
 
 
+def test_affirmative_confirmation_runs_after_render_and_before_sharing(ledger):
+    client = _FakeClient()
+    events = []
+
+    def _render(spreadsheet_id):
+        events.append('render')
+
+    def _confirm():
+        events.append('confirm')
+        assert client.share_posts == []
+        return True
+
+    result = sheets_workbook.publish_workbook(
+        client, 'Almanac', _render, ledger=ledger, confirm_share=_confirm)
+
+    assert events == ['render', 'confirm']
+    assert result.is_share_ready is True
+    assert len(client.share_posts) == 1
+
+
+def test_declined_confirmation_leaves_rendered_workbook_private(ledger):
+    client = _FakeClient()
+    result = sheets_workbook.publish_workbook(
+        client, 'Almanac', lambda sid: None, ledger=ledger,
+        confirm_share=lambda: False)
+
+    assert result.created is True
+    assert result.rendered is True
+    assert result.shared is False
+    assert result.is_share_ready is False
+    assert client.share_posts == []
+    assert result.recovery == sheets_workbook.SHARE_NOT_APPROVED_MESSAGE
+
+
 def test_a_render_failure_never_shares_anything(ledger):
     client = _FakeClient()
 

@@ -26,6 +26,7 @@ import pytest
 
 import sheets_auth
 import sheets_writer
+from google.auth.exceptions import RefreshError
 
 
 SPREADSHEETS = sheets_auth.SPREADSHEETS_SCOPE
@@ -67,6 +68,39 @@ def _write_token(path, scopes):
         'client_secret': 'cached',
         'scopes': list(scopes),
     }), encoding='utf-8')
+
+
+@pytest.fixture
+def secure_store(monkeypatch):
+    """In-memory stand-in: unit tests must never touch Credential Locker."""
+    state = {'token': None, 'events': []}
+
+    def load():
+        state['events'].append('load')
+        return state['token']
+
+    def store(serialized):
+        state['events'].append('store')
+        state['token'] = serialized
+
+    def delete():
+        state['events'].append('delete')
+        existed = state['token'] is not None
+        state['token'] = None
+        return existed
+
+    monkeypatch.setattr(sheets_auth.secure_token_store,
+                        'load_public_token', load)
+    monkeypatch.setattr(sheets_auth.secure_token_store,
+                        'store_public_token', store)
+    monkeypatch.setattr(sheets_auth.secure_token_store,
+                        'delete_public_token', delete)
+    return state
+
+
+@pytest.fixture(autouse=True)
+def no_real_secure_store(secure_store):
+    return secure_store
 
 
 @pytest.fixture
@@ -204,17 +238,16 @@ def test_the_maintainer_profile_keeps_its_permissive_reading():
 # An unusable cache sends you to consent, not to a 403
 # ---------------------------------------------------------------------------
 
-def test_public_profile_with_a_spreadsheets_token_runs_consent(
+def test_invalid_plaintext_public_cache_fails_closed_without_deleting_it(
         profiles, stub_consent):
     _, public = profiles
     _write_token(public.token_path, [SPREADSHEETS])
 
-    sheets_auth.authorized_client(public)
+    with pytest.raises(RuntimeError, match='not migrated or deleted'):
+        sheets_auth.authorized_client(public)
 
-    assert stub_consent == ['public'], (
-        'a spreadsheets-only cache was accepted for a drive.file profile'
-    )
-    assert sheets_auth.granted_scopes(public.token_path) == {DRIVE_FILE}
+    assert public.token_path.exists()
+    assert stub_consent == []
 
 
 def test_public_profile_with_no_token_runs_consent(profiles, stub_consent):
@@ -223,12 +256,134 @@ def test_public_profile_with_no_token_runs_consent(profiles, stub_consent):
     assert stub_consent == ['public']
 
 
+def test_fresh_public_consent_is_saved_only_to_secure_storage(
+        profiles, stub_consent, secure_store):
+    _, public = profiles
+
+    sheets_auth.authorized_client(public)
+
+    assert sheets_auth.granted_scopes_json(secure_store['token']) == {
+        DRIVE_FILE}
+    assert not public.token_path.exists()
+
+
+def test_secure_cached_authorization_avoids_fresh_consent(
+        profiles, stub_consent, secure_store, monkeypatch):
+    _, public = profiles
+    secure_store['token'] = _FakeCreds([DRIVE_FILE]).to_json()
+    monkeypatch.setattr(sheets_auth.Credentials, 'from_authorized_user_info',
+                        staticmethod(lambda info, scopes: _FakeCreds(scopes)))
+
+    sheets_auth.authorized_client(public)
+
+    assert stub_consent == []
+
+
+def test_expired_public_grant_refreshes_and_rewrites_secure_storage(
+        profiles, stub_consent, secure_store, monkeypatch):
+    _, public = profiles
+    secure_store['token'] = _FakeCreds([DRIVE_FILE]).to_json()
+
+    class _Refreshable(_FakeCreds):
+        def __init__(self):
+            super().__init__([DRIVE_FILE], valid=False, expired=True,
+                             refresh_token='refresh')
+
+        def refresh(self, request):
+            self.valid = True
+            self.expired = False
+
+    monkeypatch.setattr(
+        sheets_auth.Credentials, 'from_authorized_user_info',
+        staticmethod(lambda info, scopes: _Refreshable()))
+
+    sheets_auth.authorized_client(public)
+
+    assert stub_consent == []
+    assert secure_store['events'].count('store') == 1
+
+
+def test_revoked_refresh_token_runs_fresh_consent_and_replaces_secure_grant(
+        profiles, stub_consent, secure_store, monkeypatch):
+    _, public = profiles
+    secure_store['token'] = _FakeCreds([DRIVE_FILE]).to_json()
+
+    class _Revoked(_FakeCreds):
+        def __init__(self):
+            super().__init__([DRIVE_FILE], valid=False, expired=True,
+                             refresh_token='revoked')
+
+        def refresh(self, request):
+            raise RefreshError('invalid_grant')
+
+    monkeypatch.setattr(
+        sheets_auth.Credentials, 'from_authorized_user_info',
+        staticmethod(lambda info, scopes: _Revoked()))
+
+    sheets_auth.authorized_client(public)
+
+    assert stub_consent == ['public']
+    assert secure_store['events'].count('store') == 1
+
+
+def test_plaintext_migration_writes_securely_before_removing_source(
+        profiles, secure_store, monkeypatch):
+    _, public = profiles
+    _write_token(public.token_path, [DRIVE_FILE])
+    events = []
+
+    def _store(serialized):
+        assert public.token_path.exists()
+        events.append('secure-write')
+        secure_store['token'] = serialized
+
+    monkeypatch.setattr(sheets_auth.secure_token_store,
+                        'store_public_token', _store)
+    monkeypatch.setattr(sheets_auth.Credentials, 'from_authorized_user_info',
+                        staticmethod(lambda info, scopes: _FakeCreds(scopes)))
+
+    sheets_auth.load_cached_credentials(public)
+
+    assert events == ['secure-write']
+    assert secure_store['token'] is not None
+    assert not public.token_path.exists()
+
+
+def test_failed_secure_migration_keeps_plaintext_source_and_fails_closed(
+        profiles, monkeypatch):
+    _, public = profiles
+    _write_token(public.token_path, [DRIVE_FILE])
+
+    def _fail(serialized):
+        raise sheets_auth.secure_token_store.SecureTokenStoreError(
+            'locker unavailable')
+
+    monkeypatch.setattr(sheets_auth.secure_token_store,
+                        'store_public_token', _fail)
+
+    with pytest.raises(RuntimeError, match='locker unavailable'):
+        sheets_auth.load_cached_credentials(public)
+
+    assert public.token_path.exists()
+
+
+def test_local_deletion_forgets_secure_and_legacy_public_copies(
+        profiles, secure_store):
+    _, public = profiles
+    secure_store['token'] = _FakeCreds([DRIVE_FILE]).to_json()
+    _write_token(public.token_path, [DRIVE_FILE])
+
+    assert sheets_auth.delete_cached_credentials(public) is True
+    assert secure_store['token'] is None
+    assert not public.token_path.exists()
+
+
 def test_public_profile_with_a_good_token_does_not_run_consent(
         profiles, stub_consent, monkeypatch):
     _, public = profiles
     _write_token(public.token_path, [DRIVE_FILE])
-    monkeypatch.setattr(sheets_auth.Credentials, 'from_authorized_user_file',
-                        staticmethod(lambda path, scopes: _FakeCreds(scopes)))
+    monkeypatch.setattr(sheets_auth.Credentials, 'from_authorized_user_info',
+                        staticmethod(lambda info, scopes: _FakeCreds(scopes)))
 
     sheets_auth.authorized_client(public)
 
@@ -256,7 +411,7 @@ def test_the_public_profile_never_reads_the_maintainer_token(
 
 
 def test_the_public_profile_never_overwrites_the_maintainer_token(
-        profiles, stub_consent):
+        profiles, stub_consent, secure_store):
     maintainer, public = profiles
     _write_token(maintainer.token_path, [SPREADSHEETS])
     before = maintainer.token_path.read_bytes()
@@ -266,10 +421,12 @@ def test_the_public_profile_never_overwrites_the_maintainer_token(
     assert maintainer.token_path.read_bytes() == before, (
         "the public consent flow rewrote the maintainer's cached grant"
     )
-    assert public.token_path.exists()
+    assert secure_store['token'] is not None
+    assert not public.token_path.exists()
 
 
-def test_each_profile_writes_only_its_own_cache(profiles, stub_consent):
+def test_each_profile_writes_only_its_own_cache(profiles, stub_consent,
+                                                secure_store):
     maintainer, public = profiles
 
     sheets_auth.authorized_client(maintainer)
@@ -277,7 +434,7 @@ def test_each_profile_writes_only_its_own_cache(profiles, stub_consent):
     assert not public.token_path.exists()
 
     sheets_auth.authorized_client(public)
-    assert sheets_auth.granted_scopes(public.token_path) == {DRIVE_FILE}
+    assert sheets_auth.granted_scopes_json(secure_store['token']) == {DRIVE_FILE}
     assert sheets_auth.granted_scopes(maintainer.token_path) == {SPREADSHEETS}
 
 

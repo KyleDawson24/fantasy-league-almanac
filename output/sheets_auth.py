@@ -22,12 +22,13 @@ Two profiles exist, and they are deliberately not interchangeable:
       This is the profile whose consent screen MLB-209 exists to measure.
 
 The separation is enforced by construction rather than by care: distinct
-scopes, distinct client-config env vars, distinct token caches. Selecting
-the public profile cannot read, refresh, or overwrite the maintainer's
-cached grant, because it never names that file.
+scopes, distinct client-config env vars, and distinct credential stores.
+The maintainer retains its private local-file cache. The v1.9 public profile
+uses Windows Credential Locker and names its former file only as a one-time
+migration source.
 
-A note on why the scope check reads the token FILE rather than the
-credential object. `Credentials.from_authorized_user_file(path, scopes)`
+A note on why the scope check reads the serialized token rather than the
+credential object. `Credentials.from_authorized_user_info(payload, scopes)`
 STAMPS the scopes you pass onto the object it returns -- it does not
 check them against what Google actually granted. Pass `['drive.file']`
 while loading a cache that only ever held a `spreadsheets` grant and you
@@ -61,6 +62,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 
 import public_oauth_client
+import secure_token_store
 
 
 _OUTPUT_DIR = Path(__file__).resolve().parent
@@ -90,6 +92,7 @@ class Profile:
     exact_scopes: bool
     summary: str
     bundled_client: object = None
+    secure_store: bool = False
 
     @property
     def scope_list(self):
@@ -121,6 +124,7 @@ PUBLIC = Profile(
     # validated at the moment it is needed (and can be substituted in a
     # test) instead of being frozen into this module at import.
     bundled_client=public_oauth_client.bundled_client_config,
+    secure_store=True,
 )
 
 PROFILES = {p.name: p for p in (MAINTAINER, PUBLIC)}
@@ -175,6 +179,22 @@ def granted_scopes(token_path):
     return frozenset(str(s) for s in scopes)
 
 
+def granted_scopes_json(serialized):
+    """The scopes recorded in a serialized authorized-user credential."""
+    try:
+        payload = json.loads(serialized)
+    except (TypeError, ValueError):
+        return frozenset()
+    if not isinstance(payload, dict):
+        return frozenset()
+    scopes = payload.get('scopes')
+    if isinstance(scopes, str):
+        scopes = scopes.split()
+    if not isinstance(scopes, (list, tuple)):
+        return frozenset()
+    return frozenset(str(scope) for scope in scopes)
+
+
 def token_satisfies(profile, granted):
     """Does this granted scope set satisfy the profile?"""
     granted = frozenset(granted)
@@ -193,11 +213,21 @@ def load_cached_credentials(profile):
     cannot serve this profile" case, because the correct response to all
     of them is the same: run consent.
     """
-    path = profile.token_path
-    if not path.exists():
-        return None
+    if profile.secure_store:
+        serialized = _load_or_migrate_secure_token(profile)
+        if serialized is None:
+            return None
+        granted = granted_scopes_json(serialized)
+    else:
+        path = profile.token_path
+        if not path.exists():
+            return None
+        try:
+            serialized = path.read_text(encoding='utf-8')
+        except OSError:
+            serialized = ''
+        granted = granted_scopes_json(serialized)
 
-    granted = granted_scopes(path)
     if not token_satisfies(profile, granted):
         print(
             f"[sheets-auth] cached '{profile.name}' token does not carry the "
@@ -206,15 +236,57 @@ def load_cached_credentials(profile):
         return None
 
     try:
-        return Credentials.from_authorized_user_file(
-            str(path), profile.scope_list,
+        payload = json.loads(serialized)
+        return Credentials.from_authorized_user_info(
+            payload, profile.scope_list,
         )
-    except (OSError, ValueError):
+    except (TypeError, ValueError):
         print(
             f"[sheets-auth] cached '{profile.name}' token is unreadable; "
             f"re-running consent"
         )
         return None
+
+
+def _load_or_migrate_secure_token(profile):
+    """Load a public grant, migrating its former plaintext cache safely.
+
+    Migration is deliberately ordered: validate, secure write (including
+    read-back verification), then unlink.  Any secure-store failure leaves
+    the original file untouched.  Any unlink failure stops the flow rather
+    than running while a plaintext copy remains.
+    """
+    legacy_path = profile.token_path
+    if legacy_path.exists():
+        try:
+            serialized = legacy_path.read_text(encoding='utf-8')
+        except OSError as exc:
+            raise RuntimeError(
+                f"The legacy public OAuth cache at {legacy_path} could not be "
+                "read for secure migration. Remove it after revoking the app "
+                "in your Google Account, then authorize again."
+            ) from exc
+        if not token_satisfies(profile, granted_scopes_json(serialized)):
+            raise RuntimeError(
+                f"The legacy public OAuth cache at {legacy_path} is invalid "
+                "or has scopes other than exactly drive.file. It was not "
+                "migrated or deleted. Revoke the app in your Google Account, "
+                "delete this file, and authorize again."
+            )
+        secure_token_store.store_public_token(serialized)
+        try:
+            legacy_path.unlink()
+        except OSError as exc:
+            raise RuntimeError(
+                f"The Google grant was written to Windows Credential Locker, "
+                f"but the plaintext legacy copy at {legacy_path} could not be "
+                "removed. Delete that file and run again; authorization is "
+                "blocked while the plaintext copy remains."
+            ) from exc
+        print('[sheets-auth] migrated the public Google authorization to '
+              'Windows Credential Locker and removed the plaintext cache')
+        return serialized
+    return secure_token_store.load_public_token()
 
 
 def client_config_path(profile):
@@ -442,8 +514,29 @@ def run_consent_flow(profile):
 
 def save_credentials(profile, creds):
     """Cache a grant at the profile's own token path."""
+    serialized = creds.to_json()
+    if profile.secure_store:
+        secure_token_store.store_public_token(serialized)
+        return
     with open(profile.token_path, 'w') as f:
-        f.write(creds.to_json())
+        f.write(serialized)
+
+
+def delete_cached_credentials(profile):
+    """Forget a grant locally without claiming to revoke it at Google."""
+    deleted = False
+    try:
+        profile.token_path.unlink()
+        deleted = True
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        raise RuntimeError(
+            f"Could not remove the local OAuth cache at {profile.token_path}."
+        ) from exc
+    if profile.secure_store:
+        deleted = secure_token_store.delete_public_token() or deleted
+    return deleted
 
 
 def authorized_client(profile=MAINTAINER):

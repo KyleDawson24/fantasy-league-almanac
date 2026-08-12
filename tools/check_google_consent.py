@@ -33,9 +33,10 @@ Usage (from the repo root):
     .\\.venv\\Scripts\\python.exe tools\\check_google_consent.py --run-live
 
 Leaves behind: one scratch spreadsheet in the signed-in account's Drive,
-for you to inspect and delete; a `drive.file`-only token cache at
-output/.sheets_public_oauth_token.json; and one ledger row at
-output/.sheets_public_workbooks.json. Both files are gitignored.
+for you to inspect and delete; a `drive.file`-only grant in Windows
+Credential Locker; and one gitignored ledger row at
+output/.sheets_public_workbooks.json. It never creates a plaintext token
+cache.
 """
 
 import argparse

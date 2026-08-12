@@ -666,8 +666,23 @@ you are publishing a new workbook or writing into one you already own.
 ### 10a. A new share-ready almanac workbook -- no Google Cloud project
 
 ```bash
-python output/generate_almanac_sheet.py --duckdb --new-public-workbook
+python tools/create_public_almanac.py
 ```
+
+This is post-configuration orchestration: the `.env` fields and selected
+`config/leagues.yml` entry must already be complete. The guided fields-file
+onboarding remains MLB-31/MLB-207, so this is not yet described as the complete
+stranger onboarding journey.
+
+The command reuses the registry's `first_season` / `final_season` policy and
+runs one complete extraction for every applicable season—verified matchup
+membership and calendar, every closed matchup period, settings, standings,
+draft/owners, and transactions. A failed or underivable season stops before
+DuckDB build or workbook generation. It forces the local Parquet/DuckDB
+pipeline before creating the workbook. Snowflake is used only when you deliberately add
+`--advanced-snowflake`. The lower-level
+`python output/generate_almanac_sheet.py --new-public-workbook` command also
+defaults to DuckDB.
 
 **No Google Cloud project, no enabled API, no OAuth client of your own,
 and no environment variable.** The released build ships its own Google
@@ -690,25 +705,29 @@ gets past it.
 It requests exactly one permission, `drive.file`, which Google classifies
 as non-sensitive: an app holding it sees only the files it created
 itself. It cannot enumerate, open, or read the rest of your Drive. On the
-first run your browser opens Google's consent screen; later runs use a
-token cached at `output/.sheets_public_oauth_token.json` and open no
-browser.
+first run your browser opens Google's consent screen; later runs use the
+grant stored in Windows Credential Locker and normally open no browser.
 
-The run creates a workbook, renders the almanac into it, sets it to
-anyone-with-the-link **viewer**, reads that permission back, and only then
-prints `Your almanac: <link> -- share-ready.` A failure at any of those
-steps withholds that line and prints the workbook's URL with a plain
-description of what went wrong. Your workbook is never deleted to clean
-up after a failure.
+The run creates a private workbook and renders the almanac into it. Immediately
+before changing sharing, it identifies the real league/member information the
+workbook may contain and requires you to type `YES`. Automation must supply
+`--confirm-link-sharing` as its explicit affirmation. Only after that does the
+app set anyone-with-the-link **viewer**, read the permission back, and print
+`Your almanac: <link> -- share-ready.` A refusal or failure withholds that line
+and prints the workbook URL with a plain explanation. The workbook is never
+deleted to clean up after a failure.
 
-Local state stays local. The cached token, the ledger of workbooks the
-tool created (`output/.sheets_public_workbooks.json`), your DuckDB file
-and your ESPN cookies are ordinary files on your disk, protected by your
-operating system's file permissions and excluded from git by
-`.gitignore` -- there is no other protection, and no encryption at rest.
-Deleting the token file forgets the grant locally; revoking it properly
-is at [myaccount.google.com](https://myaccount.google.com/permissions),
-whenever you decide. Nothing here expires on your behalf.
+Local state stays local. The public Google grant is encrypted at rest by
+Windows Credential Locker; v1.9 supports this public flow on Windows only and
+fails closed if that backend cannot be used. It never falls back to a
+plaintext cache. An older `output/.sheets_public_oauth_token.json` is migrated
+only after the secure write succeeds and is verified, then removed. The
+workbook ledger (`output/.sheets_public_workbooks.json`), DuckDB/Parquet data
+and ESPN cookies remain ordinary local files protected by OS/file permissions
+and `.gitignore`. Revoke the grant at
+[myaccount.google.com](https://myaccount.google.com/permissions). A revoked or
+expired refresh token triggers fresh consent on the next run; nothing here
+expires on your behalf.
 
 **Not yet open to the public.** The shipped identity is in Google's
 *testing* mode: only accounts added as test users can get through the

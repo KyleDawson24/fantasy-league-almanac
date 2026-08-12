@@ -7,20 +7,14 @@ ESPN Fantasy Baseball Cookies.txt
 # Stored next to the script as .sheets_oauth_token.json; gitignored to
 # keep per-user credentials out of git.
 output/.sheets_oauth_token.json
-# MLB-209: the second OAuth profile (the published tool's drive.file
-# grant) caches separately, and the ledger of workbooks that profile
-# created holds spreadsheet ids -- which for a link-viewable book ARE the
-# capability. Both are per-user state, never committed.
+# Legacy migration source only: current public releases keep this grant in
+# Windows Credential Locker.  The ignore remains so an older plaintext cache
+# can be migrated without ever becoming committable.  The workbook ledger
+# remains a local file and can contain capability URLs.
 output/.sheets_public_oauth_token.json
 output/.sheets_public_workbooks.json
 #
-# BACKING ONE OF THESE UP: keep `.json` LAST. `*.json` matches on the
-# final extension, so `.sheets_public_oauth_token.json.bak` is NOT
-# ignored -- it lands untracked-but-committable, holding live refresh
-# tokens, one `git add .` from disaster. Use
-# `.sheets_public_oauth_token.pre-<thing>.json` instead. This was caught
-# during MLB-209 before any harm; it is written down so it is not
-# re-derived under time pressure.
+# Do not back up or rename a legacy plaintext token inside the repository.
 #
 # The MAINTAINER's client JSON still lives outside the repo entirely.
 # The PUBLISHED tool's client is different in kind and does ship, as

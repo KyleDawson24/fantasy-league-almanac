@@ -48,6 +48,7 @@ into its seeded table without any config on disk carrying a row.
 import csv
 import json
 import os
+import re
 import subprocess
 import sys
 import warnings
@@ -769,6 +770,44 @@ def test_the_consistency_assumption_has_a_standing_dbt_test():
     assert test_sql.exists()
     body = test_sql.read_text(encoding="utf-8")
     assert "count(distinct standard_period_length) > 1" in body
+
+
+# ---------------------------------------------------------------------------
+# Dialect portability -- IS [NOT] TRUE/FALSE
+# ---------------------------------------------------------------------------
+def test_no_model_uses_the_is_true_predicate():
+    """Snowflake has no IS [NOT] TRUE/FALSE predicate and rejects it as a
+    SYNTAX error. DuckDB and Postgres accept it, so it reads as ordinary SQL.
+
+    THE REASON THIS IS A TEXT SCAN. Every other claim in this file is proven by
+    BUILDING the model -- against DuckDB, which is the one engine that cannot
+    catch this. `dim_matchup_period` shipped `is_abnormal is not true`, passed
+    this suite green, and then failed to compile the first time anything built
+    it against Snowflake. A build-based guard would have the same blind spot,
+    so the spelling is asserted on the source text instead.
+
+    Line comments are stripped first: the prose in these models discusses
+    NULL/TRUE/FALSE constantly, and a scan that read comments would be noise
+    nobody keeps.
+    """
+    offenders = []
+    roots = [PROJECT_DIR / "models", PROJECT_DIR / "tests",
+             PROJECT_DIR / "macros"]
+    pattern = re.compile(r"\bis\s+(?:not\s+)?(?:true|false)\b", re.IGNORECASE)
+
+    for root in roots:
+        for path in sorted(root.rglob("*.sql")):
+            for lineno, line in enumerate(
+                    path.read_text(encoding="utf-8").splitlines(), start=1):
+                code = line.split("--", 1)[0]
+                if pattern.search(code):
+                    offenders.append(
+                        f"{path.relative_to(REPO_ROOT)}:{lineno}: {line.strip()}")
+
+    assert not offenders, (
+        "Snowflake rejects the IS [NOT] TRUE/FALSE predicate as a syntax "
+        "error; use `is distinct from true` or `coalesce(x, false) = false` "
+        "instead:\n  " + "\n  ".join(offenders))
 
 
 # ===========================================================================

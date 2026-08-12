@@ -84,6 +84,20 @@ is not a sign the repository is idle._
   such a name silently did nothing. It now takes precedence for that
   season and leaves every other season alone.
 
+### Fixed
+
+- **`dim_matchup_period` builds on Snowflake again.** It carried
+  `is_abnormal is not true`, and Snowflake has no IS [NOT] TRUE
+  predicate -- it rejects the spelling as a syntax error, so the model
+  and all 13 relations downstream of it (including the weekly facts,
+  `mart_team_matchup` and `mart_franchise_rivalry`) failed to build.
+  Now `is distinct from true`, which is the same truth table.
+
+  It reached main because the contract suite builds this model against
+  DuckDB, where the spelling is valid -- the one engine that cannot
+  catch it. A source-text guard covers the models, dbt tests and macros,
+  since a build-based check would share the blind spot.
+
 ## [1.8.0] - 2026-08-09
 
 The engine runs locally end to end. 30 commits. Full story in

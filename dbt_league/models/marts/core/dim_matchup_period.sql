@@ -284,7 +284,13 @@ select
     --
     -- The generated fallback speaks only where nothing else can.
     case
-        when is_abnormal is not true then null
+        -- `is distinct from true` rather than `is not true`: Snowflake does
+        -- not support the IS [NOT] TRUE predicate and rejects it as a SYNTAX
+        -- error, so the spelling is a portability question, not a style one.
+        -- The truth table is identical -- false and NULL both match, TRUE
+        -- does not -- which is what keeps an unknown period unexplained
+        -- rather than quietly labelled.
+        when is_abnormal is distinct from true then null
         when effective_source = 'override' then override_reason
         when is_abnormal_legacy then legacy_reason
         when standard_period_length is not null then

@@ -207,8 +207,40 @@ Rendering both everywhere would show every H2H league a table nobody asked for
 and every points league a grid of 0-0 that means "this league does not work
 that way" -- which is not what 0-0 says anywhere else on the tab.
 
-`rivalry_matrix_grid` densifies over the active axes, and the two kinds of
-empty cell are deliberately different:
+### Three states, not two
+
+`rivalry_matrix_grid` densifies over the active axes, and there are now THREE
+distinct appearances a cell region can have. Two of them are cells; the third
+is the absence of cells, and conflating it with either is the failure this
+section exists to prevent.
+
+| State | Appearance | Means |
+| --- | --- | --- |
+| Diagonal | blank cell | a team has no record against itself |
+| Never met | `0-0` | they have played nobody; **something is known and it is nil** |
+| No evidence | **no grid at all**, plus a conspicuous notice | **nothing is known**; nobody can prove any result yet |
+
+The third is a release requirement, not polish. The ledger fails closed, so a
+league whose history nobody can prove yields no rows — and densifying zero rows
+produces a full square of `0-0`, which is a *claim*: "these teams have played
+and never beaten each other". For a league whose schedule capture has never run
+that claim is false, and it is pixel-identical to the honest `0-0`.
+
+`mart_franchise_rivalry_axes.has_rivalry_evidence` separates them at the source:
+true when at least one season is admissible (proven finished, or carrying a
+closed period). League-grain deliberately — "we cannot prove any result" is a
+property of the capture state, and asking it per pair would make an expansion
+team's genuine `0-0` look like missing evidence.
+
+The unavailable state carries **no cells at all** — no grid, no header — so
+there is nothing a reader could mistake for a record, and it says out loud that
+nothing is known rather than that nobody won. The banner stays, so a reader who
+has heard the matrix exists finds it and learns why it is empty rather than
+finding nothing and wondering whether the publish broke. The renderer's own
+default is fail-closed too: an axes row missing the column takes the
+unavailable path.
+
+The two cell states remain deliberately different:
 
 - **The diagonal is blank.** A team has no record against itself and there is
   no honest number for that cell.
@@ -265,8 +297,79 @@ which is the supported (6) case above. Found in visual QA.
   CLAUDE.md rule.
 - **The PII guard cannot run non-degraded here.** The private anonymization map
   is local to the main checkout.
-- **Both golden sets will move** and neither can be re-anchored here.
-- **A league with no schedule capture shows an all-0-0 matrix**, which reads as
-  "nobody has met" rather than "we cannot prove any result yet". The warn
-  diagnostic names it for the maintainer; a reader-facing note is a post-cut
-  nicety.
+- **Both golden sets will move** and neither is re-anchored here, by
+  instruction — see §8 for the exact expected movement, recorded for the single
+  consolidated v1.9 re-anchor.
+
+
+---
+
+## 8. Expected golden movement (recorded, NOT applied)
+
+Neither golden set is regenerated on this branch. This is what a reviewer
+should expect to see when the consolidated v1.9 re-anchor runs, so that a
+diff matching this list is a confirmation and a diff exceeding it is a
+finding.
+
+### Scope
+
+Both byte-diff harnesses are `warehouse`-marked and need a live Snowflake
+connection, which this worktree does not have. Nothing here was measured
+against real league data; it is derived from what the code appends and from
+the fixture renders in `tests/`.
+
+### ESPN almanac — Advanced Standings tab only
+
+Appended at the BOTTOM of the tab, after the Roster Affinity block. Nothing
+above it moves: no existing row changes content, and no existing row changes
+index, because the block is purely additive at the end.
+
+Expected added rows, in order:
+
+1. one blank spacer row
+2. the `Rivalry Matrix` banner row (navy band, width unified with the tab)
+3. one explainer row (italic house token)
+4. one blank row
+5. the ledger label row — `Head-to-Head Matchups` for this league
+6. one header row: `Team` followed by one abbrev per ACTIVE identity
+7. one row per active identity: display name followed by one cell per identity
+
+So the tab grows by `6 + N` rows, where `N` is the number of active team
+identities. Grid width is `N + 1` columns.
+
+Cell content: `W-L` or `W-L-T`, blank on the diagonal. Every cell is a STRING
+written under `value_input_option='RAW'` — no cell here should ever be parsed
+as a date or a number.
+
+No other tab changes. Records, Team Weeks, Home, Draft, Trades and the team
+tabs are untouched by this branch.
+
+### CBS almanac — Advanced Standings tab only
+
+Same shape, one layout difference: the ledger name rides the banner row as a
+scope caption at column B instead of taking its own row. So the block is
+`5 + N` rows:
+
+1. one blank spacer row
+2. the `Rivalry Matrix` banner row, with `Season Points` in column B
+3. one explainer row
+4. one header row
+5. one row per active identity
+
+For this league the ledger is `Season Points`, not head-to-head — there are no
+matchups in a points league to have a head-to-head record about.
+
+### What would NOT be expected, and should be treated as a finding
+
+- Any change above the Rivalry Matrix block on either tab.
+- Both ledgers appearing on one tab (the format dispatch has regressed).
+- A `0-0` cell in a league with no capture (the evidence gate has regressed).
+- A grid rendered with no `Team` header row, or a header with a different
+  count of columns from the number of data rows.
+- Any change to a tab other than Advanced Standings.
+
+### Also unmeasured here
+
+The strict PII guard cannot run non-degraded in this worktree — the private
+anonymization map and salt are local to the main checkout, and were
+deliberately not copied here. Run it during main integration.

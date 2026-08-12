@@ -1743,6 +1743,41 @@ def rivalry_matrix_grid(axes, pairs, league_format=None):
     if ledger is None:
         return None
 
+    # NO EVIDENCE MEANS NO GRID (MLB-229 release requirement). The ledger fails
+    # closed, so a league whose history nobody can prove yields no rows -- and
+    # densifying zero rows produces a full square of 0-0, which is a CLAIM:
+    # "these teams have played and never beaten each other". For a league whose
+    # schedule capture has never run that claim is false, and worse, it is
+    # pixel-identical to the one honest 0-0 this matrix does make: two teams
+    # that really have never met.
+    #
+    # Unknown and proven-zero must never render the same, so the unavailable
+    # state carries NO cells at all -- no grid, no header, nothing a reader
+    # could mistake for a record. tests/test_rivalry_matrix_tab.py pins that the
+    # two renderings cannot be confused.
+    # Defaulting to FALSE, not True. A caller that has not been given the
+    # column cannot have established that anything is provable, and the whole
+    # point of this gate is that unproven renders as unproven -- so an axes row
+    # missing the key takes the same path as a league with no evidence. Found
+    # by the visual-QA harness, whose query had not been updated and which
+    # therefore drew the old all-0-0 grid for a league with no capture at all.
+    if not axes[0].get('has_rivalry_evidence', False):
+        subject = ('matchup history' if ledger == RIVALRY_MATCHUP_LEDGER
+                   else 'completed-season history')
+        return {
+            'ledger': ledger,
+            'available': False,
+            'notice': (
+                f'RIVALRY RESULTS UNAVAILABLE -- no {subject} has been '
+                'captured for this league yet, so no result here can be shown '
+                'as finished. This is not a record of nobody winning: nothing '
+                'is known yet. Capture the season history and this fills in.'),
+            'explainer': None,
+            'header': None,
+            'grid': [],
+            'width': len(keys) + 1,
+        }
+
     records = {}
     for p in pairs:
         cell = (p['row_identity_key'], p['opponent_identity_key'])
@@ -1784,6 +1819,8 @@ def rivalry_matrix_grid(axes, pairs, league_format=None):
 
     return {
         'ledger': ledger,
+        'available': True,
+        'notice': None,
         'explainer': explainer,
         'header': ['Team', *labels],
         'grid': grid,
@@ -1805,6 +1842,12 @@ def build_rivalry_matrix_rows(axes, pairs, banner_width=None,
     width = banner_width if banner_width else matrix['width']
     banner = [''] * max(width, matrix['width'])
     banner[0] = RIVALRY_MATRIX_LABEL
+
+    # The banner stays even when there is nothing to draw: a reader who has
+    # heard the matrix exists should find it and be told why it is empty,
+    # rather than find nothing and wonder whether the publish broke.
+    if not matrix['available']:
+        return [[], banner, [matrix['notice']]]
 
     return [
         [],

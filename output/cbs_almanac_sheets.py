@@ -833,7 +833,7 @@ def get_rivalry_axes():
     return query_snowflake(
         f"SELECT identity_key, identity_name, identity_abbrev,"
         f"       identity_source, active_platform_teams, league_format,"
-        f"       sort_order"
+        f"       has_rivalry_evidence, sort_order"
         f" FROM mart_franchise_rivalry_axes"
         f" WHERE {league_predicate()}"
         f" ORDER BY sort_order"
@@ -4289,10 +4289,6 @@ def build_standings_rows(context, arc, finishes, active_franchises,
             # Per-block rule: each matrix scales to its own spread.
             formats.append({'range': rng, 'gradient': _share_gradient()})
 
-    # Unified navy width (Kyle round 12): every section band runs as far
-    # as the widest one on the tab.
-    navy_specs = [s for s in formats
-                  if s.get('format', {}).get('backgroundColor') == _NAVY]
     # The Rivalry Matrix (MLB-229), last on the tab -- the CBS half of a
     # two-book feature. The CONTRACT is shared: rivalry_matrix_grid decides
     # which ledger this league's format means, densifies the cells, blanks the
@@ -4304,25 +4300,45 @@ def build_standings_rows(context, arc, finishes, active_franchises,
     # For a points league the ledger is completed SEASONS on total points --
     # there are no matchups here to have a head-to-head record about, which is
     # exactly what the format dispatch is for.
+    #
+    # ABOVE the navy-width snapshot below, deliberately. That pass runs every
+    # section band out to the widest one on the tab, and it works from a list
+    # captured at one moment -- so a band appended after it silently keeps its
+    # own narrow width and renders as a stub next to full-width neighbours.
+    # Caught by test_the_navy_width_pass_still_runs_when_evidence_is_missing.
     if rivalry_axes:
         matrix = rivalry_matrix_grid(rivalry_axes, rivalry_pairs or [])
         if matrix:
             matrix_col = _col(matrix['width'])
             rows.append([])
-            # The ledger name rides the banner as a SCOPE caption, which is
-            # this tab's idiom for "what these cells are" (Current Season /
-            # All-Time elsewhere). The ESPN book gives it its own row because
-            # its blocks stack two tables under one banner; here there is one
-            # grid, so a separate label row would be a heading with nothing to
-            # distinguish it from. Either way the sheet says which ledger it is
-            # showing -- a matrix of records that does not say what kind is the
-            # one thing format dispatch must not leave ambiguous.
-            _section(RIVALRY_MATRIX_LABEL, scopes=[(1, matrix['ledger'])],
-                     width=matrix_col)
-            _note(matrix['explainer'], width=matrix_col)
-            _header(matrix['header'], width=matrix_col)
-            rows.extend(matrix['grid'])
+            if matrix['available']:
+                # The ledger name rides the banner as a SCOPE caption, which is
+                # this tab's idiom for "what these cells are" (Current Season /
+                # All-Time elsewhere). The ESPN book gives it its own row
+                # because its blocks stack two tables under one banner; here
+                # there is one grid, so a separate label row would be a heading
+                # with nothing to distinguish it from. Either way the sheet says
+                # which ledger it is showing -- a matrix of records that does
+                # not say what kind is the one thing format dispatch must not
+                # leave ambiguous.
+                _section(RIVALRY_MATRIX_LABEL, scopes=[(1, matrix['ledger'])],
+                         width=matrix_col)
+                _note(matrix['explainer'], width=matrix_col)
+                _header(matrix['header'], width=matrix_col)
+                rows.extend(matrix['grid'])
+            else:
+                # No evidence, so no cells -- see rivalry_matrix_grid. The
+                # banner stays so the reader finds the section and is told why
+                # it is empty; the ledger name comes OFF it, because naming a
+                # ledger over a notice saying there is none reads as a table
+                # that failed to load rather than a league with no history yet.
+                _section(RIVALRY_MATRIX_LABEL, width=matrix_col)
+                _note(matrix['notice'], width=matrix_col)
 
+    # Unified navy width (Kyle round 12): every section band runs as far
+    # as the widest one on the tab.
+    navy_specs = [s for s in formats
+                  if s.get('format', {}).get('backgroundColor') == _NAVY]
     if navy_specs:
         def _range_end_width(a1):
             letters = ''.join(c for c in a1.split(':')[1] if c.isalpha())

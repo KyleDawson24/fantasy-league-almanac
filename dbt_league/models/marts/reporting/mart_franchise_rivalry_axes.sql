@@ -32,7 +32,46 @@
 -- ==========================================================================
 {{ config(materialized='table') }}
 
-with current_identities as (
+-- CAN THIS LEAGUE'S MATRIX MEAN ANYTHING YET? (MLB-229 release requirement.)
+--
+-- The ledger fails closed, so a league whose history nobody can prove produces
+-- no rows -- and a densified matrix over zero rows is a full grid of 0-0, which
+-- is a CLAIM: "these teams have played and never beaten each other". For a
+-- league whose schedule capture has never run that claim is false, and it is
+-- indistinguishable from the one honest 0-0 the matrix does make (two teams
+-- that really have never met).
+--
+-- So the two are separated at the source. A league has rivalry evidence when at
+-- least one of its seasons is admissible: proven finished, or carrying at least
+-- one closed period. Either way real results can exist, so a 0-0 cell in that
+-- league is a statement about those two teams. With NO admissible season,
+-- nothing is known about anybody and the renderer says so instead of drawing a
+-- grid.
+--
+-- Deliberately league-grain, not pair-grain: "we cannot prove any result" is a
+-- property of the league's capture state, and asking it per pair would make an
+-- expansion team's genuine 0-0 look like missing evidence.
+with admissible_seasons as (
+    select league_key, season_year
+    from {{ ref('int_league_season_closure') }}
+    where is_season_complete
+
+    union
+
+    select distinct league_key, season_year
+    from {{ ref('int_matchup_period_evidence') }}
+    where is_closed
+),
+
+rivalry_evidence as (
+    select
+        league_key,
+        count(*) as admissible_seasons
+    from admissible_seasons
+    group by league_key
+),
+
+current_identities as (
     select distinct
         c.league_key,
         i.identity_key,
@@ -85,6 +124,10 @@ select
     -- LEFT join and coalesced -- a league whose format cannot yet be read
     -- still gets axes, and says 'unknown' rather than being filed as H2H.
     coalesce(f.league_format, 'unknown') as league_format,
+    -- Whether a drawn grid would mean anything. False stops the renderer
+    -- drawing 0-0 cells that would read as results; see the header.
+    coalesce(e.admissible_seasons, 0) > 0 as has_rivalry_evidence,
+    coalesce(e.admissible_seasons, 0)     as admissible_seasons,
     row_number() over (
         partition by c.league_key
         -- identity_key breaks a name tie so the order is total. Two axes
@@ -96,3 +139,5 @@ select
 from counted c
 left join {{ ref('dim_league_format') }} f
     on c.league_key = f.league_key
+left join rivalry_evidence e
+    on c.league_key = e.league_key

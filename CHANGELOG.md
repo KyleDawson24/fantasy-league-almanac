@@ -55,6 +55,11 @@ is not a sign the repository is idle._
   itself, so the diagonal is blank; two teams that have never met read
   0-0, which is a fact about the league rather than an absence.
 
+  And if your league has no captured history yet, the matrix does not
+  draw a grid of 0-0 -- that would say "these teams have played and
+  nobody won", which is a different and false claim. It says so plainly
+  instead, and tells you what to capture.
+
   New warehouse contracts: `mart_franchise_rivalry` (long, one row per
   ordered pair -- the matrix is a render, not a grain),
   `mart_franchise_rivalry_axes`, `dim_franchise_identity`,

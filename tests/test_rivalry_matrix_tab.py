@@ -34,11 +34,11 @@ from almanac_logic import (  # noqa: E402
 )
 
 
-def _axis(key, name, abbrev, order, league_format='h2h'):
+def _axis(key, name, abbrev, order, league_format='h2h', evidence=True):
     return {'identity_key': key, 'identity_name': name,
             'identity_abbrev': abbrev, 'identity_source': 'franchise_id',
             'active_platform_teams': 1, 'league_format': league_format,
-            'sort_order': order}
+            'has_rivalry_evidence': evidence, 'sort_order': order}
 
 
 AXES = [
@@ -51,6 +51,10 @@ AXES = [
 # so any difference between the two renders is the format dispatch and nothing
 # else.
 POINTS_AXES = [dict(a, league_format='points') for a in AXES]
+
+# The same teams in a league nothing can be proven about: no schedule capture,
+# so the ledger fails closed and every cell would densify to 0-0.
+NO_EVIDENCE_AXES = [dict(a, has_rivalry_evidence=False) for a in AXES]
 
 
 def _pair(row, opp, mw, ml, mt, sw, sl, st):
@@ -325,3 +329,96 @@ def test_the_matrix_is_the_last_block_on_the_tab(rows=None):
 
     assert all(not r or r[0] != 'Advanced Standings'
                for r in rows[banner:])
+
+
+# ===========================================================================
+# Unknown evidence versus proven zero
+# ===========================================================================
+#
+# The two look the same to a careless renderer and mean opposite things:
+#
+#   "we cannot prove any result yet"  -- nothing is known
+#   "they have played nobody"          -- something is known, and it is nil
+#
+# Densifying an empty ledger produces the second from the first. These are the
+# assertions that stop it.
+
+
+def test_no_evidence_renders_no_cells_at_all(rows=None):
+    """Not one 0-0, and no header either -- nothing a reader could mistake for
+    a record. The banner stays so the section is findable."""
+    rows = build_rivalry_matrix_rows(NO_EVIDENCE_AXES, [])
+    flat = [str(c) for r in rows for c in r]
+
+    assert RIVALRY_MATRIX_LABEL in flat
+    assert '0-0' not in flat
+    assert 'Team' not in flat
+    assert _grids(rows) == {}
+
+
+def test_no_evidence_says_why_and_says_it_loudly(rows=None):
+    """A conspicuous state, not a quiet blank. It has to say the difference out
+    loud: nothing is known, as opposed to nobody having won."""
+    rows = build_rivalry_matrix_rows(NO_EVIDENCE_AXES, [])
+    notice = next(r[0] for r in rows if r and 'UNAVAILABLE' in str(r[0]))
+
+    assert 'RIVALRY RESULTS UNAVAILABLE' in notice
+    assert 'not a record of nobody winning' in notice
+    assert 'nothing is known yet' in notice
+
+
+def test_unknown_evidence_and_proven_zero_cannot_render_identically(rows=None):
+    """THE ASSERTION THIS SECTION EXISTS FOR. Same axes, same empty ledger --
+    the only difference is whether anything is provable. A renderer that
+    densified regardless would produce byte-identical output for a league with
+    no history and a league whose teams have genuinely never met."""
+    unknown = build_rivalry_matrix_rows(NO_EVIDENCE_AXES, [])
+    proven_zero = build_rivalry_matrix_rows(AXES, [])
+
+    assert unknown != proven_zero
+    assert '0-0' in [str(c) for r in proven_zero for c in r]
+    assert '0-0' not in [str(c) for r in unknown for c in r]
+
+
+def test_a_genuine_never_met_pair_still_reads_zero_zero(rows=None):
+    """Evidence exists, so nil IS the record. Cedar Crows is an expansion team
+    in a league with proven history -- 0-0 is a fact about it, and suppressing
+    that would hide the very thing the matrix is for."""
+    grid = _grids(build_rivalry_matrix_rows(AXES, PAIRS))[RIVALRY_MATCHUP_LEDGER]
+
+    assert grid[2][1] == '0-0'
+    assert grid[2][3] == ''
+
+
+def test_the_evidence_gate_is_independent_of_the_ledger_having_rows(rows=None):
+    """A league can have provable history AND an empty ledger -- every pair
+    genuinely new to each other. That still renders a grid, because 0-0 means
+    something there."""
+    rows = build_rivalry_matrix_rows(AXES, [])
+    cells = {str(c) for r in _grids(rows)[RIVALRY_MATCHUP_LEDGER]
+             for c in r[1:]}
+
+    assert cells == {'', '0-0'}
+
+
+def test_no_evidence_suppresses_the_points_ledger_too(rows=None):
+    """Format-independent: a points league with nothing provable makes the same
+    false claim if its seasons are densified."""
+    axes = [dict(a, league_format='points', has_rivalry_evidence=False)
+            for a in AXES]
+    flat = [str(c) for r in build_rivalry_matrix_rows(axes, []) for c in r]
+
+    assert '0-0' not in flat
+    assert any('UNAVAILABLE' in c for c in flat)
+
+
+def test_the_tab_still_carries_the_section_when_evidence_is_missing(rows=None):
+    """Wired end to end: the block is on Advanced Standings either way, so a
+    reader who has heard the matrix exists finds it and learns why it is empty
+    rather than finding nothing and wondering whether the publish broke."""
+    rows = build_advanced_standings_tab_rows(
+        [], [], [], 2026, rivalry_axes=NO_EVIDENCE_AXES, rivalry_pairs=[])
+    labels = [r[0] for r in rows if r]
+
+    assert RIVALRY_MATRIX_LABEL in labels
+    assert RIVALRY_MATCHUP_LEDGER not in labels

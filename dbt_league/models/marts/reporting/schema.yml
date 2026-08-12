@@ -1554,6 +1554,31 @@ models:
               arguments:
                 min_value: 1
                 inclusive: true
+      - name: has_rivalry_evidence
+        description: >
+          Whether a drawn matrix would mean anything: true when at least one of
+          the league's seasons is admissible -- proven finished, or carrying at
+          least one closed period.
+
+          THE RELEASE REQUIREMENT BEHIND IT. The ledger fails closed, so a
+          league whose history nobody can prove yields no rows -- and
+          densifying zero rows produces a full square of 0-0, which is a CLAIM
+          ("these teams have played and never beaten each other") and is
+          pixel-identical to the one honest 0-0 the matrix does make (two teams
+          that really have never met). False makes the renderer say so instead
+          of drawing cells. League-grain deliberately: "we cannot prove any
+          result" is a property of the capture state, and asking it per pair
+          would make an expansion team's genuine 0-0 look like missing
+          evidence.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [true, false]
+      - name: admissible_seasons
+        description: 'How many seasons cleared that bar. The audit handle behind has_rivalry_evidence.'
+        tests:
+          - not_null
       - name: sort_order
         description: 'Stable 1..N draw order within a league, by display name then identity_key. A consumer wanting standings order joins its own.'
         tests:

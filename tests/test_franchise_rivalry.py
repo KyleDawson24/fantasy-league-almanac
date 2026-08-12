@@ -1264,6 +1264,38 @@ def test_active_ids_are_deduplicated_onto_one_axis(built):
     assert rows == [("fid:20", 2), ("name:Bent Spokes", 2)]
 
 
+def test_evidence_is_absent_exactly_where_nothing_can_be_proven(built):
+    """The signal that stops a matrix claiming results it cannot prove. A
+    league has evidence when some season is admissible -- proven finished, or
+    carrying a closed period. espn-open never captured anything and espn-broken
+    captured something unreadable, so for both, nothing at all is known."""
+    rows = built("""
+        select league_key, min(has_rivalry_evidence), min(admissible_seasons)
+        from ANALYTICS.mart_franchise_rivalry_axes
+        group by league_key order by league_key
+    """)
+
+    assert rows == [
+        (POINTS_LEAGUE, True, 1),
+        (BROKEN_LEAGUE, False, 0),
+        (FINAL_LEAGUE, True, 1),
+        (LEAGUE, True, 3),
+        (OPEN_LEAGUE, False, 0),
+        (OTHER_LEAGUE, True, 1),
+    ]
+
+
+def test_evidence_is_a_league_property_not_a_pair_property(built):
+    """Asking it per pair would make an expansion team's genuine 0-0 look like
+    missing evidence. espn-fix has proven seasons, so 9 -- which has played no
+    matchups at all -- still sits in a league whose matrix means something."""
+    assert built("""
+        select distinct has_rivalry_evidence
+        from ANALYTICS.mart_franchise_rivalry_axes where league_key = ?
+    """, [LEAGUE]) == [(True,)]
+    assert _matchup_record(built, "fid:9", "fid:1") == (0, 0, 0, 0)
+
+
 def test_a_defunct_team_keeps_its_history_without_an_axis(built):
     """Activity applies to the axes, never to the facts. 4 has no column and
     still has every result it earned."""

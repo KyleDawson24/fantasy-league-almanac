@@ -435,11 +435,11 @@ class TestRivalryMatrix:
             {'identity_key': 'fid:1', 'identity_name': 'Alpha',
              'identity_abbrev': 'ALP', 'identity_source': 'franchise_id',
              'active_platform_teams': 1, 'league_format': league_format,
-             'sort_order': 1},
+             'has_rivalry_evidence': True, 'sort_order': 1},
             {'identity_key': 'fid:2', 'identity_name': 'Beta',
              'identity_abbrev': 'BET', 'identity_source': 'franchise_id',
              'active_platform_teams': 1, 'league_format': league_format,
-             'sort_order': 2},
+             'has_rivalry_evidence': True, 'sort_order': 2},
         ]
 
     @staticmethod
@@ -519,3 +519,51 @@ class TestRivalryMatrix:
 
         assert banner[1] == 'Head-to-Head Matchups'
         assert 'Season Points' not in [c for r in rows for c in r]
+
+    def test_no_evidence_renders_a_notice_and_no_cells(self, monkeypatch):
+        """The CBS half of the release requirement. A league nothing can be
+        proven about must not get a densified square of 0-0 -- that is a claim
+        ("these teams have played and never beaten each other") and it is
+        indistinguishable from the one honest 0-0 the matrix does make."""
+        axes = [dict(a, has_rivalry_evidence=False) for a in self._axes()]
+        rows, _ = _build(monkeypatch, rivalry_axes=axes, rivalry_pairs=[])
+        flat = [str(c) for r in rows for c in r]
+
+        assert 'Rivalry Matrix' in flat
+        assert any('RIVALRY RESULTS UNAVAILABLE' in c for c in flat)
+        assert '0-0' not in flat
+        assert ['Team', 'ALP', 'BET'] not in rows
+
+    def test_the_unavailable_banner_names_no_ledger(self, monkeypatch):
+        """Naming a ledger over a notice saying there is none reads as a table
+        that failed to load, rather than a league with no history yet."""
+        axes = [dict(a, has_rivalry_evidence=False) for a in self._axes()]
+        rows, _ = _build(monkeypatch, rivalry_axes=axes, rivalry_pairs=[])
+        banner = next(r for r in rows if r and r[0] == 'Rivalry Matrix')
+
+        assert banner == ['Rivalry Matrix']
+
+    def test_unknown_and_proven_zero_differ_in_this_book_too(self, monkeypatch):
+        """Same axes, same empty ledger; only provability differs."""
+        unknown_axes = [dict(a, has_rivalry_evidence=False)
+                        for a in self._axes()]
+        unknown, _ = _build(monkeypatch, rivalry_axes=unknown_axes,
+                            rivalry_pairs=[])
+        proven, _ = _build(monkeypatch, rivalry_axes=self._axes(),
+                           rivalry_pairs=[])
+
+        assert unknown != proven
+        assert '0-0' in [str(c) for r in proven for c in r]
+        assert '0-0' not in [str(c) for r in unknown for c in r]
+
+    def test_the_navy_width_pass_still_runs_when_evidence_is_missing(self, monkeypatch):
+        """The unavailable branch used to return early, which skipped the
+        band-width unification every navy section on this tab depends on."""
+        axes = [dict(a, has_rivalry_evidence=False) for a in self._axes()]
+        _, formats = _build(monkeypatch, rivalry_axes=axes, rivalry_pairs=[])
+        bands = [s['range'] for s in formats
+                 if s.get('format', {}).get('backgroundColor') == cbs._NAVY]
+        widths = {''.join(c for c in r.split(':')[1] if c.isalpha())
+                  for r in bands}
+
+        assert len(widths) == 1, f'navy bands ran to differing widths: {widths}'

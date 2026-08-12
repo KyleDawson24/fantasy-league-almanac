@@ -80,6 +80,25 @@ lands), not on a calendar. Hard backstop: if `[Unreleased]` exceeds
       The tag, the notes file and the GitHub Release are one action in
       three places; if you do two of them, the third is a bug someone
       finds months later.
+- [ ] **Build and attach the release bundle** (MLB-209). The tag alone is
+      the developer path; a consumer needs the archive that carries the
+      public Google OAuth identity, because that credential is
+      deliberately NOT in tracked source:
+
+      ```bash
+      .venv\Scripts\python.exe tools\build_release_bundle.py --client-json C:\Users\kyled\.gcp\fantasy-league-almanac-public-v1.9-oauth-client.json --version X.Y.Z --ref vX.Y.Z
+      ```
+
+      Build from the TAG, not `HEAD` -- the script reads a git ref and
+      never the working tree, so this is what makes the archive match
+      what was published. It prints lengths and verdicts, never values,
+      and refuses to continue if the exported source already contains a
+      credential (which would mean one reached git history, where nothing
+      can remove it and GitHub's partner scanning will report it to
+      Google).
+
+      Then attach it: `gh release upload vX.Y.Z dist\fantasy-league-almanac-X.Y.Z.zip`.
+      `dist/` is gitignored; never commit the archive.
 
 ## Post-cut
 

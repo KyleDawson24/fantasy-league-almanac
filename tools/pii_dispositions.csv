@@ -1,4 +1,5 @@
 path,category,digest,disposition,reason,recorded
+.env.example,owner,c346ca1e4cb396aa,collision,Ordinary non-identity wording in MLB-209 prose about an empty bundled OAuth descriptor; not an owner reference,2026-08-12
 CHANGELOG.md,owner,b68f6866e276467d,collision,"an MLB player's name, not a league member",2026-08-10
 README.md,owner,bd82e0cc5c1b69de,collision,"an MLB player's name, not a league member",2026-08-10
 README.md,owner,dace7a87a2cfc627,collision,"an MLB player's name, not a league member",2026-08-10
@@ -132,6 +133,7 @@ output/cbs_almanac_sheets.py,owner,2b843cf04fd1821a,collision,"the ordinary Engl
 output/cbs_almanac_sheets.py,owner,d4c826ea14c3e34d,collision,"an MLB player's name, not a league member",2026-08-10
 output/generate_season_report.py,owner,99844a7734d412e9,collision,"an MLB player's name, not a league member",2026-08-10
 output/harvest_continuity_sheet.py,owner,dd3d7e8a30e14c7e,collision,"the ordinary English word, used in its ordinary sense",2026-08-10
+output/public_oauth_client.py,owner,b488646d20d95255,collision,Ordinary non-identity wording in MLB-209 prose about an empty bundled OAuth descriptor; not an owner reference,2026-08-12
 tests/test_almanac_sheets.py,team-id,060acf2a4c728b6f,collision,synthetic fixture value that happens to sit in an identity-shaped position,2026-08-10
 tests/test_almanac_sheets.py,team-id,06c5c5c81efce0c3,collision,synthetic fixture value that happens to sit in an identity-shaped position,2026-08-10
 tests/test_almanac_sheets.py,team-id,0829a13ba366827e,collision,synthetic fixture value that happens to sit in an identity-shaped position,2026-08-10
@@ -240,6 +242,8 @@ tests/test_check_pii_strict.py,team-id,e99bd9db0b6ffdd8,collision,synthetic fixt
 tests/test_league_config_templates.py,owner,557213b8c90deaaf,collision,"the ordinary English word, used in its ordinary sense",2026-08-10
 tests/test_league_config_templates.py,owner,58d85cbf6e06d281,collision,"the ordinary English word, used in its ordinary sense",2026-08-10
 tests/test_local_raw_writer.py,team-id,c5d811027fe88200,collision,synthetic fixture value that happens to sit in an identity-shaped position,2026-08-10
+tests/test_public_oauth_client.py,owner,1980cb9dc6fc999f,collision,Ordinary non-identity wording in MLB-209 prose about an empty bundled OAuth descriptor; not an owner reference,2026-08-12
+tests/test_public_oauth_client.py,owner,6e74bf7168af76e1,collision,Ordinary non-identity wording in MLB-209 prose about an empty bundled OAuth descriptor; not an owner reference,2026-08-12
 tests/test_records_pure.py,team-id,019e7246b255d2ea,collision,synthetic fixture value that happens to sit in an identity-shaped position,2026-08-10
 tests/test_records_pure.py,team-id,071a2bc992179c3e,collision,synthetic fixture value that happens to sit in an identity-shaped position,2026-08-10
 tests/test_records_pure.py,team-id,0c0ec3ef6899469e,collision,synthetic fixture value that happens to sit in an identity-shaped position,2026-08-10

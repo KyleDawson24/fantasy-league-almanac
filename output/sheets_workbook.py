@@ -73,6 +73,20 @@ _SHARING_POLICY_REASONS = frozenset({
 # safe test; "does it contain this line" is.
 SHARE_READY_LINE = 'Your almanac: {url} -- share-ready.'
 
+# Said BEFORE consent, not after. `--new-public-workbook` is already an
+# explicit request to create and link-share a file, so this is not a
+# second confirmation prompt -- adding one would break every automated
+# invocation. It is the plain statement of what the flag means, printed
+# while the user can still hit Ctrl-C, because "anyone with the link can
+# read this" is the kind of thing people should meet before the browser
+# opens rather than in the URL they have just been handed.
+LINK_SHARING_DISCLOSURE = (
+    "The workbook this creates will be set to anyone-with-the-link VIEWER, "
+    "so whoever you send the link to can read it (it stays unlisted -- "
+    "nobody can find it by searching). Only this new workbook is affected; "
+    "nothing already in your Drive changes."
+)
+
 SHARE_RECOVERY_MESSAGE = (
     "The workbook was created in your Google Drive and is intact -- only the "
     "link-sharing step was refused, which is usually a Workspace policy on "

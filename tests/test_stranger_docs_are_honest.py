@@ -164,6 +164,143 @@ def test_the_quickstart_does_not_claim_the_espn_half_is_simply_done():
     assert "no single bootstrap command" in text
 
 
+# ---------------------------------------------------------------------------
+# The Google path (MLB-209): what it no longer needs, and what it is not yet
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("path", (QUICKSTART, SETUP), ids=lambda p: p.name)
+def test_no_live_doc_still_says_you_need_your_own_oauth_client(path):
+    """THE REGRESSION THIS EXISTS FOR. Both docs told a stranger that a
+    live Google Sheet 'needs your own OAuth client' / a GCP project. The
+    tool ships its own identity now, and that sentence would send someone
+    to do five console steps they do not need."""
+    lowered = _flat(path)
+
+    for claim in (
+        "still needs your own oauth client",
+        "needs a google oauth client",
+        "optional and needs a google oauth client",
+    ):
+        assert claim not in lowered, f"{path.name}: {claim!r}"
+
+
+@pytest.mark.parametrize("path", (QUICKSTART, SETUP), ids=lambda p: p.name)
+def test_both_docs_say_no_google_cloud_project_is_required(path):
+    """Both phrasings accepted. The two docs address different readers --
+    the Quickstart says it to you, SETUP says it about the route -- and
+    forcing identical prose is how a doc test turns into something people
+    game rather than satisfy. The CLAIM is what must be present."""
+    lowered = _flat(path)
+
+    assert ("no google cloud project" in lowered
+            or "do not need a google cloud project" in lowered)
+    assert "oauth client of your own" in lowered
+
+
+def test_the_quickstart_gives_the_exact_command(path=None):
+    text = _text(QUICKSTART)
+
+    assert ("python output/generate_almanac_sheet.py --duckdb "
+            "--new-public-workbook") in text
+
+
+@pytest.mark.parametrize("path", (QUICKSTART, SETUP), ids=lambda p: p.name)
+def test_both_docs_state_the_scope_and_the_sharing_that_follows(path):
+    """A stranger has to know two things before consenting: what is being
+    asked for, and that the result becomes readable to anyone with the
+    link. Neither may be left implied."""
+    lowered = _flat(path)
+
+    assert "drive.file" in lowered
+    assert "anyone-with-the-link" in lowered
+    assert "viewer" in lowered
+
+
+@pytest.mark.parametrize("path", (QUICKSTART, SETUP), ids=lambda p: p.name)
+def test_both_docs_describe_first_run_consent_and_the_cached_token(path):
+    lowered = _flat(path)
+
+    assert "consent" in lowered
+    assert "output/.sheets_public_oauth_token.json" in lowered
+
+
+@pytest.mark.parametrize("path", (QUICKSTART, SETUP), ids=lambda p: p.name)
+def test_both_docs_are_honest_about_where_local_state_lives(path):
+    """No encryption, no server, no upload. Ordinary files behind
+    filesystem permissions and gitignore -- said plainly, because a
+    reader who assumes more than that is being misled by omission."""
+    lowered = _flat(path)
+
+    assert "gitignore" in lowered
+    assert "permissions" in lowered
+
+
+@pytest.mark.parametrize("path", (QUICKSTART, SETUP), ids=lambda p: p.name)
+def test_both_docs_say_revocation_is_the_users_and_nothing_expires_for_them(path):
+    lowered = _flat(path)
+
+    assert "myaccount.google.com" in lowered
+    assert ("nothing here expires on your behalf" in lowered
+            or "since nothing here expires it for you" in lowered)
+
+
+@pytest.mark.parametrize("path", (QUICKSTART, SETUP), ids=lambda p: p.name)
+def test_the_byo_client_route_is_described_as_an_advanced_override(path):
+    lowered = _flat(path)
+
+    assert "override" in lowered
+    assert "not a prerequisite" in lowered
+
+
+# ---------------------------------------------------------------------------
+# What the Google path must NOT claim yet
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("path", (QUICKSTART, SETUP), ids=lambda p: p.name)
+def test_no_live_doc_claims_the_shipped_identity_is_open_to_the_public(path):
+    """OWNER RULING, and a release gate. The Cloud project is External
+    and in Google's TESTING mode: only test users get through consent,
+    grants expire in about a week, and the screen says unverified. Saying
+    or implying otherwise would send a stranger at a door Google will
+    shut in their face."""
+    lowered = _flat(path)
+
+    assert "testing" in lowered
+    assert "test users" in lowered
+    assert ("expire after about a week" in lowered
+            or "expire after roughly a week" in lowered)
+
+
+@pytest.mark.parametrize("path", (QUICKSTART, SETUP), ids=lambda p: p.name)
+def test_no_live_doc_promises_production_readiness(path):
+    lowered = _flat(path)
+
+    for claim in (
+        "ready for anyone to use",
+        "generally available",
+        "verified by google",
+        "anyone can now run this",
+    ):
+        assert claim not in lowered, f"{path.name}: {claim!r}"
+
+
+def test_the_quickstart_still_does_not_claim_one_command_orchestration():
+    """MLB-31/MLB-207 own chaining extract -> load -> dbt -> render. The
+    Google step is one more command, not a replacement for the other
+    five."""
+    text = _text(QUICKSTART)
+
+    assert "no single bootstrap command" in text
+    assert "still five commands" in text
+
+
+def test_the_quickstart_still_does_not_claim_cbs_stranger_support():
+    lowered = _flat(QUICKSTART)
+
+    assert "espn leagues only" in lowered
+    assert "the local path is espn-only" in lowered
+
+
 def test_the_roadmap_records_the_automation_as_landed_with_its_scope():
     """Marked done, but with the two corrections the work actually found --
     settings.matchupPeriods carries no membership, and the dates needed an
@@ -174,3 +311,38 @@ def test_the_roadmap_records_the_automation_as_landed_with_its_scope():
     assert "degenerate identity map" in text
     assert "regularSeasonStartDate" in text
     assert "unproven until a real payload" in text
+
+
+# ---------------------------------------------------------------------------
+# The credential ships in the release bundle, not in the repository
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("path", (QUICKSTART, SETUP), ids=lambda p: p.name)
+def test_both_docs_send_consumers_to_the_release_bundle(path):
+    """The Google identity is injected into the release archive and is
+    deliberately absent from tracked source. A doc that tells a consumer
+    to clone is telling them to install the one build that cannot do the
+    thing the section promises."""
+    lowered = _flat(path)
+
+    assert "releases page" in lowered or "release archive" in lowered
+    assert "fantasy-league-almanac-<version>.zip" in lowered
+
+
+@pytest.mark.parametrize("path", (QUICKSTART, SETUP), ids=lambda p: p.name)
+def test_both_docs_call_a_clone_the_developer_path(path):
+    """And say plainly that the live Sheets step stops in a clone, so a
+    developer meets the fail-closed message as expected behaviour rather
+    than as a bug report."""
+    lowered = _flat(path)
+
+    assert "developer path" in lowered
+    assert "shipped no identity" in lowered
+
+
+@pytest.mark.parametrize("path", (QUICKSTART, SETUP), ids=lambda p: p.name)
+def test_neither_doc_claims_a_clone_carries_the_identity(path):
+    """The claim that was true for exactly one unpushed commit."""
+    lowered = _flat(path)
+
+    assert "this tool ships its own google identity" not in lowered
+    assert "a plain clone receives" not in lowered

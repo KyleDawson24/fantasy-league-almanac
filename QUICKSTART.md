@@ -24,8 +24,12 @@ The ESPN half is walked end to end, and as of this release it needs one
 fewer thing from you: **there is no schedule to fill in**. What is still
 outstanding on the ESPN side is packaging rather than data -- there is
 no single bootstrap command and no guided fields file yet, so the five
-commands in step 5 are still five commands, and writing to a live Google
-Sheet still needs your own OAuth client.
+commands in step 5 are still five commands.
+
+Writing to a live Google Sheet no longer needs a Google Cloud project or
+an OAuth client of your own; the tool ships its own identity. That path
+is step 6, and it carries one real caveat you should read before
+counting on it.
 
 ## What you need
 
@@ -184,6 +188,89 @@ cd dbt_league && dbt deps && dbt seed && dbt build && cd ..
 python output/generate_almanac_sheet.py --no-sheets --preview-dir out/almanac_preview
 ```
 
+## 6. Optional: put it in a Google Sheet you can share
+
+Everything above writes files. This step writes your almanac into a
+**brand-new Google Sheet in your own Drive** and hands you a link.
+
+```bash
+python output/generate_almanac_sheet.py --duckdb --new-public-workbook
+```
+
+**You do not need a Google Cloud project, an enabled API, or an OAuth
+client of your own.** The released build ships its own Google identity,
+the way any installed app does. There is nothing to create and no path to
+configure.
+
+**It has to be the released build, though, and not a clone.** The Google
+credential is packaged into the release archive; it is deliberately not
+in this repository's source, because a credential in public git history
+is reported to Google by GitHub's own scanning and cannot be removed
+afterwards. So:
+
+- **Using the tool?** Download `fantasy-league-almanac-<version>.zip`
+  from the [Releases page](https://github.com/KyleDawson24/fantasy-league-almanac/releases),
+  unzip it, and run the commands above from inside it. That copy carries
+  the identity.
+- **Working on the code?** A `git clone` is the developer path, and it is
+  the right thing -- everything else in this guide works from it. But
+  this one step will stop with a message saying the build shipped no
+  identity. That is correct, not a bug. Point
+  `GOOGLE_PUBLIC_OAUTH_CLIENT_PATH` at an OAuth client of your own
+  ([SETUP.md section 10](SETUP.md#10-optional-google-sheets-sink)) if you
+  need the live path from a checkout.
+
+What happens, in order:
+
+1. It prints what it is about to ask Google for, and that the workbook it
+   creates will be shared as anyone-with-the-link viewer.
+2. Your browser opens Google's normal consent screen. You pick an account
+   and approve.
+3. It creates a new spreadsheet, renders the full almanac into it, sets it
+   to anyone-with-the-link **viewer**, reads that permission back to
+   confirm, and only then prints `Your almanac: <link> -- share-ready.`
+
+If any of those three steps does not happen, you do not get that line --
+you get the workbook's URL and a plain sentence about what went wrong.
+The workbook is yours either way; it is never deleted to tidy up.
+
+The permission it asks for is `drive.file`, which Google classifies as
+non-sensitive: **it can only see files it creates itself.** It cannot
+list, open, or read anything else in your Drive. Only the new workbook is
+shared; nothing already in your Drive changes.
+
+Later runs reuse a token cached at `output/.sheets_public_oauth_token.json`
+and do not open a browser. That file, the ledger of workbooks this tool
+created, your DuckDB file and your ESPN cookies are all ordinary local
+files -- protected by your operating system's file permissions and kept
+out of git by `.gitignore`, and by nothing else. Nothing is uploaded
+anywhere except the almanac you asked to be written. Delete the token file
+to forget the grant locally, and revoke it for real at
+[myaccount.google.com](https://myaccount.google.com/permissions) --
+whenever you choose, since nothing here expires it for you.
+
+### The caveat: this identity is not open to the public yet
+
+The shipped Google identity is currently in Google's **testing** mode.
+That means:
+
+- only Google accounts added as test users can complete the consent
+  screen -- everyone else is turned away by Google, not by this tool;
+- grants issued in testing mode **expire after about a week**, so you
+  would be asked to consent again;
+- the consent screen shows an unverified app.
+
+Moving it to production needs a published homepage, privacy policy, terms
+and branding review. That work is tracked and is a release gate. Until it
+lands, treat this step as working-but-not-yet-open: the code path is real
+and tested, and if you are not a test user Google will stop you.
+
+If you would rather use your own OAuth client -- maintainers, and anyone
+working from a clone or testing against a different Google project --
+that route is an advanced override, described in
+[SETUP.md section 10](SETUP.md#10-optional-google-sheets-sink). It is not
+a prerequisite for anything above.
+
 ## What you get
 
 `out/almanac_preview/` holds one tab-separated file per almanac tab: the
@@ -193,10 +280,8 @@ per team. Open them in anything.
 `python output/generate_summary.py` prints a weekly recap as BBCode, ready
 to paste into a league message board.
 
-Writing all of this into a live Google Sheet instead of files is
-optional and needs a Google OAuth client. That is
-[SETUP.md section 10](SETUP.md#10-optional-google-sheets-sink); nothing
-above requires it.
+And, from step 6, a Google Sheet in your own Drive with a link you can
+paste into your league chat.
 
 ## What this path does not cover yet
 

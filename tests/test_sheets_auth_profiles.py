@@ -405,3 +405,244 @@ def test_get_profile_rejects_an_unknown_name():
         sheets_auth.get_profile('admin')
     assert sheets_auth.get_profile('public') is sheets_auth.PUBLIC
     assert sheets_auth.get_profile('maintainer') is sheets_auth.MAINTAINER
+
+
+# ---------------------------------------------------------------------------
+# Which client consents (MLB-209): the bundled identity and its override
+# ---------------------------------------------------------------------------
+#
+# The public profile stopped being env-only when the published tool got an
+# identity of its own. The maintainer profile did not, and the tests below
+# are mostly about that asymmetry holding.
+
+# The SHIPPED identity: client id and PKCE, no secret. Google marks
+# client_secret optional for installed apps and code_verifier required,
+# so this is the documented shape rather than a corner cut.
+SYNTHETIC_BUNDLED_CLIENT = {
+    'installed': {
+        'client_id': '000000000000-synthetic.apps.googleusercontent.com',
+        'client_secret': 'GOCSPX-' + ('SYNTHETICbundled' + '0' * 28)[:28],
+        'auth_uri': 'https://accounts.google.com/o/oauth2/auth',
+        'token_uri': 'https://oauth2.googleapis.com/token',
+    },
+}
+
+# A maintainer's OWN client, which may well carry a secret. The override
+# path must keep working for these unchanged.
+SYNTHETIC_BYO_CLIENT = {
+    'installed': {
+        **SYNTHETIC_BUNDLED_CLIENT['installed'],
+        'client_secret': 'SYNTHETIC-not-a-real-secret',
+    },
+}
+
+
+@pytest.fixture
+def no_client_env(monkeypatch):
+    """A clean environment. `.env` is loaded in some runs, so the vars
+    are deleted rather than assumed absent."""
+    monkeypatch.delenv('GOOGLE_PUBLIC_OAUTH_CLIENT_PATH', raising=False)
+    monkeypatch.delenv('GOOGLE_OAUTH_CLIENT_PATH', raising=False)
+
+
+@pytest.fixture
+def bundled(monkeypatch):
+    """Point the public profile at a synthetic bundled identity."""
+    monkeypatch.setattr(
+        sheets_auth.public_oauth_client, 'BUNDLED_PUBLIC_CLIENT',
+        SYNTHETIC_BUNDLED_CLIENT)
+
+
+def test_the_public_profile_needs_no_env_var_at_all(no_client_env, bundled):
+    """THE POINT OF THE TICKET. Nothing set, no file on disk, and the
+    published tool can still consent -- which is what makes 'you do not
+    need a Google Cloud project' a true sentence."""
+    source = sheets_auth.resolve_client_source(sheets_auth.PUBLIC)
+
+    assert source.kind == 'bundled'
+    assert source.path is None
+    assert source.config['installed']['client_id'].endswith(
+        '.apps.googleusercontent.com')
+
+
+def test_an_explicit_public_override_still_wins(no_client_env, bundled,
+                                                tmp_path, monkeypatch):
+    """Maintainers and testers need to be able to consent as some other
+    client without editing the repo."""
+    byo = tmp_path / 'byo-client.json'
+    byo.write_text(json.dumps(SYNTHETIC_BYO_CLIENT), encoding='utf-8')
+    monkeypatch.setenv('GOOGLE_PUBLIC_OAUTH_CLIENT_PATH', str(byo))
+
+    source = sheets_auth.resolve_client_source(sheets_auth.PUBLIC)
+
+    assert source.kind == 'env'
+    assert source.path == str(byo)
+
+
+def test_a_broken_override_is_an_error_and_not_a_fallback(
+        no_client_env, bundled, tmp_path, monkeypatch):
+    """A set-but-wrong path must NOT quietly become the shipped identity.
+    A developer who typo'd a path would otherwise be consented as the
+    published app and never find out which client they were testing."""
+    monkeypatch.setenv('GOOGLE_PUBLIC_OAUTH_CLIENT_PATH',
+                       str(tmp_path / 'does-not-exist.json'))
+
+    with pytest.raises(RuntimeError, match='not found'):
+        sheets_auth.resolve_client_source(sheets_auth.PUBLIC)
+
+
+def test_the_maintainer_profile_stays_env_only(no_client_env):
+    """It has no bundled client and must never grow one: the maintainer's
+    `spreadsheets` grant opens the standing dev/prod books, and the
+    published identity has no business anywhere near them."""
+    assert sheets_auth.MAINTAINER.bundled_client is None
+
+    with pytest.raises(RuntimeError, match='GOOGLE_OAUTH_CLIENT_PATH'):
+        sheets_auth.resolve_client_source(sheets_auth.MAINTAINER)
+
+
+def test_the_maintainer_cannot_borrow_the_public_client(
+        no_client_env, bundled, tmp_path, monkeypatch):
+    """Even with the public side fully configured, the maintainer profile
+    resolves nothing -- the two never cross."""
+    byo = tmp_path / 'public-client.json'
+    byo.write_text(json.dumps(SYNTHETIC_BYO_CLIENT), encoding='utf-8')
+    monkeypatch.setenv('GOOGLE_PUBLIC_OAUTH_CLIENT_PATH', str(byo))
+
+    with pytest.raises(RuntimeError, match='GOOGLE_OAUTH_CLIENT_PATH'):
+        sheets_auth.resolve_client_source(sheets_auth.MAINTAINER)
+
+
+def test_an_unusable_bundled_identity_fails_before_any_browser(
+        no_client_env, monkeypatch):
+    """A packaging failure has to cost an error message, not a consent
+    screen followed by a KeyError. `InstalledAppFlow` is replaced with a
+    tripwire: if resolution ever gets far enough to build a flow, the
+    browser was one line away."""
+    monkeypatch.setattr(
+        sheets_auth.public_oauth_client, 'BUNDLED_PUBLIC_CLIENT',
+        {'installed': {'client_id': ''}})
+
+    class _Tripwire:
+        @staticmethod
+        def from_client_config(config, scopes):
+            raise AssertionError('a flow was built from a broken descriptor')
+
+        @staticmethod
+        def from_client_secrets_file(path, scopes):
+            raise AssertionError('the bundled path read a client file')
+
+    monkeypatch.setattr(sheets_auth, 'InstalledAppFlow', _Tripwire)
+
+    with pytest.raises(RuntimeError, match='packaging problem'):
+        sheets_auth.run_consent_flow(sheets_auth.PUBLIC)
+
+
+def _recording_flow(monkeypatch, returned_creds):
+    """A flow that records which constructor the consent path used.
+
+    BOTH flow names are replaced. The bundled path goes through
+    `BundledInstalledAppFlow` and the env path through the stock
+    `InstalledAppFlow`, and a recorder installed on only one of them
+    would let the other reach a real browser.
+    """
+    used = {}
+
+    class _Flow:
+        @classmethod
+        def from_client_config(cls, config, scopes):
+            used['how'] = 'config'
+            used['scopes'] = list(scopes)
+            used['config'] = config
+            return cls()
+
+        @classmethod
+        def from_client_secrets_file(cls, path, scopes):
+            used['how'] = 'file'
+            used['scopes'] = list(scopes)
+            used['path'] = path
+            return cls()
+
+        def run_local_server(self, port=0):
+            return returned_creds
+
+    monkeypatch.setattr(sheets_auth, 'InstalledAppFlow', _Flow)
+    monkeypatch.setattr(sheets_auth, 'BundledInstalledAppFlow', _Flow)
+    return used
+
+
+def test_the_bundled_identity_reaches_the_flow_in_memory(
+        no_client_env, bundled, monkeypatch):
+    """No temp file, no path -- the descriptor is handed to the library
+    as a mapping, which is why there is nothing on disk for a stranger to
+    lose, leak or have to install."""
+    used = _recording_flow(
+        monkeypatch, _FakeCreds([DRIVE_FILE], granted_scopes=[DRIVE_FILE]))
+
+    sheets_auth.run_consent_flow(sheets_auth.PUBLIC)
+
+    assert used['how'] == 'config'
+    assert used['config'] == SYNTHETIC_BUNDLED_CLIENT
+    assert used['scopes'] == [DRIVE_FILE]
+
+
+def test_a_byo_override_cannot_widen_what_the_public_profile_requests(
+        no_client_env, bundled, tmp_path, monkeypatch):
+    """Scopes come from the PROFILE, never from the client file. A client
+    JSON has no scope field to begin with, so the only way an override
+    could widen the request is if someone wired one -- this is the test
+    that would catch that."""
+    byo = tmp_path / 'byo-client.json'
+    byo.write_text(json.dumps({
+        'installed': {**SYNTHETIC_BYO_CLIENT['installed'],
+                      'scopes': [SPREADSHEETS]},   # ignored, and must be
+    }), encoding='utf-8')
+    monkeypatch.setenv('GOOGLE_PUBLIC_OAUTH_CLIENT_PATH', str(byo))
+
+    used = _recording_flow(
+        monkeypatch, _FakeCreds([DRIVE_FILE], granted_scopes=[DRIVE_FILE]))
+
+    sheets_auth.run_consent_flow(sheets_auth.PUBLIC)
+
+    assert used['how'] == 'file'
+    assert used['scopes'] == [DRIVE_FILE]
+    assert SPREADSHEETS not in used['scopes']
+
+
+def test_the_bundled_public_grant_is_still_judged_exactly(
+        profiles, no_client_env, bundled, monkeypatch):
+    """Shipping the client changed WHO asks. It must not have changed
+    what counts as an acceptable answer."""
+    _, public = profiles
+    _recording_flow(monkeypatch, _FakeCreds(
+        [DRIVE_FILE], granted_scopes=[DRIVE_FILE, SPREADSHEETS]))
+
+    with pytest.raises(RuntimeError, match='on top of what was requested'):
+        sheets_auth.authorized_client(public)
+
+    assert not public.token_path.exists()
+
+
+# ---------------------------------------------------------------------------
+# What the user is told before the browser opens
+# ---------------------------------------------------------------------------
+
+def test_the_public_disclosure_describes_per_file_access_and_no_enumeration():
+    text = sheets_auth.consent_disclosure(sheets_auth.PUBLIC)
+
+    assert 'drive.file' in text
+    assert 'create this one workbook' in text
+    assert 'cannot list, open, or read anything else' in text
+
+
+def test_the_disclosure_is_derived_from_the_scopes_it_describes():
+    """Written out beside the scopes rather than from them, this sentence
+    would be one edit away from describing a request the code no longer
+    makes. A profile asking for something else gets a different
+    sentence."""
+    wider = dataclasses.replace(
+        sheets_auth.PUBLIC, scopes=(DRIVE_FILE, SPREADSHEETS))
+    text = sheets_auth.consent_disclosure(wider)
+
+    assert 'cannot list, open, or read anything else' not in text
+    assert SPREADSHEETS in text

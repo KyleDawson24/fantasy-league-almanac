@@ -293,10 +293,17 @@ def publish_new_public_workbook(args, season_year, matchup_period,
 
     `client` / `publish` exist so the sequencing can be tested without
     Google. Nothing here reads a configured sheet id.
+
+    The disclosure is printed FIRST, before anything can open a browser,
+    and it is printed on the injected-client path too -- a disclosure
+    that only appears when a real consent happens is not a disclosure,
+    it is a side effect.
     """
     title = safe_workbook_title(args.public_workbook_title)
+    print(f'[almanac] {sheets_auth.consent_disclosure(sheets_auth.PUBLIC)}')
+    print(f'[almanac] {sheets_workbook.LINK_SHARING_DISCLOSURE}')
     if client is None:
-        client = sheets_auth.authorized_client(sheets_auth.PUBLIC)
+        client = _authorize_public_client()
     if publish is None:
         publish = sheets_workbook.publish_workbook
 
@@ -315,6 +322,31 @@ def publish_new_public_workbook(args, season_year, matchup_period,
     )
     report_publish_result(result)
     return result
+
+
+def _authorize_public_client():
+    """Authorize as the published app, turning an auth failure into an
+    exit code and one sentence.
+
+    Without this the two ways authorization can fail both surface as a
+    raw traceback, which is a bad way to tell somebody their install is
+    incomplete. `sheets_auth` raises `RuntimeError` for exactly two
+    things and both are the user's business rather than a bug:
+
+      - no usable identity (the descriptor did not ship, or an explicit
+        GOOGLE_PUBLIC_OAUTH_CLIENT_PATH points nowhere) -- raised by the
+        resolver, so no browser has opened;
+      - a consent that granted the wrong scopes -- raised after the
+        browser, with its own instructions.
+
+    Exit 2 rather than 1: argparse's usage-error code, which is what this
+    is from the outside -- the command as invoked cannot run.
+    """
+    try:
+        return sheets_auth.authorized_client(sheets_auth.PUBLIC)
+    except RuntimeError as exc:
+        print(f'[almanac] {exc}')
+        raise SystemExit(2)
 
 
 def report_publish_result(result):

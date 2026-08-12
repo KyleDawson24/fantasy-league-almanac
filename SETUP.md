@@ -660,8 +660,84 @@ without a reviewed cause is the bug the harness exists to catch.
 
 ## 10. Optional: Google Sheets sink
 
-The records report can also write to a Google Sheet (17-column / 3-tab
-layout for offline analysis). Skip if you only want the BBCode output.
+Two different routes live here, and which one you want depends on whether
+you are publishing a new workbook or writing into one you already own.
+
+### 10a. A new share-ready almanac workbook -- no Google Cloud project
+
+```bash
+python output/generate_almanac_sheet.py --duckdb --new-public-workbook
+```
+
+**No Google Cloud project, no enabled API, no OAuth client of your own,
+and no environment variable.** The released build ships its own Google
+identity, as installed applications do; it lives in a Cloud project used
+for nothing else, and it is not the maintainer's client.
+
+**Released build, not a clone.** The credential is injected into the
+release archive by `tools/build_release_bundle.py` and is deliberately
+absent from tracked source. GitHub's partner secret scanning reads public
+repository history out of band from anything a repository can configure,
+reports supported credentials to Google, and leaves Google deciding
+whether the credential stays valid -- and history cannot be rewritten
+after the fact. So consumers download
+`fantasy-league-almanac-<version>.zip` from the Releases page and run from
+inside it. A clone is the developer path: everything else works, and this
+one command stops with a message saying the build shipped no identity.
+That is the fail-closed state working, and section 10b is how a developer
+gets past it.
+
+It requests exactly one permission, `drive.file`, which Google classifies
+as non-sensitive: an app holding it sees only the files it created
+itself. It cannot enumerate, open, or read the rest of your Drive. On the
+first run your browser opens Google's consent screen; later runs use a
+token cached at `output/.sheets_public_oauth_token.json` and open no
+browser.
+
+The run creates a workbook, renders the almanac into it, sets it to
+anyone-with-the-link **viewer**, reads that permission back, and only then
+prints `Your almanac: <link> -- share-ready.` A failure at any of those
+steps withholds that line and prints the workbook's URL with a plain
+description of what went wrong. Your workbook is never deleted to clean
+up after a failure.
+
+Local state stays local. The cached token, the ledger of workbooks the
+tool created (`output/.sheets_public_workbooks.json`), your DuckDB file
+and your ESPN cookies are ordinary files on your disk, protected by your
+operating system's file permissions and excluded from git by
+`.gitignore` -- there is no other protection, and no encryption at rest.
+Deleting the token file forgets the grant locally; revoking it properly
+is at [myaccount.google.com](https://myaccount.google.com/permissions),
+whenever you decide. Nothing here expires on your behalf.
+
+**Not yet open to the public.** The shipped identity is in Google's
+*testing* mode: only accounts added as test users can get through the
+consent screen, those grants expire after roughly a week, and the screen
+shows an unverified app. Publishing it needs a homepage, a privacy
+policy, terms, and Google's branding review -- a separate release gate.
+Until that lands, this path works for test users and Google will stop
+everybody else.
+
+### 10b. Advanced: bring your own OAuth client
+
+You need this route if you are writing to a workbook you already created
+(the records report, or `--prod`), or if you want to consent as a client
+of your own rather than the shipped one. It is an override, not a
+prerequisite for 10a.
+
+Two separate environment variables, deliberately never interchangeable:
+
+- `GOOGLE_OAUTH_CLIENT_PATH` -- the **maintainer** profile. Requests the
+  `spreadsheets` scope and opens EXISTING workbooks by id. A `drive.file`
+  client can never see a workbook it did not create, so this is the only
+  route to a sheet you made by hand.
+- `GOOGLE_PUBLIC_OAUTH_CLIENT_PATH` -- overrides the shipped identity for
+  the `--new-public-workbook` path. Set it and it wins; leave it unset and
+  the shipped identity is used. A path that is set but wrong is an error,
+  never a silent fall-back.
+
+The two profiles have different scopes, different client configs and
+different token caches, and neither can read or overwrite the other's.
 
 ### Create a GCP project + OAuth client
 

@@ -10,10 +10,33 @@ output/.sheets_oauth_token.json
 # MLB-209: the second OAuth profile (the published tool's drive.file
 # grant) caches separately, and the ledger of workbooks that profile
 # created holds spreadsheet ids -- which for a link-viewable book ARE the
-# capability. Both are per-user state, never committed. The OAuth client
-# JSON for either profile lives outside the repo entirely.
+# capability. Both are per-user state, never committed.
 output/.sheets_public_oauth_token.json
 output/.sheets_public_workbooks.json
+#
+# BACKING ONE OF THESE UP: keep `.json` LAST. `*.json` matches on the
+# final extension, so `.sheets_public_oauth_token.json.bak` is NOT
+# ignored -- it lands untracked-but-committable, holding live refresh
+# tokens, one `git add .` from disaster. Use
+# `.sheets_public_oauth_token.pre-<thing>.json` instead. This was caught
+# during MLB-209 before any harm; it is written down so it is not
+# re-derived under time pressure.
+#
+# The MAINTAINER's client JSON still lives outside the repo entirely.
+# The PUBLISHED tool's client is different in kind and does ship, as
+# `output/public_oauth_client.py`, secret included -- Google's token
+# endpoint requires a client secret for that configured Desktop client
+# (measured live, MLB-209), and an installed app cannot keep one
+# confidential anyway. It is a dedicated, rotatable credential in a Cloud
+# project used for nothing else, guarded by a narrow format-scoped
+# exception in `.gitleaks.toml`. Tokens are still never committed; a
+# client descriptor is not a token.
+#
+# It is a .py and not a .json on purpose: the blanket `*.json` rule below
+# has only four narrow re-includes, none of them `output/`, so a
+# descriptor written as JSON there would be silently unshippable --
+# `git add` would refuse it and a clone would never receive it, while
+# the docs claimed no client was needed.
 # Defensive: any private-key file shape, in case one ever ends up
 # inside the repo dir by accident. Keys are recommended to live in the
 # home directory (see SETUP.md key-pair auth section); these patterns
@@ -22,6 +45,15 @@ output/.sheets_public_workbooks.json
 *.pem
 *.key
 id_rsa*
+
+# Release bundles (MLB-209). `tools/build_release_bundle.py` writes the
+# distributable ZIP here, and that ZIP CONTAINS THE PUBLIC OAUTH CLIENT
+# SECRET -- injected into a temporary tree, never into tracked source.
+# GitHub's partner secret scanning reports supported credentials found in
+# public history straight to Google, out of band from any scanner config
+# in this repo, so a bundle that got committed could not be un-committed.
+# This entry is what keeps `git add -A` from doing it.
+dist/
 
 # Python
 .venv/

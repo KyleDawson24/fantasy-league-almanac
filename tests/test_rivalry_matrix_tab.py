@@ -24,12 +24,14 @@ if str(REPO_ROOT / "output") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "output"))
 
 from almanac_logic import (  # noqa: E402
+    RIVALRY_INDENT_COLS,
     RIVALRY_MATCHUP_LEDGER,
     RIVALRY_MATRIX_LABEL,
     RIVALRY_SEASON_LEDGER,
     build_advanced_standings_tab_rows,
     build_rivalry_matrix_rows,
     format_rivalry_record,
+    rivalry_cell_win_pct,
     rivalry_matrix_grid,
 )
 
@@ -75,13 +77,30 @@ PAIRS = [
 ]
 
 
+def _unindent(row):
+    """One block row with its two-column indent stripped.
+
+    The block sits at column C; everything about WHAT it says is unchanged by
+    that. So the content tests below work in logical coordinates and the
+    indentation tests work on raw rows -- each asserting its own concern
+    instead of every cell lookup carrying a +2.
+    """
+    return list(row[RIVALRY_INDENT_COLS:]) if row else list(row)
+
+
+def _labels(rows):
+    """The first cell of each non-blank block row, indent stripped."""
+    return [_unindent(r)[0] for r in rows if r and _unindent(r)]
+
+
 def _grids(rows):
-    """The rendered grid, keyed by its ledger label. One entry: format
-    dispatch means a league shows the one ledger its format gives meaning to.
-    Kept as a mapping so a test names which ledger it expected rather than
-    assuming."""
+    """The rendered grid, keyed by its ledger label, in logical coordinates.
+    One entry: format dispatch means a league shows the one ledger its format
+    gives meaning to. Kept as a mapping so a test names which ledger it
+    expected rather than assuming."""
     out, current = {}, None
-    for row in rows:
+    for raw in rows:
+        row = _unindent(raw)
         if row and row[0] in (RIVALRY_MATCHUP_LEDGER, RIVALRY_SEASON_LEDGER):
             current = row[0]
             out[current] = []
@@ -157,7 +176,7 @@ def test_the_two_ledgers_are_independent(rows=None):
 def test_an_h2h_league_shows_only_the_matchup_ledger(rows=None):
     """One matrix, not two. A season-points table under an H2H league's
     head-to-head grid is a product decision nobody made."""
-    labels = [r[0] for r in build_rivalry_matrix_rows(AXES, PAIRS) if r]
+    labels = _labels(build_rivalry_matrix_rows(AXES, PAIRS))
 
     assert RIVALRY_MATCHUP_LEDGER in labels
     assert RIVALRY_SEASON_LEDGER not in labels
@@ -167,7 +186,7 @@ def test_a_points_league_shows_only_the_season_ledger(rows=None):
     """A points league has no matchups at all, so a head-to-head grid there is
     a square of 0-0 meaning "this league does not work that way" -- which is
     not what 0-0 says anywhere else on the tab."""
-    labels = [r[0] for r in build_rivalry_matrix_rows(POINTS_AXES, PAIRS) if r]
+    labels = _labels(build_rivalry_matrix_rows(POINTS_AXES, PAIRS))
 
     assert RIVALRY_SEASON_LEDGER in labels
     assert RIVALRY_MATCHUP_LEDGER not in labels
@@ -212,7 +231,8 @@ def test_both_books_render_the_same_contract(rows=None):
     come from one function, which is what stops the two workbooks from drifting
     into two different products."""
     matrix = rivalry_matrix_grid(POINTS_AXES, PAIRS)
-    espn_rows = build_rivalry_matrix_rows(POINTS_AXES, PAIRS)
+    espn_rows = [_unindent(r) for r in
+                 build_rivalry_matrix_rows(POINTS_AXES, PAIRS)]
 
     assert matrix['header'] in espn_rows
     for grid_row in matrix['grid']:
@@ -236,7 +256,7 @@ def test_the_axes_are_identities_and_keep_their_order(rows=None):
     gave -- including a configured-name identity that may stand for several
     live platform ids."""
     rows = build_rivalry_matrix_rows(AXES, PAIRS)
-    header = next(r for r in rows if r and r[0] == 'Team')
+    header = next(_unindent(r) for r in rows if _unindent(r)[:1] == ['Team'])
 
     assert header == ['Team', 'ALPH', 'BENT', 'CROW']
     assert [r[0] for r in _grids(rows)[RIVALRY_MATCHUP_LEDGER]] == [
@@ -300,11 +320,11 @@ def test_the_block_lands_on_advanced_standings(rows=None):
     given axes."""
     rows = build_advanced_standings_tab_rows(
         [], [], [], 2026, rivalry_axes=AXES, rivalry_pairs=PAIRS)
-    labels = [r[0] for r in rows if r]
+    flat = [str(c) for r in rows for c in r]
 
-    assert RIVALRY_MATRIX_LABEL in labels
-    assert RIVALRY_MATCHUP_LEDGER in labels
-    assert RIVALRY_SEASON_LEDGER not in labels
+    assert RIVALRY_MATRIX_LABEL in flat
+    assert RIVALRY_MATCHUP_LEDGER in flat
+    assert RIVALRY_SEASON_LEDGER not in flat
 
 
 def test_the_tab_is_unchanged_when_no_rivalry_data_is_passed(rows=None):
@@ -325,7 +345,7 @@ def test_the_matrix_is_the_last_block_on_the_tab(rows=None):
     rows = build_advanced_standings_tab_rows(
         [], [], [], 2026, rivalry_axes=AXES, rivalry_pairs=PAIRS)
     banner = next(i for i, r in enumerate(rows)
-                  if r and r[0] == RIVALRY_MATRIX_LABEL)
+                  if RIVALRY_MATRIX_LABEL in r)
 
     assert all(not r or r[0] != 'Advanced Standings'
                for r in rows[banner:])
@@ -360,7 +380,7 @@ def test_no_evidence_says_why_and_says_it_loudly(rows=None):
     """A conspicuous state, not a quiet blank. It has to say the difference out
     loud: nothing is known, as opposed to nobody having won."""
     rows = build_rivalry_matrix_rows(NO_EVIDENCE_AXES, [])
-    notice = next(r[0] for r in rows if r and 'UNAVAILABLE' in str(r[0]))
+    notice = next(c for r in rows for c in r if 'UNAVAILABLE' in str(c))
 
     assert 'RIVALRY RESULTS UNAVAILABLE' in notice
     assert 'not a record of nobody winning' in notice
@@ -418,7 +438,161 @@ def test_the_tab_still_carries_the_section_when_evidence_is_missing(rows=None):
     rather than finding nothing and wondering whether the publish broke."""
     rows = build_advanced_standings_tab_rows(
         [], [], [], 2026, rivalry_axes=NO_EVIDENCE_AXES, rivalry_pairs=[])
-    labels = [r[0] for r in rows if r]
+    flat = [str(c) for r in rows for c in r]
 
-    assert RIVALRY_MATRIX_LABEL in labels
-    assert RIVALRY_MATCHUP_LEDGER not in labels
+    assert RIVALRY_MATRIX_LABEL in flat
+    assert RIVALRY_MATCHUP_LEDGER not in flat
+
+
+# ===========================================================================
+# Indentation and cell shading (visual pass)
+# ===========================================================================
+#
+# The block sits two columns right, so its content begins in column C. Every
+# line of it moves together -- banner, explainer, ledger label, header, team
+# labels and cells -- because a title at the margin with a table wandering off
+# under it does not read as one object.
+
+
+def _first_col(row):
+    """0-based index of the first non-empty cell, or None for a blank row."""
+    return next((i for i, c in enumerate(row) if str(c) != ''), None)
+
+
+def test_every_line_of_the_block_starts_in_column_c(rows=None):
+    rows = build_rivalry_matrix_rows(AXES, PAIRS)
+    starts = {_first_col(r) for r in rows if _first_col(r) is not None}
+
+    assert starts == {RIVALRY_INDENT_COLS}
+
+
+def test_the_banner_moves_with_the_block(rows=None):
+    """The title indents too. Its navy band still runs from column A across
+    the tab -- that band is a full-width divider -- so what moved is the label
+    on it, not the band."""
+    rows = build_rivalry_matrix_rows(AXES, PAIRS)
+    banner = next(r for r in rows if RIVALRY_MATRIX_LABEL in r)
+
+    assert banner[RIVALRY_INDENT_COLS] == RIVALRY_MATRIX_LABEL
+    assert banner[:RIVALRY_INDENT_COLS] == [''] * RIVALRY_INDENT_COLS
+
+
+def test_the_unavailable_state_is_indented_too(rows=None):
+    """Both states, or the block jumps left when a league has no history."""
+    rows = build_rivalry_matrix_rows(NO_EVIDENCE_AXES, [])
+    starts = {_first_col(r) for r in rows if _first_col(r) is not None}
+
+    assert starts == {RIVALRY_INDENT_COLS}
+
+
+def test_the_grid_keeps_its_shape_under_the_indent(rows=None):
+    """The shift is a translation, not a reshape: same labels, same cells, two
+    columns right."""
+    rows = build_rivalry_matrix_rows(AXES, PAIRS)
+    header_at = next(i for i, r in enumerate(rows)
+                     if _unindent(r)[:1] == ['Team'])
+    grid = rows[header_at + 1:]
+
+    assert [r[RIVALRY_INDENT_COLS] for r in grid] == [
+        'Alpha Anchors', 'Bent Spokes', 'Cedar Crows']
+    assert grid[0][RIVALRY_INDENT_COLS + 2] == '5-2-1'
+    for row in grid:
+        assert len(row) == len(AXES) + 1 + RIVALRY_INDENT_COLS
+
+
+def test_the_indent_is_shared_by_both_books(rows=None):
+    """One constant, so the two workbooks cannot drift apart on it."""
+    import cbs_almanac_sheets
+
+    assert cbs_almanac_sheets.RIVALRY_INDENT_COLS == RIVALRY_INDENT_COLS
+
+
+# -- cell shading -----------------------------------------------------------
+def test_win_percentage_counts_a_tie_as_half(rows=None):
+    assert rivalry_cell_win_pct('5-2-1') == pytest.approx(5.5 / 8)
+    assert rivalry_cell_win_pct('6-6') == pytest.approx(0.5)
+    assert rivalry_cell_win_pct('12-4-0') == pytest.approx(0.75)
+
+
+def test_cells_with_no_percentage_get_no_colour(rows=None):
+    """A blank diagonal has no record, and 0-0 has no decisions -- 0-0 is not
+    0.000, and shading it deep red would invent a drubbing out of two teams
+    that have never played."""
+    assert rivalry_cell_win_pct('') is None
+    assert rivalry_cell_win_pct('0-0') is None
+    assert rivalry_cell_win_pct('0-0-0') is None
+    assert rivalry_cell_win_pct(None) is None
+    assert rivalry_cell_win_pct('not a record') is None
+
+
+def test_reciprocal_cells_shade_to_opposite_sides(rows=None):
+    """A .688 and its mirror .312 sit equal distances either side of the white
+    midpoint, which is what makes the grid readable diagonally."""
+    forward = rivalry_cell_win_pct('5-2-1')
+    reverse = rivalry_cell_win_pct('2-5-1')
+
+    assert forward + reverse == pytest.approx(1.0)
+    assert forward > 0.5 > reverse
+
+
+def test_the_shading_does_not_touch_the_text(rows=None):
+    """Colour is a second channel on the record, not a replacement for it."""
+    grid = _grids(build_rivalry_matrix_rows(AXES, PAIRS))[RIVALRY_MATCHUP_LEDGER]
+
+    assert grid[0][2] == '5-2-1'
+    assert grid[1][1] == '2-5-1'
+
+
+# -- the ESPN write layer's shading specs ------------------------------------
+#
+# Private import, same doctrine as cbs_almanac_sheets importing
+# _draft_gradient_color: the shading is one house scale used by two books, and
+# testing it through a Sheets publish is not testing at all.
+from almanac_write import _rivalry_shade_specs  # noqa: E402
+
+
+def _espn_shades():
+    rows = build_rivalry_matrix_rows(AXES, PAIRS)
+    ledger_at = next(i for i, r in enumerate(rows)
+                     if _unindent(r)[:1] == [RIVALRY_MATCHUP_LEDGER])
+    return rows, ledger_at, _rivalry_shade_specs(rows, ledger_at)
+
+
+def test_the_espn_grid_shades_only_its_decided_cells(rows=None):
+    """Two decided cells in this fixture -- Alpha's 5-2-1 and its mirror. The
+    diagonal and the never-met 0-0s get nothing."""
+    _rows, _ledger, specs = _espn_shades()
+
+    assert len(specs) == 2
+    assert all(set(s['format']) == {'backgroundColor'} for s in specs)
+
+
+def test_the_espn_shades_land_either_side_of_neutral(rows=None):
+    """.688 and .312 -- one green side, one red side, on the house gradient
+    whose midpoint is white at .500."""
+    _rows, _ledger, specs = _espn_shades()
+    by_range = {s['range']: s['format']['backgroundColor'] for s in specs}
+    winning = next(c for c in by_range.values() if c['green'] > c['red'])
+    losing = next(c for c in by_range.values() if c['red'] > c['green'])
+
+    assert winning['green'] > winning['red']
+    assert losing['red'] > losing['green']
+
+
+def test_the_espn_shades_sit_in_the_indented_columns(rows=None):
+    """Cells start at column D -- one right of the team labels in C."""
+    _rows, _ledger, specs = _espn_shades()
+    cols = {''.join(c for c in s['range'] if c.isalpha()) for s in specs}
+
+    assert cols <= {'D', 'E', 'F'}
+    assert 'A' not in cols and 'B' not in cols
+
+
+def test_an_all_zero_espn_grid_shades_nothing(rows=None):
+    """Every pair genuinely new to each other: 0-0 everywhere, no decisions,
+    no colour."""
+    rows = build_rivalry_matrix_rows(AXES, [])
+    ledger_at = next(i for i, r in enumerate(rows)
+                     if _unindent(r)[:1] == [RIVALRY_MATCHUP_LEDGER])
+
+    assert _rivalry_shade_specs(rows, ledger_at) == []

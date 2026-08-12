@@ -53,8 +53,10 @@ from almanac_data import (
 from almanac_logic import (
     SCORE_RECORD_SPECS,
     build_advanced_standings_tab_rows,
+    RIVALRY_INDENT_COLS,
     RIVALRY_MATCHUP_LEDGER,
     RIVALRY_SEASON_LEDGER,
+    rivalry_cell_win_pct,
     build_trades_tab_rows,
     build_draft_board_color_grid,
     build_draft_tab_rows,
@@ -808,6 +810,56 @@ def _affinity_bounds(rows):
     return bounds
 
 
+def _rivalry_shade_specs(rows, ledger_idx):
+    """Per-cell red -> white -> green shading for the matrix grid under the
+    ledger label at `ledger_idx` (0-based).
+
+    The scale is the house draft gradient, unchanged and reused rather than a
+    second palette invented for one block: fed 0..1, .500 lands exactly on its
+    white midpoint, which is what "centred on .500" means. Nothing here touches
+    the cell TEXT -- a W-L string is what a reader quotes at each other, and a
+    colour is a second channel on top of it, not a replacement.
+
+    Cells that carry no percentage carry no colour: the blank diagonal, and a
+    0-0 pair that has never met. 0-0 is not 0.000, and shading it deep red
+    would invent a drubbing out of two teams that have never played. The
+    unavailable-evidence state never reaches here at all -- it renders no grid.
+    """
+    header_idx = ledger_idx + 1
+    first0 = RIVALRY_INDENT_COLS + 1
+    specs = []
+    row_idx = header_idx + 1
+    while (row_idx < len(rows) and len(rows[row_idx]) > RIVALRY_INDENT_COLS
+           and rows[row_idx][RIVALRY_INDENT_COLS] not in ('', None)):
+        for col, cell in enumerate(rows[row_idx][first0:], start=first0):
+            pct = rivalry_cell_win_pct(cell)
+            if pct is None:
+                continue
+            specs.append({
+                'range': f'{_a1_col(col + 1)}{row_idx + 1}',
+                'format': {'backgroundColor': _draft_gradient_color(
+                    pct, 0.0, 1.0)},
+            })
+        row_idx += 1
+    return specs
+
+
+def _section_title_at(row, prefixes):
+    """The section title on this row, or None.
+
+    Two columns are checked and only two: A, where every section banner has
+    always put its label, and the Rivalry Matrix's indent column, where that
+    one block now puts its own. Returning the TITLE rather than a boolean keeps
+    the caller's downstream `title.startswith(...)` / `title in (...)` tests
+    working on the text wherever it was found.
+    """
+    for col in (0, RIVALRY_INDENT_COLS):
+        if len(row) > col and isinstance(row[col], str) \
+                and row[col].startswith(prefixes):
+            return row[col]
+    return None
+
+
 def _stale_conditional_rule_requests(spreadsheet, worksheet, rows=None):
     """Wipe requests for state that ACCUMULATES across reruns on this
     worksheet: conditional-format rules (each render adds at index 0;
@@ -1225,9 +1277,14 @@ def _replace_advanced_standings_tab(spreadsheet, rows, stat_specs):
         band_specs = []
         scope_cells = []
         for i, row in enumerate(rows):
-            title = row[0] if row else None
-            if not (isinstance(title, str)
-                    and title.startswith(section_title_prefixes)):
+            # A section label sits in column A on the five older blocks and in
+            # column C on the indented Rivalry Matrix, so the label is looked
+            # up at either. Explicit columns rather than "the first non-empty
+            # cell": several banner rows carry scope captions and the side
+            # finishes table further right, and any of those would satisfy a
+            # scan.
+            title = _section_title_at(row, section_title_prefixes)
+            if title is None:
                 continue
             # Band width = the widest nearby row that isn't the hidden
             # helper block (helper rows park past column 45).
@@ -1263,24 +1320,34 @@ def _replace_advanced_standings_tab(spreadsheet, rows, stat_specs):
                          'Rivalry Matrix'):
                 # The explainer-style caption directly underneath. Was a
                 # local size-10 (MLB-142); now the house token (MLB-170).
+                #
+                # The range starts where the CONTENT starts, so the indented
+                # block's caption does not style cells outside its own block.
+                caption0 = (RIVALRY_INDENT_COLS if title == 'Rivalry Matrix'
+                            else 0)
                 formats.append({
-                    'range': f'A{i + 2}:{last_col}{i + 2}',
+                    'range': (f'{_a1_col(caption0 + 1)}{i + 2}'
+                              f':{last_col}{i + 2}'),
                     'format': {'textFormat': explainer_text_format()},
                 })
-        # The Rivalry Matrix's two grid labels and their header rows
-        # (MLB-229). Plain bold, per the house convention that navy is for
-        # SECTION bands and the tables inside one are bold -- the two ledgers
-        # are halves of a single section, not two sections. Matched on the
-        # labels rather than folded into header_indices below, because those
-        # locators key off the geometry of the tables they were written for
-        # and this grid has its team names in column A.
+        # The Rivalry Matrix's ledger label and header row (MLB-229). Plain
+        # bold, per the house convention that navy is for SECTION bands and the
+        # tables inside one are bold. Matched on the label rather than folded
+        # into header_indices below, because those locators key off the
+        # geometry of the tables they were written for.
+        #
+        # Read at the INDENT column: the block moved to column C whole, label
+        # included.
         for i, row in enumerate(rows):
-            if row and row[0] in (RIVALRY_MATCHUP_LEDGER,
-                                  RIVALRY_SEASON_LEDGER):
+            if (len(row) > RIVALRY_INDENT_COLS
+                    and row[RIVALRY_INDENT_COLS] in (RIVALRY_MATCHUP_LEDGER,
+                                                     RIVALRY_SEASON_LEDGER)):
                 formats.append({
-                    'range': f'A{i + 1}:{last_col}{i + 2}',
+                    'range': (f'{_a1_col(RIVALRY_INDENT_COLS + 1)}{i + 1}'
+                              f':{last_col}{i + 2}'),
                     'format': {'textFormat': {'bold': True}},
                 })
+                formats.extend(_rivalry_shade_specs(rows, i))
         if band_specs:
             band_col = _a1_col(max(w for _, w in band_specs))
             for i, _w in band_specs:

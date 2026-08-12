@@ -442,6 +442,14 @@ class TestRivalryMatrix:
              'has_rivalry_evidence': True, 'sort_order': 2},
         ]
 
+    # The block is indented two columns (Kyle's visual pass), so content tests
+    # strip it and the indentation test below asserts on raw rows.
+    IND = cbs.RIVALRY_INDENT_COLS
+
+    @classmethod
+    def _unindent(cls, row):
+        return list(row[cls.IND:]) if row else list(row)
+
     @staticmethod
     def _pairs():
         def row(a, b, sw, sl, st):
@@ -457,29 +465,33 @@ class TestRivalryMatrix:
     def test_a_points_league_renders_the_season_ledger(self, monkeypatch):
         rows, _ = _build(monkeypatch, rivalry_axes=self._axes(),
                          rivalry_pairs=self._pairs())
-        banner = next(r for r in rows if r and r[0] == 'Rivalry Matrix')
+        banner = self._unindent(
+            next(r for r in rows if 'Rivalry Matrix' in r))
 
         # The ledger name rides the banner as a scope caption -- this tab's
         # idiom for saying what the cells are.
+        assert banner[0] == 'Rivalry Matrix'
         assert banner[1] == 'Season Points'
         assert 'Head-to-Head Matchups' not in [c for r in rows for c in r]
 
     def test_the_cells_read_from_the_row_teams_perspective(self, monkeypatch):
         rows, _ = _build(monkeypatch, rivalry_axes=self._axes(),
                          rivalry_pairs=self._pairs())
-        header = rows.index(['Team', 'ALP', 'BET'])
+        header = next(i for i, r in enumerate(rows)
+                      if self._unindent(r) == ['Team', 'ALP', 'BET'])
 
-        assert rows[header + 1] == ['Alpha', '', '4-1']
-        assert rows[header + 2] == ['Beta', '1-4', '']
+        assert self._unindent(rows[header + 1]) == ['Alpha', '', '4-1']
+        assert self._unindent(rows[header + 2]) == ['Beta', '1-4', '']
 
     def test_the_diagonal_is_blank_and_never_met_is_zero(self, monkeypatch):
         """The two empty cells stay distinguishable in this book too."""
         rows, _ = _build(monkeypatch, rivalry_axes=self._axes(),
                          rivalry_pairs=[])
-        header = rows.index(['Team', 'ALP', 'BET'])
+        header = next(i for i, r in enumerate(rows)
+                      if self._unindent(r) == ['Team', 'ALP', 'BET'])
 
-        assert rows[header + 1] == ['Alpha', '', '0-0']
-        assert rows[header + 2] == ['Beta', '0-0', '']
+        assert self._unindent(rows[header + 1]) == ['Alpha', '', '0-0']
+        assert self._unindent(rows[header + 2]) == ['Beta', '0-0', '']
 
     def test_the_block_takes_the_house_section_dressing(self, monkeypatch):
         """Navy band on the label, explainer token on the note, bold header --
@@ -487,7 +499,7 @@ class TestRivalryMatrix:
         rows, formats = _build(monkeypatch, rivalry_axes=self._axes(),
                                rivalry_pairs=self._pairs())
         label_row = next(i for i, r in enumerate(rows)
-                         if r and r[0] == 'Rivalry Matrix') + 1
+                         if 'Rivalry Matrix' in r) + 1
         # Not every spec is a range format -- this tab also emits chart and
         # dimension requests.
         ranges = {s['range']: s['format'] for s in formats
@@ -497,9 +509,10 @@ class TestRivalryMatrix:
                     if r.startswith(f'A{label_row}:'))
         assert band['backgroundColor'] == cbs._NAVY
         assert band['textFormat']['bold'] is True
-        header_row = rows.index(['Team', 'ALP', 'BET']) + 1
+        header_row = next(i for i, r in enumerate(rows)
+                          if self._unindent(r) == ['Team', 'ALP', 'BET']) + 1
         header_fmt = next(f for r, f in ranges.items()
-                          if r.startswith(f'A{header_row}:'))
+                          if r.startswith(f'C{header_row}:'))
         assert header_fmt['textFormat'] == {'bold': True}
 
     def test_no_axes_renders_no_block(self, monkeypatch):
@@ -515,7 +528,8 @@ class TestRivalryMatrix:
         what a platform-name check would have got wrong."""
         rows, _ = _build(monkeypatch, rivalry_axes=self._axes('h2h'),
                          rivalry_pairs=self._pairs())
-        banner = next(r for r in rows if r and r[0] == 'Rivalry Matrix')
+        banner = self._unindent(
+            next(r for r in rows if 'Rivalry Matrix' in r))
 
         assert banner[1] == 'Head-to-Head Matchups'
         assert 'Season Points' not in [c for r in rows for c in r]
@@ -532,16 +546,16 @@ class TestRivalryMatrix:
         assert 'Rivalry Matrix' in flat
         assert any('RIVALRY RESULTS UNAVAILABLE' in c for c in flat)
         assert '0-0' not in flat
-        assert ['Team', 'ALP', 'BET'] not in rows
+        assert ['Team', 'ALP', 'BET'] not in [self._unindent(r) for r in rows]
 
     def test_the_unavailable_banner_names_no_ledger(self, monkeypatch):
         """Naming a ledger over a notice saying there is none reads as a table
         that failed to load, rather than a league with no history yet."""
         axes = [dict(a, has_rivalry_evidence=False) for a in self._axes()]
         rows, _ = _build(monkeypatch, rivalry_axes=axes, rivalry_pairs=[])
-        banner = next(r for r in rows if r and r[0] == 'Rivalry Matrix')
+        banner = next(r for r in rows if 'Rivalry Matrix' in r)
 
-        assert banner == ['Rivalry Matrix']
+        assert self._unindent(banner) == ['Rivalry Matrix']
 
     def test_unknown_and_proven_zero_differ_in_this_book_too(self, monkeypatch):
         """Same axes, same empty ledger; only provability differs."""
@@ -567,3 +581,87 @@ class TestRivalryMatrix:
                   for r in bands}
 
         assert len(widths) == 1, f'navy bands ran to differing widths: {widths}'
+
+    # -- indentation and shading (visual pass) ------------------------------
+
+    def test_every_line_of_the_block_starts_in_column_c(self, monkeypatch):
+        """The whole block moves together -- banner, explainer, header, team
+        labels, cells -- so it reads as one object instead of a title at the
+        margin with a table wandering off under it."""
+        rows, _ = _build(monkeypatch, rivalry_axes=self._axes(),
+                         rivalry_pairs=self._pairs())
+        start = next(i for i, r in enumerate(rows) if 'Rivalry Matrix' in r)
+        block = [r for r in rows[start:] if r]
+        firsts = {next(i for i, c in enumerate(r) if str(c) != '')
+                  for r in block}
+
+        assert firsts == {self.IND}
+
+    def test_the_navy_band_still_starts_at_column_a(self, monkeypatch):
+        """The one deliberate exception. The band is a full-width divider
+        across the tab; indenting it would leave a notch."""
+        rows, formats = _build(monkeypatch, rivalry_axes=self._axes(),
+                               rivalry_pairs=self._pairs())
+        label_row = next(i for i, r in enumerate(rows)
+                         if 'Rivalry Matrix' in r) + 1
+        band = next(s for s in formats
+                    if s.get('range', '').startswith(f'A{label_row}:')
+                    and s.get('format', {}).get('backgroundColor') == cbs._NAVY)
+
+        assert band['range'].startswith('A')
+
+    def test_the_text_formats_follow_the_indent(self, monkeypatch):
+        """An indented header whose bold ran from column A would style empty
+        cells outside its own block."""
+        rows, formats = _build(monkeypatch, rivalry_axes=self._axes(),
+                               rivalry_pairs=self._pairs())
+        header_row = next(i for i, r in enumerate(rows)
+                          if self._unindent(r) == ['Team', 'ALP', 'BET']) + 1
+        note_row = header_row - 1
+        ranges = [s['range'] for s in formats if 'range' in s]
+
+        assert any(r.startswith(f'C{header_row}:') for r in ranges)
+        assert any(r.startswith(f'C{note_row}:') for r in ranges)
+
+    def test_cells_are_shaded_by_win_percentage(self, monkeypatch):
+        """Red -> white -> green on the house draft gradient, .500 at its white
+        midpoint. Alpha is 4-1 (.800) and Beta 1-4 (.200), so the two sit
+        either side of neutral."""
+        rows, formats = _build(monkeypatch, rivalry_axes=self._axes(),
+                               rivalry_pairs=self._pairs())
+        header_row = next(i for i, r in enumerate(rows)
+                          if self._unindent(r) == ['Team', 'ALP', 'BET']) + 1
+        fills = {s['range']: s['format']['backgroundColor'] for s in formats
+                 if 'range' in s
+                 and s.get('format', {}).keys() == {'backgroundColor'}
+                 and s['range'][1:].isdigit()
+                 and int(s['range'][1:]) > header_row}
+
+        # Alpha's 4-1 against Beta, and Beta's 1-4 against Alpha.
+        assert len(fills) == 2
+        alpha, beta = (fills[f'E{header_row + 1}'], fills[f'D{header_row + 2}'])
+        assert alpha['green'] > alpha['red']      # winning -> green side
+        assert beta['red'] > beta['green']        # losing  -> red side
+
+    def test_the_diagonal_and_never_met_cells_get_no_fill(self, monkeypatch):
+        """0-0 is not 0.000. Shading a never-met pair deep red would invent a
+        drubbing out of two teams that have never played."""
+        rows, formats = _build(monkeypatch, rivalry_axes=self._axes(),
+                               rivalry_pairs=[])
+        header_row = next(i for i, r in enumerate(rows)
+                          if self._unindent(r) == ['Team', 'ALP', 'BET']) + 1
+        fills = [s for s in formats
+                 if 'range' in s
+                 and s.get('format', {}).keys() == {'backgroundColor'}
+                 and s['range'][1:].isdigit()
+                 and int(s['range'][1:]) > header_row]
+
+        assert fills == []
+
+    def test_shading_does_not_change_the_displayed_record(self, monkeypatch):
+        rows, _ = _build(monkeypatch, rivalry_axes=self._axes(),
+                         rivalry_pairs=self._pairs())
+        header = next(i for i, r in enumerate(rows)
+                      if self._unindent(r) == ['Team', 'ALP', 'BET'])
+
+        assert self._unindent(rows[header + 1]) == ['Alpha', '', '4-1']

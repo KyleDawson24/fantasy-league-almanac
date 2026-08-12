@@ -1653,6 +1653,12 @@ def format_rivalry_record(wins, losses, ties):
 RIVALRY_MATCHUP_LEDGER = 'Head-to-Head Matchups'
 RIVALRY_SEASON_LEDGER = 'Season Points'
 
+# How far the whole Rivalry Matrix block is indented, in columns. Two, so its
+# content begins in column C -- shared by both books so the two cannot drift,
+# and named so the write layers can find a label that is no longer in column A
+# without either of them hardcoding a 2.
+RIVALRY_INDENT_COLS = 2
+
 # Which ledger a league's matrix MEANS, by format. The matrix is one table
 # whose definition of "a game" follows the format: in a head-to-head league a
 # rivalry is a record of matchups; in a points league there are no matchups at
@@ -1828,35 +1834,81 @@ def rivalry_matrix_grid(axes, pairs, league_format=None):
     }
 
 
+def rivalry_cell_win_pct(text):
+    """A rendered matrix cell -> its winning percentage, or None for a cell
+    that must carry no competitive colour.
+
+    None for the blank diagonal (a team has no record against itself), for a
+    0-0 never-met cell (no decisions, so no percentage exists -- 0-0 is not
+    0.000), and for anything that is not a record at all.
+
+    PARSED BACK OUT OF THE TEXT, deliberately. Both books hand their write
+    layer rows of strings, and format_rivalry_record is the single place those
+    strings are made -- so reading them back keeps the colouring on the same
+    side of the rows-only seam the rest of the tab lives on, instead of
+    threading a parallel grid of numbers through two different pipelines to
+    say what the cell already says.
+    """
+    if not isinstance(text, str):
+        return None
+    parts = text.split('-')
+    if len(parts) not in (2, 3) or not all(p.isdigit() for p in parts):
+        return None
+    wins, losses = int(parts[0]), int(parts[1])
+    ties = int(parts[2]) if len(parts) == 3 else 0
+    decisions = wins + losses + ties
+    if decisions == 0:
+        return None
+    return (wins + 0.5 * ties) / decisions
+
+
 def build_rivalry_matrix_rows(axes, pairs, banner_width=None,
                               league_format=None):
     """The ESPN almanac's layout of the Rivalry Matrix: banner, explainer,
     ledger label, header, grid. Rows only -- almanac_write paints them.
 
     The contract is rivalry_matrix_grid's; this is the arrangement.
+
+    INDENTED TO COLUMN C (Kyle, visual pass). Every line of the block moves
+    together -- banner, explainer, ledger label, header, team labels and cells
+    -- so the block reads as one object rather than a title at the margin with
+    a table wandering off under it. Column C is also the Owner column's 125px,
+    which is what team names want; the cells then start at D on the 40px value
+    width, which is what "12-4" wants.
+
+    The banner text moves WITH the block. Its navy band still runs from column
+    A across the tab -- the band is a full-width divider and always was -- so
+    what changes is where the label sits on it, not the band. almanac_write
+    finds the label at either column, so the five older sections that keep
+    theirs at A are untouched.
     """
     matrix = rivalry_matrix_grid(axes, pairs, league_format)
     if matrix is None:
         return []
 
-    width = banner_width if banner_width else matrix['width']
-    banner = [''] * max(width, matrix['width'])
-    banner[0] = RIVALRY_MATRIX_LABEL
+    pad = [''] * RIVALRY_INDENT_COLS
+
+    def _indent(row):
+        return [*pad, *row]
+
+    width = banner_width if banner_width else matrix['width'] + RIVALRY_INDENT_COLS
+    banner = [''] * max(width, matrix['width'] + RIVALRY_INDENT_COLS)
+    banner[RIVALRY_INDENT_COLS] = RIVALRY_MATRIX_LABEL
 
     # The banner stays even when there is nothing to draw: a reader who has
     # heard the matrix exists should find it and be told why it is empty,
     # rather than find nothing and wonder whether the publish broke.
     if not matrix['available']:
-        return [[], banner, [matrix['notice']]]
+        return [[], banner, _indent([matrix['notice']])]
 
     return [
         [],
         banner,
-        [matrix['explainer']],
+        _indent([matrix['explainer']]),
         [],
-        [matrix['ledger']],
-        matrix['header'],
-        *matrix['grid'],
+        _indent([matrix['ledger']]),
+        _indent(matrix['header']),
+        *(_indent(row) for row in matrix['grid']),
     ]
 
 

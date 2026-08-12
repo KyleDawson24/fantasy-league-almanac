@@ -68,7 +68,9 @@ from cbs_draft_recap_data import get_draft_history
 # (b)-refactor seam -- promoting these to a shared library module.
 from almanac_logic import (
     _HOME_SCORING_CALLOUT,
+    RIVALRY_INDENT_COLS,
     RIVALRY_MATRIX_LABEL,
+    rivalry_cell_win_pct,
     _deviation_by_slot,
     _merge_home_bands,
     build_team_history_tabs,
@@ -3581,15 +3583,22 @@ def build_standings_rows(context, arc, finishes, active_franchises,
                                        'backgroundColor': _PALE_BLUE}},
     ]
 
-    def _section(label, scopes=None, width='AA'):
+    def _section(label, scopes=None, width='AA', indent=0):
         # scopes: [(col0, text)] era/scope captions riding the banner row
         # (MLB-142) -- the records tab's note-beside-the-label idiom, but
         # positioned per block. The caption format is textFormat-only and
         # WHITE: it must survive the unified-navy-width pass (which
         # rewrites every backgroundColor=_NAVY range) and stay legible on
         # the navy band, unlike the records tab's powder-blue one.
-        cells = [label]
+        #
+        # indent shifts the LABEL and its scope captions right, for a block
+        # whose content is indented and whose banner should sit over it rather
+        # than out at the margin. Defaults to 0, so every existing caller is
+        # unchanged. The navy band itself still starts at column A -- it is a
+        # full-width divider, and indenting it would leave a notch.
+        cells = [''] * indent + [label]
         for col0, text in scopes or ():
+            col0 += indent
             cells.extend([''] * (col0 + 1 - len(cells)))
             cells[col0] = text
         rows.append(cells)
@@ -3601,21 +3610,26 @@ def build_standings_rows(context, arc, finishes, active_franchises,
         # foregroundColor lives in textFormat, which the field mask
         # replaces wholesale.
         for col0, _text in scopes or ():
-            formats.append({'range': f'{_col(col0 + 1)}{len(rows)}',
+            formats.append({'range': f'{_col(col0 + indent + 1)}{len(rows)}',
                             'format': {'textFormat': explainer_text_format(
                                 foregroundColor=_WHITE)}})
 
-    def _header(cells, width='AA'):
-        rows.append(cells)
-        formats.append({'range': f'A{len(rows)}:{width}{len(rows)}',
+    def _header(cells, width='AA', indent=0):
+        # The range starts where the CONTENT starts. An indented header whose
+        # bold ran from column A would style empty cells outside its own block
+        # -- invisible today, and wrong the moment anything is written there.
+        # The navy band above is the deliberate exception: it is a full-width
+        # divider, and indenting it would leave a notch.
+        rows.append([''] * indent + list(cells))
+        formats.append({'range': f'{_col(indent + 1)}{len(rows)}:{width}{len(rows)}',
                         'format': {'textFormat': {'bold': True}}})
 
-    def _note(text, width='AA'):
+    def _note(text, width='AA', indent=0):
         # Every explainer on this tab funnels through here -- section
         # notes AND the per-lens acquisition captions. House token
-        # (MLB-170, down from 10).
-        rows.append([text])
-        formats.append({'range': f'A{len(rows)}:{width}{len(rows)}',
+        # (MLB-170, down from 10). Range follows the indent, per _header.
+        rows.append([''] * indent + [text])
+        formats.append({'range': f'{_col(indent + 1)}{len(rows)}:{width}{len(rows)}',
                         'format': {'textFormat': explainer_text_format()}})
 
     latest = [r for r in arc if r['is_latest_period']]
@@ -4309,7 +4323,7 @@ def build_standings_rows(context, arc, finishes, active_franchises,
     if rivalry_axes:
         matrix = rivalry_matrix_grid(rivalry_axes, rivalry_pairs or [])
         if matrix:
-            matrix_col = _col(matrix['width'])
+            matrix_col = _col(matrix['width'] + RIVALRY_INDENT_COLS)
             rows.append([])
             if matrix['available']:
                 # The ledger name rides the banner as a SCOPE caption, which is
@@ -4322,18 +4336,41 @@ def build_standings_rows(context, arc, finishes, active_franchises,
                 # not say what kind is the one thing format dispatch must not
                 # leave ambiguous.
                 _section(RIVALRY_MATRIX_LABEL, scopes=[(1, matrix['ledger'])],
-                         width=matrix_col)
-                _note(matrix['explainer'], width=matrix_col)
-                _header(matrix['header'], width=matrix_col)
-                rows.extend(matrix['grid'])
+                         width=matrix_col, indent=RIVALRY_INDENT_COLS)
+                _note(matrix['explainer'], width=matrix_col,
+                      indent=RIVALRY_INDENT_COLS)
+                _header(matrix['header'], width=matrix_col,
+                        indent=RIVALRY_INDENT_COLS)
+                # Per-cell red -> white -> green by winning percentage. Same
+                # house draft gradient the ESPN book uses and the same shared
+                # parser, so one scale means one thing in both workbooks; .500
+                # is its white midpoint. The TEXT never changes -- the colour
+                # is a second channel on the record, not a replacement for it.
+                # A blank diagonal and a never-met 0-0 get none: 0-0 is not
+                # 0.000, and shading it deep red would invent a drubbing.
+                first0 = RIVALRY_INDENT_COLS + 1
+                for grid_row in matrix['grid']:
+                    rows.append([''] * RIVALRY_INDENT_COLS + grid_row)
+                    for col, cell in enumerate(rows[-1][first0:],
+                                               start=first0):
+                        pct = rivalry_cell_win_pct(cell)
+                        if pct is None:
+                            continue
+                        formats.append({
+                            'range': f'{_col(col + 1)}{len(rows)}',
+                            'format': {'backgroundColor':
+                                       _draft_gradient_color(pct, 0.0, 1.0)},
+                        })
             else:
                 # No evidence, so no cells -- see rivalry_matrix_grid. The
                 # banner stays so the reader finds the section and is told why
                 # it is empty; the ledger name comes OFF it, because naming a
                 # ledger over a notice saying there is none reads as a table
                 # that failed to load rather than a league with no history yet.
-                _section(RIVALRY_MATRIX_LABEL, width=matrix_col)
-                _note(matrix['notice'], width=matrix_col)
+                _section(RIVALRY_MATRIX_LABEL, width=matrix_col,
+                         indent=RIVALRY_INDENT_COLS)
+                _note(matrix['notice'], width=matrix_col,
+                      indent=RIVALRY_INDENT_COLS)
 
     # Unified navy width (Kyle round 12): every section band runs as far
     # as the widest one on the tab.

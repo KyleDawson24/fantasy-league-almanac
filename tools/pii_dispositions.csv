@@ -16,6 +16,7 @@ dbt_league/models/intermediate/int_cbs__roster_stints.sql,owner,77491e9aa5026e89
 dbt_league/seeds/schema.yml,owner,0f2fc185ab1bcf74,collision,"an MLB player's name, not a league member",2026-08-10
 dbt_league/seeds/schema.yml,owner,5ed79f73719c1bf2,collision,"the ordinary English word, used in its ordinary sense",2026-08-10
 dbt_league/seeds/schema.yml,owner,cba349c2d640dd63,collision,"the ordinary English word, used in its ordinary sense",2026-08-10
+dbt_league/tests/assert_rivalry_has_no_diagonal.sql,owner,ac1c6c11351210ac,collision,Ordinary non-identity source wording and a synthetic structural fixture value in the rivalry feature,2026-08-12
 demo/league_config/cbs_early_anchors_backfill.csv,owner,08b78b6efc9a95d3,collision,"an MLB player's name, not a league member",2026-08-10
 demo/league_config/cbs_early_anchors_backfill.csv,owner,0e8f6af0ce70a477,collision,a published synthetic twin fixture,2026-08-10
 demo/league_config/cbs_early_anchors_backfill.csv,owner,10fcb2818576c5f4,collision,"an MLB player's name, not a league member",2026-08-10
@@ -123,6 +124,9 @@ extract/mlb_crosswalk.py,owner,3df7a333e31dc07f,collision,"an MLB player's name,
 extract/mlb_crosswalk.py,owner,63d8074303da32d1,collision,"an MLB player's name, not a league member",2026-08-10
 extract/mlb_crosswalk.py,owner,e8a0e35e2f800ed7,collision,"an MLB player's name, not a league member",2026-08-10
 extract/mlb_crosswalk.py,owner,ee7a79ed57fb8fe3,collision,"an MLB player's name, not a league member",2026-08-10
+output/almanac_logic.py,owner,5760559997720a74,collision,Ordinary non-identity source wording and a synthetic structural fixture value in the rivalry feature,2026-08-12
+output/almanac_logic.py,owner,69bd14d5c99af3a2,collision,Ordinary non-identity source wording and a synthetic structural fixture value in the rivalry feature,2026-08-12
+output/almanac_logic.py,owner,a1b25c40db9dba89,collision,Ordinary non-identity source wording and a synthetic structural fixture value in the rivalry feature,2026-08-12
 output/almanac_render.py,owner,0fcbe706abf20202,collision,"the ordinary English word, used in its ordinary sense",2026-08-10
 output/almanac_render.py,owner,a86e8fc2da8b0501,collision,"an MLB player's name, not a league member",2026-08-10
 output/almanac_render.py,owner,cf337e411235154d,collision,"an MLB player's name, not a league member",2026-08-10
@@ -239,6 +243,7 @@ tests/test_check_pii_strict.py,team-id,37664d1e8aa5ce5f,collision,synthetic fixt
 tests/test_check_pii_strict.py,team-id,3fd1d3cfc0e0e1b0,collision,synthetic fixture value that happens to sit in an identity-shaped position,2026-08-10
 tests/test_check_pii_strict.py,team-id,5a8c3bf304d6329c,collision,synthetic fixture value that happens to sit in an identity-shaped position,2026-08-10
 tests/test_check_pii_strict.py,team-id,e99bd9db0b6ffdd8,collision,synthetic fixture value that happens to sit in an identity-shaped position,2026-08-10
+tests/test_franchise_rivalry.py,team-id,6cb483ce0dd8f5c1,collision,Ordinary non-identity source wording and a synthetic structural fixture value in the rivalry feature,2026-08-12
 tests/test_league_config_templates.py,owner,557213b8c90deaaf,collision,"the ordinary English word, used in its ordinary sense",2026-08-10
 tests/test_league_config_templates.py,owner,58d85cbf6e06d281,collision,"the ordinary English word, used in its ordinary sense",2026-08-10
 tests/test_local_raw_writer.py,team-id,c5d811027fe88200,collision,synthetic fixture value that happens to sit in an identity-shaped position,2026-08-10

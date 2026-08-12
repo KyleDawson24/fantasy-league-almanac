@@ -57,6 +57,13 @@ LEAGUE_CONFIG = PROJECT_DIR / "league_config"
 
 LEAGUE = "espn-fix"
 OTHER_LEAGUE = "espn-other"
+# One league per closure posture, so each proves one thing and nothing has two
+# jobs. Named for the posture rather than the platform -- none of this
+# dispatches on platform.
+OPEN_LEAGUE = "espn-open"       # latest season, no capture, no final evidence
+FINAL_LEAGUE = "espn-final"     # latest season, no capture, final ranks served
+BROKEN_LEAGUE = "espn-broken"   # capture present, payload unreadable
+POINTS_LEAGUE = "cbs-fix"       # no matchups at all -- the points format
 PEN = "9999"
 
 BUILD_SELECTION = [
@@ -64,6 +71,7 @@ BUILD_SELECTION = [
     "franchise_lineage",
     "stg_matchup_schedule",
     "int_matchup_period_evidence",
+    "int_league_season_closure",
     "int_franchise_seasons",
     "int_franchise_registry",
     "int_franchise_season_points",
@@ -71,6 +79,7 @@ BUILD_SELECTION = [
     "dim_franchise",
     "dim_franchise_season",
     "dim_franchise_identity",
+    "dim_league_format",
     "mart_franchise_rivalry",
     "mart_franchise_rivalry_axes",
     "assert_rivalry_reciprocity",
@@ -78,7 +87,9 @@ BUILD_SELECTION = [
     "assert_rivalry_has_no_diagonal",
     "assert_rivalry_results_partition_meetings",
     "assert_rivalry_identity_resolves",
+    "assert_rivalry_matchups_have_closure_evidence",
     "assert_configured_name_has_no_active_collision",
+    "assert_live_season_has_schedule_capture",
 ]
 
 # Two neighbouring singular tests ride along on models selected above and read
@@ -159,11 +170,29 @@ OBSERVED = [
     (41, 2021, "Bent Spokes West", "BSW"),
     (41, 2022, "Bent Spokes West", "BSW"),
     (41, 2023, "Bent Spokes West", "BSW"),
+
+    # A SEASON-SCOPED configured name lands on 2022 only. Deliberately given no
+    # matchups at all, so it forms pairs through the season ledger and cannot
+    # perturb any other team's head-to-head record while proving its own point.
+    (50, 2021, "Nomad Nine", "NMD"),
+    (50, 2022, "Nomad Nine", "NMD"),
+    (50, 2023, "Nomad Nine", "NMD"),
 ]
 
 OTHER_OBSERVED = [
     (1, 2023, "Alpha Anchors", "ALPH"),
     (2, 2023, "Beta Bandits", "BETA"),
+]
+
+# The three closure-posture leagues and the points league. Two teams each --
+# the posture is the subject, not the roster.
+POSTURE_OBSERVED = [
+    (1, 2024, "Open One", "OP1"),
+    (2, 2024, "Open Two", "OP2"),
+]
+POINTS_OBSERVED = [
+    (1, 2024, "Points One", "PT1"),
+    (2, 2024, "Points Two", "PT2"),
 ]
 
 # (league_key, franchise_id, season_year, canonical_franchise_id,
@@ -180,6 +209,11 @@ LINEAGE = [
     (LEAGUE, "41", "", "41", "Bent Spokes", "BENT"),
     # Season-scoped: 2022 belonged to nobody.
     (LEAGUE, "7", "2022", PEN, "", ""),
+    # SEASON-SCOPED CONFIGURED NAME. The seed schema has always allowed a name
+    # on a season row; dim_franchise_season used to read only the id from one,
+    # so this did nothing at all -- silently. It must now name franchise 50 for
+    # 2022 and leave 2021 and 2023 alone.
+    (LEAGUE, "50", "2022", "50", "Nomad Alias", "NMD2"),
 ]
 
 # (season_year, matchup_period, team_id, opponent_id, points, opponent_points)
@@ -218,6 +252,13 @@ OTHER_MEETINGS = [
     (2023, 1, 1, 2, 200.0, 100.0),
 ]
 
+# Identical running scores in each posture league's latest season. Whether they
+# count is decided ENTIRELY by the closure evidence, which is the point: the
+# matchup rows are the same, so any difference in the ledger is the gate.
+POSTURE_MEETINGS = [
+    (2024, 1, 1, 2, 150.0, 50.0),
+]
+
 # (season_year, team_id, platform_points) -- the platform's own season totals.
 # 2021 has no schedule capture and is not the league's latest season, so it is
 # complete by supersession; 2022 is complete by measurement; 2023 is in flight
@@ -239,7 +280,14 @@ SEASON_POINTS = [
     (2023, 40, 9999.0), (2023, 41, 9999.0),
 ]
 
+# The season-scoped-name franchise, across all three seasons.
+SEASON_POINTS += [(2021, 50, 450.0), (2022, 50, 460.0), (2023, 50, 9999.0)]
+
 OTHER_SEASON_POINTS = [(2023, 1, 500.0), (2023, 2, 400.0)]
+
+# One season each for the posture leagues, with the same totals, so the
+# season ledger's answer also turns purely on the closure evidence.
+POSTURE_SEASON_POINTS = [(2024, 1, 700.0), (2024, 2, 600.0)]
 
 
 def _result(points, opponent_points):
@@ -257,7 +305,10 @@ def _result(points, opponent_points):
 
 def _matchup_rows():
     rows = []
-    for league, meetings in ((LEAGUE, MEETINGS), (OTHER_LEAGUE, OTHER_MEETINGS)):
+    for league, meetings in ((LEAGUE, MEETINGS), (OTHER_LEAGUE, OTHER_MEETINGS),
+                             (OPEN_LEAGUE, POSTURE_MEETINGS),
+                             (FINAL_LEAGUE, POSTURE_MEETINGS),
+                             (BROKEN_LEAGUE, POSTURE_MEETINGS)):
         for season, period, team, opponent, pts, opp_pts in meetings:
             rows.append((league, season, period, team, opponent, pts, opp_pts,
                          _result(pts, opp_pts)))
@@ -320,6 +371,19 @@ SCHEDULE_CAPTURES = [
     (LEAGUE, 2023, _schedule_payload([7, 7], season_year=2023, current=2,
                                      complete=False)),
     # 2021 is deliberately absent -- the historical season nobody captured.
+
+    # The other league's only season, finished, so its cross-league isolation
+    # meeting still counts.
+    (OTHER_LEAGUE, 2023, _schedule_payload([7], season_year=2023, current=1,
+                                           complete=True)),
+
+    # PRESENT BUT UNREADABLE. A capture exists -- so has_schedule_capture is
+    # true and the season cannot fall back to "uncaptured history" -- but
+    # nothing downstream can derive a period from it. The gate must therefore
+    # find no closed period and count nothing.
+    (BROKEN_LEAGUE, 2024, {"seasonId": 2024, "status": {}, "schedule": []}),
+
+    # espn-open and espn-final have NO capture at all, deliberately.
 ]
 
 
@@ -386,7 +450,20 @@ def _create_inputs(con):
     con.execute("""
         create or replace table ANALYTICS.stg_team_standings (
             league_key varchar, season_year integer, team_id integer,
-            platform_points double)
+            platform_points double, final_rank integer)
+    """)
+    # dim_league_format's two signals. mart_period_standings exists only where
+    # a league has no matchups to be scored on, which is the points-format
+    # tell; stg_matchup_pairs is the positive evidence for the other side.
+    con.execute("""
+        create or replace table ANALYTICS.mart_period_standings (
+            league_key varchar, season_year integer, period integer,
+            team_id varchar)
+    """)
+    con.execute("""
+        create or replace table ANALYTICS.stg_matchup_pairs (
+            league_key varchar, season_year integer, matchup_period integer,
+            home_team_id integer, away_team_id integer)
     """)
     # The CBS arms, present and empty: this league is served by the derived /
     # delivered branches, and an absent relation would fail the build rather
@@ -407,21 +484,57 @@ def _populate(con):
     for league, season, payload in SCHEDULE_CAPTURES:
         con.execute("insert into RAW.MATCHUP_SCHEDULE values (?, ?, ?, ?)",
                     [season, json.dumps(payload), stamped, league])
-    for league, observed in ((LEAGUE, OBSERVED), (OTHER_LEAGUE, OTHER_OBSERVED)):
+    observed_by_league = [
+        (LEAGUE, OBSERVED), (OTHER_LEAGUE, OTHER_OBSERVED),
+        (OPEN_LEAGUE, POSTURE_OBSERVED), (FINAL_LEAGUE, POSTURE_OBSERVED),
+        (BROKEN_LEAGUE, POSTURE_OBSERVED), (POINTS_LEAGUE, POINTS_OBSERVED),
+    ]
+    for league, observed in observed_by_league:
         for team_id, season, name, abbrev in observed:
             con.execute(
                 "insert into ANALYTICS.stg_box_scores values (?, ?, ?, ?, ?, ?)",
                 [league, season, 1, team_id, name, abbrev])
+
+    # final_rank is NULL everywhere except espn-final, whose latest season has
+    # no schedule capture and must still count BECAUSE the platform published
+    # final ranks for it.
     for league, points in ((LEAGUE, SEASON_POINTS),
-                           (OTHER_LEAGUE, OTHER_SEASON_POINTS)):
+                           (OTHER_LEAGUE, OTHER_SEASON_POINTS),
+                           (OPEN_LEAGUE, POSTURE_SEASON_POINTS),
+                           (FINAL_LEAGUE, POSTURE_SEASON_POINTS),
+                           (BROKEN_LEAGUE, POSTURE_SEASON_POINTS)):
         for season, team_id, total in points:
             con.execute(
-                "insert into ANALYTICS.stg_team_standings values (?, ?, ?, ?)",
-                [league, season, team_id, total])
+                "insert into ANALYTICS.stg_team_standings values (?, ?, ?, ?, ?)",
+                [league, season, team_id, total,
+                 team_id if league == FINAL_LEAGUE else None])
+
+    # The points league: delivered period standings and parsed final standings,
+    # and NO matchups anywhere. Its rivalry is season points by construction.
+    for team_id, season, _name, _abbrev in POINTS_OBSERVED:
+        con.execute(
+            "insert into ANALYTICS.mart_period_standings values (?, ?, ?, ?)",
+            [POINTS_LEAGUE, season, 1, str(team_id)])
+    for season, team_id, total in ((2024, 1, 880.0), (2024, 2, 770.0)):
+        con.execute(
+            "insert into ANALYTICS.stg_cbs__ui_standings values (?, ?, ?, ?)",
+            [POINTS_LEAGUE, season, str(team_id), total])
+        # Its live team feed -- how a points league says which teams exist,
+        # and therefore where its matrix axes come from.
+        con.execute(
+            "insert into ANALYTICS.stg_cbs__standings values (?, ?, ?)",
+            [POINTS_LEAGUE, season, str(team_id)])
+
     for row in _matchup_rows():
         con.execute(
             "insert into ANALYTICS.mart_team_matchup values "
             "(?, ?, ?, ?, ?, ?, ?, ?)", list(row))
+        # The format signal mirrors the matchup surface: a league with pairings
+        # is head-to-head. Byes carry a NULL opponent and are not a pairing.
+        if row[4] is not None:
+            con.execute(
+                "insert into ANALYTICS.stg_matchup_pairs values (?, ?, ?, ?, ?)",
+                [row[0], row[1], row[2], row[3], row[4]])
 
 
 def _build(root, db_path):
@@ -466,7 +579,8 @@ def built(tmp_path_factory):
     empty_counts = {
         model: con.execute(f"select count(*) from ANALYTICS.{model}").fetchone()[0]
         for model in ("dim_franchise_identity", "int_franchise_season_points",
-                      "int_franchise_current_teams", "mart_franchise_rivalry",
+                      "int_franchise_current_teams", "int_league_season_closure",
+                      "dim_league_format", "mart_franchise_rivalry",
                       "mart_franchise_rivalry_axes")
     }
     _populate(con)
@@ -751,6 +865,81 @@ def test_historical_data_without_a_schedule_capture_is_retained(built):
     assert _pair(built, "fid:1", "fid:2")["first_meeting_season"] == 2021
 
 
+# ---------------------------------------------------------------------------
+# Closure fails CLOSED -- one league per posture, identical matchup rows
+# ---------------------------------------------------------------------------
+def test_the_closure_postures_are_what_the_fixture_says(built):
+    """The control for the four tests below. Same running scores in each
+    league's latest season; only the evidence differs."""
+    rows = built("""
+        select league_key, has_schedule_capture, is_season_complete,
+               completion_evidence
+        from ANALYTICS.int_league_season_closure
+        where season_year = 2024 order by league_key
+    """)
+
+    assert rows == [
+        (POINTS_LEAGUE, False, True, "parsed_final_standings"),
+        (BROKEN_LEAGUE, True, False, "schedule_capture"),
+        (FINAL_LEAGUE, False, True, "delivered_final_rank"),
+        (OPEN_LEAGUE, False, False, "unproven"),
+    ]
+
+
+def test_a_latest_season_with_no_capture_mints_nothing(built):
+    """THE FAIL-OPEN THIS REPLACES. A league that has never run the schedule
+    extract has a live season full of running scores, and the first version of
+    this ledger read "no capture" as "historical, keep everything" -- counting
+    this Tuesday as a win. Absence of evidence is not evidence of
+    completion."""
+    assert _matchup_record(built, "fid:1", "fid:2", league=OPEN_LEAGUE) is None
+
+
+def test_a_present_but_unreadable_capture_fails_closed(built):
+    """The same trap one layer down. This league HAS a capture, so it cannot
+    fall back to uncaptured history -- but the payload yields no period
+    evidence at all. A gate that decided capture presence from the derived
+    evidence would read zero rows as "never captured" and fail OPEN on exactly
+    the season whose payload it could not understand."""
+    assert built("""
+        select count(*) from ANALYTICS.int_matchup_period_evidence
+        where league_key = ?
+    """, [BROKEN_LEAGUE]) == [(0,)]
+    assert _matchup_record(built, "fid:1", "fid:2", league=BROKEN_LEAGUE) is None
+
+
+def test_a_latest_completed_season_counts_on_final_ranks_alone(built):
+    """ESPN serves rankCalculatedFinal = 0 for every team in a season that has
+    not finished, so a non-null final rank is the platform stating the season
+    is over. That is enough on its own -- the latest loaded season must not be
+    withheld merely because the OPTIONAL schedule capture has not run."""
+    assert _matchup_record(built, "fid:1", "fid:2", league=FINAL_LEAGUE) == \
+        (1, 1, 0, 0)
+    assert _season_record(built, "fid:1", "fid:2", league=FINAL_LEAGUE) == \
+        (1, 1, 0, 0)
+
+
+def test_a_superseded_season_with_no_capture_still_counts(built):
+    """espn-fix's 2021 predates the capture and the league has since played
+    2022 and 2023. A season the league moved past is over, and its history is
+    not the live season's problem."""
+    assert built("""
+        select is_season_complete, completion_evidence
+        from ANALYTICS.int_league_season_closure
+        where league_key = ? and season_year = 2021
+    """, [LEAGUE]) == [(True, "superseded_season")]
+    assert _pair(built, "fid:1", "fid:2")["first_meeting_season"] == 2021
+
+
+def test_the_missing_capture_is_reported_rather_than_silent(built):
+    """The gate is closed and silent, and a maintainer whose current season is
+    simply absent cannot tell that from a season in which nothing has happened.
+    So a warn-severity test names the league and the remedy."""
+    assert ("Warning in test assert_live_season_has_schedule_capture"
+            in built.build_output)
+    assert "ERROR=0" in built.build_output
+
+
 def test_playoff_and_abnormal_periods_are_not_the_gate(built):
     """Closure is the only period gate. Every closed period contributes,
     whatever its length or bracket -- a win in a 10-day opening week is a win.
@@ -927,6 +1116,93 @@ def test_season_points_reciprocate(built):
 
 
 # ===========================================================================
+# Season-scoped configured names
+# ===========================================================================
+def test_a_season_scoped_configured_name_applies_to_that_season(built):
+    """The seed schema has always allowed a name on a season-scoped row, and
+    dim_franchise_season used to read only the id from one -- so a league could
+    name a single season's team and get no effect and no error. 50 is "Nomad
+    Alias" in 2022 and itself either side."""
+    rows = built("""
+        select season_year, identity_key, identity_source
+        from ANALYTICS.dim_franchise_identity
+        where league_key = ? and franchise_id = '50' order by season_year
+    """, [LEAGUE])
+
+    assert rows == [(2021, "fid:50", "franchise_id"),
+                    (2022, "name:Nomad Alias", "configured_name"),
+                    (2023, "fid:50", "franchise_id")]
+
+
+def test_the_season_scoped_name_does_not_rewrite_other_seasons(built):
+    """A season-scoped row speaks about ONE franchise-season. 50's 2021 points
+    belong to fid:50 and its 2022 points to the alias -- one season each,
+    against the same rival, rather than both landing on either."""
+    assert _season_record(built, "fid:50", "fid:1") == (1, 0, 1, 0)
+    assert _season_record(built, "name:Nomad Alias", "fid:1") == (1, 0, 1, 0)
+    assert _pair(built, "fid:50", "fid:1")["first_season_compared"] == 2021
+    assert _pair(built, "name:Nomad Alias", "fid:1")["first_season_compared"] \
+        == 2022
+
+
+def test_the_season_scoped_name_reaches_the_display_too(built):
+    """Honouring it in the identity but not the label would have the matrix
+    call a team one thing while the rest of the almanac called it another --
+    for the one season the league went out of its way to name."""
+    assert built("""
+        select canonical_name, configured_name, has_configured_name
+        from ANALYTICS.dim_franchise_season
+        where league_key = ? and franchise_id = '50' and season_year = 2022
+    """, [LEAGUE]) == [("Nomad Alias", "Nomad Alias", True)]
+
+
+# ===========================================================================
+# Format dispatch
+# ===========================================================================
+def test_the_format_is_read_from_data_not_platform(built):
+    """cbs-fix has delivered period standings and no matchups; the espn-*
+    leagues have matchups and no period standings. Nothing here looks at the
+    platform half of the league key -- a CBS H2H league and an ESPN points
+    league both exist and both would be misfiled by that."""
+    rows = built("""
+        select league_key, league_format, has_period_standings, has_matchups
+        from ANALYTICS.dim_league_format order by league_key
+    """)
+
+    assert rows == [
+        (POINTS_LEAGUE, "points", True, False),
+        (BROKEN_LEAGUE, "h2h", False, True),
+        (FINAL_LEAGUE, "h2h", False, True),
+        (LEAGUE, "h2h", False, True),
+        (OPEN_LEAGUE, "h2h", False, True),
+        (OTHER_LEAGUE, "h2h", False, True),
+    ]
+
+
+def test_the_axes_carry_the_format_for_the_renderer(built):
+    """One query draws the matrix: which axes, and which ledger means anything
+    in this league."""
+    assert built("""
+        select distinct league_format from ANALYTICS.mart_franchise_rivalry_axes
+        where league_key = ?
+    """, [POINTS_LEAGUE]) == [("points",)]
+    assert built("""
+        select distinct league_format from ANALYTICS.mart_franchise_rivalry_axes
+        where league_key = ?
+    """, [LEAGUE]) == [("h2h",)]
+
+
+def test_a_points_league_has_a_season_ledger_and_no_matchups(built):
+    """The reason format dispatch exists: rendering a matchup grid here would
+    be a square of 0-0 that means "this league does not work that way", which
+    is not what 0-0 says anywhere else on the tab."""
+    row = _pair(built, "fid:1", "fid:2", league=POINTS_LEAGUE)
+
+    assert row["matchup_meetings"] == 0
+    assert (row["season_meetings"], row["season_wins"]) == (1, 1)
+
+
+# ===========================================================================
 # Grain and the diagonal
 # ===========================================================================
 def test_the_grain_is_one_row_per_ordered_pair(built):
@@ -971,7 +1247,7 @@ def test_the_axes_are_the_current_seasons_teams(built):
 
     assert "fid:4" not in axes
     assert axes == {"fid:1", "fid:2", "fid:3", "fid:5", "fid:6", "fid:7",
-                    "fid:9", "fid:20", "name:Configured Eight",
+                    "fid:9", "fid:20", "fid:50", "name:Configured Eight",
                     "name:Echo Dynasty", "name:Bent Spokes"}
 
 
@@ -1039,12 +1315,26 @@ def test_a_configured_name_does_not_reach_another_league(built):
 
 
 def test_each_league_resolves_its_own_completeness_and_axes(built):
-    """espn-other's only season is its latest and it has no schedule capture, so
-    nothing about it is proven complete -- and it still gets axes."""
-    assert built("""
-        select count(*) from ANALYTICS.int_franchise_season_points
-        where league_key = ? and is_season_complete
-    """, [OTHER_LEAGUE]) == [(0,)]
+    """Every league resolves its own horizon and its own evidence. espn-fix's
+    latest season is 2023 and unfinished; espn-other's is 2023 and finished;
+    the posture leagues sit at 2024. No league's calendar reaches another's --
+    which is what stops one league's live season from being read as history
+    because a different league has moved past that year."""
+    horizons = built("""
+        select league_key, max(season_year) filter (where is_season_complete),
+               max(season_year)
+        from ANALYTICS.int_league_season_closure
+        group by league_key order by league_key
+    """)
+
+    assert horizons == [
+        (POINTS_LEAGUE, 2024, 2024),
+        (BROKEN_LEAGUE, None, 2024),   # captured, unreadable -> nothing proven
+        (FINAL_LEAGUE, 2024, 2024),    # final ranks close its latest season
+        (LEAGUE, 2022, 2023),          # 2023 in flight
+        (OPEN_LEAGUE, None, 2024),     # unproven
+        (OTHER_LEAGUE, 2023, 2023),
+    ]
     assert built("""
         select count(*) from ANALYTICS.mart_franchise_rivalry_axes
         where league_key = ?

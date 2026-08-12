@@ -19,12 +19,21 @@ with reg as (
     from {{ ref('int_franchise_registry') }}
 ),
 
+-- ALL-SEASON rows only, matching what dim_franchise itself reads. The seed
+-- gained a season_year column in MLB-115 and this CTE was not re-scoped with
+-- it, so a season-scoped row carrying a name was compared against a
+-- franchise-grain model that -- correctly, and by documented design -- ignores
+-- it. Latent until MLB-229 made season-scoped names do something and a fixture
+-- wrote one: the failure said the display anchor had regressed, when what had
+-- actually happened is that this test was asking dim_franchise about a row
+-- that belongs to dim_franchise_season.
 override as (
     select
         league_key,
         cast(franchise_id as varchar)               as franchise_id,
         nullif(cast(canonical_name as varchar), '') as canonical_name
     from {{ ref('franchise_lineage') }}
+    where nullif(cast(season_year as varchar), '') is null
 ),
 
 -- Every franchise carrying its lineage id and its own recency.

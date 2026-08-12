@@ -34,19 +34,38 @@
 -- A meeting counts when it has an opponent, the sides are different platform
 -- teams, both carry a platform score, AND ITS MATCHUP PERIOD IS CLOSED.
 --
--- CLOSED IS NOT "HAS TWO SCORES" (MLB-229 revision). A matchup in flight
--- already carries running totals on both sides, so scores alone counted a
--- Tuesday as a win. int_matchup_period_evidence.is_closed is the real signal:
--- a period strictly below the current one, or the final period of a season
--- ESPN has finished with (proven shape, membership reaching
--- finalScoringPeriod). Playoff and abnormal-length periods are closed like any
--- other, so both stay in.
+-- CLOSED IS NOT "HAS TWO SCORES". A matchup in flight already carries running
+-- totals on both sides, so scores alone counted a Tuesday as a win.
+-- int_matchup_period_evidence.is_closed is the real signal: a period strictly
+-- below the current one, or the final period of a season ESPN has finished
+-- with (proven shape, membership reaching finalScoringPeriod). Playoff and
+-- abnormal-length periods are closed like any other, so both stay in.
 --
--- THE CAPTURE IS OPT-IN, so absence of evidence is not evidence of absence.
--- The gate applies per LEAGUE-SEASON: a season the schedule capture reached
--- must prove each period closed, and a season it never reached keeps its
--- history. Testing `is_closed` alone would have deleted every season captured
--- before the schedule extract existed.
+-- THE GATE APPLIES IN TWO LAYERS, AND IT FAILS CLOSED IN BOTH:
+--
+--   * A season the schedule capture REACHED must prove each period closed,
+--     individually. Nothing else can rescue a period the pointer has not
+--     passed.
+--   * A season the capture never reached is retained only where the season
+--     itself is independently proven finished (int_league_season_closure:
+--     delivered final ranks, parsed final standings, or supersession by a
+--     later season). An unproven season mints nothing.
+--
+-- The second layer is a correction, not a refinement. Treating "no capture" as
+-- "historical, keep everything" meant a league that had never run the schedule
+-- extract counted its live season's running scores as results -- the exact bug
+-- the closure gate was added to remove, reintroduced one level up. Absence of
+-- evidence is not evidence of completion.
+--
+-- CAPTURE PRESENCE COMES FROM THE CLOSURE MODEL, which reads
+-- stg_matchup_schedule directly rather than the derived period evidence. A
+-- capture that exists but is malformed produces zero evidence rows, and a gate
+-- keying on the evidence would read that as "never captured" and fail OPEN on
+-- precisely the season whose payload could not be understood.
+--
+-- assert_rivalry_matchups_have_closure_evidence is the tripwire: it fails if
+-- any counted meeting sits in a season that is neither captured-and-closed nor
+-- independently proven complete.
 --
 -- BOTH SCORES ARE STILL REQUIRED, for a different reason: the fact derives
 -- `result` as W / L / else 'T', so a NULL score would enter a rivalry record
@@ -140,12 +159,15 @@ period_evidence as (
     from {{ ref('int_matchup_period_evidence') }}
 ),
 
--- The league-seasons the opt-in schedule capture actually reached. Membership
--- here is what switches the closure gate on; everything else is history the
--- capture never described and must not be deleted by it.
-captured_seasons as (
-    select distinct league_key, season_year
-    from period_evidence
+-- Capture presence and season-level completion, from the model that reads the
+-- snapshot table rather than the derived evidence -- see the header.
+season_closure as (
+    select
+        league_key,
+        season_year,
+        has_schedule_capture,
+        is_season_complete
+    from {{ ref('int_league_season_closure') }}
 ),
 
 meetings as (
@@ -158,9 +180,11 @@ meetings as (
         m.opponent_points,
         m.result
     from {{ ref('mart_team_matchup') }} m
-    left join captured_seasons cs
-        on m.league_key = cs.league_key
-        and m.season_year = cs.season_year
+    -- INNER: a season the closure model cannot speak about has no completion
+    -- verdict, and a missing verdict is not permission.
+    join season_closure sc
+        on m.league_key = sc.league_key
+        and m.season_year = sc.season_year
     left join period_evidence pe
         on m.league_key = pe.league_key
         and m.season_year = pe.season_year
@@ -171,11 +195,15 @@ meetings as (
       and m.opponent_points is not null
       and m.result is not null
       and (
-            -- Season never captured: keep it, the gate cannot speak here.
-            cs.league_key is null
-            -- Season captured: the period must be PROVEN closed. A period the
-            -- evidence has no row for is not closed, it is unknown.
-            or coalesce(pe.is_closed, false)
+            case
+                -- Captured season: the PERIOD must be proven closed. A period
+                -- the evidence has no row for is not closed, it is unknown --
+                -- which is what makes a malformed payload fail closed.
+                when sc.has_schedule_capture then coalesce(pe.is_closed, false)
+                -- Uncaptured season: retained only where the SEASON is
+                -- independently proven finished.
+                else sc.is_season_complete
+            end
           )
 ),
 

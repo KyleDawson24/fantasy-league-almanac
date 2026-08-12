@@ -420,3 +420,102 @@ class TestAcquisitionBlocks:
         assert alpha[15] == 50.0               # trade, history only
         assert alpha[16] == 1050.0             # total
         assert not any(r and r[0] == 'Ghosts' for r in rows[hdr_idx:])
+
+
+class TestRivalryMatrix:
+    """MLB-229's CBS half. The contract is shared with the ESPN book
+    (almanac_logic.rivalry_matrix_grid); only the layout is local, so these
+    check that the CBS builder arranges it in CBS's idiom -- navy section
+    band, explainer note, bold header -- and that a points league gets the
+    SEASON ledger rather than a head-to-head grid it has no matchups for."""
+
+    @staticmethod
+    def _axes(league_format='points'):
+        return [
+            {'identity_key': 'fid:1', 'identity_name': 'Alpha',
+             'identity_abbrev': 'ALP', 'identity_source': 'franchise_id',
+             'active_platform_teams': 1, 'league_format': league_format,
+             'sort_order': 1},
+            {'identity_key': 'fid:2', 'identity_name': 'Beta',
+             'identity_abbrev': 'BET', 'identity_source': 'franchise_id',
+             'active_platform_teams': 1, 'league_format': league_format,
+             'sort_order': 2},
+        ]
+
+    @staticmethod
+    def _pairs():
+        def row(a, b, sw, sl, st):
+            return {'row_identity_key': a, 'opponent_identity_key': b,
+                    'row_team_name': a, 'opponent_team_name': b,
+                    'matchup_meetings': 0, 'matchup_wins': 0,
+                    'matchup_losses': 0, 'matchup_ties': 0,
+                    'season_meetings': sw + sl + st, 'season_wins': sw,
+                    'season_losses': sl, 'season_ties': st}
+        return [row('fid:1', 'fid:2', 4, 1, 0),
+                row('fid:2', 'fid:1', 1, 4, 0)]
+
+    def test_a_points_league_renders_the_season_ledger(self, monkeypatch):
+        rows, _ = _build(monkeypatch, rivalry_axes=self._axes(),
+                         rivalry_pairs=self._pairs())
+        banner = next(r for r in rows if r and r[0] == 'Rivalry Matrix')
+
+        # The ledger name rides the banner as a scope caption -- this tab's
+        # idiom for saying what the cells are.
+        assert banner[1] == 'Season Points'
+        assert 'Head-to-Head Matchups' not in [c for r in rows for c in r]
+
+    def test_the_cells_read_from_the_row_teams_perspective(self, monkeypatch):
+        rows, _ = _build(monkeypatch, rivalry_axes=self._axes(),
+                         rivalry_pairs=self._pairs())
+        header = rows.index(['Team', 'ALP', 'BET'])
+
+        assert rows[header + 1] == ['Alpha', '', '4-1']
+        assert rows[header + 2] == ['Beta', '1-4', '']
+
+    def test_the_diagonal_is_blank_and_never_met_is_zero(self, monkeypatch):
+        """The two empty cells stay distinguishable in this book too."""
+        rows, _ = _build(monkeypatch, rivalry_axes=self._axes(),
+                         rivalry_pairs=[])
+        header = rows.index(['Team', 'ALP', 'BET'])
+
+        assert rows[header + 1] == ['Alpha', '', '0-0']
+        assert rows[header + 2] == ['Beta', '0-0', '']
+
+    def test_the_block_takes_the_house_section_dressing(self, monkeypatch):
+        """Navy band on the label, explainer token on the note, bold header --
+        the same visual system as every other block on this tab."""
+        rows, formats = _build(monkeypatch, rivalry_axes=self._axes(),
+                               rivalry_pairs=self._pairs())
+        label_row = next(i for i, r in enumerate(rows)
+                         if r and r[0] == 'Rivalry Matrix') + 1
+        # Not every spec is a range format -- this tab also emits chart and
+        # dimension requests.
+        ranges = {s['range']: s['format'] for s in formats
+                  if 'range' in s and 'format' in s}
+
+        band = next(f for r, f in ranges.items()
+                    if r.startswith(f'A{label_row}:'))
+        assert band['backgroundColor'] == cbs._NAVY
+        assert band['textFormat']['bold'] is True
+        header_row = rows.index(['Team', 'ALP', 'BET']) + 1
+        header_fmt = next(f for r, f in ranges.items()
+                          if r.startswith(f'A{header_row}:'))
+        assert header_fmt['textFormat'] == {'bold': True}
+
+    def test_no_axes_renders_no_block(self, monkeypatch):
+        """A league with no active teams renders nothing rather than an empty
+        banner over an empty grid."""
+        rows, _ = _build(monkeypatch)
+
+        assert 'Rivalry Matrix' not in [r[0] for r in rows if r]
+
+    def test_an_h2h_cbs_league_would_render_the_matchup_ledger(self, monkeypatch):
+        """Format dispatch is by DATA, not by book. A CBS head-to-head league
+        exists, and it must get the head-to-head grid here -- which is exactly
+        what a platform-name check would have got wrong."""
+        rows, _ = _build(monkeypatch, rivalry_axes=self._axes('h2h'),
+                         rivalry_pairs=self._pairs())
+        banner = next(r for r in rows if r and r[0] == 'Rivalry Matrix')
+
+        assert banner[1] == 'Head-to-Head Matchups'
+        assert 'Season Points' not in [c for r in rows for c in r]

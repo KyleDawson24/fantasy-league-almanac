@@ -300,14 +300,14 @@ def built(tmp_path_factory):
     # consumer resolves it against manual decisions. It has its own build in
     # tests/test_dim_matchup_period_contract.py.
     #
-    # int_franchise_season_points is the same shape of exclusion (MLB-229): it
-    # reads the season-completion evidence, which makes it a descendant, and it
-    # needs the standings feeds this fixture has no reason to carry. Its
-    # subtree -- the rivalry ledger and that ledger's tests -- goes with it.
-    # tests/test_franchise_rivalry.py builds it.
+    # int_league_season_closure is the same shape of exclusion (MLB-229): it
+    # reads the schedule capture, which makes it a descendant, and it needs the
+    # standings feeds this fixture has no reason to carry. Its whole subtree --
+    # season points, the rivalry ledger, and those models' tests -- goes with
+    # it. tests/test_franchise_rivalry.py builds them.
     result = _run_dbt(["build", "--select", "stg_matchup_schedule+",
                        "--exclude", "dim_matchup_period+",
-                       "int_franchise_season_points+"], db_path)
+                       "int_league_season_closure+"], db_path)
     if result.returncode != 0:
         pytest.fail("dbt build over an EMPTY RAW.MATCHUP_SCHEDULE failed, so "
                     "present-but-empty is not a supported state:\n"

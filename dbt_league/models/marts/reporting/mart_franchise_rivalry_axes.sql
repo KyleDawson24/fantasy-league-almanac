@@ -73,19 +73,26 @@ counted as (
 )
 
 select
-    league_key,
-    identity_key,
-    identity_source,
-    identity_name,
-    identity_abbrev,
-    current_season,
-    active_platform_teams,
+    c.league_key,
+    c.identity_key,
+    c.identity_source,
+    c.identity_name,
+    c.identity_abbrev,
+    c.current_season,
+    c.active_platform_teams,
+    -- The league's format, carried so a renderer needs ONE query to draw the
+    -- matrix: which axes, and which of the two ledgers means anything here.
+    -- LEFT join and coalesced -- a league whose format cannot yet be read
+    -- still gets axes, and says 'unknown' rather than being filed as H2H.
+    coalesce(f.league_format, 'unknown') as league_format,
     row_number() over (
-        partition by league_key
+        partition by c.league_key
         -- identity_key breaks a name tie so the order is total. Two axes
         -- cannot share a name AND a key -- that is one axis -- so this only
         -- decides between two differently-keyed teams whose labels match,
         -- which is exactly the unconfigured-fallback case.
-        order by identity_name, identity_key
+        order by c.identity_name, c.identity_key
     ) as sort_order
-from counted
+from counted c
+left join {{ ref('dim_league_format') }} f
+    on c.league_key = f.league_key

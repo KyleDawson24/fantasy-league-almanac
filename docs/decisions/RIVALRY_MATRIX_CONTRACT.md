@@ -5,8 +5,12 @@ What the matrix means, which rulings produced it, and what is left.
 Supersedes `HEAD_TO_HEAD_RIVALS_CONTRACT.md` (deleted), which described a
 provisional first pass. Two of its claims were wrong and are corrected here:
 it counted a matchup as complete once both running scores existed, and it
-reported season-points support as blocked on unresolved assumptions. Both are
-resolved below.
+reported season-points support as blocked on unresolved assumptions.
+
+**ONE MATRIX, SELECTED BY FORMAT.** An earlier revision of this document
+described two grids stacked on every league's tab. That was an invented product
+change and is corrected below: the matrix is one table whose definition of "a
+game" follows the league's format.
 
 ---
 
@@ -29,6 +33,12 @@ Kyle's ruling, in the order it applies:
    and the best observed name is a display label hung on it.
 6. **Two fallback identities never merge on a matching observed name.**
    Observation is a coincidence; configuration is a statement.
+
+7. **A season-scoped lineage row may configure a name for that season
+   alone**, taking precedence over the franchise-level answer without
+   rewriting any other season. The seed schema has always allowed it; the
+   season dim used to read only the id from such a row, so it silently did
+   nothing.
 
 The asymmetry between (3) and (6) is the whole ruling, and it is why
 `dim_franchise.canonical_name` cannot be the group-by key: it coalesces the
@@ -79,11 +89,29 @@ is the real signal, and it already existed: a period strictly below the
 current one, or the final period of a season ESPN has finished with (proven
 shape, membership reaching `finalScoringPeriod`).
 
-**The gate applies per league-season, not per period.** The schedule capture
-is opt-in, so absence of evidence is not evidence of absence: a season the
-capture reached must prove each period closed, and a season it never reached
-keeps its history. Testing `is_closed` alone would have deleted every season
-captured before the schedule extract existed.
+**The gate has two layers and fails closed in both.**
+
+1. A season the capture **reached** must prove each period closed,
+   individually. Nothing else rescues a period the pointer has not passed.
+2. A season the capture **never reached** is retained only where the season is
+   independently proven finished (`int_league_season_closure`). An unproven
+   season mints nothing.
+
+Layer 2 is a correction, not a refinement. Treating "no capture" as
+"historical, keep everything" meant a league that had never run the schedule
+extract counted its live season's running scores as results -- the same bug the
+closure gate exists to remove, reintroduced one level up. Absence of evidence
+is not evidence of completion.
+
+**Capture presence is read from `stg_matchup_schedule`, not from the derived
+period evidence.** A capture that exists but is malformed produces zero
+evidence rows, and a gate keying on the evidence would read that as "never
+captured" and fail *open* on precisely the season whose payload could not be
+understood.
+
+A league whose latest season has no capture therefore shows no results for it.
+That is correct and silent, so `assert_live_season_has_schedule_capture` warns
+with the remedy -- run the schedule extract.
 
 Both scores are still required, for a different reason: the fact derives
 `result` as `W` / `L` / else `'T'`, so a NULL score would enter a rivalry
@@ -123,11 +151,17 @@ One completed season = one win, loss or tie on **raw total points**.
 
 Not one rule, and `completion_evidence` records which applied:
 
+`int_league_season_closure` owns this for **both** ledgers -- two answers to
+one question drift, and the first version of each drifted toward yes.
+Precedence:
+
 | Evidence | Meaning |
 | --- | --- |
-| `schedule_capture` | `season_is_complete` measured from the payload |
-| `superseded_season` | No capture, but the league has played a later season — the platform has moved on from it |
-| `final_standings_source` | Parsed final standings, complete by construction |
+| `schedule_capture` | The capture reached this season and it decides, both ways. Stale final ranks must not resurrect a season the platform says is still being played. |
+| `delivered_final_rank` | No capture, but the platform published final ranks. ESPN serves `rankCalculatedFinal = 0` for an unfinished season, so a non-null rank is proof -- and it is consulted **before** supersession, so the latest loaded season is no longer withheld merely because an optional extract has not run. |
+| `parsed_final_standings` | Parsed year-end standings, final by construction |
+| `superseded_season` | The league has played a later season |
+| `unproven` | Nothing above answered -- and that means **no** |
 
 The supersession fallback is a statement about the league's own timeline
 rather than a guess about the calendar, which is what makes it safe for a
@@ -160,8 +194,21 @@ answer it.
 The matrix is a render, not a grain — a wide table needs a column per team, so
 its schema would move whenever a league gained or lost one.
 
-`build_rivalry_matrix_rows` densifies over the active axes, and the two kinds
-of empty cell are deliberately different:
+**The format selects the ledger** (`dim_league_format`, by data presence --
+never by platform name, per the house rule):
+
+| Format | Signal | Ledger shown |
+| --- | --- | --- |
+| `h2h` | matchup pairings exist | completed matchups |
+| `points` | delivered period standings exist | completed seasons on total points |
+| `unknown` | neither yet | none -- a matrix whose meaning cannot be stated is worse than no matrix |
+
+Rendering both everywhere would show every H2H league a table nobody asked for
+and every points league a grid of 0-0 that means "this league does not work
+that way" -- which is not what 0-0 says anywhere else on the tab.
+
+`rivalry_matrix_grid` densifies over the active axes, and the two kinds of
+empty cell are deliberately different:
 
 - **The diagonal is blank.** A team has no record against itself and there is
   no honest number for that cell.
@@ -173,12 +220,19 @@ Collapsing those into one appearance loses the distinction, which is why the
 mart emits no diagonal row at all: the renderer cannot get it wrong by
 accident.
 
-Two grids, one section, at the bottom of **Advanced Standings**: a standings
-answers "who is ahead", and "against whom" is the next question. Both are
-standings arithmetic rather than a new kind of statistic. Wired on **both**
-workbook paths — preview/generator and publish — because a block that renders
-in preview and silently vanishes from the published sheet is a failure this tab
-has already had once.
+One grid at the bottom of **Advanced Standings**, in **both books**: a
+standings answers "who is ahead", and "against whom" is the next question.
+
+`rivalry_matrix_grid` is the shared contract -- which ledger, how a cell reads,
+what the diagonal does, what the explainer promises. Only the LAYOUT is
+per-book: the ESPN builder returns rows for the write layer to paint and gives
+the ledger its own label row; the CBS builder accumulates rows and format
+ranges together and rides the ledger name on the section banner as a scope
+caption, this tab's idiom. Two idioms, one product.
+
+Wired on **both ESPN workbook paths** -- preview/generator and publish --
+because a block that renders in preview and silently vanishes from the
+published sheet is a failure this tab has already had once.
 
 Row labels disambiguate with the abbrev when two axes share a display name,
 which is the supported (6) case above. Found in visual QA.
@@ -190,11 +244,15 @@ which is the supported (6) case above. Found in visual QA.
 | Layer | Model |
 | --- | --- |
 | Identity | `dim_franchise_identity` (+ provenance on `dim_franchise`, `dim_franchise_season`) |
+| Completion | `int_league_season_closure` |
+| Format | `dim_league_format` |
 | Season totals | `int_franchise_season_points` |
 | Current teams | `int_franchise_current_teams` |
 | Ledger | `mart_franchise_rivalry` |
 | Axes | `mart_franchise_rivalry_axes` |
-| Render | `almanac_logic.build_rivalry_matrix_rows`, on Advanced Standings |
+| Render (shared) | `almanac_logic.rivalry_matrix_grid` |
+| Render (ESPN) | `almanac_logic.build_rivalry_matrix_rows` -> Advanced Standings |
+| Render (CBS) | `cbs_almanac_sheets.build_standings_rows` -> Advanced Standings |
 
 ---
 
@@ -207,7 +265,8 @@ which is the supported (6) case above. Found in visual QA.
   CLAUDE.md rule.
 - **The PII guard cannot run non-degraded here.** The private anonymization map
   is local to the main checkout.
-- **CBS renders nothing yet.** The points-league almanac has its own tab
-  builder and is not wired to this block; the marts are platform-general and
-  populate for any league whose data arrives, so wiring is a renderer question
-  rather than a modelling one.
+- **Both golden sets will move** and neither can be re-anchored here.
+- **A league with no schedule capture shows an all-0-0 matrix**, which reads as
+  "nobody has met" rather than "we cannot prove any result yet". The warn
+  diagnostic names it for the maintainer; a reader-facing note is a post-cut
+  nicety.

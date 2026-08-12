@@ -1243,7 +1243,8 @@ def get_rivalry_axes():
     eras on the axis its current id resolves to."""
     return query_snowflake(
         f"SELECT identity_key, identity_name, identity_abbrev,"
-        f"       identity_source, active_platform_teams, sort_order"
+        f"       identity_source, active_platform_teams, league_format,"
+        f"       sort_order"
         f" FROM mart_franchise_rivalry_axes"
         f" WHERE {league_predicate()}"
         f" ORDER BY sort_order"

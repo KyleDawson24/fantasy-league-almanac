@@ -53,6 +53,8 @@ from almanac_data import (
 from almanac_logic import (
     SCORE_RECORD_SPECS,
     build_advanced_standings_tab_rows,
+    RIVALRY_MATCHUP_LEDGER,
+    RIVALRY_SEASON_LEDGER,
     build_trades_tab_rows,
     build_draft_board_color_grid,
     build_draft_tab_rows,
@@ -1273,7 +1275,8 @@ def _replace_advanced_standings_tab(spreadsheet, rows, stat_specs):
         # locators key off the geometry of the tables they were written for
         # and this grid has its team names in column A.
         for i, row in enumerate(rows):
-            if row and row[0] in ('Head-to-Head Matchups', 'Season Points'):
+            if row and row[0] in (RIVALRY_MATCHUP_LEDGER,
+                                  RIVALRY_SEASON_LEDGER):
                 formats.append({
                     'range': f'A{i + 1}:{last_col}{i + 2}',
                     'format': {'textFormat': {'bold': True}},

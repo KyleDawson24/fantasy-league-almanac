@@ -1013,3 +1013,94 @@ models:
         description: 'The season the capture describes -- this league''s latest.'
         tests:
           - not_null
+
+  - name: int_league_season_closure
+    description: >
+      Is this league-season FINISHED, and how do we know (MLB-229)? One row per
+      (league_key, season_year), with the evidence named rather than implied.
+
+      ONE MODEL because two consumers ask this question -- the matchup ledger
+      ("may I count results from this season") and the season-points ledger
+      ("is this total final") -- and two answers to one question drift. The
+      first version of each drifted in the same direction: toward yes.
+
+      EVIDENCE, IN PRECEDENCE ORDER. (1) The schedule capture, where it reached
+      this season: it is the live pointer and it decides both ways, so stale
+      final ranks cannot resurrect a season the platform says is still being
+      played. (2) Authoritative final standings, consulted only without a
+      capture -- a delivered final rank (ESPN nulls rankCalculatedFinal at 0
+      for an unfinished season, so a non-null one is proof) or a parsed
+      final-standings source. (3) Supersession: a season the league has played
+      past is over. (4) Unproven.
+
+      UNPROVEN MEANS NO. Treating "no capture" as "historical, keep everything"
+      meant a league that had never run the schedule extract counted its live
+      season's running scores as results. Absence of evidence is not evidence
+      of completion.
+
+      has_schedule_capture reads stg_matchup_schedule, NOT the derived period
+      evidence: a capture that is present but malformed produces zero evidence
+      rows, and keying on the evidence would read that as "never captured" and
+      fail OPEN on exactly the season whose payload could not be understood.
+
+      Grain: one row per (league_key, season_year).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - season_year
+    columns:
+      - name: league_key
+        description: 'League registry key. Part of the grain; each league resolves its own horizon.'
+        tests:
+          - not_null
+      - name: season_year
+        description: 'The season this verdict covers. Part of the grain.'
+        tests:
+          - not_null
+      - name: has_schedule_capture
+        description: >
+          Whether the opt-in schedule snapshot reached this league-season, read
+          from the snapshot table. Presence is a fact about the capture;
+          readability is a separate fact, which is why this does not come from
+          the derived evidence.
+        tests:
+          - not_null
+      - name: schedule_says_complete
+        description: 'The capture''s own completion verdict. Meaningless where has_schedule_capture is false.'
+        tests:
+          - not_null
+      - name: has_final_rank
+        description: 'A delivered final rank exists for at least one team -- the platform published a final answer.'
+        tests:
+          - not_null
+      - name: has_final_standings
+        description: 'A parsed final-standings source covers this season. Final by construction.'
+        tests:
+          - not_null
+      - name: is_superseded
+        description: 'The league has played a later season. A statement about the league''s timeline, not a guess about the calendar.'
+        tests:
+          - not_null
+      - name: is_season_complete
+        description: >
+          The verdict. Non-null on purpose: "not proven complete" and "unknown"
+          are the same thing to every consumer, and a NULL would push a
+          three-valued test onto each of them.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [true, false]
+      - name: completion_evidence
+        description: >
+          schedule_capture | delivered_final_rank | parsed_final_standings |
+          superseded_season | unproven -- WHY the verdict is what it is.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['schedule_capture', 'delivered_final_rank',
+                         'parsed_final_standings', 'superseded_season',
+                         'unproven']

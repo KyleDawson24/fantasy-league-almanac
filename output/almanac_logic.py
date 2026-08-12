@@ -1650,13 +1650,49 @@ def format_rivalry_record(wins, losses, ties):
     return f'{wins}-{losses}'
 
 
-def build_rivalry_matrix_rows(axes, pairs, banner_width=None):
-    """Densify the long rivalry ledger into two square grids -- head-to-head
-    matchups, and completed seasons on total points -- over the ACTIVE teams.
+RIVALRY_MATCHUP_LEDGER = 'Head-to-Head Matchups'
+RIVALRY_SEASON_LEDGER = 'Season Points'
 
-    axes come from almanac_data.get_rivalry_axes (already deduplicated and
-    ordered); pairs from get_rivalry_matrix (one row per ordered pair that has
-    a result). Returns the rows; the write layer paints them.
+# Which ledger a league's matrix MEANS, by format. The matrix is one table
+# whose definition of "a game" follows the format: in a head-to-head league a
+# rivalry is a record of matchups; in a points league there are no matchups at
+# all, and the rivalry is which team outscored which, season by season.
+# Rendering both everywhere would show every H2H league a table nobody asked
+# for and every points league a grid that is structurally empty.
+#
+# 'unknown' -- a league with neither signal yet -- renders nothing rather than
+# guessing, which is the same posture dim_league_format takes.
+_RIVALRY_LEDGER_BY_FORMAT = {
+    'h2h': RIVALRY_MATCHUP_LEDGER,
+    'points': RIVALRY_SEASON_LEDGER,
+}
+
+
+def rivalry_ledger_for_format(league_format):
+    """The one ledger a league of this format shows, or None."""
+    return _RIVALRY_LEDGER_BY_FORMAT.get(league_format)
+
+
+def rivalry_matrix_grid(axes, pairs, league_format=None):
+    """The Rivalry Matrix as data: which ledger, what it is called, its column
+    headers, its explainer, and the densified square grid.
+
+    THE SHARED HALF OF A TWO-BOOK FEATURE. Both almanacs render this matrix and
+    they lay tables out differently -- the ESPN builder returns rows and the
+    write layer paints them, while the CBS builder accumulates rows and format
+    ranges side by side. Only the LAYOUT differs; the product contract must
+    not. So the contract lives here -- which ledger a format means, how a cell
+    reads, what the diagonal does, what the explainer promises -- and each book
+    arranges the pieces in its own idiom.
+
+    Returns None when the format selects no ledger, or there are no axes.
+
+    FORMAT SELECTS THE LEDGER, from data presence rather than platform name --
+    league_format is carried on the axes rows and defaults to whatever they
+    say, so a caller normally passes nothing. A head-to-head league gets
+    completed matchups; a points league gets completed seasons on total points.
+    An unrecognised or unknown format renders nothing: a matrix whose meaning
+    we cannot state is worse than no matrix.
 
     DENSIFICATION IS THE WHOLE JOB, and the two empty cases are deliberately
     different:
@@ -1678,7 +1714,7 @@ def build_rivalry_matrix_rows(axes, pairs, banner_width=None):
     combined history is in the cells.
     """
     if not axes:
-        return []
+        return None
 
     keys = [a['identity_key'] for a in axes]
     labels = [a.get('identity_abbrev') or a['identity_name'] for a in axes]
@@ -1701,53 +1737,84 @@ def build_rivalry_matrix_rows(axes, pairs, banner_width=None):
         for a in axes
     ]
 
-    matchup = {}
-    season = {}
+    if league_format is None:
+        league_format = axes[0].get('league_format')
+    ledger = rivalry_ledger_for_format(league_format)
+    if ledger is None:
+        return None
+
+    records = {}
     for p in pairs:
         cell = (p['row_identity_key'], p['opponent_identity_key'])
-        matchup[cell] = (p['matchup_wins'], p['matchup_losses'],
-                         p['matchup_ties'])
-        season[cell] = (p['season_wins'], p['season_losses'], p['season_ties'])
+        records[cell] = (
+            (p['matchup_wins'], p['matchup_losses'], p['matchup_ties'])
+            if ledger == RIVALRY_MATCHUP_LEDGER
+            else (p['season_wins'], p['season_losses'], p['season_ties'])
+        )
 
-    def grid(source):
-        out = []
-        for row_key, row_name in zip(keys, names):
-            cells = []
-            for col_key in keys:
-                if row_key == col_key:
-                    cells.append(RIVALRY_BLANK_CELL)
-                    continue
-                record = source.get((row_key, col_key))
-                cells.append(format_rivalry_record(*record) if record
-                             else format_rivalry_record(0, 0, 0))
-            out.append([row_name, *cells])
-        return out
+    grid = []
+    for row_key, row_name in zip(keys, names):
+        cells = []
+        for col_key in keys:
+            if row_key == col_key:
+                cells.append(RIVALRY_BLANK_CELL)
+                continue
+            record = records.get((row_key, col_key))
+            cells.append(format_rivalry_record(*record) if record
+                         else format_rivalry_record(0, 0, 0))
+        grid.append([row_name, *cells])
 
-    width = banner_width if banner_width else len(keys) + 1
-    banner = [''] * max(width, len(keys) + 1)
+    if ledger == RIVALRY_MATCHUP_LEDGER:
+        explainer = (
+            'Every active team against every other, read ACROSS the row: the '
+            "row team's record first. Completed matchups only -- a week still "
+            'being played is not a result yet, and playoff weeks count. Teams '
+            'that have never met read 0-0; a team has no record against '
+            'itself.')
+    else:
+        explainer = (
+            'Every active team against every other, read ACROSS the row: the '
+            "row team's record first. Each completed season BOTH teams were "
+            'in the league counts as one game, won by whoever scored more '
+            'over the whole year, however narrowly; a season a team was not '
+            'in counts for nobody, and playing fewer weeks is part of the '
+            'result rather than something to adjust for. Teams that have '
+            'never shared a season read 0-0; a team has no record against '
+            'itself.')
+
+    return {
+        'ledger': ledger,
+        'explainer': explainer,
+        'header': ['Team', *labels],
+        'grid': grid,
+        'width': len(keys) + 1,
+    }
+
+
+def build_rivalry_matrix_rows(axes, pairs, banner_width=None,
+                              league_format=None):
+    """The ESPN almanac's layout of the Rivalry Matrix: banner, explainer,
+    ledger label, header, grid. Rows only -- almanac_write paints them.
+
+    The contract is rivalry_matrix_grid's; this is the arrangement.
+    """
+    matrix = rivalry_matrix_grid(axes, pairs, league_format)
+    if matrix is None:
+        return []
+
+    width = banner_width if banner_width else matrix['width']
+    banner = [''] * max(width, matrix['width'])
     banner[0] = RIVALRY_MATRIX_LABEL
 
-    rows = [
+    return [
         [],
         banner,
-        ['Every active team against every other, read ACROSS the row: the '
-         'row team\'s record first. Head-to-head counts completed matchups '
-         'only -- a week still being played is not a result yet. Season '
-         'Points counts each completed season both teams played as one game, '
-         'won by whoever scored more over the whole year, however narrowly; '
-         'a season a team was not in the league counts for nobody. Teams '
-         'that have never met read 0-0; a team has no record against '
-         'itself.'],
+        [matrix['explainer']],
         [],
-        ['Head-to-Head Matchups'],
-        ['Team', *labels],
+        [matrix['ledger']],
+        matrix['header'],
+        *matrix['grid'],
     ]
-    rows.extend(grid(matchup))
-    rows.append([])
-    rows.append(['Season Points'])
-    rows.append(['Team', *labels])
-    rows.extend(grid(season))
-    return rows
 
 
 # Trading Block sort classes (2026-07-20 dev-render feedback): being-

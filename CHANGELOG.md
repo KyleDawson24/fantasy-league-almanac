@@ -25,10 +25,15 @@ is not a sign the repository is idle._
 ### Added
 
 - **The Rivalry Matrix** (MLB-229): every active team against every
-  other, at the bottom of Advanced Standings, in two grids -- completed
-  head-to-head matchups, and completed seasons scored as one game each,
-  won by whoever put up more points over the whole year. A standings
+  other, at the bottom of Advanced Standings in BOTH books. A standings
   answers "who is ahead"; this answers "against whom".
+
+  ONE matrix, and what counts as a game follows your league's format --
+  read from the data, never from which site the league is on. A
+  head-to-head league sees completed matchups. A points league, which has
+  no matchups to have a record about, sees each completed season scored as
+  one game, won by whoever put up more points over the whole year however
+  narrowly, with no adjustment for playing fewer weeks.
 
   It aggregates by TEAM, not by platform id. A franchise whose id was
   re-minted, or that has been renamed, brings its whole history with it,
@@ -40,15 +45,20 @@ is not a sign the repository is idle._
   configuration is a statement; if two live teams share a configured name
   the build warns, so an accidental collision can be corrected.
 
-  Only completed matchups count -- a week still being played is not a
-  result yet -- and only completed seasons both teams were in the league
-  for. A team has no record against itself, so the diagonal is blank;
-  two teams that have never met read 0-0, which is a fact about the
-  league rather than an absence.
+  Only FINISHED results count. A week still being played is not a result,
+  and neither is a whole season nobody can prove is over -- if the
+  schedule capture has not run for your live season, its games stay out
+  and the build tells you to run it rather than quietly counting Tuesday
+  as a win. Seasons the platform has published final standings for count
+  without needing that capture at all. Only seasons both teams were
+  actually in the league for are compared. A team has no record against
+  itself, so the diagonal is blank; two teams that have never met read
+  0-0, which is a fact about the league rather than an absence.
 
   New warehouse contracts: `mart_franchise_rivalry` (long, one row per
   ordered pair -- the matrix is a render, not a grain),
   `mart_franchise_rivalry_axes`, `dim_franchise_identity`,
+  `dim_league_format`, `int_league_season_closure`,
   `int_franchise_season_points`, `int_franchise_current_teams`. Design
   and rulings in
   [RIVALRY_MATRIX_CONTRACT.md](docs/decisions/RIVALRY_MATRIX_CONTRACT.md).
@@ -62,6 +72,12 @@ is not a sign the repository is idle._
   deliberately unchanged -- it is a rendered label with goldens behind
   it. The new columns resolve across a whole lineage, so a name written
   against a re-minted id names the franchise's earlier eras too.
+
+- **A season-scoped `franchise_lineage` row can now name that season's
+  team** (MLB-229). The seed has always accepted a canonical name on a
+  season row and `dim_franchise_season` read only the id from one, so
+  such a name silently did nothing. It now takes precedence for that
+  season and leaves every other season alone.
 
 ## [1.8.0] - 2026-08-09
 

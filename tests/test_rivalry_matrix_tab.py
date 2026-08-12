@@ -24,17 +24,21 @@ if str(REPO_ROOT / "output") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "output"))
 
 from almanac_logic import (  # noqa: E402
+    RIVALRY_MATCHUP_LEDGER,
     RIVALRY_MATRIX_LABEL,
+    RIVALRY_SEASON_LEDGER,
     build_advanced_standings_tab_rows,
     build_rivalry_matrix_rows,
     format_rivalry_record,
+    rivalry_matrix_grid,
 )
 
 
-def _axis(key, name, abbrev, order):
+def _axis(key, name, abbrev, order, league_format='h2h'):
     return {'identity_key': key, 'identity_name': name,
             'identity_abbrev': abbrev, 'identity_source': 'franchise_id',
-            'active_platform_teams': 1, 'sort_order': order}
+            'active_platform_teams': 1, 'league_format': league_format,
+            'sort_order': order}
 
 
 AXES = [
@@ -42,6 +46,11 @@ AXES = [
     _axis('name:Bent Spokes', 'Bent Spokes', 'BENT', 2),
     _axis('fid:2', 'Cedar Crows', 'CROW', 3),
 ]
+
+# The same teams in a points league. Identical axes and identical ledger rows,
+# so any difference between the two renders is the format dispatch and nothing
+# else.
+POINTS_AXES = [dict(a, league_format='points') for a in AXES]
 
 
 def _pair(row, opp, mw, ml, mt, sw, sl, st):
@@ -63,10 +72,13 @@ PAIRS = [
 
 
 def _grids(rows):
-    """The two data grids, split on their section headers."""
+    """The rendered grid, keyed by its ledger label. One entry: format
+    dispatch means a league shows the one ledger its format gives meaning to.
+    Kept as a mapping so a test names which ledger it expected rather than
+    assuming."""
     out, current = {}, None
     for row in rows:
-        if row and row[0] in ('Head-to-Head Matchups', 'Season Points'):
+        if row and row[0] in (RIVALRY_MATCHUP_LEDGER, RIVALRY_SEASON_LEDGER):
             current = row[0]
             out[current] = []
         elif current and row and row[0] != 'Team':
@@ -92,7 +104,7 @@ def test_two_teams_that_never_met_read_zero_zero(rows=None):
     Alpha is nil, and nil is a fact -- blanking it would hide an expansion
     team's whole situation behind the same appearance as the diagonal."""
     grids = _grids(build_rivalry_matrix_rows(AXES, PAIRS))
-    crows = grids['Head-to-Head Matchups'][2]
+    crows = grids[RIVALRY_MATCHUP_LEDGER][2]
 
     assert crows[0] == 'Cedar Crows'
     assert crows[1] == '0-0' and crows[2] == '0-0'
@@ -102,7 +114,8 @@ def test_two_teams_that_never_met_read_zero_zero(rows=None):
 def test_the_blank_diagonal_and_the_zero_cell_are_distinguishable(rows=None):
     """The one assertion that fails if either empty case is made to look like
     the other."""
-    grid = _grids(build_rivalry_matrix_rows(AXES, PAIRS))['Season Points']
+    grid = _grids(build_rivalry_matrix_rows(
+        POINTS_AXES, PAIRS))[RIVALRY_SEASON_LEDGER]
     diagonal = {grid[i][1 + i] for i in range(len(grid))}
     never_met = grid[2][1]
 
@@ -116,7 +129,7 @@ def test_the_blank_diagonal_and_the_zero_cell_are_distinguishable(rows=None):
 # ===========================================================================
 def test_a_cell_reads_from_the_row_teams_perspective(rows=None):
     grids = _grids(build_rivalry_matrix_rows(AXES, PAIRS))
-    matchups = grids['Head-to-Head Matchups']
+    matchups = grids[RIVALRY_MATCHUP_LEDGER]
 
     assert matchups[0][0] == 'Alpha Anchors'
     assert matchups[0][2] == '5-2-1'
@@ -124,13 +137,83 @@ def test_a_cell_reads_from_the_row_teams_perspective(rows=None):
 
 
 def test_the_two_ledgers_are_independent(rows=None):
-    """Same pair, different records: 5-2-1 in matchups and 3-1 across completed
-    seasons. A renderer that filled both grids from one source would show the
-    same number twice."""
+    """Same pair, same ledger rows, different records: 5-2-1 in matchups and
+    3-1 across completed seasons. A renderer that read one lens for both
+    formats would show the same number twice."""
     grids = _grids(build_rivalry_matrix_rows(AXES, PAIRS))
 
-    assert grids['Head-to-Head Matchups'][0][2] == '5-2-1'
-    assert grids['Season Points'][0][2] == '3-1'
+    assert grids[RIVALRY_MATCHUP_LEDGER][0][2] == '5-2-1'
+    assert _grids(build_rivalry_matrix_rows(
+        POINTS_AXES, PAIRS))[RIVALRY_SEASON_LEDGER][0][2] == '3-1'
+
+
+# ===========================================================================
+# Format dispatch
+# ===========================================================================
+def test_an_h2h_league_shows_only_the_matchup_ledger(rows=None):
+    """One matrix, not two. A season-points table under an H2H league's
+    head-to-head grid is a product decision nobody made."""
+    labels = [r[0] for r in build_rivalry_matrix_rows(AXES, PAIRS) if r]
+
+    assert RIVALRY_MATCHUP_LEDGER in labels
+    assert RIVALRY_SEASON_LEDGER not in labels
+
+
+def test_a_points_league_shows_only_the_season_ledger(rows=None):
+    """A points league has no matchups at all, so a head-to-head grid there is
+    a square of 0-0 meaning "this league does not work that way" -- which is
+    not what 0-0 says anywhere else on the tab."""
+    labels = [r[0] for r in build_rivalry_matrix_rows(POINTS_AXES, PAIRS) if r]
+
+    assert RIVALRY_SEASON_LEDGER in labels
+    assert RIVALRY_MATCHUP_LEDGER not in labels
+
+
+def test_an_unknown_format_renders_nothing(rows=None):
+    """An install that has captured neither signal yet. A matrix whose meaning
+    cannot be stated is worse than no matrix, so this renders none rather than
+    defaulting to head-to-head."""
+    unknown = [dict(a, league_format='unknown') for a in AXES]
+
+    assert build_rivalry_matrix_rows(unknown, PAIRS) == []
+    assert rivalry_matrix_grid(unknown, PAIRS) is None
+
+
+def test_the_format_comes_from_the_axes_by_default(rows=None):
+    """The renderer does not decide the format and does not ask the platform:
+    it reads what the axes carry, which the warehouse derived from data
+    presence."""
+    assert rivalry_matrix_grid(AXES, PAIRS)['ledger'] == RIVALRY_MATCHUP_LEDGER
+    assert rivalry_matrix_grid(POINTS_AXES, PAIRS)['ledger'] == \
+        RIVALRY_SEASON_LEDGER
+
+
+def test_the_explainer_describes_the_ledger_being_shown(rows=None):
+    """Each ledger promises something different -- completed matchups versus
+    completed shared seasons -- and a caption describing the other one is a
+    quietly wrong sheet."""
+    h2h = rivalry_matrix_grid(AXES, PAIRS)['explainer']
+    points = rivalry_matrix_grid(POINTS_AXES, PAIRS)['explainer']
+
+    assert 'Completed matchups only' in h2h
+    assert 'still being played' in h2h
+    assert 'completed season BOTH teams' in points
+    assert 'was not in counts for nobody' in points
+
+
+def test_both_books_render_the_same_contract(rows=None):
+    """The shared half of a two-book feature: the ESPN builder returns rows and
+    the CBS builder accumulates rows plus format ranges, so only the LAYOUT is
+    per-book. The cells, the ledger choice, the header and the explainer all
+    come from one function, which is what stops the two workbooks from drifting
+    into two different products."""
+    matrix = rivalry_matrix_grid(POINTS_AXES, PAIRS)
+    espn_rows = build_rivalry_matrix_rows(POINTS_AXES, PAIRS)
+
+    assert matrix['header'] in espn_rows
+    for grid_row in matrix['grid']:
+        assert grid_row in espn_rows
+    assert [matrix['ledger']] in espn_rows
 
 
 def test_ties_are_shown_only_when_they_exist(rows=None):
@@ -152,7 +235,7 @@ def test_the_axes_are_identities_and_keep_their_order(rows=None):
     header = next(r for r in rows if r and r[0] == 'Team')
 
     assert header == ['Team', 'ALPH', 'BENT', 'CROW']
-    assert [r[0] for r in _grids(rows)['Season Points']] == [
+    assert [r[0] for r in _grids(rows)[RIVALRY_MATCHUP_LEDGER]] == [
         'Alpha Anchors', 'Bent Spokes', 'Cedar Crows']
 
 
@@ -175,7 +258,7 @@ def test_rows_sharing_a_display_name_are_disambiguated(rows=None):
         _axis('fid:6', 'Twin Name FC', 'TWN2', 2),
         _axis('fid:1', 'Alpha Anchors', 'ALPH', 3),
     ]
-    grid = _grids(build_rivalry_matrix_rows(twins, []))['Season Points']
+    grid = _grids(build_rivalry_matrix_rows(twins, []))[RIVALRY_MATCHUP_LEDGER]
 
     assert [r[0] for r in grid] == ['Twin Name FC (TWN1)',
                                     'Twin Name FC (TWN2)',
@@ -184,7 +267,7 @@ def test_rows_sharing_a_display_name_are_disambiguated(rows=None):
 
 def test_unambiguous_rows_are_not_suffixed(rows=None):
     """Tagging every row would clutter the ordinary case to fix the rare one."""
-    grid = _grids(build_rivalry_matrix_rows(AXES, PAIRS))['Season Points']
+    grid = _grids(build_rivalry_matrix_rows(AXES, PAIRS))[RIVALRY_MATCHUP_LEDGER]
 
     assert [r[0] for r in grid] == ['Alpha Anchors', 'Bent Spokes',
                                     'Cedar Crows']
@@ -216,8 +299,8 @@ def test_the_block_lands_on_advanced_standings(rows=None):
     labels = [r[0] for r in rows if r]
 
     assert RIVALRY_MATRIX_LABEL in labels
-    assert 'Head-to-Head Matchups' in labels
-    assert 'Season Points' in labels
+    assert RIVALRY_MATCHUP_LEDGER in labels
+    assert RIVALRY_SEASON_LEDGER not in labels
 
 
 def test_the_tab_is_unchanged_when_no_rivalry_data_is_passed(rows=None):

@@ -1997,3 +1997,54 @@ models:
           ESPN's own season point total. NOT asserted equal to the
           warehouse's calculated total -- the platform's point stats have
           diverged before, so this stays labelled as the platform's number.
+
+  - name: dim_league_format
+    description: >
+      What KIND of league is this (MLB-229)? One row per league_key, decided by
+      DATA PRESENCE.
+
+      The Rivalry Matrix means different things in different formats: in a
+      head-to-head league a rivalry is a record of matchups; in a points league
+      there are no matchups at all, and the rivalry is which team outscored
+      which, season by season. Rendering both grids everywhere would show every
+      H2H league a table nobody asked for and every points league a grid that
+      is structurally empty, so the renderer has to know the format -- and this
+      is where it asks.
+
+      NEVER BY PLATFORM NAME, per the house rule. A CBS H2H league and an ESPN
+      points league both exist and both would be misfiled by a platform check.
+      The signal is the one output/cbs_almanac_sheets.is_points_league already
+      used: delivered period standings exist only where there are no matchups
+      to be scored on. Matchup presence rides alongside as the positive
+      evidence for the other side, so a league with neither reads `unknown`
+      rather than being quietly filed as H2H.
+
+      Grain: one row per league_key.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+    columns:
+      - name: league_key
+        description: 'League registry key. The whole grain.'
+        tests:
+          - not_null
+      - name: has_period_standings
+        description: 'Delivered period standings exist -- the points-format signal.'
+        tests:
+          - not_null
+      - name: has_matchups
+        description: 'Matchup pairings exist -- the head-to-head signal.'
+        tests:
+          - not_null
+      - name: league_format
+        description: >
+          points | h2h | unknown. `unknown` is a real answer for an install
+          that has captured neither signal yet, and renders no matrix rather
+          than guessing at one.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['points', 'h2h', 'unknown']

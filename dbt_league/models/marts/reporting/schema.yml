@@ -1531,6 +1531,18 @@ models:
         description: 'The season the team capture describes -- the league''s latest, per league.'
         tests:
           - not_null
+      - name: league_format
+        description: >
+          points | h2h | unknown, from dim_league_format -- carried here so a
+          renderer needs ONE query to draw the matrix: which axes, and which of
+          the two ledgers means anything in this league. Coalesced, so a league
+          whose format cannot yet be read still gets axes and says `unknown`
+          rather than being filed as H2H.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['points', 'h2h', 'unknown']
       - name: active_platform_teams
         description: >
           How many live platform ids resolved onto this axis. Normally 1; more

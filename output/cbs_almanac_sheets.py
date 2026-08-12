@@ -68,10 +68,12 @@ from cbs_draft_recap_data import get_draft_history
 # (b)-refactor seam -- promoting these to a shared library module.
 from almanac_logic import (
     _HOME_SCORING_CALLOUT,
+    RIVALRY_MATRIX_LABEL,
     _deviation_by_slot,
     _merge_home_bands,
     build_team_history_tabs,
     get_optimal_team_selections,
+    rivalry_matrix_grid,
     season_pace_factors,
     updated_stamp,
 )
@@ -817,6 +819,41 @@ def get_active_franchises(roster_date):
         f" FROM stg_cbs__rosters"
         f" WHERE {league_predicate()} AND roster_date = '{roster_date}'"
         f" ORDER BY team_id"
+    )
+
+
+def get_rivalry_axes():
+    """The ACTIVE teams the Rivalry Matrix draws (MLB-229), with the league's
+    format so the renderer knows which ledger means anything here.
+
+    The CBS twin of almanac_data.get_rivalry_axes, reading the same
+    platform-general mart. Not shared as one function because the two books
+    reach the warehouse through their own query helpers; the CONTRACT is shared
+    one layer up, in rivalry_matrix_grid."""
+    return query_snowflake(
+        f"SELECT identity_key, identity_name, identity_abbrev,"
+        f"       identity_source, active_platform_teams, league_format,"
+        f"       sort_order"
+        f" FROM mart_franchise_rivalry_axes"
+        f" WHERE {league_predicate()}"
+        f" ORDER BY sort_order"
+    )
+
+
+def get_rivalry_matrix():
+    """Every ordered pair of team identities with something to say about each
+    other. Long; the renderer densifies over the active axes.
+
+    NOT filtered to active teams -- the axes decide what is drawn, the ledger
+    holds everything, including the folded franchises an active team's record
+    was built against."""
+    return query_snowflake(
+        f"SELECT row_identity_key, opponent_identity_key,"
+        f"       row_team_name, opponent_team_name,"
+        f"       matchup_meetings, matchup_wins, matchup_losses, matchup_ties,"
+        f"       season_meetings, season_wins, season_losses, season_ties"
+        f" FROM mart_franchise_rivalry"
+        f" WHERE {league_predicate()}"
     )
 
 
@@ -3516,7 +3553,8 @@ def build_standings_rows(context, arc, finishes, active_franchises,
                          alltime_pitching_rows=None, season_days=None,
                          detailed_alltime_rows=None,
                          acquisition_rows=None, alltime_acquisition_rows=None,
-                         affinity_rows=None):
+                         affinity_rows=None,
+                         rivalry_axes=None, rivalry_pairs=None):
     """Advanced Standings: the rank-by-period arc with its toggleable
     line chart, the points-by-slot grids (season totals by deployed slot
     left; all-time PACES PER STANDARD SEASON right -- P era-complete,
@@ -4255,6 +4293,36 @@ def build_standings_rows(context, arc, finishes, active_franchises,
     # as the widest one on the tab.
     navy_specs = [s for s in formats
                   if s.get('format', {}).get('backgroundColor') == _NAVY]
+    # The Rivalry Matrix (MLB-229), last on the tab -- the CBS half of a
+    # two-book feature. The CONTRACT is shared: rivalry_matrix_grid decides
+    # which ledger this league's format means, densifies the cells, blanks the
+    # diagonal and zeroes the never-met pairs, and writes the explainer. Only
+    # the LAYOUT is local, because this builder accumulates rows and format
+    # ranges together while the ESPN one returns rows for the write layer to
+    # paint. Two idioms, one product.
+    #
+    # For a points league the ledger is completed SEASONS on total points --
+    # there are no matchups here to have a head-to-head record about, which is
+    # exactly what the format dispatch is for.
+    if rivalry_axes:
+        matrix = rivalry_matrix_grid(rivalry_axes, rivalry_pairs or [])
+        if matrix:
+            matrix_col = _col(matrix['width'])
+            rows.append([])
+            # The ledger name rides the banner as a SCOPE caption, which is
+            # this tab's idiom for "what these cells are" (Current Season /
+            # All-Time elsewhere). The ESPN book gives it its own row because
+            # its blocks stack two tables under one banner; here there is one
+            # grid, so a separate label row would be a heading with nothing to
+            # distinguish it from. Either way the sheet says which ledger it is
+            # showing -- a matrix of records that does not say what kind is the
+            # one thing format dispatch must not leave ambiguous.
+            _section(RIVALRY_MATRIX_LABEL, scopes=[(1, matrix['ledger'])],
+                     width=matrix_col)
+            _note(matrix['explainer'], width=matrix_col)
+            _header(matrix['header'], width=matrix_col)
+            rows.extend(matrix['grid'])
+
     if navy_specs:
         def _range_end_width(a1):
             letters = ''.join(c for c in a1.split(':')[1] if c.isalpha())
@@ -5116,6 +5184,8 @@ def build_all_tabs(nav_targets=None):
         alltime_acquisition_rows=get_acquisition_channels_alltime(
             context['last_closed_season']),
         affinity_rows=get_mlb_affinity(season),
+        rivalry_axes=get_rivalry_axes(),
+        rivalry_pairs=get_rivalry_matrix(),
     )
 
     draft = build_draft_recap_rows(

@@ -44,6 +44,8 @@ from almanac_data import (
     get_team_acquisition_channels_alltime,
     get_team_affinity_weights,
     get_team_rank_arc,
+    get_rivalry_axes,
+    get_rivalry_matrix,
     get_espn_season_finishes,
     get_team_standings_alltime,
     get_player_season_points,

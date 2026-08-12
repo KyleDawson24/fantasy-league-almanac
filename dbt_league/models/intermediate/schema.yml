@@ -898,3 +898,118 @@ models:
           are retained -- membership is the key set, never the values.
         tests:
           - not_null
+
+  - name: int_franchise_season_points
+    description: >
+      Each franchise's AUTHORITATIVE season points total, as the platform
+      itself reported it, with the evidence for whether the season is finished
+      (MLB-229).
+
+      NOT fct_team_season_performance: that fact's totals are ours, summed from
+      the player chain under a chosen lens, and its platform_points overlay is
+      NULL for a points league by design. A season-points rivalry asks who the
+      PLATFORM said outscored whom, so it reads delivered standings -- which
+      also makes the comparison available for seasons the player chain never
+      covered.
+
+      Two source arms, joined by DATA PRESENCE rather than a platform check
+      (the int_franchise_registry rule): delivered season standings
+      (stg_team_standings), and parsed final standings (stg_cbs__ui_standings),
+      which are final by construction. stg_cbs__standings is deliberately not a
+      third arm -- it carries the live season only and has no completion
+      evidence, so every row it could contribute would be filtered out again.
+
+      COMPLETENESS is not one rule. Where the opt-in schedule capture reached a
+      season, season_is_complete is a measured fact. Where it did not, a season
+      STRICTLY EARLIER than the league's latest standings season is complete --
+      the platform has moved on from it -- which leaves only the latest season
+      unproven, and that is exactly the one that might be in flight. Parsed
+      final standings are complete by construction.
+
+      Grain: one row per (league_key, season_year, franchise_id).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - season_year
+              - franchise_id
+    columns:
+      - name: league_key
+        description: 'League registry key. Part of the grain.'
+        tests:
+          - not_null
+      - name: season_year
+        description: 'The season this total covers. Part of the grain.'
+        tests:
+          - not_null
+      - name: franchise_id
+        description: 'Platform team id, as varchar to match the franchise dims. Part of the grain.'
+        tests:
+          - not_null
+      - name: season_points
+        description: 'The platform''s own season total for this franchise. Never our recomputed lens.'
+        tests:
+          - not_null
+      - name: points_source
+        description: 'delivered_standings | parsed_final_standings -- which arm produced the total. Final standings win where both reach one franchise-season.'
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['delivered_standings', 'parsed_final_standings']
+      - name: is_season_complete
+        description: >
+          Whether the season is finished. Non-null on purpose: "not proven
+          complete" and "unknown" are the same thing to every consumer, and
+          leaving it NULL would push a three-valued test onto each of them.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [true, false]
+      - name: completion_evidence
+        description: >
+          schedule_capture | superseded_season | final_standings_source -- WHY
+          is_season_complete says what it says. The audit handle for "is this
+          season complete because we measured it, or because the league moved
+          past it?"
+        tests:
+          - not_null
+
+  - name: int_franchise_current_teams
+    description: >
+      The platform teams a league is fielding RIGHT NOW (MLB-229), from its
+      latest team capture.
+
+      Feeds mart_franchise_rivalry_axes and nothing that aggregates a fact:
+      activity belongs to the axes of a rendered matrix, never to the history
+      underneath it. A team that changed platform ids keeps every result its
+      former ids earned.
+
+      Both arms are the same shape -- the team list of the league's latest
+      captured season -- so a new platform joins by adding its own team capture
+      and nothing else moves. The standings feeds are used rather than roster
+      snapshots because the question is which TEAMS exist, and reaching a
+      roster would depend on the player chain to answer it.
+
+      Grain: one row per (league_key, franchise_id).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - franchise_id
+    columns:
+      - name: league_key
+        description: 'League registry key. Each league resolves its own latest season.'
+        tests:
+          - not_null
+      - name: franchise_id
+        description: 'Platform team id the league is currently fielding, as varchar.'
+        tests:
+          - not_null
+      - name: current_season
+        description: 'The season the capture describes -- this league''s latest.'
+        tests:
+          - not_null

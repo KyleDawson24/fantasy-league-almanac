@@ -146,6 +146,12 @@ def stranger(tmp_path_factory):
     result = subprocess.run(
         [sys.executable, "-m", "dbt.cli.main", "build",
          "--select", "+dim_matchup_period",
+         # CAUTIOUS indirect selection -- see the same flag and reasoning in
+         # tests/test_dim_matchup_period_contract.py (MLB-229). `+model`
+         # selects ancestors; dbt's default eager rule additionally pulls in
+         # any test with one selected parent, including tests that span into
+         # subgraphs this fixture does not build.
+         "--indirect-selection", "cautious",
          "--project-dir", str(PROJECT_DIR), "--profiles-dir", str(PROFILES_DIR),
          "--target", "duckdb"],
         cwd=str(REPO_ROOT), env=env, capture_output=True, text=True)

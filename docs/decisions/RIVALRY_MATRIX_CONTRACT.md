@@ -1,0 +1,213 @@
+# The Rivalry Matrix contract (MLB-229)
+
+What the matrix means, which rulings produced it, and what is left.
+
+Supersedes `HEAD_TO_HEAD_RIVALS_CONTRACT.md` (deleted), which described a
+provisional first pass. Two of its claims were wrong and are corrected here:
+it counted a matchup as complete once both running scores existed, and it
+reported season-points support as blocked on unresolved assumptions. Both are
+resolved below.
+
+---
+
+## 1. Identity: what counts as one team
+
+Kyle's ruling, in the order it applies:
+
+1. **Platform ids identify source records.** They are never rewritten. Every
+   fact keeps the team id the platform served.
+2. **An explicitly configured canonical name IS the aggregation identity.**
+   Where the league has written one in `franchise_lineage`, that name is the
+   team.
+3. **A configured name collapses everything that carries it** — different
+   platform ids, and different `canonical_franchise_id`s. Two franchises the
+   lineage never linked are one team if the league named them the same thing.
+4. **Historical names and re-minted ids roll into it.** A configured name
+   written against a re-minted id names the whole lineage, earliest era
+   included — it belongs to the franchise, not to the row it was typed on.
+5. **Without a configured name, the identity is the canonical franchise id**
+   and the best observed name is a display label hung on it.
+6. **Two fallback identities never merge on a matching observed name.**
+   Observation is a coincidence; configuration is a statement.
+
+The asymmetry between (3) and (6) is the whole ruling, and it is why
+`dim_franchise.canonical_name` cannot be the group-by key: it coalesces the
+configured and observed cases into one string, so grouping on it would merge
+(6) and lose (3)'s provenance.
+
+### What changed to support it
+
+- `dim_franchise` gained `configured_name` / `configured_abbrev` /
+  `has_configured_name`. These are **lineage-wide** — resolved from the
+  latest-observed member that carries an override — while `canonical_name`
+  keeps its per-id resolution untouched. `canonical_name` is a rendered label
+  with goldens behind it; widening it would have moved output under a ticket
+  that is not about display.
+- `dim_franchise_season` carries the same three through.
+- `dim_franchise_identity` (new, season-grain) applies the rule.
+  `identity_key` is prefix-tagged — `name:Bent Spokes`, `fid:14` — so the two
+  kinds share one column and a league that names a team `13` cannot collide
+  with franchise 13.
+
+Matching is **exact after trimming**: no case folding, no punctuation
+smoothing. A league that wrote two different strings meant two different
+things.
+
+### Accidental collisions
+
+`assert_configured_name_has_no_active_collision` **warns** — per season — when
+two teams that were both playing share one configured name. The rule still
+aggregates them, because it has to mean the same thing everywhere; the warning
+is how the league notices a seed typo. Warn rather than error: the rule
+produces a defined answer, nothing is corrupt, and a build that refuses to
+finish over a display-seed typo is a gate people learn to skip.
+
+The old fixture treated two ids both named "Bent Spokes" as teams that must
+stay apart. Under this ruling that is exactly backwards, and the test now
+asserts the collapse.
+
+---
+
+## 2. Completion: what counts as played
+
+**A matchup counts when its period is CLOSED**, it has an opponent, the two
+sides are different platform teams, and both carry a platform score.
+
+The provisional pass had no closure gate and counted a matchup as soon as both
+scores were non-null — which is true on a Tuesday. `int_matchup_period_evidence.is_closed`
+is the real signal, and it already existed: a period strictly below the
+current one, or the final period of a season ESPN has finished with (proven
+shape, membership reaching `finalScoringPeriod`).
+
+**The gate applies per league-season, not per period.** The schedule capture
+is opt-in, so absence of evidence is not evidence of absence: a season the
+capture reached must prove each period closed, and a season it never reached
+keeps its history. Testing `is_closed` alone would have deleted every season
+captured before the schedule extract existed.
+
+Both scores are still required, for a different reason: the fact derives
+`result` as `W` / `L` / else `'T'`, so a NULL score would enter a rivalry
+record as a **tie**. It also makes the filter symmetric — one team's
+`platform_points` is the other's `opponent_points` — which is where
+reciprocity comes from.
+
+**Playoffs stay in.** A standings is a regular-season object; a rivalry is not.
+**Abnormal-length periods stay in.** `is_record_eligible` gates per-week
+extremes, and a head-to-head result is not an extreme.
+
+---
+
+## 3. Season points
+
+One completed season = one win, loss or tie on **raw total points**.
+
+- **Authoritative platform totals only** (`int_franchise_season_points`), never
+  our recomputed lens: ESPN's `stg_team_standings.platform_points`, and CBS's
+  parsed final standings `stg_cbs__ui_standings.total_points`.
+  `stg_cbs__standings` is deliberately not a third arm — it carries the live
+  season only, with no completion evidence, so every row it could contribute
+  would be filtered out again. It becomes the right seam the day CBS gains a
+  completion signal.
+- **No margin weighting.** Outscoring a team by 1 and by 1,000 are both one
+  win.
+- **No normalisation for periods played.** A team that played fewer weeks
+  scored fewer points, and that is part of what happened.
+- **Only seasons both teams played.** The pairwise join is an INNER join on
+  season, so a season one side sat out produces no verdict in either
+  direction — an absent team neither outscored anyone nor was outscored. Every
+  completed season both played is compared; none is otherwise excluded.
+- **An identity's platform ids are summed before the comparison**, so a team
+  that fielded two ids in one season is compared once, on its whole output.
+
+### Completeness
+
+Not one rule, and `completion_evidence` records which applied:
+
+| Evidence | Meaning |
+| --- | --- |
+| `schedule_capture` | `season_is_complete` measured from the payload |
+| `superseded_season` | No capture, but the league has played a later season — the platform has moved on from it |
+| `final_standings_source` | Parsed final standings, complete by construction |
+
+The supersession fallback is a statement about the league's own timeline
+rather than a guess about the calendar, which is what makes it safe for a
+historical season and still refuses the live one.
+
+---
+
+## 4. Activity
+
+**Active is determined from current platform ids in the latest team capture**
+(`int_franchise_current_teams`: `stg_team_standings` / `stg_cbs__standings` at
+each league's latest season), resolved through the identity rule and
+deduplicated — two live ids sharing one configured name are one axis.
+
+**Activity applies to the AXES, never to the fact aggregation.** An active team
+keeps every result its former ids and names earned; a folded team keeps its
+games and loses its column. The same ledger therefore serves a current-teams
+matrix, an all-time one, or anything between, by changing which axes are asked
+for.
+
+The standings feeds are used rather than roster snapshots because the question
+is which *teams* exist — reaching a roster would depend on the player chain to
+answer it.
+
+---
+
+## 5. The rendered matrix
+
+`mart_franchise_rivalry` is **long**: one row per ordered pair of identities.
+The matrix is a render, not a grain — a wide table needs a column per team, so
+its schema would move whenever a league gained or lost one.
+
+`build_rivalry_matrix_rows` densifies over the active axes, and the two kinds
+of empty cell are deliberately different:
+
+- **The diagonal is blank.** A team has no record against itself and there is
+  no honest number for that cell.
+- **Two active teams that never met read 0-0.** That is a fact about the
+  league — an expansion team, an unlucky rotation — and blanking it would hide
+  it.
+
+Collapsing those into one appearance loses the distinction, which is why the
+mart emits no diagonal row at all: the renderer cannot get it wrong by
+accident.
+
+Two grids, one section, at the bottom of **Advanced Standings**: a standings
+answers "who is ahead", and "against whom" is the next question. Both are
+standings arithmetic rather than a new kind of statistic. Wired on **both**
+workbook paths — preview/generator and publish — because a block that renders
+in preview and silently vanishes from the published sheet is a failure this tab
+has already had once.
+
+Row labels disambiguate with the abbrev when two axes share a display name,
+which is the supported (6) case above. Found in visual QA.
+
+---
+
+## 6. Where things live
+
+| Layer | Model |
+| --- | --- |
+| Identity | `dim_franchise_identity` (+ provenance on `dim_franchise`, `dim_franchise_season`) |
+| Season totals | `int_franchise_season_points` |
+| Current teams | `int_franchise_current_teams` |
+| Ledger | `mart_franchise_rivalry` |
+| Axes | `mart_franchise_rivalry_axes` |
+| Render | `almanac_logic.build_rivalry_matrix_rows`, on Advanced Standings |
+
+---
+
+## 7. Known limits
+
+- **Goldens are not re-anchored.** The byte-diff harness is `warehouse`-marked
+  and needs a live Snowflake connection, which the MLB-229 worktree does not
+  have. Advanced Standings gains rows, so the goldens WILL move and must be
+  re-anchored under review from an environment with warehouse access, per the
+  CLAUDE.md rule.
+- **The PII guard cannot run non-degraded here.** The private anonymization map
+  is local to the main checkout.
+- **CBS renders nothing yet.** The points-league almanac has its own tab
+  builder and is not wired to this block; the marts are platform-general and
+  populate for any league whose data arrives, so wiring is a renderer question
+  rather than a modelling one.

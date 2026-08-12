@@ -190,6 +190,8 @@ def _generate(args, parser):
             team_week_stat_specs),
         acquisition_rows_alltime=(
             almanac_sheets.get_team_acquisition_channels_alltime()),
+        rivalry_axes=almanac_sheets.get_rivalry_axes(),
+        rivalry_pairs=almanac_sheets.get_rivalry_matrix(),
     )
     trades_rows = None
     if args.include_trades:

@@ -1262,55 +1262,54 @@ models:
         tests:
           - not_null
 
-  - name: mart_franchise_head_to_head
+
+  - name: mart_franchise_rivalry
     description: >
-      The rivalry ledger (MLB-229 rung 1). One row per ORDERED pair of
-      canonical franchises, aggregating every completed meeting between them
-      from the row franchise's perspective.
+      The Rivalry Matrix contract (MLB-229). One row per ORDERED pair of team
+      IDENTITIES, carrying two independent ledgers: head-to-head MATCHUPS, and
+      completed SEASONS compared on total points.
 
-      LONG, NOT WIDE. The consumer surface is a matrix; the matrix is a
-      render, not a grain. A wide table would need one column per franchise,
-      so its schema would change whenever a league gained or lost one --
-      dynamic SQL, an undocumentable contract, nothing downstream can join to.
-      Pivoting is the renderer's job.
+      LONG, NOT WIDE. The matrix is a render, not a grain -- a wide table needs
+      a column per team, so its schema would move whenever a league gained or
+      lost one. Pivoting and densifying belong to the renderer.
 
-      IDENTITY. Matchup facts keep their real platform team ids; resolution
-      happens here through dim_franchise_season, the season-aware lineage
-      machinery. A franchise whose platform id was re-minted is one rival
-      across both eras; a live id handed to a new manager is two franchises,
-      which only the season-grain dim can express. Aggregation keys on
-      canonical_franchise_id and never on name text, so two unrelated
-      franchises sharing a display name stay separate rows. Display resolves
-      to the configured canonical_name when the lineage seed gives one, else
-      the resolved franchise's latest observed platform name.
+      IDENTITY. Platform ids identify source records and are never rewritten.
+      Aggregation keys on dim_franchise_identity.identity_key: the explicitly
+      configured canonical name where the league gives one -- collapsing
+      separate platform ids AND separate canonical_franchise_ids into one team
+      -- and the canonical franchise id where it does not. Historical names and
+      re-minted ids roll into the configured identity; two unconfigured teams
+      whose observed names merely coincide stay apart. Nothing groups on
+      dim_franchise.canonical_name, which coalesces those two cases into one
+      string.
 
-      WHAT COUNTS. A meeting needs an opponent (byes excluded), two distinct
-      platform teams, and a platform score on BOTH sides. The last is not
-      defensive: the fact derives result as W / L / else 'T', so a NULL score
-      on either side would enter this ledger as a TIE. Requiring both scores
-      also makes the filter symmetric -- one team's platform_points is the
-      other's opponent_points -- which is what guarantees reciprocity.
+      MATCHUPS. A meeting needs an opponent, two distinct platform teams, a
+      platform score on both sides, and a CLOSED matchup period
+      (int_matchup_period_evidence.is_closed). Closure is not "has two scores":
+      a matchup in flight already carries running totals, so scores alone
+      counted a Tuesday as a win. The schedule capture is opt-in, so the gate
+      applies per league-season -- a captured season must prove each period
+      closed, an uncaptured one keeps its history. Playoffs and abnormal-length
+      periods stay in.
 
-      SCOPE CHOICES, ALL DELIBERATE. Playoff meetings are IN (a rivalry is not
-      a standings). Abnormal-length weeks are IN (is_record_eligible gates
-      per-week extremes, and a head-to-head result is not an extreme). The
-      holding pen is OUT on both sides, before aggregation, so a season-scoped
-      lineage row parking a team-season on it removes that meeting from both
-      directions. There is NO activity filter -- defunct franchises are
-      included, because the project has no authoritative definition of "still
-      active"; see docs/decisions/HEAD_TO_HEAD_RIVALS_CONTRACT.md.
+      SEASONS. One completed season both teams played = one win, loss or tie on
+      RAW total points, with no margin weighting and no normalisation for
+      periods played. The pairwise join is an INNER join on season, so a season
+      one side sat out produces no verdict either way. Totals are the
+      platform's own (int_franchise_season_points), and an identity's platform
+      ids are summed before the comparison.
 
-      THE DIAGONAL IS ABSENT, NOT ZERO. A franchise has no row against itself,
-      so a renderer draws a blank cell rather than a 0-0 that reads as a played
-      series. Self-pairs are removed after resolution, which is the only place
-      two platform ids collapsing to one franchise is visible.
+      SHARED. The holding pen is excluded on both sides of both ledgers before
+      aggregation. Self-pairs are removed after identity resolution, so the
+      matrix diagonal is ABSENT rather than 0-0 -- the renderer draws it blank,
+      and reserves 0-0 for two active teams that have genuinely never met. A
+      pair appears once either ledger has something to say; the other reads
+      zero rather than NULL. Win percentages are NULL at zero meetings, because
+      undefined is not 0.500. No activity filter -- see
+      mart_franchise_rivalry_axes.
 
-      Populated wherever a league delivers scored matchups (H2H, any platform)
-      and empty for a pure points league -- the same data-presence toggle
-      fct_team_season_performance uses, never a platform check.
-
-      Grain: one row per (league_key, row_canonical_franchise_id,
-      opponent_canonical_franchise_id).
+      Grain: one row per (league_key, row_identity_key,
+      opponent_identity_key).
       Materialization: table -- float score sums, and a view would re-sum them
       in a nondeterministic order on every read.
     tests:
@@ -1318,123 +1317,232 @@ models:
           arguments:
             combination_of_columns:
               - league_key
-              - row_canonical_franchise_id
-              - opponent_canonical_franchise_id
+              - row_identity_key
+              - opponent_identity_key
     columns:
       - name: league_key
         description: 'League registry key (config/leagues.yml). First-class dimension in the grain -- rivalries never blend across leagues.'
         tests:
           - not_null
-      - name: row_canonical_franchise_id
+      - name: row_identity_key
         description: >
-          Canonical franchise id of the perspective franchise, resolved
-          through dim_franchise_season. Every measure on the row is stated
-          from this franchise's point of view.
+          Aggregation identity of the perspective team, from
+          dim_franchise_identity. Prefix-tagged (name: / fid:) so a configured
+          name and a franchise id share one column without colliding. Every
+          measure on the row is stated from this team's point of view.
         tests:
           - not_null
-      - name: opponent_canonical_franchise_id
+      - name: opponent_identity_key
         description: >
-          Canonical franchise id of the opposing franchise. Never equal to
-          row_canonical_franchise_id -- the diagonal is absent by construction
-          (assert_head_to_head_has_no_diagonal).
+          Aggregation identity of the opposing team. Never equal to
+          row_identity_key -- the diagonal is absent by construction
+          (assert_rivalry_has_no_diagonal).
         tests:
           - not_null
-      - name: row_franchise_name
+      - name: row_team_name
         description: >
-          Display name of the row franchise: the configured canonical_name
-          when the lineage seed gives one, else its latest observed platform
-          name. A LABEL only -- nothing aggregates on it.
+          Display name of the row team: the configured canonical name when the
+          league gives one, else the resolved franchise's best observed name. A
+          LABEL only -- nothing aggregates on it.
         tests:
           - not_null
-      - name: row_franchise_abbrev
-        description: 'Display abbreviation of the row franchise, resolved on the same precedence as row_franchise_name.'
-      - name: opponent_franchise_name
-        description: 'Display name of the opponent franchise, resolved on the same precedence as row_franchise_name.'
+      - name: row_team_abbrev
+        description: 'Display abbreviation of the row team, resolved on the same precedence as row_team_name.'
+      - name: row_identity_source
+        description: 'configured_name | franchise_id -- which rule produced this identity. The provenance a consumer needs to know whether a shared display name means a shared team.'
         tests:
           - not_null
-      - name: opponent_franchise_abbrev
-        description: 'Display abbreviation of the opponent franchise.'
-      - name: meetings
-        description: >
-          Completed meetings between the two franchises. Always equals
-          wins + losses + ties (assert_head_to_head_results_partition_meetings)
-          and always at least 1 -- a pair with no meetings has no row.
-        tests:
-          - not_null
-          - dbt_utils.accepted_range:
+          - accepted_values:
               arguments:
-                min_value: 1
-                inclusive: true
-      - name: wins
-        description: 'Meetings the row franchise won, on the platform lens.'
+                values: ['configured_name', 'franchise_id']
+      - name: opponent_team_name
+        description: 'Display name of the opponent team, resolved on the same precedence as row_team_name.'
         tests:
           - not_null
-          - dbt_utils.accepted_range:
-              arguments:
-                min_value: 0
-                inclusive: true
-      - name: losses
-        description: >
-          Meetings the row franchise lost. Reciprocally equal to the opponent
-          row's wins.
+      - name: opponent_team_abbrev
+        description: 'Display abbreviation of the opponent team.'
+      - name: opponent_identity_source
+        description: 'configured_name | franchise_id for the opponent identity.'
         tests:
           - not_null
-          - dbt_utils.accepted_range:
+          - accepted_values:
               arguments:
-                min_value: 0
-                inclusive: true
-      - name: ties
+                values: ['configured_name', 'franchise_id']
+      - name: matchup_meetings
         description: >
-          Meetings that finished level. A genuine tie only -- a meeting
-          missing a score on either side is excluded upstream rather than
-          falling through the fact's else-branch into this column.
+          Completed head-to-head matchups between the two teams. Always equals
+          matchup_wins + matchup_losses + matchup_ties
+          (assert_rivalry_results_partition_meetings). Zero where the pair
+          exists only through the season ledger.
         tests:
           - not_null
           - dbt_utils.accepted_range:
               arguments:
                 min_value: 0
                 inclusive: true
+      - name: matchup_wins
+        description: 'Matchups the row team won, on the platform lens.'
+        tests:
+          - not_null
+      - name: matchup_losses
+        description: 'Matchups the row team lost. Reciprocally equal to the opponent row''s matchup_wins.'
+        tests:
+          - not_null
+      - name: matchup_ties
+        description: >
+          Matchups that finished level. A genuine tie only -- a matchup missing
+          a score on either side, or sitting in an open period, is excluded
+          rather than falling through the fact's else-branch into this column.
+        tests:
+          - not_null
       - name: points_for
         description: >
-          Platform points scored by the row franchise across these meetings.
+          Platform points scored by the row team across those matchups.
           Platform lens deliberately -- the same lens result is derived from,
-          so points_for > points_against can never contradict a losing record.
+          so points can never contradict the record.
         tests:
           - not_null
       - name: points_against
-        description: >
-          Platform points conceded to the opponent franchise. Reciprocally
-          equal to the opponent row's points_for.
+        description: 'Platform points conceded. Reciprocally equal to the opponent row''s points_for.'
         tests:
           - not_null
       - name: points_margin
         description: >
-          points_for - points_against, differenced in exact decimal rather
-          than from the cast-back doubles. Exactly the negation of the
-          opponent row's margin (assert_head_to_head_reciprocity).
+          points_for - points_against, differenced in exact decimal rather than
+          from the cast-back doubles. Exactly the negation of the opponent
+          row's margin (assert_rivalry_reciprocity).
         tests:
           - not_null
-      - name: win_pct
+      - name: matchup_win_pct
         description: >
-          (wins + 0.5 * ties) / meetings -- the project's own winning
-          percentage, matching the all-time ordering in
-          output/almanac_data.py. Unrounded: display precision is the
-          renderer's call.
+          (matchup_wins + 0.5 * matchup_ties) / matchup_meetings -- the
+          project's own winning percentage, matching the all-time ordering in
+          output/almanac_data.py. NULL at zero meetings: undefined is not
+          0.500. Unrounded; display precision is the renderer's call.
         tests:
-          - not_null
           - dbt_utils.accepted_range:
               arguments:
                 min_value: 0
                 max_value: 1
                 inclusive: true
       - name: first_meeting_season
+        description: 'Earliest season the two teams played a counted matchup. NULL when they never have.'
+      - name: last_meeting_season
+        description: 'Most recent season the two teams played a counted matchup. Never earlier than first_meeting_season.'
+      - name: season_meetings
         description: >
-          Earliest season the two franchises met. Carried so a consumer can
-          age a rivalry without a second query -- and so whatever activity
-          rule Kyle rules on later can be applied without changing this grain.
+          Completed seasons BOTH teams played, and therefore the number of
+          pairwise season-points verdicts. A season one side sat out is not
+          counted in either direction.
         tests:
           - not_null
-      - name: last_meeting_season
-        description: 'Most recent season the two franchises met. Never earlier than first_meeting_season.'
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+      - name: season_wins
+        description: 'Completed seasons in which the row team outscored the opponent on raw total points.'
+        tests:
+          - not_null
+      - name: season_losses
+        description: 'Completed seasons the row team was outscored in. Reciprocally equal to the opponent row''s season_wins.'
+        tests:
+          - not_null
+      - name: season_ties
+        description: 'Completed seasons in which the two totals were exactly equal, compared in exact decimal.'
+        tests:
+          - not_null
+      - name: season_points_for
+        description: 'Total platform season points the row team scored across the compared seasons.'
+        tests:
+          - not_null
+      - name: season_points_against
+        description: 'Total platform season points the opponent scored across the same seasons. Reciprocally equal to the opponent row''s season_points_for.'
+        tests:
+          - not_null
+      - name: season_win_pct
+        description: '(season_wins + 0.5 * season_ties) / season_meetings. NULL at zero compared seasons.'
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+                inclusive: true
+      - name: first_season_compared
+        description: 'Earliest completed season both teams played. NULL when they never shared one.'
+      - name: last_season_compared
+        description: 'Most recent completed season both teams played.'
+
+  - name: mart_franchise_rivalry_axes
+    description: >
+      The rows and columns of the Rivalry Matrix (MLB-229): one row per ACTIVE
+      team identity in a league, with its display label and a stable draw
+      order.
+
+      WHY ACTIVITY LIVES HERE AND NOT ON THE LEDGER. Activity applies to the
+      AXES of a rendered matrix, never to the facts underneath it. An active
+      team keeps every result its former platform ids and names earned, and a
+      folded team's games still happened -- they just have no row on a grid
+      about who is playing now. The same fact rows therefore serve a
+      current-teams matrix, an all-time one, or anything between, by changing
+      which axes are asked for.
+
+      Current platform ids come from int_franchise_current_teams (the league's
+      latest team capture), resolve through dim_franchise_identity for that
+      season, and are DEDUPLICATED -- two live ids sharing one configured
+      canonical name are one axis, the same collapse their history gets.
+      active_platform_teams reports how many resolved onto each axis;
+      assert_configured_name_has_no_active_collision warns when that is more
+      than one, which is usually a seed typo rather than a real merge.
+
+      The holding pen gets no axis. Ordering is by display name, so a matrix
+      reads alphabetically and two rebuilds draw the same grid.
+
+      Grain: one row per (league_key, identity_key).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - identity_key
+    columns:
+      - name: league_key
+        description: 'League registry key. Each league resolves its own current season, so two leagues at different points in their calendars never contaminate each other.'
+        tests:
+          - not_null
+      - name: identity_key
+        description: 'Aggregation identity, joinable to mart_franchise_rivalry.row_identity_key / opponent_identity_key.'
+        tests:
+          - not_null
+      - name: identity_source
+        description: 'configured_name | franchise_id.'
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['configured_name', 'franchise_id']
+      - name: identity_name
+        description: 'Axis label -- the configured canonical name, else the best observed name.'
+        tests:
+          - not_null
+      - name: identity_abbrev
+        description: 'Short axis label, for a column header that has to fit.'
+      - name: current_season
+        description: 'The season the team capture describes -- the league''s latest, per league.'
+        tests:
+          - not_null
+      - name: active_platform_teams
+        description: >
+          How many live platform ids resolved onto this axis. Normally 1; more
+          means a configured canonical name collapsed several, which is the
+          rule working and worth a look at the seed.
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 1
+                inclusive: true
+      - name: sort_order
+        description: 'Stable 1..N draw order within a league, by display name then identity_key. A consumer wanting standings order joins its own.'
         tests:
           - not_null

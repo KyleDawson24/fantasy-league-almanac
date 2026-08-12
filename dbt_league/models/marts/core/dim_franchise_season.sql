@@ -82,7 +82,13 @@ select
     r.is_season_override,
     (r.franchise_id = r.canonical_franchise_id) as is_canonical_anchor,
     canon.canonical_name                        as canonical_name,
-    canon.canonical_abbrev                      as canonical_abbrev
+    canon.canonical_abbrev                      as canonical_abbrev,
+    -- Provenance, carried from the CANONICAL franchise (MLB-229): whether
+    -- this franchise-season's name was configured by the league or merely
+    -- observed. dim_franchise_identity keys on the difference.
+    canon.configured_name                       as configured_name,
+    canon.configured_abbrev                     as configured_abbrev,
+    canon.has_configured_name                   as has_configured_name
 from resolved r
 join {{ ref('dim_franchise') }} canon
     on r.league_key = canon.league_key

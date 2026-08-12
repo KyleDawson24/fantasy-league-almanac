@@ -1229,6 +1229,54 @@ def get_team_rank_arc(season_year):
     """, (season_year,))
 
 
+def get_rivalry_axes():
+    """The ACTIVE teams a Rivalry Matrix draws rows and columns for
+    (MLB-229), already deduplicated onto one axis per team identity and
+    ordered.
+
+    Read straight off mart_franchise_rivalry_axes rather than reconstructed
+    from the standings rows every other block on this tab uses, and the
+    difference is the point: the standings are keyed by PLATFORM team id,
+    while a rivalry axis is keyed by team IDENTITY. Two live platform ids
+    that the league has given one configured canonical name are one team
+    here and two rows there, and a franchise that changed ids keeps its old
+    eras on the axis its current id resolves to."""
+    return query_snowflake(
+        f"SELECT identity_key, identity_name, identity_abbrev,"
+        f"       identity_source, active_platform_teams, sort_order"
+        f" FROM mart_franchise_rivalry_axes"
+        f" WHERE {league_predicate()}"
+        f" ORDER BY sort_order"
+    )
+
+
+def get_rivalry_matrix():
+    """Every ordered pair of team identities with something to say about
+    each other (MLB-229): the head-to-head matchup ledger and the
+    completed-season points ledger, from the row team's perspective.
+
+    LONG, and densified by the renderer rather than here. The mart is one
+    row per ordered pair that HAS a result; the matrix wants a cell for
+    every pair of active axes, including the ones that have never met.
+    Filling those in is a display decision -- an empty diagonal, a 0-0 for
+    two teams that never played -- so build_rivalry_matrix_rows makes it,
+    and the query stays a straight read.
+
+    NOT FILTERED TO ACTIVE TEAMS. The axes decide what is drawn; the ledger
+    holds everything, including the folded franchises an active team's
+    record was built against. Filtering here would make a team's totals
+    depend on who else is still playing."""
+    return query_snowflake(
+        f"SELECT row_identity_key, opponent_identity_key,"
+        f"       row_team_name, opponent_team_name,"
+        f"       matchup_meetings, matchup_wins, matchup_losses, matchup_ties,"
+        f"       points_for, points_against, points_margin,"
+        f"       season_meetings, season_wins, season_losses, season_ties"
+        f" FROM mart_franchise_rivalry"
+        f" WHERE {league_predicate()}"
+    )
+
+
 def get_team_affinity_weights(season_year):
     """Active-lineup INVOLVEMENT per (team, MLB club) -- the affinity-
     chart substrate, weighted by PA + BF (Kyle 2026-07-17 round 10:

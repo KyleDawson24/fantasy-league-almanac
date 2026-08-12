@@ -181,11 +181,21 @@ def _dbt(argv, env):
     back door. Every call in this fixture passes it -- a `dbt test` or a
     follow-up `dbt build` that forgot would resolve the legacy rows to a
     different league than the build that created them.
+
+    CAUTIOUS INDIRECT SELECTION (MLB-229), and here for the same reason the var
+    is: every selection in this file names a SUBGRAPH, and dbt's default eager
+    rule additionally pulls in any test with at least ONE selected parent. A
+    test spanning this subgraph and another therefore arrives in a build
+    carrying only half of what it reads, and fails on a relation this fixture
+    never created. Cautious takes a test only when ALL of its parents are
+    built, which is the question this fixture is already asking. Measured: it
+    drops exactly the cross-subgraph tests and nothing this build relies on.
     """
     return subprocess.run(
         [sys.executable, "-m", "dbt.cli.main", *argv,
          "--project-dir", str(PROJECT_DIR), "--profiles-dir", str(PROFILES_DIR),
          "--target", "duckdb",
+         "--indirect-selection", "cautious",
          "--vars", json.dumps({"legacy_matchup_schedule_league": ALPHA})],
         cwd=str(REPO_ROOT), env=env, capture_output=True, text=True)
 

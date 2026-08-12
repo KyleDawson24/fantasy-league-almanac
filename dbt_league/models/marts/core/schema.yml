@@ -341,8 +341,110 @@ models:
           Display name of the canonical franchise: the franchise_lineage seed's
           override when one is given, else the name worn by the lineage's
           most-recently-seen member (Kyle's rule, 2026-07-22).
+
+          A COALESCE, so it cannot tell a configured name from an observed one
+          -- read configured_name when that difference matters, and never GROUP
+          BY this column to decide identity.
         tests:
           - not_null
+      - name: configured_name
+        description: >
+          The name the league EXPLICITLY configured for this franchise in the
+          franchise_lineage seed, or NULL where it configured none (MLB-229).
+          NULL is the whole signal, not a missing value: a configured name is a
+          statement of identity, an observed one is a coincidence, and
+          dim_franchise_identity keys on exactly that difference.
+
+          LINEAGE-WIDE, unlike canonical_name's per-id override: every member
+          of a lineage reports the same configured name, so a name written
+          against a re-minted id names the whole franchise.
+      - name: configured_abbrev
+        description: 'The explicitly configured abbreviation, or NULL. Same lineage-wide resolution as configured_name.'
+      - name: has_configured_name
+        description: 'Non-null convenience flag: true where the league configured a canonical name for this franchise.'
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [true, false]
+
+  - name: dim_franchise_identity
+    description: >
+      The AGGREGATION identity of a franchise-season (MLB-229): which team, for
+      the purpose of adding things up, is this platform id in this season?
+
+      NOT dim_franchise_season. That model stops at the lineage seed's re-mint
+      links, which is right for provenance and wrong for a rivalry ledger -- a
+      league can hold ONE team across ids the lineage never linked. Kyle's
+      ruling: an explicitly configured canonical name IS the identity, so two
+      franchises carrying the same configured name are one team here even when
+      their canonical_franchise_ids differ, and historical names and re-minted
+      ids roll into it.
+
+      THE FALLBACK IS AN ID, NEVER A NAME. With no configured name the identity
+      is the canonical franchise id and the best observed name is a label hung
+      on it, so two unconfigured teams whose observed names happen to match stay
+      separate. The key is prefix-tagged (name: / fid:) so the two kinds share a
+      column and can never collide.
+
+      Matching is exact after trimming -- no case folding, no punctuation
+      smoothing. A league that wrote two different strings meant two different
+      things. Accidental collisions still aggregate, and
+      assert_configured_name_has_no_active_collision warns so the seed can be
+      corrected.
+
+      Activity is not here: see mart_franchise_rivalry_axes.
+
+      Grain: one row per (league_key, franchise_id, season_year).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - franchise_id
+              - season_year
+    columns:
+      - name: league_key
+        description: 'League registry key. Part of the grain; identities never span leagues.'
+        tests:
+          - not_null
+      - name: franchise_id
+        description: 'Platform team id. Part of the grain, and never rewritten -- it identifies source records.'
+        tests:
+          - not_null
+      - name: season_year
+        description: 'The season this row speaks about. Part of the grain, because a season-scoped lineage row can move a single season to a different identity.'
+        tests:
+          - not_null
+      - name: canonical_franchise_id
+        description: 'The franchise this id belonged to in this season, carried from dim_franchise_season for provenance and for holding-pen filtering.'
+        tests:
+          - not_null
+      - name: identity_key
+        description: >
+          The aggregation key: 'name:' + the trimmed configured canonical name
+          where one exists, else 'fid:' + canonical_franchise_id. The prefix is
+          load-bearing -- it stops a league that names a team '13' from
+          colliding with franchise 13.
+        tests:
+          - not_null
+      - name: identity_source
+        description: 'configured_name | franchise_id -- which rule produced identity_key.'
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['configured_name', 'franchise_id']
+      - name: identity_name
+        description: 'Display label for the identity, resolved once per key: the configured name, else the canonical franchise''s best observed name.'
+        tests:
+          - not_null
+      - name: identity_abbrev
+        description: 'Short display label for the identity.'
+      - name: canonical_name
+        description: 'What dim_franchise_season says, kept alongside so the identity rule''s input is visible next to its output.'
+      - name: configured_name
+        description: 'The explicit name, or NULL. Provenance for identity_source.'
 
   - name: dim_franchise_season
     description: >
@@ -396,6 +498,21 @@ models:
         description: 'Display name of the canonical franchise for this season.'
         tests:
           - not_null
+      - name: configured_name
+        description: >
+          The name the league explicitly configured for this season's canonical
+          franchise, or NULL (MLB-229). Carried from dim_franchise so a
+          season-grain consumer can tell a configured identity from an observed
+          label without a second join.
+      - name: configured_abbrev
+        description: 'The explicitly configured abbreviation for this season''s canonical franchise, or NULL.'
+      - name: has_configured_name
+        description: 'Non-null convenience flag: true where a canonical name was configured.'
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [true, false]
 
   - name: dim_owner
     description: >

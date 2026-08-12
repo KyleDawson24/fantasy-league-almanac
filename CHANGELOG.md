@@ -22,6 +22,47 @@ in a shareable workbook). Release notes are built from the commit range
 at each cut rather than accumulated here, so this section staying short
 is not a sign the repository is idle._
 
+### Added
+
+- **The Rivalry Matrix** (MLB-229): every active team against every
+  other, at the bottom of Advanced Standings, in two grids -- completed
+  head-to-head matchups, and completed seasons scored as one game each,
+  won by whoever put up more points over the whole year. A standings
+  answers "who is ahead"; this answers "against whom".
+
+  It aggregates by TEAM, not by platform id. A franchise whose id was
+  re-minted, or that has been renamed, brings its whole history with it,
+  and a league can declare two ids to be one team by giving them the same
+  canonical name in `franchise_lineage` -- which is what makes the matrix
+  match how a league actually remembers itself rather than how the
+  platform files it. Two teams that merely happen to share an OBSERVED
+  name stay separate, because observation is a coincidence and
+  configuration is a statement; if two live teams share a configured name
+  the build warns, so an accidental collision can be corrected.
+
+  Only completed matchups count -- a week still being played is not a
+  result yet -- and only completed seasons both teams were in the league
+  for. A team has no record against itself, so the diagonal is blank;
+  two teams that have never met read 0-0, which is a fact about the
+  league rather than an absence.
+
+  New warehouse contracts: `mart_franchise_rivalry` (long, one row per
+  ordered pair -- the matrix is a render, not a grain),
+  `mart_franchise_rivalry_axes`, `dim_franchise_identity`,
+  `int_franchise_season_points`, `int_franchise_current_teams`. Design
+  and rulings in
+  [RIVALRY_MATRIX_CONTRACT.md](docs/decisions/RIVALRY_MATRIX_CONTRACT.md).
+
+### Changed
+
+- **`dim_franchise` and `dim_franchise_season` expose name provenance**
+  (MLB-229): `configured_name` / `configured_abbrev` /
+  `has_configured_name`, so a name the league configured can be told from
+  one merely observed. `canonical_name` coalesces the two and is
+  deliberately unchanged -- it is a rendered label with goldens behind
+  it. The new columns resolve across a whole lineage, so a name written
+  against a re-minted id names the franchise's earlier eras too.
+
 ## [1.8.0] - 2026-08-09
 
 The engine runs locally end to end. 30 commits. Full story in

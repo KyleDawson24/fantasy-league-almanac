@@ -36,6 +36,8 @@ from almanac_data import (
     get_team_acquisition_channels_alltime,
     get_team_affinity_weights,
     get_team_rank_arc,
+    get_rivalry_axes,
+    get_rivalry_matrix,
     get_espn_season_finishes,
     get_team_standings_alltime,
     get_trades_tab_data,
@@ -184,6 +186,13 @@ def write_almanac(sheet_id, season_year=None, matchup_period=None, client=None):
         standings_rows_alltime=get_team_standings_alltime(
             team_week_stat_specs),
         acquisition_rows_alltime=get_team_acquisition_channels_alltime(),
+        # MLB-229. Passed on BOTH paths deliberately: acquisition_rows was
+        # preview-only for months because the writer knew how to paint blocks
+        # the assembly never handed it, and a block that renders in preview and
+        # silently vanishes from the published sheet is the failure mode this
+        # tab has already had once.
+        rivalry_axes=get_rivalry_axes(),
+        rivalry_pairs=get_rivalry_matrix(),
     )
     # Trades is the one live-API tab; an ESPN hiccup shouldn't sink the
     # whole publish. On failure the previous tab content stands, its
@@ -1207,7 +1216,8 @@ def _replace_advanced_standings_tab(spreadsheet, rows, stat_specs):
                                   'Points by Lineup Slot',
                                   'Production by Acquisition Channel',
                                   'Roster Affinity by MLB Team',
-                                  'Rank by Week')
+                                  'Rank by Week',
+                                  'Rivalry Matrix')
         # Two passes so every navy band runs as far as the WIDEST one
         # (Kyle round 12: unified band width).
         band_specs = []
@@ -1247,12 +1257,26 @@ def _replace_advanced_standings_tab(spreadsheet, rows, stat_specs):
                     'format': {'textFormat': explainer_text_format()},
                 })
             if title in ('Production by Acquisition Channel',
-                         'Roster Affinity by MLB Team'):
+                         'Roster Affinity by MLB Team',
+                         'Rivalry Matrix'):
                 # The explainer-style caption directly underneath. Was a
                 # local size-10 (MLB-142); now the house token (MLB-170).
                 formats.append({
                     'range': f'A{i + 2}:{last_col}{i + 2}',
                     'format': {'textFormat': explainer_text_format()},
+                })
+        # The Rivalry Matrix's two grid labels and their header rows
+        # (MLB-229). Plain bold, per the house convention that navy is for
+        # SECTION bands and the tables inside one are bold -- the two ledgers
+        # are halves of a single section, not two sections. Matched on the
+        # labels rather than folded into header_indices below, because those
+        # locators key off the geometry of the tables they were written for
+        # and this grid has its team names in column A.
+        for i, row in enumerate(rows):
+            if row and row[0] in ('Head-to-Head Matchups', 'Season Points'):
+                formats.append({
+                    'range': f'A{i + 1}:{last_col}{i + 2}',
+                    'format': {'textFormat': {'bold': True}},
                 })
         if band_specs:
             band_col = _a1_col(max(w for _, w in band_specs))

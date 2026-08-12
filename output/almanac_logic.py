@@ -1093,7 +1093,9 @@ def build_advanced_standings_tab_rows(standings_rows, slot_rows, stat_specs,
                                       rank_arc_rows=None,
                                       finishes_rows=None,
                                       standings_rows_alltime=None,
-                                      acquisition_rows_alltime=None):
+                                      acquisition_rows_alltime=None,
+                                      rivalry_axes=None,
+                                      rivalry_pairs=None):
     """Build the Advanced Standings tab: the per-stat weekly-average
     standings (Table A) stacked over a team x active-lineup-slot points
     grid (Table B), an all-time twin of Table B shown as per-matchup
@@ -1612,6 +1614,139 @@ def build_advanced_standings_tab_rows(standings_rows, slot_rows, stat_specs,
                   for tid in team_ids],
             ])
 
+    # The Rivalry Matrix (MLB-229), last on the tab. It belongs on Advanced
+    # Standings rather than on a tab of its own: a standings answers "who is
+    # ahead", and the natural next question is "against whom" -- and both
+    # ledgers here are standings arithmetic (a record, and a season-by-season
+    # points verdict) rather than a new kind of statistic.
+    #
+    # Its axes are the RIVALRY axes, not the standings rows every table above
+    # shares. Those are keyed by platform team id, and a rivalry axis is keyed
+    # by team identity -- so a league that has given two live ids one
+    # configured canonical name gets one row here and two rows above, which is
+    # correct in both places and would be wrong if either borrowed the other's.
+    if rivalry_axes:
+        rows.extend(build_rivalry_matrix_rows(
+            rivalry_axes, rivalry_pairs or [],
+            banner_width=ESPN_DIVIDER_COL0 + 1))
+
+    return rows
+
+
+RIVALRY_MATRIX_LABEL = 'Rivalry Matrix'
+RIVALRY_BLANK_CELL = ''
+
+
+def format_rivalry_record(wins, losses, ties):
+    """One matrix cell: 'W-L' or 'W-L-T' from the row team's perspective.
+
+    Ties are dropped when there are none, because '12-4' is what a reader
+    expects and '12-4-0' reads as a league that has ties and this pair
+    happened not to. Where they exist the third number is not optional --
+    two teams at 6-6-2 are not 6-6.
+    """
+    if ties:
+        return f'{wins}-{losses}-{ties}'
+    return f'{wins}-{losses}'
+
+
+def build_rivalry_matrix_rows(axes, pairs, banner_width=None):
+    """Densify the long rivalry ledger into two square grids -- head-to-head
+    matchups, and completed seasons on total points -- over the ACTIVE teams.
+
+    axes come from almanac_data.get_rivalry_axes (already deduplicated and
+    ordered); pairs from get_rivalry_matrix (one row per ordered pair that has
+    a result). Returns the rows; the write layer paints them.
+
+    DENSIFICATION IS THE WHOLE JOB, and the two empty cases are deliberately
+    different:
+
+      * THE DIAGONAL IS BLANK. A team has no record against itself, and there
+        is no honest number to print. An empty cell says "not a thing that
+        happens".
+      * A PAIR THAT NEVER MET IS 0-0. Two teams that are both playing today
+        and have never been scheduled against each other HAVE a head-to-head
+        record and it is nil. That is a fact about the league -- an expansion
+        team, an unlucky rotation -- and blanking it would hide it.
+
+    Blanking both, or zeroing both, collapses those into one appearance and
+    loses the distinction. The mart deliberately emits no diagonal row so this
+    layer cannot get it wrong by accident.
+
+    Axes are IDENTITIES, not platform teams: two live ids sharing one
+    configured canonical name occupy one row and one column, and their whole
+    combined history is in the cells.
+    """
+    if not axes:
+        return []
+
+    keys = [a['identity_key'] for a in axes]
+    labels = [a.get('identity_abbrev') or a['identity_name'] for a in axes]
+
+    # Row labels DISAMBIGUATE when two axes share a display name, which is a
+    # supported state rather than a data error: two teams with no configured
+    # canonical name whose observed names happen to match are deliberately kept
+    # apart, and they then arrive here wearing the same string. The column
+    # headers are abbrevs so they already differ; the row labels are full names
+    # and without this the grid shows two identical rows and no way to tell
+    # which is which. Only the ambiguous ones are suffixed -- tagging every row
+    # would clutter the ordinary case to fix the rare one.
+    seen = {}
+    for axis in axes:
+        seen[axis['identity_name']] = seen.get(axis['identity_name'], 0) + 1
+    names = [
+        (f"{a['identity_name']} ({a['identity_abbrev']})"
+         if seen[a['identity_name']] > 1 and a.get('identity_abbrev')
+         else a['identity_name'])
+        for a in axes
+    ]
+
+    matchup = {}
+    season = {}
+    for p in pairs:
+        cell = (p['row_identity_key'], p['opponent_identity_key'])
+        matchup[cell] = (p['matchup_wins'], p['matchup_losses'],
+                         p['matchup_ties'])
+        season[cell] = (p['season_wins'], p['season_losses'], p['season_ties'])
+
+    def grid(source):
+        out = []
+        for row_key, row_name in zip(keys, names):
+            cells = []
+            for col_key in keys:
+                if row_key == col_key:
+                    cells.append(RIVALRY_BLANK_CELL)
+                    continue
+                record = source.get((row_key, col_key))
+                cells.append(format_rivalry_record(*record) if record
+                             else format_rivalry_record(0, 0, 0))
+            out.append([row_name, *cells])
+        return out
+
+    width = banner_width if banner_width else len(keys) + 1
+    banner = [''] * max(width, len(keys) + 1)
+    banner[0] = RIVALRY_MATRIX_LABEL
+
+    rows = [
+        [],
+        banner,
+        ['Every active team against every other, read ACROSS the row: the '
+         'row team\'s record first. Head-to-head counts completed matchups '
+         'only -- a week still being played is not a result yet. Season '
+         'Points counts each completed season both teams played as one game, '
+         'won by whoever scored more over the whole year, however narrowly; '
+         'a season a team was not in the league counts for nobody. Teams '
+         'that have never met read 0-0; a team has no record against '
+         'itself.'],
+        [],
+        ['Head-to-Head Matchups'],
+        ['Team', *labels],
+    ]
+    rows.extend(grid(matchup))
+    rows.append([])
+    rows.append(['Season Points'])
+    rows.append(['Team', *labels])
+    rows.extend(grid(season))
     return rows
 
 

@@ -91,6 +91,43 @@ display_anchor as (
             and r.franchise_id = f.franchise_id
     )
     where recency_rank = 1
+),
+
+-- THE CONFIGURED-NAME ANCHOR (MLB-229). A configured name belongs to the
+-- FRANCHISE, not to the id it happens to be written against. A league that
+-- names a re-minted id -- the era it thinks of as current -- has named the
+-- whole lineage, including the earlier ids that are the same team. Resolving
+-- per-id instead would let one franchise show two names, and would make an
+-- explicit name on a non-anchor id invisible to anything keyed on the anchor.
+--
+-- Latest-observed wins among the members that carry one, mirroring the
+-- DISPLAY anchor immediately above -- if a league has named two eras of one
+-- franchise differently, the current era is the one it means. The
+-- franchise_id tie-break is the same determinism guard for the same reason.
+configured_anchor as (
+    select
+        league_key,
+        canonical_franchise_id,
+        override_name,
+        override_abbrev
+    from (
+        select
+            r.league_key,
+            r.canonical_franchise_id,
+            r.override_name,
+            r.override_abbrev,
+            row_number() over (
+                partition by r.league_key, r.canonical_franchise_id
+                order by f.last_observed_season desc nulls last,
+                         r.franchise_id desc
+            ) as recency_rank
+        from resolved r
+        join franchises f
+            on r.league_key = f.league_key
+            and r.franchise_id = f.franchise_id
+        where r.override_name is not null
+    )
+    where recency_rank = 1
 )
 
 select
@@ -99,8 +136,30 @@ select
     r.canonical_franchise_id,
     (r.franchise_id = r.canonical_franchise_id)       as is_canonical_anchor,
     coalesce(r.override_name, anchor.franchise_name)  as canonical_name,
-    coalesce(r.override_abbrev, anchor.abbrev)        as canonical_abbrev
+    coalesce(r.override_abbrev, anchor.abbrev)        as canonical_abbrev,
+
+    -- PROVENANCE (MLB-229). canonical_name above is a COALESCE, so it cannot
+    -- tell a name the league CONFIGURED from one merely OBSERVED -- and those
+    -- two answer different questions. A configured name is a statement of
+    -- identity: the league is saying "this franchise IS this team", which is
+    -- why two ids carrying the same configured name are one team and two ids
+    -- that merely happen to be observed under the same string are not.
+    -- Grouping on the coalesced column cannot distinguish them, so the
+    -- configured name is published separately. NULL means "no explicit name"
+    -- -- the whole signal, not a missing value.
+    --
+    -- LINEAGE-WIDE, unlike canonical_name's per-id override: every member of a
+    -- lineage reports the same configured name, because they are the same
+    -- franchise. canonical_name is deliberately left exactly as it was -- it
+    -- is a rendered label with goldens behind it, and widening its resolution
+    -- would move output under a ticket that is not about display.
+    conf.override_name                                as configured_name,
+    conf.override_abbrev                              as configured_abbrev,
+    (conf.override_name is not null)                  as has_configured_name
 from resolved r
 join display_anchor anchor
     on r.league_key = anchor.league_key
     and r.canonical_franchise_id = anchor.canonical_franchise_id
+left join configured_anchor conf
+    on r.league_key = conf.league_key
+    and r.canonical_franchise_id = conf.canonical_franchise_id

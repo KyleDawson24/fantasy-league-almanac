@@ -16,7 +16,18 @@ rather than passing on a developer machine and failing on a clone.
 
 PURE. No network (the one fetch is substituted), no warehouse (the sinks are
 recording fakes and, for the Snowflake seam, the real adapter over a fake
-connection), no credentials, no seed.
+connection), no REAL credentials, no seed.
+
+"No real credentials" is a stronger claim than "no credentials", and the
+difference is the whole of MLB-235's CI correction. These tests drive `run()`,
+and `run()` validates the registry's declared credentials before it opens a
+sink or fetches anything -- correctly, because the real thing is about to talk
+to ESPN. So the environment has to satisfy that check, and
+`synthetic_espn_credentials` below satisfies it with values that could not
+possibly authenticate. It does not merely COVER a missing .env; it OVERRIDES a
+present one, so the run under test sees the same environment on a maintainer's
+machine and on a bare clone. See that fixture for why this file was green on
+Kyle's laptop and red on CI from the day it landed.
 
 EVERY PAYLOAD IS SYNTHETIC. Shapes match what MLB-235 recorded on the wire --
 `schedule[]` keyed by `matchupPeriodId`, membership as the KEYS of
@@ -69,6 +80,22 @@ SEASON = 2026
 TODAY = date(SEASON, 8, 11)
 
 TEAM_ID = 987654
+
+# The credentials `run()` demands, answered with values that are self-evidently
+# not credentials. Written as PAIRS rather than a dict literal on purpose:
+# tools/check_pii.py builds its identifier pattern from the registry's own
+# declared env names, so `"LEAGUE_ID": "0"` -- a key, a colon, a value -- is
+# exactly the shape that scanner is looking for. A two-tuple has no colon.
+#
+# The values are deliberately unusable. A real ESPN_S2 is a long URL-encoded
+# blob and a real SWID is a braced GUID; nothing here would survive contact
+# with espn.com, which is the point -- the fetch is substituted, so what these
+# have to satisfy is `require_credentials()` and nothing else.
+_SYNTHETIC_CREDENTIALS = (
+    ("ESPN_S2", "synthetic-espn-s2-for-tests-not-a-real-cookie"),
+    ("SWID", "{SYNTHETIC-SWID-FOR-TESTS-NOT-A-REAL-GUID}"),
+    ("LEAGUE_ID", "0"),
+)
 
 
 # ---------------------------------------------------------------------------
@@ -194,6 +221,43 @@ def _args(**overrides):
 
 
 @pytest.fixture(autouse=True)
+def synthetic_espn_credentials(monkeypatch):
+    """Satisfy `run()`'s credential gate from the test, not from a .env.
+
+    WHY THIS EXISTS. `run()` calls `target_league.require_credentials()` as
+    its third statement, before the sink opens and long before the first
+    fetch. That check reads `os.environ` directly, through the registry -- it
+    is not behind `connect_espn` or `fetch_league_payload`, so substituting
+    those (which `no_seed_no_network` does) cannot reach it. Every test in
+    this file therefore needed ESPN_S2 and SWID to be SET in the process
+    before it could exercise anything at all.
+
+    WHY NOBODY NOTICED. The module-level `load_dotenv()` above -- there for an
+    unrelated and still-good reason, see the LEAGUE_ID note -- loaded Kyle's
+    real .env into the pytest process at import. On his machine the gate was
+    satisfied by his actual ESPN cookies and every test passed. On a clean
+    checkout there is no .env, and all 58 exited on the same line before
+    reaching a single assertion. Green locally, red on CI, for the most
+    misleading possible reason: the suite was reading a file that is not, and
+    must never be, part of the repo.
+
+    WHY setenv AND NOT setdefault. `setdefault` would leave the maintainer's
+    run using his real cookies and CI using synthetic ones -- two different
+    environments, which is the bug rather than the fix. `monkeypatch.setenv`
+    overrides, so both machines run the same test. It also unwinds at
+    teardown, so nothing leaks into the rest of the session (the hazard the
+    LEAGUE_ID note records the hard way).
+
+    SCOPE. Autouse HERE, in the one module that drives `run()`. Deliberately
+    not in tests/conftest.py: `test_league_registry.py` proves that missing
+    credentials are reported, and a global fixture would quietly delete that
+    coverage by making them never missing.
+    """
+    for name, value in _SYNTHETIC_CREDENTIALS:
+        monkeypatch.setenv(name, value)
+
+
+@pytest.fixture(autouse=True)
 def no_seed_no_network(monkeypatch):
     """The seed raises, the network is absent, the clock is pinned.
 
@@ -259,6 +323,84 @@ def run_extract(monkeypatch):
         return sink, asked, code
 
     return _run
+
+
+# ===========================================================================
+# 0. The credential boundary: this file runs on a bare clone
+# ===========================================================================
+# The regression for MLB-235's CI correction. Section 1 below is the headline
+# claim -- box scores with no seed -- and it was untestable anywhere but Kyle's
+# laptop, because `run()` refused before selection on a checkout with no .env.
+# These three hold that door open from both sides.
+def test_the_credentials_under_test_did_not_come_from_a_dotenv():
+    """THE REGRESSION. Every credential `run()` demands is the synthetic
+    sentinel from this module, not whatever a .env happens to hold.
+
+    This is the assertion that fails on the old arrangement in the ONE
+    environment that used to look fine. On a bare clone the previous code
+    failed everywhere, loudly; on Kyle's machine it passed everywhere, which
+    is why it survived. Here his .env is the adversary: if these values ever
+    revert to being sourced from it, the ones read back are his real cookies
+    and this test says so on the machine where nothing else would.
+    """
+    from config.league_registry import get_league
+
+    declared = set(get_league(LEAGUE).credential_env)
+    supplied = {name for name, _value in _SYNTHETIC_CREDENTIALS}
+
+    # Rot guard: a credential added to leagues.yml with no synthetic answer
+    # here would take this file down on CI only, which is the failure mode
+    # the whole correction exists to remove.
+    assert declared == supplied, (
+        "config/leagues.yml and _SYNTHETIC_CREDENTIALS disagree about what "
+        f"'{LEAGUE}' requires; declared-not-supplied={sorted(declared - supplied)}, "
+        f"supplied-not-declared={sorted(supplied - declared)}")
+
+    for name, value in _SYNTHETIC_CREDENTIALS:
+        assert os.environ[name] == value, (
+            f"{name} is not this module's synthetic value, so the run under "
+            f"test is reading real credentials from somewhere -- almost "
+            f"certainly the maintainer's .env, which CI does not have.")
+
+
+def test_the_headline_path_runs_on_those_synthetic_credentials(run_extract):
+    """And the sentinels are sufficient: with nothing real in the
+    environment, the box-score path still reaches selection and extracts.
+
+    Section 1 proves this too, but only incidentally. Stated here it is the
+    claim itself -- a stranger's clone gets box scores -- rather than a
+    precondition some other assertion happens to need.
+    """
+    payload = _payload((7, 7, 7, 7), current=5, latest=28)
+
+    sink, _asked, code = run_extract(payload)
+
+    assert code == 0
+    assert [mp for mp, _sps in sink.box_scores] == [1, 2, 3, 4]
+
+
+def test_genuinely_missing_credentials_still_refuse_the_run(monkeypatch):
+    """THE OTHER SIDE OF THE DOOR, and the reason the fixture above is scoped
+    to this file rather than to conftest.
+
+    `require_credentials()` is not being softened, and a private-league run
+    with no cookies must still stop before it does anything. Unset them and
+    the refusal has to come straight back -- naming the variables, naming the
+    file that declares them, and naming where they belong. Asserted at the
+    CLI boundary, where the regression actually happened; the unit-level
+    version lives in tests/test_league_registry.py.
+    """
+    monkeypatch.delenv("ESPN_S2", raising=False)
+    monkeypatch.delenv("SWID", raising=False)
+
+    with pytest.raises(SystemExit) as exc:
+        extract.run(_args())
+
+    message = str(exc.value)
+    assert "[league registry]" in message
+    assert "ESPN_S2" in message and "SWID" in message
+    assert "config/leagues.yml" in message
+    assert ".env" in message
 
 
 # ===========================================================================

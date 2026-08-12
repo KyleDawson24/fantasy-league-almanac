@@ -2,7 +2,9 @@
 #
 # Two jobs:
 #   unit-tests -- the pure-function pytest suite (pytest.ini already
-#     excludes the warehouse-marked goldens by default).
+#     excludes the warehouse-marked goldens by default). Runs `dbt deps`
+#     first: "pure" here means no warehouse and no credentials, not no
+#     dbt -- several tests build the project against a throwaway DuckDB.
 #   dbt-parse  -- dbt deps + parse against a placeholder profile
 #     (.github/ci/profiles.yml). Parse never opens a connection but
 #     validates refs, schema YAML, Jinja, doc() resolution, and the
@@ -32,6 +34,16 @@ jobs:
           python-version: "3.13"
           cache: pip
       - run: pip install -r requirements.txt
+      # Part of the suite, not of the dbt job. Four test files build
+      # `+dim_matchup_period` against a throwaway DuckDB, and dbt refuses to
+      # compile a project whose packages.yml is unsatisfied -- so without this
+      # they do not fail an assertion, they ERROR at setup, every one of them.
+      # It never showed up locally because dbt_packages/ is already installed
+      # in Kyle's checkout and is gitignored, so a clean clone has nothing
+      # there. Same class of defect as the credential one this commit fixes:
+      # CI is the only machine that is actually clean.
+      - name: dbt deps (the DuckDB-backed tests build the project)
+        run: dbt deps --project-dir dbt_league
       - name: Unit tests (warehouse goldens excluded by pytest.ini)
         run: pytest tests/ -q
 

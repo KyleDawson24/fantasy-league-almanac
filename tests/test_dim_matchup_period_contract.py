@@ -893,11 +893,26 @@ def pioneer(tmp_path_factory):
 
     env = dict(os.environ, DBT_DUCKDB_PATH=str(db))
     env.pop("DBT_LEAGUE_CONFIG", None)
+    # CAUTIOUS INDIRECT SELECTION, for the reason `_dbt` documents at length:
+    # `+dim_matchup_period` names a subgraph, and dbt's default eager rule also
+    # pulls in any test with at least ONE selected parent. The MLB-229 rivalry
+    # tests span this subgraph and the rivalry one, so eager handed them a build
+    # holding only half of what they read and they errored on mart_team_matchup,
+    # a relation this fixture never creates.
+    #
+    # This invocation cannot simply call `_dbt`: that helper pins
+    # `legacy_matchup_schedule_league` to the synthetic league, and this fixture
+    # exists precisely to measure the ORDINARY configuration. So it takes the
+    # one flag rather than the whole helper.
+    #
+    # Cautious drops a test only when some parent is unbuilt, so every rivalry
+    # assertion still runs in the builds that do create its dependencies.
     result = subprocess.run(
         [sys.executable, "-m", "dbt.cli.main", "build",
          "--select", "+dim_matchup_period",
          "--project-dir", str(PROJECT_DIR), "--profiles-dir", str(PROFILES_DIR),
-         "--target", "duckdb"],
+         "--target", "duckdb",
+         "--indirect-selection", "cautious"],
         cwd=str(REPO_ROOT), env=env, capture_output=True, text=True)
     if result.returncode != 0:
         pytest.fail("the pioneer build over an EMPTY RAW.MATCHUP_SCHEDULE "

@@ -347,14 +347,18 @@ tabs are untouched by this branch.
 ### CBS almanac — Advanced Standings tab only
 
 Same shape, one layout difference: the ledger name rides the banner row as a
-scope caption at column B instead of taking its own row. So the block is
-`5 + N` rows:
+scope caption at column B instead of taking its own row. That drops BOTH the
+ESPN block's separate ledger-label row and the blank row above it, so the
+fixed part is four rows rather than six and the block is `4 + N` rows:
 
 1. one blank spacer row
 2. the `Rivalry Matrix` banner row, with `Season Points` in column B
 3. one explainer row
 4. one header row
 5. one row per active identity
+
+Four fixed rows, then N. For this league's 16 active identities that is 20
+rows, and the grid is `N + 1` = 17 columns wide.
 
 For this league the ledger is `Season Points`, not head-to-head — there are no
 matchups in a points league to have a head-to-head record about.

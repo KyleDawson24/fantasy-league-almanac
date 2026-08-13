@@ -290,33 +290,35 @@ which is the supported (6) case above. Found in visual QA.
 
 ## 7. Known limits
 
-- **Goldens are not re-anchored.** The byte-diff harness is `warehouse`-marked
-  and needs a live Snowflake connection, which the MLB-229 worktree does not
-  have. Advanced Standings gains rows, so the goldens WILL move and must be
-  re-anchored under review from an environment with warehouse access, per the
-  CLAUDE.md rule.
-- **The PII guard cannot run non-degraded here.** The private anonymization map
-  is local to the main checkout.
-- **Both golden sets will move** and neither is re-anchored here, by
-  instruction — see §8 for the exact expected movement, recorded for the single
-  consolidated v1.9 re-anchor.
+Both of the limits this section carried were properties of the MLB-229
+worktree, and both are closed in the main checkout:
+
+- **Both golden sets are re-anchored**, under review and from an environment
+  with warehouse access, per the CLAUDE.md rule. In two moves, not one: the
+  additive block (`cd2a45c`) and then the column-C indent (this commit). §8
+  records what each was expected to do and what it measured.
+- **The PII guard has run non-degraded** — the private anonymization map is
+  local to the main checkout, and that is where it ran.
 
 
 ---
 
-## 8. Expected golden movement (recorded, NOT applied)
+## 8. Golden movement (recorded first, then measured)
 
-Neither golden set is regenerated on this branch. This is what a reviewer
-should expect to see when the consolidated v1.9 re-anchor runs, so that a
-diff matching this list is a confirmation and a diff exceeding it is a
-finding.
+This section was written before either golden set moved, so that a diff
+matching it would be a confirmation and a diff exceeding it would be a
+finding. Both moves have now run against the real warehouse and both matched.
+The predictions are kept in their original form below and each is followed by
+what it measured, because a prediction edited after the fact proves nothing.
 
 ### Scope
 
-Both byte-diff harnesses are `warehouse`-marked and need a live Snowflake
-connection, which this worktree does not have. Nothing here was measured
-against real league data; it is derived from what the code appends and from
-the fixture renders in `tests/`.
+Written from what the code appends and from the fixture renders in `tests/`;
+the byte-diff harnesses are `warehouse`-marked, and the worktree that recorded
+this had no Snowflake connection to measure against. Both harnesses have since
+been run from the main checkout at the pinned ESPN anchor — 2026 Week 7,
+`--matchup-period 7` — with the CBS Team-of-the-Month window pinned to June
+2026, which is what those two suites pin.
 
 ### ESPN almanac — Advanced Standings tab only
 
@@ -344,6 +346,10 @@ as a date or a number.
 No other tab changes. Records, Team Weeks, Home, Draft, Trades and the team
 tabs are untouched by this branch.
 
+**Measured.** 18 of 19 tabs byte-identical; Advanced Standings grew from 152
+to 172 lines, `6 + N` for `N` = 14. The whole pre-existing prefix, lines
+1-152, compared equal.
+
 ### CBS almanac — Advanced Standings tab only
 
 Same shape, one layout difference: the ledger name rides the banner row as a
@@ -363,6 +369,29 @@ rows, and the grid is `N + 1` = 17 columns wide.
 For this league the ledger is `Season Points`, not head-to-head — there are no
 matchups in a points league to have a head-to-head record about.
 
+**Measured.** 20 of 21 tabs byte-identical; Advanced Standings grew from 183
+to 203 lines, `4 + N` for `N` = 16. The whole pre-existing prefix, lines
+1-183, compared equal.
+
+### The indent, second move — both books, Advanced Standings only
+
+The block was then indented to begin at column C, so the two columns quoted
+above move: the ESPN team labels and the CBS ones start at C, their cells at
+D, and CBS's `Season Points` scope caption rides the banner at D rather than
+B. The banner ROW is unchanged in width — its navy band always ran the full
+tab and still does — so what moves on it is the label, not the band.
+
+Expected, and measured, at the same anchor: no row gained or lost in either
+book, no cell's text changed, and every non-empty cell in the block moved
+exactly two columns right. ESPN lines 1-153 and CBS lines 1-184 compared
+equal, the two blank rows inside the ESPN block compared equal, and the other
+38 golden TSVs across the two corpora were byte-identical.
+
+Cell fills — the red-white-green shade by winning percentage that landed with
+the indent — are formatting, and a TSV baseline carries none. That the
+goldens do not move for them is correct and is not evidence the shading works;
+its cover is the renderer's own formatting tests.
+
 ### What would NOT be expected, and should be treated as a finding
 
 - Any change above the Rivalry Matrix block on either tab.
@@ -372,8 +401,9 @@ matchups in a points league to have a head-to-head record about.
   count of columns from the number of data rows.
 - Any change to a tab other than Advanced Standings.
 
-### Also unmeasured here
+### Also unmeasured there, since run
 
-The strict PII guard cannot run non-degraded in this worktree — the private
+The strict PII guard could not run non-degraded in the worktree — the private
 anonymization map and salt are local to the main checkout, and were
-deliberately not copied here. Run it during main integration.
+deliberately not copied. It has since run there, non-degraded and clean, with
+the rivalry hits it turned up reviewed and recorded (`8ea7ada`).

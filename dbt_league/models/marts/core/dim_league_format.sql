@@ -14,8 +14,11 @@
 -- fct_team_season_performance, output/cbs_almanac_sheets.is_points_league):
 -- format follows what the data DOES, not what the platform is called. A CBS
 -- H2H league and an ESPN points league both exist and both would be misfiled
--- by a platform check, and a new platform joins by delivering data rather than
--- by being added to a list.
+-- by a platform check. A platform's explicit FORMAT field is data, however,
+-- and the first stranger rehearsal supplied the missing measured control:
+-- ESPN currentLeagueType=5 is a season-long points league, while the H2H
+-- points seasons on file read current=0 / created=2. That signal may settle
+-- the format without pretending a platform name settles it.
 --
 -- THE SIGNAL is the one the renderer already used: delivered period standings
 -- exist only where the league has no matchups to be scored on
@@ -41,20 +44,31 @@ matchups as (
       and away_team_id is not null
 ),
 
+season_points_schedule as (
+    select distinct league_key, true as has_season_points_schedule
+    from {{ ref('stg_matchup_schedule') }}
+    where current_league_type = 5
+),
+
 leagues as (
     select league_key from period_standings
     union
     select league_key from matchups
+    union
+    select league_key from season_points_schedule
 )
 
 select
     l.league_key,
     coalesce(ps.has_period_standings, false) as has_period_standings,
     coalesce(m.has_matchups, false)          as has_matchups,
+    coalesce(sp.has_season_points_schedule, false)
+                                                as has_season_points_schedule,
     case
         -- Delivered period standings settle it: that feed exists precisely
         -- because there are no matchups to read a result from.
         when coalesce(ps.has_period_standings, false) then 'points'
+        when coalesce(sp.has_season_points_schedule, false) then 'points'
         when coalesce(m.has_matchups, false)          then 'h2h'
         else 'unknown'
     end as league_format
@@ -63,3 +77,5 @@ left join period_standings ps
     on l.league_key = ps.league_key
 left join matchups m
     on l.league_key = m.league_key
+left join season_points_schedule sp
+    on l.league_key = sp.league_key

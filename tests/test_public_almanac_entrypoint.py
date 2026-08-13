@@ -3,6 +3,7 @@ from subprocess import CalledProcessError
 
 import pytest
 
+import tools.create_public_almanac as public_almanac
 from config.league_registry import League
 from tools.create_public_almanac import (
     PublicAlmanacPlanError,
@@ -87,7 +88,7 @@ def test_local_path_uses_build_instead_of_separate_seed_and_run():
 
     local = ['--project-dir', 'dbt_league',
              '--profiles-dir', 'dbt_league/profiles']
-    assert ['DBT', 'build', *local] in plan
+    assert ['DBT', 'build', *local, '--threads', '1'] in plan
     assert ['DBT', 'seed', *local] not in plan
     assert ['DBT', 'run', *local] not in plan
 
@@ -141,7 +142,8 @@ def test_failed_local_dbt_build_prevents_workbook_generation():
         execute_plan(plan, runner=_runner)
 
     assert ['DBT', 'build', '--project-dir', 'dbt_league',
-            '--profiles-dir', 'dbt_league/profiles'] in called
+            '--profiles-dir', 'dbt_league/profiles',
+            '--threads', '1'] in called
     assert not any('generate_almanac_sheet.py' in command for command in called)
 
 
@@ -176,3 +178,42 @@ def test_automation_confirmation_is_forwarded_explicitly():
         _args(confirm_link_sharing=True), python='PY', dbt='DBT',
         league=_league(first=2026), through_season=2026)
     assert '--confirm-link-sharing' in plan[-1]
+
+
+def test_main_loads_the_release_dotenv_before_validating_credentials(
+        tmp_path, monkeypatch):
+    """The sealed-rehearsal regression: every value was present in .env,
+    yet the new public entrypoint reported all three missing because no child
+    process had run yet and this process had never loaded the file itself.
+
+    Pin both ordering and location. The registry validation must see the
+    release root's .env before any command is executed, even when the caller's
+    current directory is somewhere else.
+    """
+    (tmp_path / '.env').write_text(
+        'TEST_S2=synthetic-cookie\n'
+        'TEST_SWID={SYNTHETIC-GUID}\n'
+        'TEST_LEAGUE_ID=8675309\n',
+        encoding='utf-8',
+    )
+    for name in ('TEST_S2', 'TEST_SWID', 'TEST_LEAGUE_ID'):
+        monkeypatch.delenv(name, raising=False)
+
+    league = League(
+        key='espn-ten', platform='espn', display_name='Ten seasons',
+        credential_env=('TEST_S2', 'TEST_SWID', 'TEST_LEAGUE_ID'),
+        league_id_env='TEST_LEAGUE_ID', first_season=2026,
+    )
+    executed = []
+    monkeypatch.setattr(public_almanac, 'REPO_ROOT', tmp_path)
+    monkeypatch.setattr(public_almanac, 'get_league', lambda key: league)
+    monkeypatch.setattr(
+        public_almanac, 'command_plan',
+        lambda args, league: [['PY', 'synthetic-command']],
+    )
+    monkeypatch.setattr(
+        public_almanac, 'execute_plan', lambda plan: executed.extend(plan),
+    )
+
+    assert public_almanac.main([]) == 0
+    assert executed == [['PY', 'synthetic-command']]

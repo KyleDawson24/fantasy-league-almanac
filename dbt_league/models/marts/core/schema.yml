@@ -133,6 +133,10 @@ models:
       matchup_schedule seed is demoted to what only it can still answer --
       the calendar, plus a fallback for periods the platform has not reached.
 
+      ESPN type-5 season-points leagues contribute one live, season-long
+      reporting period. It is record-eligible while open, spans scoring day 1
+      through latestScoringPeriod, and never claims to be a closed H2H result.
+
       Resolution order is explicit override > derived verdict > espn-main
       legacy seed > unknown. The seed's rows carry no league_key because they
       predate the registry; they belong to espn-main, and are stamped with it
@@ -179,7 +183,9 @@ models:
         tests:
           - not_null
       - name: matchup_period
-        description: 'ESPN weekly matchup number (1-indexed).'
+        description: >
+          ESPN matchup/reporting period number (1-indexed). Weekly H2H leagues
+          have many; a type-5 season-points league has one season-long period.
         tests:
           - not_null
       - name: start_date
@@ -2001,7 +2007,8 @@ models:
   - name: dim_league_format
     description: >
       What KIND of league is this (MLB-229)? One row per league_key, decided by
-      DATA PRESENCE.
+      delivered data or an explicit platform format field -- never the
+      platform's name.
 
       The Rivalry Matrix means different things in different formats: in a
       head-to-head league a rivalry is a record of matchups; in a points league
@@ -2036,6 +2043,13 @@ models:
           - not_null
       - name: has_matchups
         description: 'Matchup pairings exist -- the head-to-head signal.'
+        tests:
+          - not_null
+      - name: has_season_points_schedule
+        description: >
+          The captured schedule explicitly reports ESPN currentLeagueType=5,
+          measured on a real season-long points league. This is format data,
+          not a platform-name inference.
         tests:
           - not_null
       - name: league_format

@@ -60,10 +60,11 @@
 -- is what makes a future divergence stop the build instead of silently
 -- shifting the calendar.
 --
--- ONLY CLOSED PERIODS GET DERIVED DATES. int_matchup_period_evidence gates
--- the bounds on is_closed, so an in-flight period keeps the seed's dates if
--- it has them and none otherwise -- its membership is still filling in, and
--- dating it would publish a week that ends today and moves tomorrow.
+-- ONLY CLOSED H2H PERIODS GET DERIVED DATES. The one narrow exception is an
+-- ESPN type-5 season-points container: its purpose is to report the season to
+-- date, so its end date deliberately advances with latestScoringPeriod. An
+-- in-flight H2H period still keeps the seed's dates if it has them and none
+-- otherwise; this exception does not admit it.
 
 {{ config(materialized='view') }}
 

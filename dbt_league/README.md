@@ -15,27 +15,27 @@ Browse the compiled catalog (lineage + column-level docs) at the
 ## The DAG, top to bottom
 
 ```
-RAW.* sources (27)         seeds (19)
+RAW.* sources (29)         seeds (20)
    │                          │
    ▼                          │
-staging/    (27) stg_*   1:1 reshapes of RAW; no business logic
+staging/    (32) stg_*   1:1 reshapes of RAW; no business logic
    │                          │
    ▼                          │
-intermediate/ (15) int_* business logic that isn't yet a contract:
+intermediate/ (23) int_* business logic that isn't yet a contract:
    │                     the slot-validity filter + daily wide rollup
    ▼                          │
-marts/core/ (20) dim_*   the star-schema contract layer: 9 dims
+marts/core/ (22) dim_*   the star-schema contract layer: 11 dims
    │            fct_*    + 11 facts (daily / weekly / season grains,
    │                     active / inactive lenses, position points)
    ▼
-marts/reporting/ (16) mart_*  consumer-facing report shapes:
+marts/reporting/ (18) mart_*  consumer-facing report shapes:
    │                     leaderboard, benchmarks, matchup view,
    ▼                     roster snapshot, draft board, records
 exposures (4)            the Python output scripts, declared in
                          models/exposures.yml
 ```
 
-78 models in all. Counts here are regenerated at each release cut from
+95 models in all. Counts here are regenerated at each release cut from
 the parsed manifest (see [RELEASING.md](../RELEASING.md)); if you are
 reading them mid-cycle, `dbt parse` and the manifest are the truth.
 
@@ -43,10 +43,10 @@ Layer conventions:
 
 | Layer | Prefix | Default materialization | What belongs here |
 |---|---|---|---|
-| `staging/` | `stg_` | **table** (11 of 27 pin `view` themselves) | One model per raw-table *grain* (a multi-grain source like box_scores feeds several single-grain reshapes). Pure reshape: flatten VARIANT, type, rename. The only layer that reads `source()`. |
-| `intermediate/` | `int_` | **table** (all 15 pin their own; 10 are views) | Business logic that isn't yet a consumer contract: the slot-validity filter and the wide daily point rollup. |
-| `marts/core/` | `dim_` / `fct_` | table (3 weekly facts override to incremental; 9 thin dims/facts to view) | The contract layer. Grain-documented dimensions and facts that reporting marts and the Python output layer rely on. |
-| `marts/reporting/` | `mart_` | table (6 of 16 override to view) | Report-shaped derivations over core: rankings, league aggregates, matchup context, snapshot joins. |
+| `staging/` | `stg_` | **table** (13 of 32 pin `view` themselves) | One model per raw-table *grain* (a multi-grain source like box_scores feeds several single-grain reshapes). Pure reshape: flatten VARIANT, type, rename. The only layer that reads `source()`. |
+| `intermediate/` | `int_` | **table** (all 23 pin their own; 18 are views) | Business logic that isn't yet a consumer contract: the slot-validity filter and the wide daily point rollup. |
+| `marts/core/` | `dim_` / `fct_` | table (3 weekly facts override to incremental; 11 thin dims/facts to view) | The contract layer. Grain-documented dimensions and facts that reporting marts and the Python output layer rely on. |
+| `marts/reporting/` | `mart_` | table (6 of 18 override to view) | Report-shaped derivations over core: rankings, league aggregates, matchup context, snapshot joins. |
 
 The staging/intermediate `table` defaults are deliberate and recent
 (MLB-134): a view over fat JSON re-runs the whole reshape for every
@@ -189,14 +189,14 @@ round every displayed value at source.
 
 ## Testing
 
-573 dbt data tests (559 generic + 14 singular) plus source-freshness
+717 dbt data tests (693 generic + 24 singular) plus source-freshness
 contracts:
 
-- **Generic tests** (559) -- every model carries a
+- **Generic tests** (693) -- every model carries a
   `dbt_utils.unique_combination_of_columns` grain test; keys and
   partitions carry `not_null` / `accepted_values`; staging FKs into the
   seed catalog carry `relationships`.
-- **Singular tests** (14, in `dbt_league/tests/`) -- cross-model
+- **Singular tests** (24, in `dbt_league/tests/`) -- cross-model
   invariants that used to be run-when-you-remember analyses, now
   enforced on every build: the season-fact-vs-weekly-rollup fidelity
   check (grain completeness both directions + points within the
@@ -250,7 +250,7 @@ dbt ls                  # resolve node selection without running it
 a dev-loop reflex:
 
 ```bash
-dbt seed                # load the 19 seed CSVs
+dbt seed                # load the 20 seed CSVs
 dbt build               # models + tests, incremental weekly
 dbt build --full-refresh   # after backfills or seed schema changes
 dbt seed --full-refresh    # after a seed's columns change

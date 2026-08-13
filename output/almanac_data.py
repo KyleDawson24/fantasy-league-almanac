@@ -1453,12 +1453,23 @@ def _espn_communication_topics(season_year):
                 'sortMessageDate': {'sortPriority': 1, 'sortAsc': False},
             }
         }
-        page = _espn_league_get(
-            season_year,
-            'kona_league_communication',
-            extra_headers={'x-fantasy-filter': json.dumps(page_filter)},
-            path='/communication/',
-        ).get('topics') or []
+        try:
+            payload = _espn_league_get(
+                season_year,
+                'kona_league_communication',
+                extra_headers={'x-fantasy-filter': json.dumps(page_filter)},
+                path='/communication/',
+            )
+        except requests.HTTPError as exc:
+            status = getattr(exc.response, 'status_code', None)
+            if status in (401, 403):
+                print(
+                    '[warn] ESPN did not authorize the communications feed; '
+                    'the Trade Record is unavailable, not empty.'
+                )
+                return None
+            raise
+        page = payload.get('topics') or []
         topics.extend(page)
         if len(page) < 200:
             break
@@ -1472,8 +1483,11 @@ def _executed_trades(season_year):
     'receiving_team_id'}]}]. One topic per transaction event; only the
     msgType-244 executed movements count, and to=0 legs (trade-baked
     drops to waivers) are excluded."""
+    topics = _espn_communication_topics(season_year)
+    if topics is None:
+        return None
     trades = []
-    for topic in _espn_communication_topics(season_year):
+    for topic in topics:
         legs = [
             {
                 'player_id': m.get('targetId'),
@@ -1653,6 +1667,8 @@ def get_trades_tab_data(season_year):
             }
 
     trades = _executed_trades(season_year)
+    trade_record_available = trades is not None
+    trades = trades or []
     leg_pids = sorted({
         leg['player_id'] for t in trades for leg in t['legs']
         if leg.get('player_id')
@@ -1753,6 +1769,7 @@ def get_trades_tab_data(season_year):
         'as_of': datetime.now().strftime('%Y-%m-%d %H:%M'),
         'players': list(players.values()),
         'trades': trades,
+        'trade_record_available': trade_record_available,
     }
 
 

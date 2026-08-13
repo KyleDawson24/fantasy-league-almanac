@@ -312,6 +312,9 @@ def run_extract(monkeypatch):
         monkeypatch.setattr(
             extract, "serialize_box_scores",
             lambda league, sp, mp: (serialized or {"scoring_period": sp}))
+        monkeypatch.setattr(
+            extract, "serialize_season_points_rosters",
+            lambda year, sp, period: (serialized or {"scoring_period": sp}))
 
         from contextlib import contextmanager
 
@@ -1231,16 +1234,120 @@ def test_the_zero_period_shape_refuses_an_ordinary_box_score_run(run_extract):
     message.encode("ascii")
     assert "no closed matchup periods" in message
     assert "nothing was fabricated" in message.lower()
-    assert "rotisserie" in message or "roto" in message
+    assert "rotisserie" in message.lower() or "roto" in message.lower()
     assert "--matchup-schedule-only" in message
     assert sink.box_scores == []
     assert len(sink.matchup_schedules) == 1
 
 
+def test_active_season_long_points_extracts_its_daily_window(run_extract):
+    """The 2026-08-13 stranger-rehearsal shape: type 5, one reporting
+    container, and no closed H2H period. It must produce player-day RAW now,
+    not wait until the season finishes."""
+    payload = _payload((12,), current=1, latest=12)
+    payload["status"].update(
+        currentLeagueType=5, createdAsLeagueType=5)
+
+    sink, _asked, code = run_extract(payload, all=True)
+
+    assert code == 0
+    assert sink.box_scores == [(1, list(range(1, 13)))]
+
+
+def test_season_long_points_never_calls_the_h2h_wrapper(
+        run_extract, monkeypatch):
+    payload = _payload((3,), current=1, latest=3)
+    payload["status"].update(
+        currentLeagueType=5, createdAsLeagueType=5)
+    monkeypatch.setattr(
+        extract, "connect_espn",
+        lambda year: pytest.fail("season-long points opened the H2H wrapper"))
+
+    sink, _asked, code = run_extract(payload, all=True)
+
+    assert code == 0
+    assert sink.box_scores == [(1, [1, 2, 3])]
+
+
+def test_a_zero_entry_season_points_schedule_uses_the_status_day_endpoint(
+        run_extract):
+    payload = {
+        "seasonId": SEASON,
+        "status": {"currentMatchupPeriod": 1,
+                   "latestScoringPeriod": 4,
+                   "currentLeagueType": 5,
+                   "createdAsLeagueType": 5},
+        "schedule": [],
+    }
+
+    sink, _asked, code = run_extract(payload, all=True)
+
+    assert code == 0
+    assert sink.box_scores == [(1, [1, 2, 3, 4])]
+
+
+def test_a_multi_team_period_needs_no_fabricated_h2h_sides(run_extract):
+    payload = {
+        "seasonId": SEASON,
+        "status": {"currentMatchupPeriod": 1,
+                   "latestScoringPeriod": 4,
+                   "currentLeagueType": 5,
+                   "createdAsLeagueType": 5},
+        "schedule": [{"matchupPeriodId": 1}],
+    }
+
+    sink, _asked, code = run_extract(payload, all=True)
+
+    assert code == 0
+    assert sink.box_scores == [(1, [1, 2, 3, 4])]
+
+
+def test_a_float_that_merely_equals_five_does_not_earn_the_type_five_path(
+        run_extract):
+    payload = {
+        "seasonId": SEASON,
+        "status": {"currentMatchupPeriod": 1,
+                   "latestScoringPeriod": 4,
+                   "currentLeagueType": 5.0,
+                   "createdAsLeagueType": 5},
+        "schedule": [],
+    }
+
+    with pytest.raises(SystemExit, match="no closed matchup periods"):
+        run_extract(payload, all=True)
+
+
+@pytest.mark.parametrize("mutation, phrase", [
+    (lambda payload: payload["status"].pop("latestScoringPeriod"),
+     "latestScoringPeriod"),
+    (lambda payload: payload["schedule"][0]["home"][
+        "pointsByScoringPeriod"].pop("2"), "participating sides disagree"),
+    (lambda payload: payload["status"].update(currentMatchupPeriod=2),
+     "currentMatchupPeriod=2"),
+])
+def test_malformed_season_points_evidence_preserves_only_the_snapshot(
+        run_extract, mutation, phrase):
+    payload = _payload((3,), current=1, latest=3)
+    payload["status"].update(
+        currentLeagueType=5, createdAsLeagueType=5)
+    mutation(payload)
+    sink = _RecordingSink()
+
+    with pytest.raises(SystemExit) as excinfo:
+        run_extract(payload, sink, all=True, include_settings=True)
+
+    assert phrase in str(excinfo.value)
+    assert len(sink.matchup_schedules) == 1
+    assert sink.box_scores == []
+    assert sink.other_writes == []
+
+
 def test_the_zero_period_refusal_reports_measured_format_evidence(run_extract):
-    """The status block's own league-type fields, verbatim and uninterpreted.
-    Hard-coding "0 means H2H" from one league is the unverified format map
-    the standing rule forbids; reporting the measurement is not."""
+    """Unknown type values remain diagnostic rather than guessed.
+
+    Type 5 now has a measured season-points contract and never reaches this
+    refusal. That does not license inventing meanings for every other number.
+    """
     payload = {"seasonId": SEASON,
                "status": {"currentMatchupPeriod": 1,
                           "currentLeagueType": 3, "createdAsLeagueType": 3},
@@ -1252,7 +1359,7 @@ def test_the_zero_period_refusal_reports_measured_format_evidence(run_extract):
     message = str(excinfo.value)
     assert "status.currentLeagueType = 3" in message
     assert "status.createdAsLeagueType = 3" in message
-    assert "NOT established what these values mean" in message
+    assert "Only type 5 has a measured non-H2H acquisition path" in message
 
 
 def test_the_zero_period_refusal_names_no_identity(run_extract):

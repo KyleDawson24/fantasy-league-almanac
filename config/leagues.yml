@@ -46,9 +46,8 @@
 default_league: espn-main
 
 leagues:
-  # Entry #1: the 14-team ESPN H2H-points keeper league this project was
-  # built around. Byte-neutral registry adoption: same env vars, same
-  # defaults, zero behavior change to the weekly runbook.
+  # Entry #1: the public ESPN quickstart slot. Keep the key and env-variable
+  # references; QUICKSTART asks you to change only its label and year bounds.
   espn-main:
     platform: espn
     display_name: "ESPN main league"
@@ -61,14 +60,9 @@ leagues:
       sheets_almanac_env: SHEETS_OUTPUT_ID
       sheets_dev_env: SHEETS_DEV_ID
 
-  # Entry #2: the father-in-law's CBS league ("Box Score Baseball",
-  # running since 2001). Read-only museum: extraction captures history
-  # and the accruing current season, and nothing we build ever writes
-  # back to the platform. 16-team pure-points (non-H2H) -- but that's
-  # settings-derived at staging, which is why no format field exists
-  # here. The CBS raw captures live on disk today (data/cbs_raw/); this
-  # entry activates for the warehouse when the CBS staging work lands
-  # (MLB-59+).
+  # Entry #2: the project's CBS reference slot. It is not used by the ESPN
+  # quickstart and can remain exactly as supplied. Format is derived from
+  # platform data, which is why no format field appears here.
   cbs-bsb:
     platform: cbs
     display_name: "Box Score Baseball (CBS)"

@@ -83,28 +83,16 @@
 -- weight) -- MLB-193, which keeps them NULL deliberately rather than
 -- guessing.
 --
--- Phase 4 raw shape: {"matchups": [...], "free_agents": [...]}.
+-- Current raw shape: {"matchups": [...], "team_rosters": [...],
+-- "free_agents": [...]}. H2H rows omit team_rosters; season-long points rows
+-- leave matchups empty. Pre-Phase-4 rows are still the bare matchup array.
 -- Pre-Phase-4 raw shape: bare array of matchup dicts. raw_json:matchups
 -- is NULL on the array shape, so the COALESCE falls through to raw_json
 -- itself and the legacy rows still flatten. Both arms stay ARRAYS, which
 -- DuckDB requires -- a JSON object there raises rather than yielding zero
 -- rows. Both shapes can coexist post-Phase-4 backfill but in practice we
 -- --full-refresh, so this is defense-in-depth.
-with free_agent_source as (
-    -- The sub-document is projected BEFORE the flatten so the 236 KB
-    -- parent payload does not ride into it -- see the memory note in
-    -- stg_box_scores__matchups for why that matters on DuckDB. On its own
-    -- this took the free-agent branch from OOM to 2.2s.
-    select
-        league_key,
-        season_year,
-        scoring_period,
-        matchup_period,
-        {{ json_get('raw_json', 'free_agents') }} as free_agents_json
-    from {{ source('raw', 'box_scores') }}
-),
-
-home_players as (
+with home_players as (
     select
         league_key,
         season_year,
@@ -158,42 +146,18 @@ away_players as (
         {{ flatten_array('away_lineup', 'p') }}
 ),
 
--- Phase 4 free agents: top-level array on the raw JSON dict, parallel to
--- matchups[]. NULL team fields by construction (FAs have no fantasy team).
--- home_away is also NULL — they're not on either side of any matchup.
-free_agents as (
-    select
-        league_key,
-        season_year,
-        scoring_period,
-        matchup_period,
-        cast(null as string)               as owner_name,
-        cast(null as string)               as team_name,
-        cast(null as integer)              as team_id,
-        cast(null as string)               as team_abbrev,
-        cast(null as string)               as home_away,
-        {{ json_text('f.value', 'name') }}::string               as player_name,
-        {{ json_text('f.value', 'playerId') }}::integer          as player_id,
-        {{ json_text('f.value', 'position') }}::string           as position,
-        {{ json_text('f.value', 'lineupSlot') }}::string         as lineup_slot,
-        {{ json_text('f.value', 'clubOfGame') }}::string          as pro_team,
-        {{ json_text('f.value', 'points') }}::double              as points,
-        {{ json_get('f.value', 'breakdown') }}                  as breakdown,
-        {{ json_get('f.value', 'eligibleSlots') }}              as eligible_slots,
-        coalesce(
-            {{ json_text('f.value', 'games_played') }}::integer,
-            {{ iff(json_keys_count(json_get('f.value', 'breakdown')) ~ ' > 0', '1', '0') }}
-        )                                  as games_played
-    from free_agent_source,
-        {{ flatten_array('free_agents_json', 'f') }}
-),
-
+-- The two large JSON branches are already materialized as typed player rows.
+-- That boundary keeps their DuckDB array expansions out of this final union's
+-- memory arena; home/away retain the older matchup boundary that proved the
+-- same shape on H2H data.
 all_players as (
     select * from home_players
     union all
     select * from away_players
     union all
-    select * from free_agents
+    select * from {{ ref('stg_box_scores__season_points_players') }}
+    union all
+    select * from {{ ref('stg_box_scores__free_agents') }}
 )
 
 select

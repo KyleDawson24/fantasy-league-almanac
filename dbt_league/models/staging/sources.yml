@@ -35,7 +35,7 @@ sources:
             warn_after: {count: 210, period: day}
             error_after: {count: 420, period: day}
       - name: team_owners
-        description: "Raw ESPN team -> owner mapping, append-only. Each row is a VARIANT array of {team_id, owner_id, first_name, last_name} for a season, captured from league.teams[].owners. owner_id is the stable ESPN member GUID the box-score extract discards; this is the bridge that lets the owner_nicknames seed join the data. Staging picks the latest snapshot per season."
+        description: "Raw ESPN team -> owner mapping, append-only. Each row is a VARIANT array of {team_id, owner_id, first_name, last_name, display_name} for a season, captured from league.teams[].owners. Public leagues may withhold first/last while serving display_name. owner_id is the stable ESPN member GUID the box-score extract discards; this is the bridge that lets the owner_nicknames seed join the data. Staging picks the latest snapshot per season."
         config:
           loaded_at_field: extracted_at
           freshness:

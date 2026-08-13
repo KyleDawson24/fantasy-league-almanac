@@ -37,6 +37,9 @@ select
 from feed f
 full outer join seed s
     on f.cbs_key = s.cbs_key
-where f.cbs_key is null
-    or s.cbs_key is null
-    or f.feed_points != s.points_2026
+where exists (select 1 from feed)
+  and (
+      f.cbs_key is null
+      or s.cbs_key is null
+      or f.feed_points != s.points_2026
+  )

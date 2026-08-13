@@ -208,7 +208,7 @@ Beyond that: the platform half -- Yahoo and Sleeper adapters, to prove the platf
 
 **Just here to look?** The screenshots above and the [hosted dbt catalog](https://kyledawson24.github.io/fantasy-league-almanac/) cover the design; [docs/user-guide/](docs/user-guide/) covers how to read the almanac itself.
 
-**Want to run it?** [QUICKSTART.md](QUICKSTART.md) is the short path: the fields to fill and the commands to run, one screen, with every step linked into SETUP.md. Read the three notes below first, because they set expectations that the quickstart then assumes.
+**Want to run it?** Open [QUICKSTART.md](QUICKSTART.md) first -- and if you downloaded the release ZIP, it is the only file you need. It is the complete Windows runbook, written for someone who has never used a terminal: installing Python, unzipping, opening PowerShell in the right folder, the two files to fill in, and the one command that produces a shareable Google Sheet. (The ZIP also carries a `START_HERE.txt` that says exactly that and nothing more.) The notes below are context for people reading the source; they are not prerequisites for running it.
 
 - **The engine port has landed.** The transform layer builds on DuckDB as well as Snowflake: engine-specific SQL sits behind adapter-dispatch macros, and the output layer can point at either. That is done and exercised locally, not planned.
 - **`tools/demo.sh` is a build-and-render wrapper, not a demo you can run from a clean clone.** It builds the chain and renders the almanac off the tracked demo fixture in its own local warehouse, with no Snowflake account and no Google credentials -- but it does not land raw data and will not invent any, so on a clone that has never run an extract it says so and stops. It is maintainer scaffolding until the packaged sample exists.
@@ -222,9 +222,9 @@ The portability spike that sized the transform-layer port, including the traps i
 
 ## What this demonstrates
 
-The current shape of the transform layer: **78 dbt models** (36 views, 39 tables, 3 incremental), **19 seeds**, **573 data tests**, **27 sources**, and **4 declared exposures**. These counts are regenerated from the parsed manifest at each release cut; if you are reading them mid-cycle, `dbt parse` and the manifest are the truth.
+The current shape of the transform layer: **95 dbt models** (48 views, 44 tables, 3 incremental), **20 seeds**, **717 data tests**, **29 sources**, and **4 declared exposures**. These counts are regenerated from the parsed manifest at each release cut; if you are reading them mid-cycle, `dbt parse` and the manifest are the truth.
 
-Most of that needs a warehouse to exercise, but not all of it: with no account and no credentials, `dbt deps && dbt parse` compiles the project and `pytest tests/` passes. On CI's clean Linux checkout of `main` that reads **749 passed, 3 skipped, 27 deselected** -- the warehouse-marked goldens deselect, and the tests wanting private regression corpora skip rather than fail. Your own checkout will print different totals: some tests need a POSIX shell and skip on Windows, and any untracked work of your own is collected too. Counts drift between releases; `pytest tests/ -q` on your machine is the truth.
+Most of that needs a warehouse to exercise, but not all of it: with no account and no credentials, `dbt deps && dbt parse` compiles the project and `pytest tests/` passes. At this cut a fresh clone collects **1512** tracked pure tests, with **27** warehouse-marked goldens deselected by default -- collection counts, not a pass tally, since the tests wanting private regression corpora skip rather than fail. Your own checkout will print different totals: some tests need a POSIX shell and skip on Windows, and any untracked work of your own is collected too. Counts drift between releases; `pytest tests/ -q` on your machine is the truth.
 
 - **Modeling that survived a second implementation.** Wide convergence facts at consumer grain; a symmetric active/inactive split ("active is fantasy reality, inactive is MLB reality") that is what makes wasted-production analysis possible at all; a seed-driven UNPIVOT mart where adding a tracked stat is a CSV row rather than a five-file SQL change.
 - **Reproducibility.** Floating-point sums are not associative, and SQL engines do not promise summation order, so rebuilding with no code change could move a rendered cell by one, and oh boy it often did. Sums now run in exact decimal with pinned tie-breaks, and a byte-diff harness pins a known week so any drift fails loudly.
@@ -255,7 +255,26 @@ Most of that needs a warehouse to exercise, but not all of it: with no account a
 
 ## Status
 
-- **v1.8.0** -- current, 2026-08-10. The engine runs locally, end to
+- **v1.9.0** -- current, 2026-08-13. The journey ends in a Google
+  workbook. One post-configuration command walks every season the
+  registry bounds, builds locally, and creates a spreadsheet the app
+  owns, renders the almanac into it and returns a link. It asks Google
+  for `drive.file` only -- it cannot browse anything in your Drive it
+  did not create -- and the workbook is **created private**: link
+  sharing happens only after you confirm it explicitly, and the
+  permission is read back to prove it. Local DuckDB is the default;
+  Snowflake needs a deliberate `--advanced-snowflake`. The public Google
+  flow is Windows-only in v1.9 because the grant lives in Windows
+  Credential Locker rather than a plaintext file; the local, non-Google
+  application is not. ESPN is the release path -- CBS is an urgent
+  fast-follow, not part of the supported stranger journey. Underneath:
+  ESPN's matchup weeks and the season calendar now come from
+  measurement rather than a hand-maintained seed, and the **Rivalry
+  Matrix** lands on Advanced Standings in both books. This is not yet
+  guided onboarding (MLB-31/MLB-207), and the untouched-machine
+  rehearsal has not run. Full notes:
+  [RELEASE NOTES v1.9.0.md](RELEASE%20NOTES%20v1.9.0.md).
+- **v1.8.0** -- 2026-08-10. The engine runs locally, end to
   end: `extract.py --raw-target local` lands RAW as parquet plus a
   manifest, so a fresh clone with league credentials and **no warehouse
   account of any kind** reaches rendered previews. ESPN only -- CBS
@@ -269,7 +288,7 @@ Most of that needs a warehouse to exercise, but not all of it: with no account a
   eight crash paths a stranger's first run would have hit, and a
   lineup-slot fallthrough that was silently deleting pitcher
   production. Full notes:
-  [RELEASE NOTES v1.8.0.md](RELEASE%20NOTES%20v1.8.0.md).
+  [RELEASE NOTES v1.8.0.md](docs/releases/RELEASE%20NOTES%20v1.8.0.md).
 - **v1.7.0** -- 2026-08-05. The first public release, and three
   things at once: the **DuckDB engine port** lands (the transform layer
   builds on either engine, though nothing lands raw data outside

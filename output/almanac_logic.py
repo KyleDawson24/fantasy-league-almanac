@@ -910,7 +910,12 @@ def _alltime_draft_grid(history_rows, team_count, factors):
         cells = [_whole(statistics.median(paced_by_slot[s]))
                  if paced_by_slot.get(s) else ''
                  for s in range(1, team_count + 1)]
-        return [label, top['season_year'], top.get('team_abbrev') or '',
+        # DuckDB faithfully returns the dbt DECIMAL season key as Decimal.
+        # Google Sheets' JSON client accepts numbers but cannot serialize a
+        # Python Decimal object. Season year is an integer identifier, so
+        # normalize it here at the display seam rather than weakening exact
+        # decimal handling for points throughout the data layer.
+        return [label, int(top['season_year']), top.get('team_abbrev') or '',
                 _draft_player_label(top), _whole(float(top['season_points'])),
                 _whole(statistics.median(all_paced)), *cells]
 
@@ -1983,6 +1988,13 @@ def build_trades_tab_rows(trade_data, season_year):
             "points since the trade."])
 
     rows.append(list(TRADE_RECORD_HEADER))
+    if not trade_data.get('trade_record_available', True):
+        rows.append([
+            'Unavailable -- ESPN did not authorize this league\'s '
+            'communications feed for the signed-in member. This does not '
+            'mean that no trades occurred.'
+        ])
+        return rows
     if not trades:
         rows.append(['No trades have been executed yet this season.'])
         return rows

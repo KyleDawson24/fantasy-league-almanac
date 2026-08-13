@@ -264,6 +264,8 @@ tests/test_records_pure.py,team-id,91c95330ab0f4a06,collision,synthetic fixture 
 tests/test_records_pure.py,team-id,ae7a1f38d2e961a7,collision,synthetic fixture value that happens to sit in an identity-shaped position,2026-08-10
 tests/test_records_pure.py,team-id,ed1de80b69017f46,collision,synthetic fixture value that happens to sit in an identity-shaped position,2026-08-10
 tests/test_records_pure.py,team-id,ede0e86cebc1f16a,collision,synthetic fixture value that happens to sit in an identity-shaped position,2026-08-10
+tests/test_season_points_models.py,team-id,9f772f775d01ceba,collision,Synthetic structural fixture value in the isolated season-points model test; not a real team identity,2026-08-13
+tests/test_season_points_models.py,team-id,e10082cd9f7c567b,collision,Synthetic structural fixture value in the isolated season-points model test; not a real team identity,2026-08-13
 tools/anonymize_sheet_copy.py,owner,5b895ae249027294,collision,"an MLB player's name, not a league member",2026-08-10
 tools/anonymize_sheet_copy.py,owner,5d40ee1e623ca453,collision,"an MLB player's name, not a league member",2026-08-10
 tools/anonymize_sheet_copy.py,owner,74ebeb20e1a8ddb0,collision,"an MLB player's name, not a league member",2026-08-10

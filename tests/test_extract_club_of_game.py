@@ -35,6 +35,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 import pytest
+import requests
 from dotenv import load_dotenv
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -68,6 +69,37 @@ _spec.loader.exec_module(extract)
 
 sys.path.insert(0, str(_REPO_ROOT / "extract"))
 from matchup_membership import parse_matchup_membership  # noqa: E402
+
+
+def _http_response(status_code):
+    response = requests.Response()
+    response.status_code = status_code
+    response.url = "https://example.invalid/communication/"
+    return response
+
+
+def test_transaction_feed_refusal_is_unavailable_not_empty(monkeypatch, capsys):
+    response = _http_response(401)
+    monkeypatch.setattr(extract.requests, "get", lambda *a, **k: response)
+
+    assert extract.fetch_transactions(2026) is None
+    assert "transaction-dependent output will be omitted" in capsys.readouterr().out
+
+
+def test_unavailable_transaction_feed_writes_nothing(monkeypatch):
+    class Sink:
+        def __init__(self):
+            self.writes = []
+
+        def write_transactions(self, *args):
+            self.writes.append(args)
+
+    sink = Sink()
+    monkeypatch.setattr(extract, "fetch_transactions", lambda year: None)
+
+    extract.extract_transactions(sink, 2026, "espn-test")
+
+    assert sink.writes == []
 
 
 # ---------------------------------------------------------------------------
@@ -361,6 +393,64 @@ def test_network_failure_raises_rather_than_returning_empty(monkeypatch):
                    exc=extract.requests.RequestException("connection reset"))
     with pytest.raises(extract.KonaUnavailable):
         extract.fetch_all_player_stats(2026, 100)
+
+
+def test_transient_connection_reset_retries_then_returns_players(monkeypatch):
+    class _Response:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"players": []}
+
+    calls = []
+    sleeps = []
+
+    def _get(*args, **kwargs):
+        calls.append((args, kwargs))
+        if len(calls) == 1:
+            raise requests.ConnectionError("connection reset")
+        return _Response()
+
+    monkeypatch.setattr(extract.requests, "get", _get)
+    monkeypatch.setattr(extract.time, "sleep", sleeps.append)
+
+    assert extract.fetch_all_player_stats(2026, 100) == {}
+    assert len(calls) == 2
+    assert sleeps == [1]
+
+
+def test_auth_failure_is_not_retried(monkeypatch):
+    calls = []
+    response = requests.Response()
+    response.status_code = 401
+
+    def _get(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise requests.HTTPError("401 Unauthorized", response=response)
+
+    monkeypatch.setattr(extract.requests, "get", _get)
+
+    with pytest.raises(extract.KonaUnavailable, match="401 Unauthorized"):
+        extract.fetch_all_player_stats(2026, 100)
+    assert len(calls) == 1
+
+
+def test_transient_retries_are_bounded_then_refuse(monkeypatch):
+    calls = []
+    sleeps = []
+
+    def _get(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise requests.ConnectionError("connection reset")
+
+    monkeypatch.setattr(extract.requests, "get", _get)
+    monkeypatch.setattr(extract.time, "sleep", sleeps.append)
+
+    with pytest.raises(extract.KonaUnavailable, match="connection reset"):
+        extract.fetch_all_player_stats(2026, 100)
+    assert len(calls) == 4
+    assert sleeps == [1, 3, 7]
 
 
 def test_bad_json_raises_rather_than_returning_empty(monkeypatch):

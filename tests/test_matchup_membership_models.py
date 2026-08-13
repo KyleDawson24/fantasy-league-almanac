@@ -300,6 +300,10 @@ def built(tmp_path_factory):
     # consumer resolves it against manual decisions. It has its own build in
     # tests/test_dim_matchup_period_contract.py.
     #
+    # dim_league_format is another descendant now that ESPN's explicit type-5
+    # signal can identify season-points leagues before standings exist. Its
+    # other inputs belong to the rivalry fixture, not this membership fixture.
+    #
     # int_league_season_closure is the same shape of exclusion (MLB-229): it
     # reads the schedule capture, which makes it a descendant, and it needs the
     # standings feeds this fixture has no reason to carry. Its whole subtree --
@@ -307,6 +311,7 @@ def built(tmp_path_factory):
     # it. tests/test_franchise_rivalry.py builds them.
     result = _run_dbt(["build", "--select", "stg_matchup_schedule+",
                        "--exclude", "dim_matchup_period+",
+                       "dim_league_format+",
                        "int_league_season_closure+"], db_path)
     if result.returncode != 0:
         pytest.fail("dbt build over an EMPTY RAW.MATCHUP_SCHEDULE failed, so "
@@ -341,6 +346,18 @@ def built(tmp_path_factory):
                 [2018, json.dumps(FRESH_SNAPSHOT), datetime(2026, 8, 10), LEAGUE])
     con.execute("insert into RAW.MATCHUP_SCHEDULE values (?, ?, ?, ?)",
                 [2018, json.dumps(STALE_SNAPSHOT), datetime(2026, 8, 1), LEAGUE])
+    con.execute("insert into RAW.MATCHUP_SCHEDULE values (?, ?, ?, ?)", [
+        2027,
+        json.dumps({
+            "seasonId": 2027,
+            "status": {"currentMatchupPeriod": 1,
+                       "latestScoringPeriod": 142,
+                       "currentLeagueType": 5,
+                       "createdAsLeagueType": 5},
+            "schedule": [{"matchupPeriodId": 1}],
+        }),
+        datetime(2026, 8, 11), OTHER_LEAGUE,
+    ])
 
     yield query
     con.close()
@@ -470,6 +487,24 @@ def test_the_current_period_is_excluded(built):
     assert [p for p, _c, _a in report["periods"]] == [1, 2, 3, 4]
     assert 5 not in {m for m, _s in report["membership"]}
     assert not any(a for _p, _c, a in report["periods"])
+
+
+def test_type_five_is_reportable_without_being_closed_h2h(built):
+    evidence = built("""
+        select matchup_period, is_closed, is_reportable,
+               is_season_points_period, scoring_period_count,
+               min_scoring_period, max_scoring_period
+        from ANALYTICS.int_matchup_period_evidence
+        where league_key = ? and season_year = 2027
+    """, [OTHER_LEAGUE])
+    shape = built("""
+        select matchup_period, is_abnormal_derived, derivation_status
+        from ANALYTICS.int_matchup_period_shape
+        where league_key = ? and season_year = 2027
+    """, [OTHER_LEAGUE])
+
+    assert evidence == [(1, False, True, True, 142, 1, 142)]
+    assert shape == [(1, False, "insufficient_evidence")]
 
 
 def test_leagues_do_not_bleed_into_each_other(built):
@@ -633,12 +668,14 @@ def test_a_season_identity_mismatch_is_malformed(built, status_by_season):
     assert _sql_report(built, 2016)["membership"] == []
 
 
-def test_is_abnormal_derived_is_never_false_when_unknown(built):
-    """The fail-closed property, asserted across every row at once."""
+def test_unknown_h2h_abnormality_is_never_published_as_false(built):
+    """Only the explicit type-5 container may be ordinary without a norm."""
     leaked = built("""
         select count(*) from ANALYTICS.int_matchup_period_shape
-        where derivation_status <> 'derived' and is_abnormal_derived is not null
-    """)
+        where derivation_status <> 'derived'
+          and is_abnormal_derived is not null
+          and not (league_key = ? and season_year = 2027)
+    """, [OTHER_LEAGUE])
     assert leaked == [(0,)]
 
 

@@ -119,6 +119,26 @@ MIN_CLOSED_PERIODS_FOR_STANDARD = 3
 # payload except an absurd one is not a promise.
 MAX_SCORING_PERIOD_KEY_LENGTH = 6
 
+# ESPN's measured status code for a season-long points league. The first
+# stranger rehearsal supplied the missing control on 2026-08-13: a real ESPN
+# season-long points league reported currentLeagueType=5 and
+# createdAsLeagueType=5, currentMatchupPeriod=1 for its entire season, and one
+# schedule entry whose membership ran from scoring period 1 through
+# latestScoringPeriod. H2H points remains measured as current=0 / created=2.
+#
+# `currentLeagueType` is the operative field. `createdAsLeagueType` is kept as
+# provenance but is not required to remain 5: a league that changed format
+# must be processed according to the season it is currently playing, not the
+# format in which it was born.
+SEASON_LONG_POINTS_LEAGUE_TYPE = 5
+
+# A scoring period is one baseball day. The bound is intentionally above any
+# plausible MLB season but small enough that a hostile latestScoringPeriod
+# cannot make the range below allocate according to an arbitrary payload
+# claim. Ordinary MLB seasons are under 220 calendar days; 400 leaves ample
+# room for special openers, pauses and postseason fantasy calendars.
+MAX_SEASON_LONG_SCORING_PERIODS = 400
+
 
 # ---------------------------------------------------------------------------
 # What comes back
@@ -148,6 +168,36 @@ class PeriodMembership:
     @property
     def scoring_period_count(self):
         return len(self.scoring_periods)
+
+
+@dataclass(frozen=True)
+class SeasonPointsWindow:
+    """The reportable daily window of an ESPN season-long points league.
+
+    This is deliberately NOT named a closed matchup. The season-spanning
+    container remains current until the season ends, but its day-grain roster
+    and player production are precisely what the product is meant to report.
+    Keeping this type separate prevents support for that format from quietly
+    admitting unfinished H2H matchups through the closed-period parser.
+    """
+
+    reporting_period: int
+    scoring_periods: tuple
+    is_complete: bool
+
+    @property
+    def scoring_period_count(self):
+        return len(self.scoring_periods)
+
+    @property
+    def matchup_period(self):
+        """Compatibility key for the RAW loader and settled-history guard.
+
+        The value is a storage/reporting container, not a claim that an H2H
+        matchup occurred. Keeping the semantic name on the dataclass separate
+        is what makes that distinction visible to callers.
+        """
+        return self.reporting_period
 
 
 @dataclass(frozen=True)
@@ -698,6 +748,116 @@ def _agree(matchup_period, side_memberships):
 
     return PeriodMembership(matchup_period,
                             tuple(sorted(distinct.pop())))
+
+
+def season_long_points_window(payload):
+    """Return the live/reportable window for ESPN season-long points.
+
+    This is the narrow exception the 2026-08-13 stranger rehearsal proved we
+    need. In this format ESPN leaves matchup period 1 CURRENT for the whole
+    season. Applying the H2H rule (strictly below current) therefore produces
+    no data for the league's entire first year, and repeating that rule in
+    later years hides every active season until it is over.
+
+    The exception does not call the period closed and does not apply to H2H.
+    It requires ESPN's explicit currentLeagueType=5, currentMatchupPeriod=1,
+    and a bounded daily endpoint from the status block. Where ESPN supplies a
+    season-spanning schedule entry, any side that publishes daily membership
+    must agree on the exact unbroken 1..endpoint run. A zero-entry schedule or
+    an entry with no H2H sides is also valid for this format: the status block
+    still supplies the day endpoint, and the multi-team period has no opponent
+    pair to read.
+
+    On a completed season finalScoringPeriod is the endpoint; on a live one
+    latestScoringPeriod is. This is what lets the current day update without
+    weakening the separate closed-matchup rule. Anything inconsistent raises
+    rather than silently truncating the season.
+    """
+    if not isinstance(payload, dict):
+        return None
+    status = payload.get("status")
+    if not isinstance(status, dict):
+        return None
+
+    league_type = status.get("currentLeagueType")
+    if (not isinstance(league_type, int) or isinstance(league_type, bool)
+            or league_type != SEASON_LONG_POINTS_LEAGUE_TYPE):
+        return None
+
+    current = _require_positive_int(
+        status.get("currentMatchupPeriod"),
+        "status.currentMatchupPeriod for a season-long points league")
+    if current != 1:
+        raise MatchupMembershipError(
+            "ESPN identifies this as a season-long points league but reports "
+            f"currentMatchupPeriod={current}; the measured contract keeps one "
+            "season-spanning reporting period numbered 1, so no safe daily "
+            "window can be selected")
+
+    latest = _optional_scoring_period(status.get("latestScoringPeriod"))
+    final = _optional_scoring_period(status.get("finalScoringPeriod"))
+    is_complete = latest is not None and final is not None and latest > final
+    endpoint = final if is_complete else latest
+    if endpoint is None:
+        raise MatchupMembershipError(
+            "ESPN identifies this as a season-long points league but supplies "
+            "no usable latestScoringPeriod; without the current daily endpoint "
+            "the extractor cannot know how much of the season to report")
+    if endpoint > MAX_SEASON_LONG_SCORING_PERIODS:
+        raise MatchupMembershipError(
+            f"season-long points endpoint {endpoint} exceeds the guarded "
+            f"maximum of {MAX_SEASON_LONG_SCORING_PERIODS} daily scoring "
+            "periods; refusing to allocate from an implausible payload claim")
+
+    schedule = payload.get("schedule")
+    if not isinstance(schedule, list):
+        raise MatchupMembershipError(
+            "season-long points schedule is not a list")
+
+    if schedule:
+        sides = []
+        for index, entry in enumerate(schedule, start=1):
+            if not isinstance(entry, dict):
+                raise MatchupMembershipError(
+                    f"schedule entry #{index} is {type(entry).__name__}, not "
+                    "an object")
+            period = _require_positive_int(
+                entry.get("matchupPeriodId"),
+                f"schedule entry #{index}: matchupPeriodId")
+            if period != 1:
+                raise MatchupMembershipError(
+                    "ESPN identifies this as season-long points but its "
+                    f"schedule includes matchup period {period}; the measured "
+                    "contract has only the season-spanning period 1")
+            for position in ("home", "away"):
+                membership = _side_membership(
+                    entry.get(position), 1, position, index)
+                if membership is not None:
+                    sides.append(membership)
+        if sides:
+            observed = _agree(1, sides).scoring_periods
+            for expected, actual in enumerate(observed, start=1):
+                if actual != expected:
+                    raise MatchupMembershipError(
+                        "season-long points membership is not the unbroken "
+                        f"daily run 1..{endpoint}; expected scoring period "
+                        f"{expected} but observed {actual}")
+            if len(observed) != endpoint:
+                raise MatchupMembershipError(
+                    "season-long points membership does not reach the status "
+                    f"endpoint: observed {len(observed)} daily scoring "
+                    f"period(s), expected {endpoint}")
+
+    # Type 5's one multi-team container has no opponent pair to invent. The
+    # bounded status endpoint is the current daily index, so 1..endpoint is
+    # the reportable window whether or not an H2H-shaped side repeated it.
+    scoring_periods = tuple(range(1, endpoint + 1))
+
+    return SeasonPointsWindow(
+        reporting_period=1,
+        scoring_periods=tuple(scoring_periods),
+        is_complete=is_complete,
+    )
 
 
 def _require_no_gaps(closed, current, promoted=False):

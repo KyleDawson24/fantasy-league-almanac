@@ -33,7 +33,7 @@ with owners as (
         owner_id,
         first_name,
         last_name,
-        cast(null as varchar) as seen_name
+        nullif(trim(display_name), '') as seen_name
     from {{ ref('stg_team_owners') }}
     where owner_id is not null
     qualify row_number() over (
@@ -107,7 +107,11 @@ select
             ''),
         -- CBS historical owners have no nickname row and no last_name, so the
         -- concat above is NULL -- fall back to their roster-page display.
-        o.seen_name
+        -- ESPN can likewise expose only displayName for a privacy-limited
+        -- member. If the platform withholds every name field, retain a clear
+        -- non-identity label; the team name still distinguishes the row.
+        o.seen_name,
+        'Unknown owner'
     ) as owner_display
 from owners o
 left join nicknames n

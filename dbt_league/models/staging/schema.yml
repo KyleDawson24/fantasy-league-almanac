@@ -6,6 +6,9 @@ models:
       One row per player per scoring period, per league.
       Includes rostered players (with team_id and owner_name)
       and free agents (NULL team fields, lineup_slot='FA').
+      H2H roster attribution comes from matchup sides; ESPN season-long
+      points attribution comes from the parallel day-specific team_rosters
+      block, without manufacturing an opponent.
       A player_id is unique within a given (league_key, season_year, scoring_period) -- a player cannot simultaneously be on two fantasy rosters or be both rostered and FA within one league (the same MLB player CAN appear in multiple leagues).
     tests:
       - dbt_utils.unique_combination_of_columns:
@@ -29,7 +32,7 @@ models:
         tests:
           - not_null
       - name: matchup_period
-        description: 'The weekly matchup period this scoring period belongs to.'
+        description: 'The weekly matchup period this scoring period belongs to, or the season-spanning reporting container for ESPN season-long points.'
       - name: team_name
         description: 'ESPN fantasy team name. NULL for free agent rows.'
       - name: team_id
@@ -39,7 +42,7 @@ models:
       - name: owner_name
         description: 'Team owner display name, extracted from the ESPN API. For co-managed teams, a slash-delimited list of first names. NULL for free agent rows.'
       - name: home_away
-        description: 'Whether this player was on the home or away side of the fantasy matchup. NULL for free agent rows (FAs are not part of any matchup).'
+        description: 'Whether this player was on the home or away side of the fantasy matchup. NULL for free agents and season-long-points rows because neither is part of an H2H pairing.'
       - name: player_name
         description: 'Player full name as reported by ESPN.'
       - name: player_id
@@ -100,6 +103,65 @@ models:
                 values: [0, 1, 2]
       - name: display_name
         description: 'COALESCE of player_nicknames.nickname and player_name. Joined here so display_name propagates through every downstream model.'
+
+  - name: stg_box_scores__team_rosters
+    description: >
+      One row per ESPN fantasy team per scoring day for league type 5.
+      Projects the day-specific team_rosters block before its lineup is
+      flattened by stg_box_scores. H2H payloads have no such block and produce
+      zero rows. This preserves team attribution without inventing an opponent.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - season_year
+              - scoring_period
+              - team_id
+    columns:
+      - name: league_key
+        tests: [not_null]
+      - name: season_year
+        tests: [not_null]
+      - name: scoring_period
+        tests: [not_null]
+      - name: team_id
+        tests: [not_null]
+      - name: lineup
+        description: 'The team roster for this scoring day, retained as JSON until the downstream player flatten.'
+
+  - name: stg_box_scores__season_points_players
+    description: >
+      One typed row per rostered player per scoring day for ESPN league type
+      5. This materialized boundary flattens the team-roster lineup separately
+      from the final player union so DuckDB can release the parent JSON first.
+    columns:
+      - name: league_key
+        tests: [not_null]
+      - name: season_year
+        tests: [not_null]
+      - name: scoring_period
+        tests: [not_null]
+      - name: team_id
+        tests: [not_null]
+      - name: player_id
+        tests: [not_null]
+
+  - name: stg_box_scores__free_agents
+    description: >
+      One typed row per unrostered player per scoring day. The model projects
+      and flattens RAW's free_agents block behind its own materialized boundary
+      so its JSON expansion does not share a DuckDB statement with rostered
+      season-points players and the final union.
+    columns:
+      - name: league_key
+        tests: [not_null]
+      - name: season_year
+        tests: [not_null]
+      - name: scoring_period
+        tests: [not_null]
+      - name: player_id
+        tests: [not_null]
 
   - name: stg_player_stat_breakdowns
     description: >
@@ -385,6 +447,8 @@ models:
       - name: owner_id
         tests:
           - not_null
+      - name: display_name
+        description: 'ESPN public display label. May be present when privacy settings withhold first_name and last_name.'
 
   - name: stg_schedule_settings
     description: >
@@ -419,12 +483,12 @@ models:
         tests:
           - not_null
       - name: playoff_rounds
-        description: 'total_matchup_periods - regular_season_periods. Must be positive: a season cannot schedule fewer periods than its own regular season.'
+        description: 'total_matchup_periods - regular_season_periods. Zero is valid for a league with no playoffs; the value may never be negative.'
         tests:
           - not_null
           - dbt_utils.accepted_range:
               arguments:
-                min_value: 1
+                min_value: 0
                 inclusive: true
       - name: playoff_team_count
         tests:
@@ -1275,6 +1339,15 @@ models:
           only periods strictly below it are eligible, because the period in
           flight is still filling in and reads short. NULL when the payload
           held something unreadable, which fails the season closed.
+      - name: current_league_type
+        description: >
+          ESPN status.currentLeagueType, type-gated as an integer. A real
+          season-long points league measured 5 in the 2026-08-13 stranger
+          rehearsal; the H2H points seasons on file measure 0.
+      - name: created_as_league_type
+        description: >
+          ESPN status.createdAsLeagueType. Provenance only: the current field
+          decides the format if a league has changed since it was created.
       - name: schedule
         description: >
           The verbatim schedule array, still JSON. Interpreted by

@@ -8,17 +8,20 @@ dbt-architecture cleanup; refactor-only), and v1.1.0 on 2026-05-22
 (a correctness pass over the CBS record book, 2026-07-25), and v1.6.0
 (2026-07-30, the pre-port anchor release: Total-Points vocabulary,
 Advanced Standings banners, a re-render hygiene fix, and a determinism
-sweep). Most recently, v1.8.0 (2026-08-10) proved the warehouse-free
-local journey end to end: a fresh clone with league credentials and no
-warehouse account of any kind reaches rendered preview files on disk --
-ESPN only, not yet a shareable workbook, and not yet stranger-proof.
-See CHANGELOG.md for the per-release entries.
+sweep), v1.8.0 (2026-08-10, the warehouse-free local journey: a fresh
+clone with league credentials and no warehouse account of any kind
+reaches rendered preview files on disk). Most recently, v1.9.0
+(2026-08-13) ended that journey in a shareable Google workbook for
+ESPN, after configuration -- an app-created book under a `drive.file`
+grant, private until sharing is explicitly confirmed -- and retired the
+hand-maintained matchup-schedule seed in favour of weeks and dates read
+from the platform. See CHANGELOG.md for the per-release entries.
 
-**In flight right now:** the stranger's Google-workbook journey (MLB-209)
--- the service foundation is on `main`, and what remains is wiring it
-into the full onboarding path -- and deriving the matchup schedule from
-the platform's own settings instead of a hand-maintained seed (the "Data
-wiring" item below).
+**In flight right now:** guided fields-file onboarding (MLB-31/MLB-207),
+which is what still stands between the v1.9.0 command and a stranger
+running this cold; the untouched-machine rehearsal of that path; and
+CBS, which remains outside the supported stranger journey and is an
+urgent fast-follow rather than a 2.0 gate.
 
 The items below are what's still on deck, organized by
 priority and ambition. v1.x = incremental polish on the current
@@ -33,7 +36,7 @@ a single afternoon.
 
 > **Overtaken by events (noted 2026-07-31, refreshed 2026-08-11).** This
 > block was written when v1.1.0 was the current release; the project is
-> now at v1.8.0 and the engine port has shipped. The items below are
+> now at v1.9.0 and the engine port has shipped. The items below are
 > still wanted, but "the next release" no longer describes any of them.
 > Re-prioritizing this section is its own pass.
 

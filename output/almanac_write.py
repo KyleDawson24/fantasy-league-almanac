@@ -1157,6 +1157,12 @@ def _apply_standings_gradients(spreadsheet, worksheet, rows, stat_specs):
                 },
                 'index': 0,
             }})
+    # An otherwise valid section may be present with a header and zero data
+    # rows (the supported first-season / in-progress installation state).
+    # Google rejects a conditional-format rule whose `ranges` list is empty,
+    # so omit those rules rather than letting one empty table cancel every
+    # formatting request for the tab.
+    requests = [request for request in requests if request is not None]
     if requests:
         _sheets_batch_update(
             spreadsheet, f'standings gradients {worksheet.title}', requests,
@@ -2438,7 +2444,11 @@ def _apply_team_weeks_conditional_formats(spreadsheet, worksheet, rows, stat_spe
             sheet_id, column, len(rows), scale='three_good_high', row_ranges=row_ranges,
         ))
 
-    _sheets_batch_update(spreadsheet, f'conditional formats {worksheet.title}', requests)
+    requests = [request for request in requests if request is not None]
+    if requests:
+        _sheets_batch_update(
+            spreadsheet, f'conditional formats {worksheet.title}', requests,
+        )
 
 
 def _apply_team_weeks_record_formats(spreadsheet, worksheet, stat_specs,
@@ -2728,15 +2738,19 @@ def _color_scale_request(sheet_id, column_index, row_count, scale='three_good_hi
             'maxpoint': {'type': 'MAX', 'color': high_color},
         }
 
+    ranges = _color_scale_ranges(
+        sheet_id,
+        column_index,
+        row_count,
+        row_ranges=row_ranges,
+    )
+    if not ranges:
+        return None
+
     return {
         'addConditionalFormatRule': {
             'rule': {
-                'ranges': _color_scale_ranges(
-                    sheet_id,
-                    column_index,
-                    row_count,
-                    row_ranges=row_ranges,
-                ),
+                'ranges': ranges,
                 'gradientRule': gradient_rule,
             },
             'index': 0,

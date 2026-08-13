@@ -85,6 +85,20 @@ typed as (
              then {{ try_to_number(current) }} end::integer
             as current_matchup_period,
 
+        -- Format evidence, measured on both sides. The H2H points seasons on
+        -- file read current=0 / created=2; the 2026-08-13 stranger rehearsal
+        -- of a real ESPN season-long points league read 5 / 5 and one
+        -- season-spanning current period. currentLeagueType is operative;
+        -- createdAsLeagueType is provenance for a league that later changes.
+        {% set current_type = json_get('raw_json', 'status', 'currentLeagueType') %}
+        case when {{ json_is_integer(current_type) }}
+             then {{ try_to_number(json_unwrap_text(current_type)) }}
+             end::integer as current_league_type,
+        {% set created_type = json_get('raw_json', 'status', 'createdAsLeagueType') %}
+        case when {{ json_is_integer(created_type) }}
+             then {{ try_to_number(json_unwrap_text(created_type)) }}
+             end::integer as created_as_league_type,
+
         -- Completion evidence. A finished season pins currentMatchupPeriod ON
         -- its final period rather than past it (2025 came back 26 of 26), so
         -- the strict rule alone would discard the last completed week of
@@ -132,6 +146,8 @@ bounded as (
         captured_at,
         declared_season_year,
         current_matchup_period,
+        current_league_type,
+        created_as_league_type,
         schedule,
         scheduled_matchup_count,
         -- The pure parser's `_optional_scoring_period` also refuses a

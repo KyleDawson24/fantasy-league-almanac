@@ -695,7 +695,8 @@ models:
       is computed over it (MLB-235) -- the ONLY model that flattens the
       schedule, so the rule for which scoring periods a period contains is
       written once. One row per readable matchup period, closed and open
-      alike. Closed periods are shape-checked (every participating side must
+      alike, plus the single live reporting period for an ESPN type-5
+      season-points league. Closed H2H periods are shape-checked (every participating side must
       expose the same pointsByScoringPeriod key set, byes excepted); open ones
       deliberately are not, matching the pure parser, which skips a period it
       is not going to classify. The SQL twin of
@@ -727,7 +728,18 @@ models:
       - name: is_closed
         description: >
           matchup_period < current_matchup_period. Structural, not
-          calendar-based.
+          calendar-based. Always false for the open type-5 season-points
+          container, even though that container is reportable.
+      - name: is_reportable
+        description: >
+          True for a closed H2H period or the one live ESPN type-5
+          season-points container. Separates "may feed the record book now"
+          from "is a finished head-to-head matchup."
+      - name: is_season_points_period
+        description: >
+          True only for ESPN's type-5, season-long multi-team reporting
+          container. It has no home/away pairing and remains reportable while
+          latestScoringPeriod advances through the current season.
       - name: is_well_formed
         description: >
           Closed periods only (NULL for open ones, which are not checked).
@@ -820,9 +832,12 @@ models:
 
   - name: int_matchup_period_shape
     description: >
-      How long each closed matchup period was and whether that is abnormal for
+      How long each reportable matchup period was and whether that is abnormal for
       its season (MLB-235) -- the point of the ticket in one column, computed
       from ESPN's membership with no reference to the matchup_schedule seed.
+      For an ESPN type-5 season-points league, the one live container is
+      reportable and explicitly ordinary even though it is not an H2H-closed
+      matchup; its length is simply the available daily endpoint to date.
       A malformed season contributes no rows at all; an insufficient or
       ambiguous one contributes rows whose is_abnormal_derived is NULL,
       because their lengths are known facts and only the norm is missing.

@@ -1,10 +1,11 @@
 -- int_matchup_period_shape.sql
--- How long each closed matchup period was, and whether that is abnormal for
--- the season it sits in (MLB-235).
+-- How long each reportable matchup period was, and whether that is abnormal
+-- for the season it sits in (MLB-235).
 --
 -- ==========================================================================
 -- GRAIN: one row per (league_key, season_year, matchup_period) that is
--- CLOSED, for every season whose payload could be read at all.
+-- REPORTABLE, for every season whose payload could be read at all. This means
+-- closed for H2H and includes the one live ESPN type-5 reporting container.
 -- ==========================================================================
 --
 -- THE POINT OF THE TICKET, in one column: is_abnormal_derived is computed
@@ -38,7 +39,8 @@ select
     d.standard_period_length,
     d.derivation_status,
     -- Only a season that established a norm can call a period abnormal.
-    case when d.derivation_status = 'derived'
+    case when e.is_season_points_period then false
+         when d.derivation_status = 'derived'
          then e.scoring_period_count <> d.standard_period_length
     end as is_abnormal_derived,
     -- Carried so a reader can tell "this period's own evidence was bad" from
@@ -49,5 +51,5 @@ from {{ ref('int_matchup_period_evidence') }} e
 inner join {{ ref('int_matchup_season_derivation') }} d
     on e.league_key = d.league_key
    and e.season_year = d.season_year
-where e.is_closed
+where e.is_reportable
   and d.derivation_status <> 'malformed'

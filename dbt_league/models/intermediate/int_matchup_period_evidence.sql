@@ -99,6 +99,10 @@ with entries as (
         {{ json_unwrap_text(json_get('m.value', 'away')) }} as away_text
     from {{ ref('stg_matchup_schedule') }} s,
         {{ flatten_array('s.schedule', 'm') }}
+    -- Type 5 is one live multi-team period, not an H2H pairing. Its bounded
+    -- status-derived reporting row is added separately below so an absent
+    -- home/away side is not misclassified as malformed H2H evidence.
+    where s.current_league_type is distinct from 5
 ),
 
 readable as (
@@ -273,14 +277,17 @@ resolved as (
                         and max_scoring_period = final_scoring_period, false)
         ) as is_closed
     from verdict
-)
+),
 
+h2h_output as (
 select
     league_key,
     season_year,
     current_matchup_period,
     matchup_period,
     is_closed,
+    is_closed as is_reportable,
+    false as is_season_points_period,
     is_completion_candidate,
     -- Published for eligible periods only, matching the pure parser: a period
     -- that was skipped, or a candidate that failed to earn promotion, carries
@@ -307,3 +314,38 @@ select
         as max_scoring_period,
     case when is_closed then scoring_periods end as scoring_periods
 from resolved
+),
+
+season_points_output as (
+    -- ESPN type 5 is one season-long, multi-team period. latestScoringPeriod
+    -- is today's bounded daily endpoint, not the eventual season length.
+    -- The period is reportable while open but is NOT called closed: rivalry
+    -- and W/L closure consumers must continue to exclude the live season.
+    select
+        league_key,
+        season_year,
+        current_matchup_period,
+        1::integer as matchup_period,
+        false as is_closed,
+        true as is_reportable,
+        true as is_season_points_period,
+        false as is_completion_candidate,
+        true as is_well_formed,
+        scheduled_matchup_count as matchup_count,
+        0::integer as participating_sides,
+        0::integer as sides_with_membership,
+        0::integer as distinct_signatures,
+        0::integer as invalid_key_count,
+        latest_scoring_period::integer as scoring_period_count,
+        1::integer as min_scoring_period,
+        latest_scoring_period::integer as max_scoring_period,
+        null as scoring_periods
+    from {{ ref('stg_matchup_schedule') }}
+    where current_league_type = 5
+      and current_matchup_period = 1
+      and latest_scoring_period between 1 and 400
+)
+
+select * from h2h_output
+union all
+select * from season_points_output

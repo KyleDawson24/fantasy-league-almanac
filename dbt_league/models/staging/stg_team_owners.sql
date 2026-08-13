@@ -1,7 +1,7 @@
 -- stg_team_owners.sql
 -- v1.2: per-season team -> owner bridge, flattened from the append-only
 -- RAW.TEAM_OWNERS snapshots (one VARIANT array of {team_id, owner_id,
--- first_name, last_name} per extract). Latest snapshot per season,
+-- first_name, last_name, display_name} per extract). Latest snapshot per season,
 -- mirroring the stg pattern over scoring/roster settings.
 --
 -- ==========================================================================
@@ -40,6 +40,7 @@ select
     {{ json_text('t.value', 'team_id') }}::integer    as team_id,
     {{ json_text('t.value', 'owner_id') }}::string    as owner_id,
     {{ json_text('t.value', 'first_name') }}::string  as first_name,
-    {{ json_text('t.value', 'last_name') }}::string   as last_name
+    {{ json_text('t.value', 'last_name') }}::string   as last_name,
+    {{ json_text('t.value', 'display_name') }}::string as display_name
 from latest_extraction le,
     {{ flatten_array('le.raw_json', 't') }}

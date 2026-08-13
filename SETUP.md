@@ -1,15 +1,26 @@
 # Setup
 
-End-to-end setup for running the pipeline against your own ESPN
-Fantasy Baseball league. Covers prerequisites, credentials, dbt
-profile, and the first run.
+The detailed reference for running the pipeline against your own ESPN
+Fantasy Baseball league: prerequisites, credentials, league registry, dbt
+profile, the first run, and the advanced Snowflake and bring-your-own-Google
+routes.
+
+**This is not the supported release path.**
+[QUICKSTART.md](QUICKSTART.md) is: download the release ZIP, make a venv,
+fill in `.env` and `config/leagues.yml`, and run
+`python tools/create_public_almanac.py`. That command owns extraction,
+the local parquet/DuckDB build, dbt, and the Google workbook. Come here
+when you want the detail behind one of those steps, when you are running
+the maintainer's Snowflake path, or when you are bringing your own Google
+client.
 
 If you just want to read about what this project does, see
-[README.md](README.md). If you're forking to run against your league,
-keep reading.
+[README.md](README.md).
 
-Expect ~30-45 minutes for first-time setup, mostly waiting for
-Snowflake free-tier provisioning.
+Expect ~30-45 minutes for first-time setup **if you take the optional
+Snowflake path**, mostly waiting for free-tier provisioning. The local
+DuckDB path that QUICKSTART uses provisions nothing and skips section 4
+and section 5 entirely.
 
 ---
 
@@ -17,15 +28,26 @@ Snowflake free-tier provisioning.
 
 - **Python 3.13.x** -- not 3.14, which the pinned stack currently crashes
   under (mashumaro, via dbt). Earlier 3.x versions haven't been tested.
-- **Git**.
-- **An ESPN Fantasy Baseball league**. Private leagues are supported
-  (requires cookies -- see step 3). Public leagues should work without
-  cookies but haven't been tested for v1.0.
-- **A Snowflake account**. Free-tier (Standard, 30-day trial → $0 storage
-  for small datasets after) is plenty. Sign up at
-  https://signup.snowflake.com. Pick any region.
-- *(Optional)* **A Google Cloud project** if you want the Google Sheets
-  sink. Free; skippable.
+- **An ESPN Fantasy Baseball league**. Private leagues are supported and
+  are what the release path expects (requires cookies -- see step 3).
+  Public leagues should need less, but that has not been proven through
+  the `create_public_almanac.py` entrypoint.
+- **Git**, only for the developer/source path. The release ZIP does not
+  need it.
+- **Windows**, only for the public Google workbook flow -- v1.9 stores
+  that grant in Windows Credential Locker. The local pipeline (extract,
+  DuckDB, dbt, preview files, BBCode) has no such requirement.
+- *(Optional, advanced)* **A Snowflake account**, if you want the
+  maintainer's warehouse path instead of local DuckDB. It is **not a
+  prerequisite**: nothing in the release journey touches it, and it is
+  reached only by deliberately passing `--advanced-snowflake`. Free-tier
+  (Standard, 30-day trial → $0 storage for small datasets after) is
+  plenty. Sign up at https://signup.snowflake.com. Pick any region.
+- *(Optional, advanced)* **A Google Cloud project and OAuth client**.
+  **Not required for the public workbook path** -- the release build
+  ships its own identity. You need your own client only for section 10b:
+  writing to a workbook you already created (the records report, or
+  `--prod`), or consenting as a client of your own from a source clone.
 
 ---
 
@@ -369,6 +391,52 @@ unauthenticated, so expiry can't corrupt the archive.
 
 ## 7. Tell it about your league
 
+### The league registry (`config/leagues.yml`)
+
+This is the one configuration file the release path genuinely requires,
+and it is the file `create_public_almanac.py` reads to decide *which*
+league to build and *how far back*. Open it and edit the `espn-main`
+entry, or add your own beside it:
+
+```yaml
+default_league: espn-main
+
+leagues:
+  espn-main:
+    platform: espn
+    display_name: "My league"
+    league_id_env: LEAGUE_ID
+    credential_env: [ESPN_S2, SWID, LEAGUE_ID]
+    first_season: 2019
+    final_season: null
+```
+
+- **`display_name`** -- a label for logs and docs, never keyed on. Pick
+  something non-identifying; it does not have to be the league's real
+  name.
+- **`first_season`** -- the earliest ESPN season that belongs to this
+  league. The public command builds every season from here forward, so a
+  wrong value is the most common cause of a short or failing history.
+- **`final_season`** -- `null` while the league is ongoing, or the final
+  year once it has finished.
+- **`default_league`** -- must name the entry you want built. With more
+  than one entry, pass `--league LEAGUE_KEY` rather than relying on the
+  default.
+- **`credential_env`** -- every `.env` variable the adapter needs at
+  extract time. The loader reports which are missing, and
+  `create_public_almanac.py` checks them before it runs anything.
+
+**No secrets and no private league id go in this file** -- it is tracked
+in git. The entry names the `.env` variable holding the id
+(`league_id_env`) instead. A genuinely public league could use a literal
+`league_id:`; when both are present the literal wins.
+
+The header comment in `config/leagues.yml` is the full field reference,
+including why league format is derived from the platform rather than
+configured here.
+
+### The league_config seeds
+
 Seeds are CSV files dbt loads into the warehouse. This project keeps them
 in two directories, and the difference is the whole point:
 
@@ -510,9 +578,9 @@ python extract/extract.py            # Extract recent matchup periods
 cd dbt_league
 dbt deps                              # Install dbt_utils package (first
                                       # run only; idempotent)
-dbt seed                              # Load the 19 seed CSVs -- 5 reference
-                                      # + 13 from league_config (section 7)
-dbt build                             # Build 78 models + run 573 tests
+dbt seed                              # Load the 20 seed CSVs -- 6 reference
+                                      # + 14 from league_config (section 7)
+dbt build                             # Build 95 models + run 717 tests
 
 cd ..
 python output/generate_summary.py     # Weekly recap BBCode
@@ -609,10 +677,12 @@ nothing in it should be a reflex.
 pytest tests/
 ```
 
-Expected on a fresh clone: **595 passed, 27 deselected**. The
-warehouse-marked tests are deselected by default via `pytest.ini`; no
-credentials are involved and nothing is written. These counts drift
-between releases -- `pytest tests/ -q` is the truth.
+Fresh-clone collection at this cut: **1512** pure tests, with **27**
+warehouse-marked tests deselected by default via `pytest.ini`; no
+credentials are involved and nothing is written. Those are what pytest
+COLLECTS, not a pass tally -- how many pass or skip varies by machine and
+OS. These counts drift between releases -- `pytest tests/ -q` is the
+truth.
 
 ### Tier 2: the warehouse suite
 
@@ -676,7 +746,8 @@ stranger onboarding journey.
 
 The command reuses the registry's `first_season` / `final_season` policy and
 runs one complete extraction for every applicable season—verified matchup
-membership and calendar, every closed matchup period, settings, standings,
+membership and calendar, every closed H2H matchup or every reportable scoring
+day in a measured ESPN season-long-points season, settings, standings,
 draft/owners, and transactions. A failed or underivable season stops before
 DuckDB build or workbook generation. It forces the local Parquet/DuckDB
 pipeline before creating the workbook. Snowflake is used only when you deliberately add
@@ -729,13 +800,18 @@ and `.gitignore`. Revoke the grant at
 expired refresh token triggers fresh consent on the next run; nothing here
 expires on your behalf.
 
-**Not yet open to the public.** The shipped identity is in Google's
-*testing* mode: only accounts added as test users can get through the
-consent screen, those grants expire after roughly a week, and the screen
-shows an unverified app. Publishing it needs a homepage, a privacy
-policy, terms, and Google's branding review -- a separate release gate.
-Until that lands, this path works for test users and Google will stop
-everybody else.
+**Branding review is still pending.** The shipped identity's publishing
+status is **In Production**: it is not restricted to a test-user list,
+and the roughly week-long grant expiry that applies in Google's testing
+mode does not apply to it. The homepage, Privacy Policy and Terms are
+live at [kpdawson.com](https://kpdawson.com), and `drive.file` is
+non-sensitive -- Google reports that data-access verification is not
+required for it. What remains is branding verification, which has been
+submitted and not yet reviewed. Until it is approved Google may withhold
+the configured branding and may show an unverified-app warning on the
+consent screen. That is a statement about branding review, not about
+reach: `drive.file` is still the only scope the public path requests, so
+it can see the workbook it creates and nothing else in your Drive.
 
 ### 10b. Advanced: bring your own OAuth client
 
@@ -822,10 +898,12 @@ no longer does -- weeks come from ESPN's own response now, so a blank
 seed is the normal state and not a cause. Check instead that the extract
 actually captured a matchup schedule: an ordinary box-score run prints
 `Matchup schedule for <year>` followed by how many closed matchup periods
-it found. Zero closed periods early in a season is real and simply means
-nothing has finished yet. Then confirm `dbt seed && dbt build` ran after
-the extract -- a week present in RAW but missing downstream is usually a
-build that has not caught up.
+it found. Zero closed periods early in an ordinary H2H season is real and
+simply means nothing has finished yet. ESPN season-long points is different:
+measured league type 5 follows a daily roster path and does not wait for its
+one season-spanning reporting container to close. Then confirm `dbt seed &&
+dbt build` ran after the extract -- a period present in RAW but missing
+downstream is usually a build that has not caught up.
 
 The same shape explains a green build with unnamed CBS franchises or no
 CBS owner history: `cbs_franchises.csv`, `cbs_team_owners.csv` and

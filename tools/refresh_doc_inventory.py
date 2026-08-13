@@ -1,11 +1,30 @@
-"""Regenerate the inventory counts in SETUP.md and dbt_league/README.md (MLB-153).
+"""Regenerate the inventory counts in the three docs that quote them (MLB-153).
 
-Every count in those two files -- model totals, per-layer counts,
-materialization splits, seed/source/exposure counts, dbt test counts, the
-pytest collection numbers -- is DERIVED here and written back. Nothing is
+Governed documents:
+
+    README.md                 the transform-layer shape sentence
+    SETUP.md                  the run-book counts and the pytest expectations
+    dbt_league/README.md      the DAG diagram, layer table and test counts
+
+Every CURRENT PROJECT-INVENTORY count this script governs in those files
+-- model totals, per-layer counts, materialization splits,
+seed/source/exposure counts, dbt test counts, the pytest collection
+numbers -- is DERIVED here and written back. Nothing governed is
 transcribed. The counts drifted in the first place because they were kept
 by hand: the ticket that asked for this script said "72 models" while the
 tree held 74.
+
+That scope is deliberately narrow. The same documents also carry
+historical measurements, release dates, memory figures and other numbers
+that are intentionally frozen or measured elsewhere, and this script does
+not touch them. The anchor tables below are the exact list of what it
+owns; a number not anchored there is somebody else's to keep true.
+
+The root README was the last one still drifting. It claimed to be
+"regenerated from the parsed manifest at each release cut" while nothing
+regenerated it, so it sat at 78 models and 573 tests against a tree
+holding 92 and 702 -- a sentence that documented its own freshness and
+was wrong about it.
 
 Run it as a release-ceremony step (see RELEASING.md). It is deliberately
 NOT a CI test, a pytest case, or a pre-commit hook: docs are allowed to
@@ -55,7 +74,8 @@ import sys
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PROJECT_DIR = os.path.join(REPO, "dbt_league")
 MANIFEST = os.path.join(PROJECT_DIR, "target", "manifest.json")
-STAT_SEED = os.path.join(PROJECT_DIR, "seeds", "stat_classification.csv")
+SEED_REFERENCE_DIR = os.path.join(PROJECT_DIR, "seeds")
+STAT_SEED = os.path.join(SEED_REFERENCE_DIR, "stat_classification.csv")
 
 LAYERS = {
     "staging": "staging",
@@ -120,6 +140,23 @@ def tracked_test_files() -> list[str]:
     return sorted(files)
 
 
+def seed_root_of(node) -> str:
+    """'reference' for the tracked vocabulary root, 'league_config' otherwise.
+
+    seed-paths is ["seeds", env_var('DBT_LEAGUE_CONFIG', 'league_config')],
+    so the SECOND root moves -- the demo fixture points it at
+    demo/league_config, and the test harness points it at absolute temp
+    directories. The reference root never moves, so it is the one worth
+    testing for, and everything outside it is league config by
+    construction. Comparing resolved paths rather than the raw string
+    keeps that true whether the override arrived relative or absolute.
+    """
+    resolved = os.path.normcase(os.path.abspath(
+        os.path.join(PROJECT_DIR, node["original_file_path"])))
+    reference = os.path.normcase(os.path.abspath(SEED_REFERENCE_DIR)) + os.sep
+    return "reference" if resolved.startswith(reference) else "league_config"
+
+
 def gather() -> dict[str, int]:
     with open(MANIFEST, encoding="utf-8") as f:
         manifest = json.load(f)
@@ -147,6 +184,11 @@ def gather() -> dict[str, int]:
         return sum(1 for n in by_layer[layer]
                    if n["config"]["materialized"] == materialization)
 
+    def mat_total(materialization: str) -> int:
+        """Project-wide materialization count, for the root README."""
+        return sum(1 for n in models
+                   if n["config"]["materialized"] == materialization)
+
     core = by_layer["core"]
     with open(STAT_SEED, newline="", encoding="utf-8-sig") as f:
         stat_rows = sum(1 for _ in csv.DictReader(f))
@@ -166,7 +208,14 @@ def gather() -> dict[str, int]:
         "core_views": mat("core", "view"),
         "core_incremental": mat("core", "incremental"),
         "reporting_views": mat("reporting", "view"),
+        "models_views": mat_total("view"),
+        "models_tables": mat_total("table"),
+        "models_incremental": mat_total("incremental"),
         "seeds": len(seeds),
+        "seeds_reference": sum(1 for n in seeds
+                               if seed_root_of(n) == "reference"),
+        "seeds_league_config": sum(1 for n in seeds
+                                   if seed_root_of(n) == "league_config"),
         "sources": len(manifest["sources"]),
         "exposures": len(manifest["exposures"]),
         "tests_total": len(tests),
@@ -185,6 +234,22 @@ def gather() -> dict[str, int]:
         raise Failure("marts/core holds a model that is neither dim_ nor "
                       "fct_; the README's '8 dims + 11 facts' sentence no "
                       "longer describes the layer.")
+    materialized = (facts["models_views"] + facts["models_tables"]
+                    + facts["models_incremental"])
+    if materialized != facts["models_total"]:
+        raise Failure(
+            f"the materialization split covers {materialized} of "
+            f"{facts['models_total']} models, so the root README's "
+            f"'(N views, N tables, N incremental)' no longer adds up. A "
+            f"fourth materialization (ephemeral, materialized_view) has "
+            f"appeared -- widen the sentence, then this script."
+        )
+    if facts["seeds_reference"] + facts["seeds_league_config"] != facts["seeds"]:
+        raise Failure(  # pragma: no cover - the split is exhaustive by
+            f"seed roots sum to "  # construction; guard against a future third
+            f"{facts['seeds_reference'] + facts['seeds_league_config']}, "
+            f"not {facts['seeds']}"
+        )
     return facts
 
 
@@ -221,17 +286,42 @@ README_RULES = [
     ("seeds",               r"# load the (?P<n>\d+) seed CSVs"),
 ]
 
+# The root README's one inventory sentence. It advertises itself as
+# regenerated at each cut, so it has to actually be.
+ROOT_README_RULES = [
+    ("models_total",       r"\*\*(?P<n>\d+) dbt models\*\*"),
+    ("models_views",       r"\*\*\d+ dbt models\*\* \((?P<n>\d+) views,"),
+    ("models_tables",      r"\*\*\d+ dbt models\*\* \(\d+ views, (?P<n>\d+) tables,"),
+    ("models_incremental", r"\d+ views, \d+ tables, (?P<n>\d+) incremental\)"),
+    ("seeds",              r"\*\*(?P<n>\d+) seeds\*\*"),
+    ("tests_total",        r"\*\*(?P<n>\d+) data tests\*\*"),
+    ("sources",            r"\*\*(?P<n>\d+) sources\*\*"),
+    ("exposures",          r"\*\*(?P<n>\d+) declared exposures\*\*"),
+    # Collection counts, and the prose says so. These replaced a frozen
+    # "749 passed, 3 skipped" from one CI run that stopped being current
+    # the moment anything was added -- and read as a pass guarantee the
+    # generator was never in a position to make, since it derives these
+    # from `--collect-only`.
+    ("pytest_pure",        r"collects \*\*(?P<n>\d+)\*\* tracked pure tests"),
+    ("pytest_warehouse",   r"with \*\*(?P<n>\d+)\*\* warehouse-marked goldens"),
+]
+
 SETUP_RULES = [
     ("seeds",            r"# Load the (?P<n>\d+) seed CSVs"),
+    # The breakdown, derived rather than written once: 5 + 13 outlived two
+    # seed additions and still summed to 18 under a headline of 20.
+    ("seeds_reference",     r"seed CSVs -- (?P<n>\d+) reference"),
+    ("seeds_league_config", r"# \+ (?P<n>\d+) from league_config"),
     ("models_total",     r"# Build (?P<n>\d+) models \+ run"),
     ("tests_total",      r"models \+ run (?P<n>\d+) tests"),
-    ("pytest_pure",      r"fresh clone: \*\*(?P<n>\d+) passed"),
-    ("pytest_warehouse", r"passed, (?P<n>\d+) deselected\*\*"),
+    ("pytest_pure",      r"collection at this cut: \*\*(?P<n>\d+)\*\* pure tests"),
+    ("pytest_warehouse", r"pure tests, with \*\*(?P<n>\d+)\*\*"),
     ("pytest_warehouse", r"This collects \*\*(?P<n>\d+) tests\*\*"),
     ("pytest_warehouse", r"How many of the (?P<n>\d+) actually run"),
 ]
 
 TARGETS = [
+    ("README.md", ROOT_README_RULES),
     ("SETUP.md", SETUP_RULES),
     (os.path.join("dbt_league", "README.md"), README_RULES),
 ]

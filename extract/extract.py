@@ -85,8 +85,9 @@ import csv
 import json
 import os
 import sys
+import time
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from pathlib import Path
 
@@ -112,7 +113,7 @@ from raw_sink import LocalParquetSink
 from matchup_membership import (
     RECENT, SNAPSHOT_KEYS, MatchupMembershipError, classify_recency,
     matchup_schedule_snapshot, parse_matchup_membership, recent_periods,
-    seasons_to_request)
+    season_long_points_window, seasons_to_request)
 from season_calendar import (
     SeasonCalendarError, season_calendar_snapshot, season_calendar_url)
 
@@ -198,6 +199,15 @@ PRO_TEAM_MAP = getattr(espn_baseball_constant, "PRO_TEAM_MAP", {})
 # from this one would silently widen or narrow the guard (MLB-175's scar:
 # the twin that was right until it wasn't).
 LIVE_CAPTURE_WINDOW_DAYS = 21
+
+# A complete-history season-points run makes two authenticated ESPN reads for
+# every scoring day. One reset near the end must not throw away the work of
+# the preceding hundred-plus days, but neither may a bad credential become a
+# long retry loop. These are the waits *after* the initial attempt. Only
+# transport failures, timeouts, throttling, and server errors qualify; other
+# 4xx responses fail immediately and the caller's no-partial-period guard
+# remains authoritative after the final attempt.
+ESPN_TRANSIENT_RETRY_DELAYS_SECONDS = (1, 3, 7)
 
 # ---------------------------------------------------------------------------
 # The public MLB calendar request (MLB-235 rung 4B-2)
@@ -383,6 +393,60 @@ class KonaUnavailable(RuntimeError):
     """
 
 
+class RosterUnavailable(KonaUnavailable):
+    """ESPN did not return the day-specific roster document.
+
+    A season-long points league has no H2H box-score wrapper to provide team
+    attribution, so mRoster is required rather than a fallback. Subclassing
+    KonaUnavailable preserves the existing all-or-nothing period refusal:
+    either source failing means no partial period is written.
+    """
+
+
+def _is_transient_espn_error(exc):
+    """Whether an ESPN request failure is safe and useful to retry."""
+    if isinstance(exc, (requests.ConnectionError, requests.Timeout)):
+        return True
+    if isinstance(exc, requests.HTTPError):
+        response = exc.response
+        status = response.status_code if response is not None else None
+        return status in {408, 429} or (status is not None and status >= 500)
+    return False
+
+
+def _espn_json_with_transient_retries(*, label, url, params, headers=None):
+    """GET one authenticated ESPN JSON document with bounded backoff.
+
+    The helper retries only failures for which the same request can plausibly
+    succeed moments later. A malformed success body and permanent HTTP error
+    remain immediate failures; callers still validate the document's shape.
+    """
+    delays = (0,) + ESPN_TRANSIENT_RETRY_DELAYS_SECONDS
+    for attempt, delay in enumerate(delays):
+        if delay:
+            print(
+                f"    [retry] {label}: waiting {delay}s before attempt "
+                f"{attempt + 1}/{len(delays)}"
+            )
+            time.sleep(delay)
+        try:
+            response = requests.get(
+                url,
+                params=params,
+                cookies={"swid": SWID, "espn_s2": ESPN_S2},
+                headers=headers,
+                timeout=30,
+            )
+            response.raise_for_status()
+            return response.json()
+        except (requests.RequestException, ValueError) as exc:
+            if attempt == len(delays) - 1 or not _is_transient_espn_error(exc):
+                raise
+            print(f"    [retry] {label}: transient ESPN failure: {exc}")
+
+    raise AssertionError("unreachable")
+
+
 def fetch_all_player_stats(year, scoring_period):
     """
     Pull per-player stats for a single scoring period from ESPN's
@@ -427,15 +491,12 @@ def fetch_all_player_stats(year, scoring_period):
         }
     }
     try:
-        response = requests.get(
-            url,
+        data = _espn_json_with_transient_retries(
+            label=f"kona scoring period {scoring_period}",
+            url=url,
             params={"view": "kona_player_info", "scoringPeriodId": scoring_period},
-            cookies={"swid": SWID, "espn_s2": ESPN_S2},
             headers={"x-fantasy-filter": json.dumps(fantasy_filter)},
-            timeout=30,
         )
-        response.raise_for_status()
-        data = response.json()
     except (requests.RequestException, ValueError) as e:
         raise KonaUnavailable(
             f"kona fetch failed for sp={scoring_period}: {e}"
@@ -814,6 +875,202 @@ def serialize_box_scores(league, scoring_period, matchup_period):
     return {"matchups": matchups, "free_agents": free_agents}
 
 
+def fetch_season_points_rosters(year, scoring_period):
+    """The day-specific team rosters for a season-long points league.
+
+    The pinned espn-api wrapper only implements its concrete box-score classes
+    for H2H points and H2H categories. On league type 5 it falls back to the
+    abstract BoxScore class, so calling ``League.box_scores`` is not merely a
+    bad fit: it raises before returning any lineup. ESPN's mRoster view is the
+    underlying day-grain source and supplies exactly what this format needs --
+    each player's fantasy team and lineup slot on that scoring day -- without
+    inventing an opponent.
+    """
+    url = f"{ESPN_API_BASE}/{year}/segments/0/leagues/{LEAGUE_ID}"
+    try:
+        data = _espn_json_with_transient_retries(
+            label=f"mRoster scoring period {scoring_period}",
+            url=url,
+            params={"view": "mRoster", "scoringPeriodId": scoring_period},
+        )
+    except (requests.RequestException, ValueError) as exc:
+        raise RosterUnavailable(
+            f"mRoster fetch failed for sp={scoring_period}: {exc}") from exc
+
+    if not isinstance(data, dict) or not isinstance(data.get("teams"), list):
+        raise RosterUnavailable(
+            f"mRoster returned no teams list for sp={scoring_period}")
+    return data
+
+
+def _roster_period_stats(player, scoring_period):
+    """Wrapper-independent fallback stats from one mRoster player object."""
+    breakdown = {}
+    points = 0.0
+    games = 0
+    for split in player.get("stats", []) or []:
+        if split.get("statSplitTypeId") != 5:
+            continue
+        if split.get("scoringPeriodId") != scoring_period:
+            continue
+        raw_stats = split.get("stats") or {}
+        if not raw_stats:
+            continue
+        for stat_id_raw, value in raw_stats.items():
+            if value is None:
+                continue
+            try:
+                stat_id = int(stat_id_raw)
+            except (TypeError, ValueError):
+                continue
+            stat_name = _STAT_ID_TO_NAME.get(stat_id, str(stat_id))
+            breakdown[stat_name] = breakdown.get(stat_name, 0) + value
+        if split.get("appliedTotal") is not None:
+            points += split["appliedTotal"]
+        games += 1
+    return breakdown, round(points, 4), games
+
+
+def _owner_display(owner_ids, members):
+    names = []
+    for owner_id in owner_ids or []:
+        member = members.get(owner_id, {})
+        first = (member.get("firstName") or "").strip().title()
+        last = (member.get("lastName") or "").strip().title()
+        display = " ".join(part for part in (first, last) if part)
+        if not display:
+            display = (member.get("displayName") or "").strip()
+        if display:
+            names.append(display)
+    if not names:
+        return "Unknown"
+    if len(names) == 1:
+        return names[0]
+    return " / ".join(name.split()[0] for name in names)
+
+
+def _team_display_name(team):
+    """Use ESPN's direct name when present, else its location + nickname."""
+    direct = (team.get("name") or "").strip()
+    if direct:
+        return direct
+    parts = ((team.get("location") or "").strip(),
+             (team.get("nickname") or "").strip())
+    composed = " ".join(part for part in parts if part)
+    return composed or f"Team {team['id']}"
+
+
+def serialize_season_points_rosters(year, scoring_period, reporting_period=1):
+    """Serialize a season-long points day without manufacturing a matchup.
+
+    RAW gains a parallel ``team_rosters`` array. The ordinary ``matchups``
+    array stays empty, so matchup-pair and W/L models correctly see no games;
+    staging flattens the roster array into the same player-day contract used
+    by the format-agnostic player and team season facts.
+    """
+    roster_doc = fetch_season_points_rosters(year, scoring_period)
+    all_player_stats = fetch_all_player_stats(year, scoring_period)
+    members = {member.get("id"): member
+               for member in roster_doc.get("members", []) or []
+               if isinstance(member, dict) and member.get("id") is not None}
+    rostered_ids = set()
+    team_rosters = []
+    kona_count = fallback_count = empty_count = 0
+
+    for team in roster_doc["teams"]:
+        if not isinstance(team, dict) or team.get("id") is None:
+            raise RosterUnavailable(
+                f"mRoster scoring period {scoring_period} contains a team "
+                "without an id")
+        lineup = []
+        entries = ((team.get("roster") or {}).get("entries") or [])
+        if not isinstance(entries, list):
+            raise RosterUnavailable(
+                f"mRoster scoring period {scoring_period}, team {team['id']} "
+                "has no roster entries list")
+        for entry in entries:
+            if not isinstance(entry, dict):
+                raise RosterUnavailable(
+                    f"mRoster scoring period {scoring_period} contains a "
+                    "non-object roster entry")
+            player = ((entry.get("playerPoolEntry") or {}).get("player") or {})
+            player_id = entry.get("playerId", player.get("id"))
+            if player_id is None:
+                continue
+            rostered_ids.add(player_id)
+
+            slot_id = entry.get("lineupSlotId")
+            if slot_id not in LINEUP_SLOT_MAP:
+                raise unmapped_lineup_slot_error(
+                    KeyError(slot_id), reporting_period, scoring_period)
+
+            raw = all_player_stats.get(player_id)
+            if raw is not None:
+                breakdown = raw["breakdown"]
+                points = raw["points"]
+                games_played = raw["games_played"]
+                club_of_game = raw["club_of_game"]
+                kona_count += 1
+            else:
+                breakdown, points, games_played = _roster_period_stats(
+                    player, scoring_period)
+                club_of_game = None
+                if games_played:
+                    fallback_count += 1
+                else:
+                    empty_count += 1
+
+            lineup.append({
+                "name": player.get("fullName") or str(player_id),
+                "playerId": player_id,
+                "position": DEFAULT_POSITION_MAP.get(
+                    player.get("defaultPositionId"), "UNK"),
+                "lineupSlot": LINEUP_SLOT_MAP[slot_id],
+                "proTeam": PRO_TEAM_MAP.get(player.get("proTeamId"), "FA"),
+                "clubOfGame": club_of_game,
+                "points": points,
+                "breakdown": breakdown,
+                "games_played": games_played,
+                "eligibleSlots": [
+                    LINEUP_SLOT_MAP.get(slot, str(slot))
+                    for slot in player.get("eligibleSlots", []) or []
+                ],
+            })
+
+        team_rosters.append({
+            "team_name": _team_display_name(team),
+            "team_id": team["id"],
+            "team_abbrev": team.get("abbrev") or str(team["id"]),
+            "owner": _owner_display(team.get("owners"), members),
+            "lineup": lineup,
+        })
+
+    free_agents = []
+    for player_id, raw in all_player_stats.items():
+        if player_id in rostered_ids:
+            continue
+        free_agents.append({
+            "name": raw["name"],
+            "playerId": player_id,
+            "position": DEFAULT_POSITION_MAP.get(
+                raw["default_position_id"], "UNK"),
+            "lineupSlot": "FA",
+            "proTeam": raw["pro_team"],
+            "clubOfGame": raw["club_of_game"],
+            "points": raw["points"],
+            "breakdown": raw["breakdown"],
+            "games_played": raw["games_played"],
+            "eligibleSlots": raw["eligible_slots"],
+        })
+
+    print(f"    season-points rosters: {len(team_rosters)} team(s), "
+          f"{len(rostered_ids)} rostered player(s) | {kona_count} tracked by "
+          f"kona | fallbacks: {fallback_count} | inactive/no-game: "
+          f"{empty_count}")
+    return {"matchups": [], "team_rosters": team_rosters,
+            "free_agents": free_agents}
+
+
 def ensure_league_key_column(cursor, table):
     """Idempotent schema self-heal (MLB-57): every RAW table carries a
     league_key column. Pre-registry installs created these tables without
@@ -1171,7 +1428,7 @@ def load_box_scores_to_snowflake(conn, records, matchup_period, year, league_key
 
 
 def extract_matchup_period(sink, league, matchup_period, year, league_key,
-                           scoring_periods):
+                           scoring_periods, serializer=None):
     """
     Extract all scoring periods for a matchup period and load them to the sink.
 
@@ -1194,10 +1451,13 @@ def extract_matchup_period(sink, league, matchup_period, year, league_key,
     print(f"  Matchup period {matchup_period} spans {len(scoring_periods)} days "
           f"(scoring periods {scoring_periods[0]}-{scoring_periods[-1]})")
 
+    serializer = serializer or (
+        lambda scoring_period, period: serialize_box_scores(
+            league, scoring_period, period))
     records = []
     for sp in scoring_periods:
         print(f"  Pulling scoring period {sp}...")
-        sp_data = serialize_box_scores(league, sp, matchup_period)
+        sp_data = serializer(sp, matchup_period)
         records.append({
             "scoring_period": sp,
             "matchup_period": matchup_period,
@@ -1633,7 +1893,7 @@ def load_roster_settings_to_snowflake(conn, roster_settings, year, league_key):
 
 def fetch_team_owners(year):
     """Return the season's team -> owner mapping as a list of dicts:
-    {team_id, owner_id, first_name, last_name}.
+    {team_id, owner_id, first_name, last_name, display_name}.
 
     The box-score extract keeps only a formatted owner *name* string
     (format_owners) and discards the stable ESPN member GUID. This
@@ -1652,6 +1912,11 @@ def fetch_team_owners(year):
                 "owner_id": owner.get("id"),
                 "first_name": owner.get("firstName"),
                 "last_name": owner.get("lastName"),
+                # Public leagues can expose the stable owner id and ESPN
+                # display name while withholding first/last name. Preserve
+                # that supported privacy shape instead of turning it into a
+                # downstream not-null failure.
+                "display_name": owner.get("displayName"),
             })
     return rows
 
@@ -1788,6 +2053,9 @@ def fetch_transactions(year):
     board for this season," returning [] so a backfill --year cleanly no-ops.
 
     Returns [] when the board is empty (pre-draft) or not served for the season.
+    Returns None when ESPN refuses this otherwise-authenticated member access
+    to the communications feed. None means unavailable, not empty; callers
+    must preserve any older good snapshot and omit dependent claims.
     """
     url = f"{ESPN_API_BASE}/{year}/segments/0/leagues/{LEAGUE_ID}/communication/"
     topics = []
@@ -1814,6 +2082,14 @@ def fetch_transactions(year):
             print(f"  ESPN serves no transaction board for {year} "
                   f"(current-season only) -- skipping.")
             return []
+        if response.status_code in (401, 403):
+            print(
+                f"  [warn] ESPN did not authorize the transaction board for "
+                f"{year} (HTTP {response.status_code}). Other league data may "
+                "still be available; transaction-dependent output will be "
+                "omitted rather than reported as empty."
+            )
+            return None
         response.raise_for_status()
         page = response.json().get("topics") or []
         if not page:
@@ -2044,6 +2320,10 @@ def extract_transactions(sink, year, league_key):
     """Pull the season transaction board from ESPN and load it to the sink."""
     print(f"\nTransactions for {year}:")
     topics = fetch_transactions(year)
+    if topics is None:
+        print("  Transaction board unavailable -- preserving any prior "
+              "snapshot and continuing.")
+        return
     if topics:
         print(f"  Retrieved {len(topics)} transaction topics for {year}")
         sink.write_transactions(topics, year, league_key)
@@ -2250,10 +2530,11 @@ class AcquiredMembership:
     """One mMatchupScore acquisition, as both consumers see it.
 
     `snapshot` is the {seasonId, status, schedule} object RAW stored, and
-    `parse` is the membership derived FROM THAT SAME OBJECT. Both are always
-    present: an acquisition that could not derive membership raises rather
-    than returning, so there is no "acquired but unusable" value to forget to
-    check.
+    `parse` is the CLOSED H2H membership derived FROM THAT SAME OBJECT.
+    `season_points` is a separate live daily reporting window only when ESPN
+    explicitly identifies league type 5. It is not folded into `parse.closed`:
+    doing that would make an unfinished season-long container look like a
+    completed H2H matchup and weaken the rule for every ordinary league.
 
     Holding both is the whole reason this type exists. A run that fetched the
     document twice -- once to store and once to select -- could store one
@@ -2263,6 +2544,7 @@ class AcquiredMembership:
 
     snapshot: dict
     parse: object
+    season_points: object = None
 
 
 def acquire_matchup_membership(sink, year, league_key, payload=None):
@@ -2331,13 +2613,19 @@ def acquire_matchup_membership(sink, year, league_key, payload=None):
     try:
         parse = parse_matchup_membership(
             snapshot, league_key=league_key, season_year=year)
+        season_points = season_long_points_window(snapshot)
     except MatchupMembershipError as exc:
         raise SystemExit(refuse_membership_unusable(year, str(exc)))
 
     print(f"  {len(parse.closed)} closed matchup period(s) in {year} "
           f"(latest scoring period "
           f"{parse.latest_scoring_period if parse.latest_scoring_period is not None else 'unknown'})")
-    return AcquiredMembership(snapshot, parse)
+    if season_points is not None:
+        state = "complete" if season_points.is_complete else "active"
+        print(f"  ESPN season-long points: {state} reporting window "
+              f"1-{season_points.scoring_periods[-1]} (not classified as a "
+              "closed H2H matchup)")
+    return AcquiredMembership(snapshot, parse, season_points)
 
 
 # ---------------------------------------------------------------------------
@@ -2394,13 +2682,10 @@ def refuse_membership_unusable(year, why):
     ])
 
 
-# The status fields that MIGHT identify a non-H2H scoring format, reported
-# verbatim and interpreted nowhere. Their MEANING is unverified in this repo
-# -- the two seasons on file are both H2H points and both read
-# currentLeagueType=0, createdAsLeagueType=2, so the values are measured but
-# the map from value to format is not. Printing what was measured is useful;
-# hard-coding "0 means H2H" from a sample of one league is the unverified
-# format map the standing rule forbids.
+# The status fields that identify format evidence. Type 5 now has one narrow,
+# measured season-long-points acquisition path. Other numeric values remain
+# diagnostic: the two H2H seasons on file read current=0 / created=2, but that
+# does not establish a complete ESPN type map.
 FORMAT_EVIDENCE_FIELDS = ("currentLeagueType", "createdAsLeagueType")
 
 
@@ -2408,8 +2693,10 @@ def refuse_no_closed_periods(year, snapshot, current_matchup_period):
     """A box-score run that found zero closed matchup periods.
 
     ZERO IS A VALID CARDINALITY, not malformed data (Kyle's ruling). A
-    season-long points or roto league may plausibly expose no H2H schedule at
-    all, and a season asked about before its first period closes has none yet.
+    rotisserie league may plausibly expose no H2H schedule at all, and a
+    season asked about before its first period closes has none yet. A measured
+    ESPN season-long points league follows its separate daily roster path and
+    therefore never reaches this refusal.
     Neither is a reason to fabricate matchup period 0 or 1.
 
     But it IS a reason to refuse rather than exit 0. A run that selects
@@ -2442,19 +2729,18 @@ def refuse_no_closed_periods(year, snapshot, current_matchup_period):
         "",
         "  * the season has not finished its first matchup period yet, so",
         "    there is genuinely nothing settled to pull; or",
-        "  * this league does not play head-to-head at all. A season-long",
-        "    points or rotisserie league may expose no matchup schedule, or",
-        "    one season-spanning period that stays current until the season",
-        "    ends. This extractor's box-score route is H2H-shaped and has",
-        "    never been run against a real league of that kind, so it",
-        "    refuses rather than guessing at the acquisition.",
+        "  * this league does not play head-to-head and is not the measured",
+        "    ESPN season-long points shape. Rotisserie and other formats may",
+        "    expose no matchup schedule; their acquisition remains unproven,",
+        "    so the extractor refuses rather than guessing.",
     ]
     if evidence:
         lines += [
             "",
             "  Measured from this season's own status block and reported",
-            "  verbatim. This project has NOT established what these values mean;",
-            "  the two H2H seasons on file both read 0 and 2:",
+            "  verbatim. Only type 5 has a measured non-H2H acquisition path;",
+            "  the two H2H seasons on file read 0 and 2, but other meanings",
+            "  have not been guessed:",
             "",
         ] + evidence
     lines += [
@@ -2717,6 +3003,21 @@ def select_matchup_periods(parse, *, requested, want_all, year, today=None):
     return periods, "recent matchup periods"
 
 
+def select_season_points_window(window, *, requested, want_all, year):
+    """Select the one season-long reporting container without calling it H2H."""
+    period = window.reporting_period
+    if requested:
+        offenders = [value for value in requested if value != period]
+        if offenders:
+            raise SystemExit(
+                f"Season-long points uses reporting period {period}; requested "
+                f"period(s) {offenders} do not exist. Nothing was written.")
+        return list(requested), "specified season-long reporting period"
+    if want_all:
+        return [period], "the season-long points reporting window"
+    return [period], "the current season-long points reporting window"
+
+
 def extract_league_settings(sink, year, league_key):
     """Pull scoring + roster settings from ESPN and load them to the sink.
 
@@ -2907,9 +3208,11 @@ def run(args):
     membership is acquired FIRST, before settings, standings, transactions or
     any box score, because two refusals have to happen before any of those
     writes: a structurally valid document the membership parser cannot read,
-    and a season with zero closed matchup periods. Both mean the box-score
-    route has no non-circular answer, and letting settings land first would
-    produce exactly the partial run the two-tier rule exists to prevent.
+    and an H2H season with zero closed matchup periods. Both mean the ordinary
+    box-score route has no non-circular answer. The explicit ESPN type-5 path
+    instead derives its one live reporting window before any write. Letting
+    settings land first would produce exactly the partial run the two-tier
+    rule exists to prevent.
     """
     year = args.year
 
@@ -3063,7 +3366,8 @@ def run(args):
         # Zero closed periods parsed CLEANLY and is a valid cardinality, so
         # it is not the refusal above. Only a run that owes the user player
         # data refuses on it -- see refuse_no_closed_periods.
-        if do_box_scores and not membership.parse.closed:
+        if (do_box_scores and not membership.parse.closed
+                and membership.season_points is None):
             raise SystemExit(refuse_no_closed_periods(
                 year, membership.snapshot,
                 membership.parse.current_matchup_period))
@@ -3083,8 +3387,14 @@ def run(args):
         # --- Box scores ---
         if do_box_scores:
             parse = membership.parse
-            periods, described = select_matchup_periods(
-                parse, requested=args.periods, want_all=args.all, year=year)
+            season_points = membership.season_points
+            if season_points is not None:
+                periods, described = select_season_points_window(
+                    season_points, requested=args.periods,
+                    want_all=args.all, year=year)
+            else:
+                periods, described = select_matchup_periods(
+                    parse, requested=args.periods, want_all=args.all, year=year)
             print(f"\nExtracting {described} for {year}: {periods}")
 
             if not periods:
@@ -3122,9 +3432,11 @@ def run(args):
             # of it. A per-period check would half-finish — three periods
             # overwritten, the fourth refused — which is a worse state to be
             # handed than a clean refusal.
+            guard_parse = (replace(parse, closed=(season_points,))
+                           if season_points is not None else parse)
             if not args.overwrite_day_accurate_history:
                 settled = settled_loaded_periods(
-                    sink, year, league_key, periods, parse)
+                    sink, year, league_key, periods, guard_parse)
                 if settled:
                     raise SystemExit(refuse_settled_overwrite(
                         settled, year, "--overwrite-day-accurate-history"))
@@ -3135,14 +3447,26 @@ def run(args):
                       "returns today, and ESPN will not serve the originals "
                       "again.")
 
-            league = connect_espn(year)
+            league = None if season_points is not None else connect_espn(year)
+            serializer = None
+            if season_points is not None:
+                serializer = (
+                    lambda scoring_period, reporting_period:
+                    serialize_season_points_rosters(
+                        year, scoring_period, reporting_period))
 
             for mp in periods:
-                print(f"\nMatchup period {mp}:")
+                label = ("Season-long reporting period" if season_points
+                         is not None else "Matchup period")
+                print(f"\n{label} {mp}:")
                 try:
+                    scoring_periods = (
+                        season_points.scoring_periods
+                        if season_points is not None
+                        else parse.scoring_periods_for(mp))
                     extract_matchup_period(
                         sink, league, mp, year, league_key,
-                        parse.scoring_periods_for(mp))
+                        scoring_periods, serializer=serializer)
                 except KonaUnavailable as exc:
                     raise SystemExit(refuse_extract_without_stats(year, mp, str(exc)))
 

@@ -64,6 +64,7 @@ OPEN_LEAGUE = "espn-open"       # latest season, no capture, no final evidence
 FINAL_LEAGUE = "espn-final"     # latest season, no capture, final ranks served
 BROKEN_LEAGUE = "espn-broken"   # capture present, payload unreadable
 POINTS_LEAGUE = "cbs-fix"       # no matchups at all -- the points format
+TYPE5_LEAGUE = "espn-season-points"  # ESPN's measured multi-team period
 PEN = "9999"
 
 BUILD_SELECTION = [
@@ -382,6 +383,16 @@ SCHEDULE_CAPTURES = [
     # nothing downstream can derive a period from it. The gate must therefore
     # find no closed period and count nothing.
     (BROKEN_LEAGUE, 2024, {"seasonId": 2024, "status": {}, "schedule": []}),
+
+    # ESPN season-long points, measured in the stranger rehearsal. One live
+    # multi-team period has no opponent pairing, but currentLeagueType=5 is
+    # positive format evidence rather than an empty install.
+    (TYPE5_LEAGUE, 2026, {
+        "seasonId": 2026,
+        "status": {"currentMatchupPeriod": 1, "latestScoringPeriod": 142,
+                   "currentLeagueType": 5, "createdAsLeagueType": 5},
+        "schedule": [{"matchupPeriodId": 1}],
+    }),
 
     # espn-open and espn-final have NO capture at all, deliberately.
 ]
@@ -1176,7 +1187,15 @@ def test_the_format_is_read_from_data_not_platform(built):
         (LEAGUE, "h2h", False, True),
         (OPEN_LEAGUE, "h2h", False, True),
         (OTHER_LEAGUE, "h2h", False, True),
+        (TYPE5_LEAGUE, "points", False, False),
     ]
+
+
+def test_espn_type_five_is_positive_points_evidence(built):
+    assert built("""
+        select league_format, has_season_points_schedule, has_matchups
+        from ANALYTICS.dim_league_format where league_key = ?
+    """, [TYPE5_LEAGUE]) == [("points", True, False)]
 
 
 def test_the_axes_carry_the_format_for_the_renderer(built):
@@ -1366,6 +1385,7 @@ def test_each_league_resolves_its_own_completeness_and_axes(built):
         (LEAGUE, 2022, 2023),          # 2023 in flight
         (OPEN_LEAGUE, None, 2024),     # unproven
         (OTHER_LEAGUE, 2023, 2023),
+        (TYPE5_LEAGUE, None, 2026),    # live multi-team season
     ]
     assert built("""
         select count(*) from ANALYTICS.mart_franchise_rivalry_axes

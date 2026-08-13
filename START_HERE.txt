@@ -1,0 +1,13 @@
+FANTASY LEAGUE ALMANAC
+======================
+
+Everything you need is in QUICKSTART.md, in this same folder.
+
+QUICKSTART.md is a plain text file. Double-click it -- or right-click it
+and choose "Open with" > "Notepad" if Windows asks what to open it with.
+
+Read it from the top. It assumes you have never used a terminal, and it
+covers every step from installing Python to the one command that builds
+your league's almanac into a Google Sheet.
+
+Nothing else in this folder needs to be opened first.

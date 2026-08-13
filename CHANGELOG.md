@@ -12,53 +12,103 @@ them by filename alone.)
 
 ## [Unreleased]
 
-_Next up is v2.0, whose goal is that a stranger with an ESPN or CBS
-league enters some credentials, runs some things, and gets an almanac
-their league can open -- a workbook in their own Drive, not files on
-disk. ESPN end to end is the gate; CBS is a first-class goal being
-priced. The charter is MLB-210; the keystones are MLB-208 (extract has
-to write RAW locally, which it cannot yet) and MLB-209 (the journey ends
-in a shareable workbook). Release notes are built from the commit range
-at each cut rather than accumulated here, so this section staying short
-is not a sign the repository is idle._
+_Release notes are built from the commit range at each cut rather than
+accumulated here, so this section staying short is not a sign the
+repository is idle._
+
+## [1.9.0] - 2026-08-13
+
+The almanac ends in a shareable Google workbook. 29 commits. Full story
+in [RELEASE NOTES v1.9.0.md](RELEASE%20NOTES%20v1.9.0.md).
+
+Minor rather than major: substantial additive behaviour, and no existing
+install has a migration step to run.
 
 ### Added
+
+- **The journey ends in a Google workbook** (MLB-209).
+  `tools/create_public_almanac.py` is one post-configuration command: it
+  walks every season the registry entry bounds, refuses to continue if
+  any of them cannot be derived, builds locally, then creates a
+  spreadsheet the app owns, renders the almanac into it and returns a
+  link. **Local DuckDB is the default** -- Snowflake is reached only via
+  the deliberate `--advanced-snowflake` option.
+
+  The app requests **`drive.file` only**, so it can reach files it
+  created itself and cannot browse anything else in your Drive. The
+  workbook is **created private** and stays private through the render;
+  immediately before sharing, the app names the league and member
+  information it contains and requires you to type `YES`
+  (`--confirm-link-sharing` for automation). Only then does it set
+  anyone-with-the-link viewer and **read the permission back** to
+  confirm it. Any failure withholds the share-ready line, prints the
+  workbook URL, and never deletes your workbook.
+
+  Windows only in v1.9: the grant lives in Windows Credential Locker and
+  the release **refuses to fall back to a plaintext token file**. A
+  legacy plaintext cache is migrated only after a verified secure write,
+  then removed. The local, non-Google application is unaffected.
+
+- **The almanac carries its own Google identity, injected into the
+  release bundle rather than committed** (MLB-209).
+  `tools/build_release_bundle.py` builds a tree from a git ref, injects
+  the credential, zips it and deletes the tree; **no production OAuth
+  credential is in git**, the tracked descriptor is empty, and the
+  builder refuses to run if the exported source already contains a
+  credential-shaped literal. A tracked-tree census asserts the same on
+  every run.
+
+- **Matchup-period membership and the season calendar are read from the
+  platform** (MLB-235), captured to `RAW.MATCHUP_SCHEDULE` and
+  `RAW.MLB_SEASON_CALENDAR`. Weeks and the days inside them come from
+  ESPN's own matchup document; dates come from MLB's published season
+  start via the free public MLB Stats API. New chain:
+  `stg_matchup_schedule`, `stg_mlb__season_calendar`,
+  `int_matchup_period_evidence`, `int_matchup_season_derivation`,
+  `int_matchup_period_shape`, `int_matchup_period_membership`,
+  `int_matchup_season_standard`.
+
+- **A live ESPN season-long points league can produce its almanac in year
+  one.** ESPN type 5 is modeled as one season-long, multi-team reporting
+  period whose available daily window advances through
+  `latestScoringPeriod`. Day-specific rosters feed the shared player and team
+  facts without fabricating weekly opponents, W-L results, or a closed H2H
+  matchup. The separate live-current-week enhancement for ordinary H2H
+  leagues remains deferred.
 
 - **The Rivalry Matrix** (MLB-229): every active team against every
   other, at the bottom of Advanced Standings in BOTH books. A standings
   answers "who is ahead"; this answers "against whom".
 
   ONE matrix, and what counts as a game follows your league's format --
-  read from the data, never from which site the league is on. A
-  head-to-head league sees completed matchups. A points league, which has
-  no matchups to have a record about, sees each completed season scored as
-  one game, won by whoever put up more points over the whole year however
-  narrowly, with no adjustment for playing fewer weeks.
+  decided by evidence in the data, never by which site the league is on,
+  because a CBS head-to-head league and an ESPN points league both
+  exist. A head-to-head league sees completed matchups; a points league,
+  which has no matchups to have a record about, sees each completed
+  season scored as one game on raw platform totals, with no adjustment
+  for playing fewer weeks.
 
-  It aggregates by TEAM, not by platform id. A franchise whose id was
-  re-minted, or that has been renamed, brings its whole history with it,
-  and a league can declare two ids to be one team by giving them the same
-  canonical name in `franchise_lineage` -- which is what makes the matrix
-  match how a league actually remembers itself rather than how the
-  platform files it. Two teams that merely happen to share an OBSERVED
-  name stay separate, because observation is a coincidence and
-  configuration is a statement; if two live teams share a configured name
-  the build warns, so an accidental collision can be corrected.
+  It aggregates by TEAM, not by platform id: a re-minted or renamed
+  franchise brings its whole history with it, and a league can declare
+  two ids to be one team by giving them the same canonical name in
+  `franchise_lineage`. Two teams that merely share an OBSERVED name stay
+  separate -- observation is a coincidence, configuration is a statement
+  -- and two live teams sharing a configured name raise a warning so the
+  collision can be corrected.
 
-  Only FINISHED results count. A week still being played is not a result,
-  and neither is a whole season nobody can prove is over -- if the
-  schedule capture has not run for your live season, its games stay out
-  and the build tells you to run it rather than quietly counting Tuesday
-  as a win. Seasons the platform has published final standings for count
-  without needing that capture at all. Only seasons both teams were
-  actually in the league for are compared. A team has no record against
-  itself, so the diagonal is blank; two teams that have never met read
-  0-0, which is a fact about the league rather than an absence.
+  Only FINISHED results count: not a week still being played, and not a
+  season nobody can prove is over. Seasons the platform has published
+  final standings for count without a schedule capture. Only seasons
+  both teams were in the league for are compared. The diagonal is blank,
+  and two teams that never met read 0-0 -- but a league with no provable
+  history renders **no grid at all** under a notice saying what to
+  capture, because a square of 0-0 would claim these teams played and
+  nobody won.
 
-  And if your league has no captured history yet, the matrix does not
-  draw a grid of 0-0 -- that would say "these teams have played and
-  nobody won", which is a different and false claim. It says so plainly
-  instead, and tells you what to capture.
+  Presentation: the block is indented to column C to match the section
+  above it, and cells are shaded red/white/green by winning percentage
+  on the existing house gradient, centred on .500. The blank diagonal
+  and a never-met 0-0 get no colour.
 
   New warehouse contracts: `mart_franchise_rivalry` (long, one row per
   ordered pair -- the matrix is a render, not a grain),
@@ -69,6 +119,52 @@ is not a sign the repository is idle._
   [RIVALRY_MATRIX_CONTRACT.md](docs/decisions/RIVALRY_MATRIX_CONTRACT.md).
 
 ### Changed
+
+- **The hand-maintained `matchup_schedule.csv` is retired from the ESPN
+  path** (MLB-235). An ESPN user no longer fills it in before anything
+  works -- the quickstart step is removed, not reworded. The old
+  dependency was circular: the seed decided which dates belonged to
+  which week, and the extract then stamped that answer onto every row it
+  wrote. `dim_matchup_period` now resolves derived-first with the seed
+  as fallback, and a standing dbt test fails the build if the two ever
+  disagree. Measured: anchors of 2025-03-18 and 2026-03-25 reproduce the
+  retired calendar across all 44 closed periods of both seasons.
+
+- **Matchup periods are scoped to a league** (MLB-235). The seed had no
+  `league_key` and every consumer joined on `(season_year,
+  matchup_period)` alone, so one league's calendar reached any other
+  league sharing those period numbers. Resolution order is now explicit
+  override > derived verdict > legacy seed > unknown, and the legacy
+  rows are stamped to the league that owns them.
+
+- **Unknown period shape is no longer treated as normal** (MLB-235).
+  `is_abnormal` is deliberately nullable -- derivation declines for
+  in-flight periods, malformed payloads and seasons below the evidence
+  floor -- and `is_record_eligible` is the non-null gate, true only when
+  abnormality is known and false. The Python side had been failing open
+  here (`not None` is `True`, so an unknown period banded as ordinary
+  and could be marked a record holder) while SQL dropped it by accident
+  of three-valued logic; both now read the same gate.
+
+- **A finished season recovers its last completed week** (MLB-235). ESPN
+  pins `currentMatchupPeriod` *on* the final period rather than past it,
+  so a strict "below current" rule discarded the closing week of every
+  finished season. That period is promoted on three proofs together --
+  the season is over, the period is well-formed, and its membership
+  reaches the final scoring day -- and any proof failing simply excludes
+  that one period rather than discarding the season.
+
+- **Present-but-empty is a supported installation state** (MLB-235). The
+  derived-calendar models are created over an empty capture and the
+  empty result is asserted, so a league that has never run the schedule
+  extract has no row rather than a verdict nobody earned.
+
+- **Both almanac goldens re-anchored under review** (MLB-229), for the
+  Advanced Standings matrix block and its two-column indent. 38 of the
+  40 private golden TSVs are unchanged byte-for-byte and no file was
+  added or removed; the two that moved hold their row counts exactly
+  (ESPN 172, CBS 203) with every differing line the same text two
+  columns right. Warehouse suite 27/27.
 
 - **`dim_franchise` and `dim_franchise_season` expose name provenance**
   (MLB-229): `configured_name` / `configured_abbrev` /
@@ -98,10 +194,48 @@ is not a sign the repository is idle._
   catch it. A source-text guard covers the models, dbt tests and macros,
   since a build-based check would share the blind spot.
 
-## [1.8.0] - 2026-08-09
+- **The all-blank installation builds.** QUICKSTART says every
+  `league_config` file may stay blank, and on that exact state the run
+  died: an empty CSV has no column type to infer, so `league_key`
+  arrived INTEGER and met the VARCHAR one from `stg_box_scores`. All
+  fourteen committed templates now declare their types, and the
+  fresh-clone test builds from what is actually committed rather than
+  from any working copy.
+
+- **The pure test suite no longer depends on the maintainer's machine.**
+  Three ways, all of them "it works on my checkout": a test file that
+  drives the real CLI was authenticating with real cookies its own
+  `load_dotenv()` had loaded; four dbt fixtures assumed installed
+  packages a clean checkout does not have; and the matchup-period
+  contract was verified against whatever calendar the checkout carried.
+  Measured on a fresh clone with no `.env`: 58 failures + 114 errors
+  became zero failures with two explicitly justified skips.
+
+### Security
+
+- **The PII guard sees whole identity families** (MLB-234). Its
+  inventory is derived per category from whatever source is
+  authoritative -- owners, franchise names and labels, division names,
+  team ids, league ids -- so adding a league covers its identities with
+  no list to maintain. Two classification rules changed to make that
+  safe: a team label is whatever the league says it is (an emoji, an
+  all-digits name), and identifiers are entropy-gated rather than
+  grepped, since one- and two-digit team ids are also every week number
+  and array index in the tree.
+
+- **A green PII sweep now means somebody looked.** The class-wide
+  amnesty is replaced by a committed per-occurrence disposition ledger,
+  keyed to the identity, the category and the surrounding text rather
+  than to the first match in a file. An unreviewed occurrence **fails by
+  default**; `--allow-unreviewed` is the diagnostic census and is
+  deliberately not what the hook runs. The pre-push hook moved to
+  `tools/hooks/pre-push` and is tracked, install with `git config
+  core.hooksPath tools/hooks`.
+
+## [1.8.0] - 2026-08-10
 
 The engine runs locally end to end. 30 commits. Full story in
-[RELEASE NOTES v1.8.0.md](RELEASE%20NOTES%20v1.8.0.md).
+[RELEASE NOTES v1.8.0.md](docs/releases/RELEASE%20NOTES%20v1.8.0.md).
 
 Minor rather than major: the standings reorder and the podium marks move
 rendered values, but nothing needs a migration step and no existing
@@ -210,7 +344,7 @@ install has to do anything.
 ## [1.7.0] - 2026-08-05
 
 The first public release. 129 commits. Full story in
-[RELEASE NOTES v1.7.0.md](RELEASE%20NOTES%20v1.7.0.md).
+[RELEASE NOTES v1.7.0.md](docs/releases/RELEASE%20NOTES%20v1.7.0.md).
 
 Minor rather than major: an additive wave plus one gated migration. The
 club-attribution flip is the only thing that moves rendered values, and a

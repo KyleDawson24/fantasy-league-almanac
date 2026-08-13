@@ -7,6 +7,9 @@ surface: eligibility display, row formatting, tab-row layout for both
 tables, and the write layer's structure parsers (bounds / merge groups).
 """
 
+import requests
+
+import almanac_data
 from almanac_logic import build_trades_tab_rows
 from almanac_render import (
     TRADE_RECORD_HEADER,
@@ -60,6 +63,27 @@ def _section_rows(rows, header):
             break
         out.append(r)
     return out
+
+
+def test_live_communication_refusal_is_unavailable(monkeypatch):
+    response = requests.Response()
+    response.status_code = 401
+    response.url = "https://example.invalid/communication/"
+    error = requests.HTTPError(response=response)
+    monkeypatch.setattr(
+        almanac_data, "_espn_league_get",
+        lambda *args, **kwargs: (_ for _ in ()).throw(error),
+    )
+
+    assert almanac_data._espn_communication_topics(2026) is None
+
+
+def test_executed_trades_propagates_unavailable(monkeypatch):
+    monkeypatch.setattr(
+        almanac_data, "_espn_communication_topics", lambda year: None,
+    )
+
+    assert almanac_data._executed_trades(2026) is None
 
 
 # ---- trade_eligibility_display ---------------------------------------------
@@ -185,6 +209,16 @@ def test_empty_block_and_no_trades_render_notices():
     flat = [r[0] for r in rows if r]
     assert any(s.startswith('Nobody is on the block') for s in flat)
     assert any(s.startswith('No trades have been executed') for s in flat)
+
+
+def test_unavailable_trade_record_is_not_rendered_as_no_trades():
+    rows = build_trades_tab_rows(
+        {**_data(), 'trade_record_available': False}, 2026,
+    )
+    flat = [r[0] for r in rows if r]
+    assert any(s.startswith('Unavailable -- ESPN did not authorize')
+               for s in flat)
+    assert not any(s.startswith('No trades have been executed') for s in flat)
 
 
 # ---- build_trades_tab_rows: Trade Record section ----------------------------

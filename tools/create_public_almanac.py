@@ -23,6 +23,8 @@ import sys
 from datetime import date
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -117,7 +119,11 @@ def command_plan(args, python=None, dbt=None, league=None,
         transforms = [
             [python, 'tools/load_parquet_to_duckdb.py'],
             [dbt, 'deps', *local],
-            [dbt, 'build', *local],
+            # The public path targets ordinary laptops. Keep dbt itself at
+            # one concurrent node in addition to the profile's one DuckDB
+            # engine thread; four simultaneous JSON-heavy models exhausted
+            # a measured 5.5 GiB machine even though each model fits alone.
+            [dbt, 'build', *local, '--threads', '1'],
         ]
     return [*extracts, *transforms, generator]
 
@@ -138,7 +144,7 @@ def execute_plan(plan, runner=subprocess.run):
                 f"Complete-history preparation stopped because this command "
                 f"failed with exit code {exc.returncode}: {' '.join(command)}. "
                 "The Google workbook step was not run; fix the reported "
-                "season/feed error and retry."
+                "extraction or build error and retry."
             ) from exc
 
 
@@ -172,6 +178,13 @@ def main(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
+        # This entrypoint validates the registry before launching any child
+        # process. Load the release folder's .env first; otherwise a stranger
+        # can fill in all three ESPN values correctly and still be told that
+        # every one is missing. Use the explicit repository path so invoking
+        # this script from another working directory cannot change which file
+        # supplies the configuration.
+        load_dotenv(REPO_ROOT / '.env')
         league = get_league(args.league)
         plan = command_plan(args, league=league)
         # Validate the registry shape and derive the complete season range before

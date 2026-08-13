@@ -42,16 +42,27 @@ def _code_only(text, prefix):
 class TestStagingReadsClubOfGame:
     """stg_box_scores must source pro_team from the game-level field."""
 
-    def test_all_three_unions_read_club_of_game(self):
-        sql = _read(MODELS / 'staging' / 'stg_box_scores.sql')
-        # home lineup, away lineup, free agents -- all three, or the flip
-        # is half-applied and the book mixes two attribution rules.
-        assert sql.count("'clubOfGame'") == 3
+    def test_all_four_unions_read_club_of_game(self):
+        staging = MODELS / 'staging'
+        sql = '\n'.join(_read(staging / name) for name in (
+            'stg_box_scores.sql',
+            'stg_box_scores__season_points_players.sql',
+            'stg_box_scores__free_agents.sql',
+        ))
+        # home lineup, away lineup, season-points team rosters, free agents --
+        # all four, or the flip is half-applied and the book mixes two
+        # attribution rules.
+        assert sql.count("'clubOfGame'") == 4
 
     def test_pro_team_column_is_not_fed_from_the_person_stamp(self):
         """`proTeam` may still be DISCUSSED in comments -- it is the
         preserved observation record -- but must not feed the column."""
-        sql = _read(MODELS / 'staging' / 'stg_box_scores.sql')
+        staging = MODELS / 'staging'
+        sql = '\n'.join(_read(staging / name) for name in (
+            'stg_box_scores.sql',
+            'stg_box_scores__season_points_players.sql',
+            'stg_box_scores__free_agents.sql',
+        ))
         code = '\n'.join(line for line in sql.splitlines()
                          if not line.lstrip().startswith('--'))
         assert "'proTeam'" not in code

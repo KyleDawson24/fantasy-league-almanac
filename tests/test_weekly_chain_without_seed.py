@@ -17,10 +17,10 @@ maintainer's working dbt_league/league_config: those files are skip-worktree
 and hold real league data on disk, so reading them would leak private content
 into a test and pass for exactly one person.
 
-AND IT RUNS THE COMMANDS THE QUICKSTART PRINTS: unscoped `dbt seed` and
-unscoped `dbt run`, not a narrow `--select`. QUICKSTART says every
-league_config file may stay blank and then tells the reader to type those two
-commands; anything narrower would test a path nobody was told to take.
+AND IT RUNS THE PUBLIC RELEASE'S BUILD: unscoped `dbt build`, not a narrow
+`--select`. The release entrypoint promises every league_config file may stay
+blank and then runs this command; anything narrower would test a path nobody
+was told to take.
 
 NOTHING UNDER TEST IS STUBBED. The fact models are the real ones -- no
 hand-created ANALYTICS relation standing in for the player fact, which would
@@ -57,6 +57,7 @@ LEAGUE_CONFIG = PROJECT_DIR / "league_config"
 CONTRACT = REPO_ROOT / "config" / "raw_schema_contract.json"
 
 LEAGUE = "espn-stranger"
+POINTS_LEAGUE = "espn-season-points"
 SEASON = 2026
 OPENER = date(2026, 3, 25)
 
@@ -147,6 +148,22 @@ def _box_score_blob():
     }
 
 
+def _season_points_blob():
+    """The same player-day contract, carried by teams rather than rivals."""
+    return {
+        "matchups": [],
+        "team_rosters": [
+            {"team_name": name, "team_id": team_id,
+             "team_abbrev": abbrev, "owner": f"Owner {abbrev}",
+             "lineup": _lineup(index)}
+            for index, (team_id, name, abbrev) in enumerate(TEAMS, start=1)
+        ],
+        "free_agents": [
+            _player(900, "Free Agent", "FA", 2.0, {"AB": 2, "H": 1}),
+        ],
+    }
+
+
 SCORING_ITEMS = [
     {"statId": 0, "points": 0.0, "isReverseItem": False},   # AB
     {"statId": 1, "points": 1.0, "isReverseItem": False},   # H
@@ -154,8 +171,47 @@ SCORING_ITEMS = [
 ]
 
 TEAM_OWNERS = [{"team_id": team_id, "team_name": name, "team_abbrev": abbrev,
-                "owner": f"Owner {abbrev}", "owner_id": f"{{OWNER-{team_id}}}"}
+                "owner_id": f"{{OWNER-{team_id}}}",
+                "first_name": None, "last_name": None,
+                "display_name": f"Owner {abbrev}"}
                for team_id, name, abbrev in TEAMS]
+
+
+def _season_points_schedule_settings():
+    """Measured no-playoff shape: one season-spanning period, zero rounds."""
+    return {
+        "matchupPeriodCount": 1,
+        "matchupPeriods": {"1": [1]},
+        "matchupPeriodLength": 1,
+        "playoffTeamCount": 0,
+        "playoffMatchupPeriodLength": 1,
+        "playoffSeedingRule": "TOTAL_POINTS_SCORED",
+        "playoffSeedingRuleBy": 0,
+        "playoffReseed": False,
+        "variablePlayoffMatchupPeriodLength": False,
+        "consolationLadderDisabled": True,
+        "periodTypeId": 1,
+        "divisions": [{"id": 0, "name": "League", "size": len(TEAMS)}],
+    }
+
+
+def _season_points_standings():
+    rows = []
+    for rank, (team_id, name, abbrev) in enumerate(TEAMS, start=1):
+        rows.append({
+            "id": team_id, "abbrev": abbrev, "name": name,
+            "divisionId": 0, "playoffSeed": rank,
+            "rankCalculatedFinal": 0,
+            "record": {
+                "overall": {"wins": 0, "losses": 0, "ties": 0,
+                            "percentage": 0.0, "gamesBack": 0.0,
+                            "streakLength": 0, "streakType": "NONE"},
+                "division": {"wins": 0, "losses": 0, "ties": 0},
+            },
+            "points": float(100 - rank), "pointsAdjusted": 0.0,
+            "waiverRank": rank,
+        })
+    return rows
 
 
 def _calendar_snapshot():
@@ -248,16 +304,29 @@ def weekly(tmp_path_factory):
 
     stamped = datetime(2026, 8, 11, 12, 0, 0)
 
-    def snapshot(table, payload):
+    def snapshot(table, payload, league_key=LEAGUE):
         con.execute(
             f"insert into RAW.{table} (SEASON_YEAR, RAW_JSON, EXTRACTED_AT, "
             f"LEAGUE_KEY) values (?, ?, ?, ?)",
-            [SEASON, json.dumps(payload), stamped, LEAGUE])
+            [SEASON, json.dumps(payload), stamped, league_key])
 
     snapshot("MATCHUP_SCHEDULE", _matchup_schedule_payload())
     snapshot("MLB_SEASON_CALENDAR", _calendar_snapshot())
     snapshot("SCORING_SETTINGS", SCORING_ITEMS)
     snapshot("TEAM_OWNERS", TEAM_OWNERS)
+    snapshot("MATCHUP_SCHEDULE", {
+        "seasonId": SEASON,
+        "status": {"currentMatchupPeriod": 1,
+                   "latestScoringPeriod": PERIOD_LENGTHS[0],
+                   "currentLeagueType": 5,
+                   "createdAsLeagueType": 5},
+        "schedule": [{"matchupPeriodId": 1}],
+    }, POINTS_LEAGUE)
+    snapshot("SCORING_SETTINGS", SCORING_ITEMS, POINTS_LEAGUE)
+    snapshot("SCHEDULE_SETTINGS", _season_points_schedule_settings(),
+             POINTS_LEAGUE)
+    snapshot("TEAM_OWNERS", TEAM_OWNERS, POINTS_LEAGUE)
+    snapshot("TEAM_STANDINGS", _season_points_standings(), POINTS_LEAGUE)
 
     blob = _box_score_blob()
     for scoring_period in _membership()[BOX_SCORE_PERIOD]:
@@ -267,6 +336,14 @@ def weekly(tmp_path_factory):
             "values (?, ?, ?, ?, ?, ?)",
             [SEASON, scoring_period, BOX_SCORE_PERIOD, json.dumps(blob),
              stamped, LEAGUE])
+    points_blob = _season_points_blob()
+    for scoring_period in range(1, PERIOD_LENGTHS[0] + 1):
+        con.execute(
+            "insert into RAW.BOX_SCORES (SEASON_YEAR, SCORING_PERIOD, "
+            "MATCHUP_PERIOD, RAW_JSON, LOADED_AT, LEAGUE_KEY) "
+            "values (?, ?, ?, ?, ?, ?)",
+            [SEASON, scoring_period, 1, json.dumps(points_blob), stamped,
+             POINTS_LEAGUE])
     con.close()
 
     env = dict(os.environ,
@@ -280,23 +357,16 @@ def weekly(tmp_path_factory):
              "--profiles-dir", str(PROFILES_DIR), "--target", "duckdb"],
             cwd=str(REPO_ROOT), env=env, capture_output=True, text=True)
 
-    # THE TWO COMMANDS THE QUICKSTART PRINTS, unscoped and in order.
-    # Narrowing either would test a path nobody was told to take -- and the
-    # whole point of this fixture is that "every league_config file may stay
-    # blank" and "run these commands" have to be true together.
-    seeded = _dbt("seed")
-    if seeded.returncode != 0:
-        pytest.fail(
-            "`dbt seed` over the COMMITTED header-only league_config "
-            "templates failed, so a fresh clone cannot complete step 5 of "
-            f"the Quickstart:\n{seeded.stdout[-5000:]}")
-
-    result = _dbt("run")
+    # Run the exact unscoped build used by the public release. `dbt build`
+    # includes every seed, so a preceding standalone seed would exercise a
+    # second-pass state the public command never creates. Narrowing this build
+    # would miss project-level tests that can reject a supported league shape
+    # after every model itself succeeds.
+    result = _dbt("build", "--threads", "1")
     if result.returncode != 0:
         pytest.fail(
-            "the unscoped `dbt run` a stranger is told to type failed on the "
-            "exact all-blank installation, so the Quickstart's claim that "
-            "every league_config file may stay blank is not true:\n"
+            "the unscoped `dbt build` the public command runs failed on the "
+            "exact all-blank installation, so the release path is not true:\n"
             f"{result.stdout[-8000:]}\n{result.stderr[-1500:]}")
 
     # The declared tests for the models this file is about. Scoped, and only
@@ -315,7 +385,6 @@ def weekly(tmp_path_factory):
     con = duckdb.connect(str(db))
     query = lambda sql, p=None: con.execute(sql, p or []).fetchall()
     query.build_output = result.stdout
-    query.seed_output = seeded.stdout
     query.test_output = tested.stdout
     query.template_names = template_names
     yield query
@@ -345,23 +414,23 @@ def test_every_committed_league_config_template_is_empty_in_this_build(weekly):
 
 
 def test_the_unscoped_seed_loaded_every_template(weekly):
-    """`dbt seed` is the stranger's first command over these files, and an
-    untyped empty CSV is exactly where it used to be able to fail."""
-    assert "ERROR=0" in weekly.seed_output
-    assert "Completed successfully" in weekly.seed_output
+    """The public `dbt build` includes every seed, and an untyped empty CSV
+    is exactly where the stranger path used to be able to fail."""
+    assert "ERROR=0" in weekly.build_output
+    assert "Done. PASS=" in weekly.build_output
 
 
-def test_the_unscoped_run_built_the_whole_project(weekly):
+def test_the_unscoped_build_built_and_tested_the_whole_project(weekly):
     """THE CONTRADICTION THIS CLOSES. QUICKSTART says every league_config
-    file may stay blank and then prints an unscoped `dbt run`. On the exact
-    all-blank state that run used to die: an empty CSV has nothing to infer a
+    file may stay blank and the public entrypoint runs an unscoped build. On
+    the exact all-blank state that build used to die: an empty CSV has nothing to infer a
     type from, so `league_key` arrived INTEGER and met the VARCHAR one from
     stg_box_scores in int_franchise_registry, int_cbs__team_owner_season and
     stg_cbs__mlbam_crosswalk. Declaring the types in dbt_project.yml is what
     makes the two halves of that sentence true together."""
     assert "ERROR=0" in weekly.build_output
     assert "SKIP=0" in weekly.build_output
-    assert "Completed successfully" in weekly.build_output
+    assert "Done. PASS=" in weekly.build_output
 
 
 def test_the_cbs_only_models_build_empty_rather_than_erroring(weekly):
@@ -391,15 +460,17 @@ def test_the_platform_general_registry_carries_espn_and_only_espn(weekly):
         group by 1 order by 1""")
     by_league = {key: int(n) for key, n in rows}
 
-    assert set(by_league) == {LEAGUE}, by_league
+    assert set(by_league) == {LEAGUE, POINTS_LEAGUE}, by_league
     # Two observed teams plus the synthesized holding pen.
     assert by_league[LEAGUE] == len(TEAMS) + 1
+    assert by_league[POINTS_LEAGUE] == len(TEAMS) + 1
 
 
 def test_no_matchup_period_row_comes_from_the_legacy_seed(weekly):
     rows = weekly("""
         select calendar_source, count(*) from ANALYTICS.dim_matchup_period
-        group by 1 order by 1""")
+        where league_key = ?
+        group by 1 order by 1""", [LEAGUE])
 
     assert dict(rows) == {"derived": len(PERIOD_LENGTHS)}
 
@@ -507,7 +578,9 @@ def test_the_row_counts_are_what_the_fixture_implies(weekly):
     two teams, three players each, twelve scoring periods, one free agent --
     so a change in any of them is either a fixture edit or a regression.
     """
-    counts = {rel: weekly(f"select count(*) from ANALYTICS.{rel}")[0][0]
+    counts = {rel: weekly(
+        f"select count(*) from ANALYTICS.{rel} where league_key = ?",
+        [LEAGUE])[0][0]
               for rel in ("dim_matchup_period",
                           "fct_player_daily_performance",
                           "fct_player_weekly_slot_performance",
@@ -531,3 +604,62 @@ def test_the_row_counts_are_what_the_fixture_implies(weekly):
         # Season rollup over the same seven player-seasons.
         "fct_player_season_performance": 7,
     }, counts
+
+
+# ===========================================================================
+# A live ESPN season-points league reaches the same record-book facts
+# ===========================================================================
+def test_season_points_has_one_live_reportable_period(weekly):
+    row = weekly("""
+        select matchup_period, scoring_period_count, start_date, end_date,
+               calendar_source, is_record_eligible, derivation_status
+        from ANALYTICS.dim_matchup_period
+        where league_key = ? and season_year = ?
+    """, [POINTS_LEAGUE, SEASON])
+
+    assert row == [(1, PERIOD_LENGTHS[0], OPENER,
+                    OPENER + timedelta(days=PERIOD_LENGTHS[0] - 1),
+                    "derived", True, "insufficient_evidence")]
+
+
+def test_season_points_reaches_player_and_team_facts_without_a_rival(weekly):
+    assert weekly("""
+        select count(*) from ANALYTICS.stg_matchup_pairs
+        where league_key = ?
+    """, [POINTS_LEAGUE]) == [(0,)]
+    assert weekly("""
+        select count(distinct scoring_period)
+        from ANALYTICS.fct_player_daily_performance
+        where league_key = ? and season_year = ?
+    """, [POINTS_LEAGUE, SEASON]) == [(PERIOD_LENGTHS[0],)]
+    assert weekly("""
+        select count(distinct team_id), count(result)
+        from ANALYTICS.fct_team_weekly_active_performance
+        where league_key = ? and season_year = ? and matchup_period = 1
+    """, [POINTS_LEAGUE, SEASON]) == [(len(TEAMS), 0)]
+    assert weekly("""
+        select count(distinct team_id)
+        from ANALYTICS.fct_team_season_performance
+        where league_key = ? and season_year = ?
+    """, [POINTS_LEAGUE, SEASON]) == [(len(TEAMS),)]
+
+
+def test_season_points_format_is_selected_from_espns_explicit_type(weekly):
+    assert weekly("""
+        select league_format, has_matchups, has_season_points_schedule
+        from ANALYTICS.dim_league_format where league_key = ?
+    """, [POINTS_LEAGUE]) == [("points", False, True)]
+
+
+def test_season_points_can_have_zero_playoff_rounds(weekly):
+    assert weekly("""
+        select playoff_rounds from ANALYTICS.stg_schedule_settings
+        where league_key = ? and season_year = ?
+    """, [POINTS_LEAGUE, SEASON]) == [(0,)]
+
+
+def test_privacy_limited_owner_uses_espn_display_name(weekly):
+    assert weekly("""
+        select owner_display from ANALYTICS.dim_owner
+        where league_key = ? order by owner_display
+    """, [POINTS_LEAGUE]) == [("Owner AAA",), ("Owner BBB",)]

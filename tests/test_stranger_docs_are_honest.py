@@ -28,8 +28,11 @@ QUICKSTART = REPO_ROOT / "QUICKSTART.md"
 SETUP = REPO_ROOT / "SETUP.md"
 SEED_README = REPO_ROOT / "dbt_league" / "league_config" / "README.md"
 ROADMAP = REPO_ROOT / "ROADMAP.md"
+ENV_EXAMPLE = REPO_ROOT / ".env.example"
 
 LIVE_DOCS = (QUICKSTART, SETUP, SEED_README)
+
+PUBLIC_ENTRYPOINT = "tools/create_public_almanac.py"
 
 
 def _text(path):
@@ -45,6 +48,18 @@ def _flat(path):
     delete the test rather than fix the doc.
     """
     return " ".join(_text(path).split()).lower()
+
+
+def _commands(path):
+    """`_flat`, with path separators normalized to forward slashes.
+
+    QUICKSTART is the Windows runbook, so it writes
+    `tools\\create_public_almanac.py` -- what a reader actually copies into
+    PowerShell. Other prose writes `tools/create_public_almanac.py`. Both
+    name the same script, and a guard that cares which slash was typed is
+    testing typography rather than truth.
+    """
+    return _flat(path).replace("\\", "/")
 
 
 # ---------------------------------------------------------------------------
@@ -106,11 +121,10 @@ def test_the_quickstart_explains_where_the_dates_come_from():
     """"Dates are unavailable" was the old, and now obsolete, story. A
     stranger has to be told the calendar is derived and from what, without
     being asked to type any of it."""
-    text = _text(QUICKSTART).lower()
+    text = _flat(QUICKSTART)
 
-    assert "scoring periods are **days**" in text
-    assert "plus\nn-1 days" in text or "plus n-1 days" in text
     assert "mlb stats api" in text
+    assert "season start" in text
     assert "nobody types a calendar" in text
 
 
@@ -145,23 +159,39 @@ def test_the_quickstart_separates_the_three_capture_spellings():
 # ---------------------------------------------------------------------------
 # What is NOT claimed
 # ---------------------------------------------------------------------------
-def test_season_long_points_and_roto_are_still_called_unproven():
-    """Zero- and one-period shapes are ACCEPTED without fabrication. That is
-    not the same as saying they work, and the docs must not blur the two."""
+def test_season_long_points_is_supported_without_claiming_roto():
+    """The measured type-5 path works; roto remains a different unknown."""
     text = _flat(QUICKSTART)
 
-    assert "not proven" in text or "unproven" in text
+    assert "season-long points is supported" in text
+    assert "middle of its first season" in text
     assert "rotisserie" in text
+    assert "rotisserie remains unproven" in text
+    assert "inventing weekly opponents" in text
+
+
+def test_live_h2h_is_not_smuggled_into_the_season_points_fix():
+    text = _flat(QUICKSTART)
+
+    assert "unfinished current matchup" in text
+    assert "separate enhancement" in text
 
 
 def test_the_quickstart_does_not_claim_the_espn_half_is_simply_done():
-    """It said "The ESPN half is done and walked." MLB-207's bootstrap and
-    MLB-209's Google delivery are not in this commit, so the flat claim
-    would over-promise."""
+    """It said "The ESPN half is done and walked." MLB-209's Google
+    delivery has since shipped, but MLB-31/MLB-207's guided onboarding has
+    not, so the flat claim would still over-promise.
+
+    This used to prove the point by asserting the words "no single
+    bootstrap command" were present. v1.9 ships exactly such a command,
+    so that phrasing had to go -- the guard now asks for the limitation
+    that is still real instead of the one that stopped being."""
     text = _text(QUICKSTART)
+    lowered = _flat(QUICKSTART)
 
     assert "The ESPN half is done and walked." not in text
-    assert "no single bootstrap command" in text
+    assert "guided setup, but it is not a wizard yet" in lowered
+    assert "form-driven setup is planned" in lowered
 
 
 # ---------------------------------------------------------------------------
@@ -198,9 +228,51 @@ def test_both_docs_say_no_google_cloud_project_is_required(path):
 
 
 def test_the_quickstart_gives_the_exact_command(path=None):
+    """Copy-pasteable, interpreter and all.
+
+    This used to require the literal "python tools/create_public_almanac.py".
+    The runbook names the venv interpreter explicitly now -- see
+    test_the_quickstart_does_not_require_activating_the_venv for why -- so
+    the guard asks for the script in a command position behind that
+    interpreter rather than for a bare `python` in front of it."""
     text = _text(QUICKSTART)
 
-    assert "python tools/create_public_almanac.py" in text
+    assert _commands(QUICKSTART).count(PUBLIC_ENTRYPOINT) >= 1
+    assert r".venv\Scripts\python.exe tools\create_public_almanac.py" in text
+
+
+def test_the_quickstart_installs_with_the_venv_interpreter_too():
+    """The install step has the same failure mode as the run step: `pip`
+    off PATH is whichever pip the machine happens to have, and there may
+    be none. `-m pip` through the venv's own interpreter is the one
+    spelling that cannot install into the wrong place."""
+    text = _text(QUICKSTART)
+
+    assert r".\.venv\Scripts\python.exe -m pip install -r requirements.txt" in text
+
+
+def test_the_quickstart_does_not_require_activating_the_venv():
+    """THE REGRESSION THIS EXISTS FOR. Step 2 said `.venv\\Scripts\\activate`.
+    On Windows PowerShell that resolves to Activate.ps1, and a default
+    execution policy blocks it -- so the very first command of the public
+    journey failed on the exact machine class that journey targets, and
+    the documented recovery would have been `Set-ExecutionPolicy`.
+
+    Naming the interpreter is the same environment with none of that: no
+    policy change, and nothing to understand about how activation works.
+    Prose may still MENTION activation as an option; what must not come
+    back is an activation command standing on its own as a required step,
+    so this matches whole command lines rather than searching the text."""
+    lines = {line.strip().lower() for line in _text(QUICKSTART).splitlines()}
+
+    for command in (
+        r".venv\scripts\activate",
+        r".\.venv\scripts\activate",
+        r".venv\scripts\activate.ps1",
+        r".\.venv\scripts\activate.ps1",
+        "source .venv/bin/activate",
+    ):
+        assert command not in lines, f"QUICKSTART.md: {command!r}"
 
 
 @pytest.mark.parametrize("path", (QUICKSTART, SETUP), ids=lambda p: p.name)
@@ -256,18 +328,168 @@ def test_the_byo_client_route_is_described_as_an_advanced_override(path):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("path", (QUICKSTART, SETUP), ids=lambda p: p.name)
-def test_no_live_doc_claims_the_shipped_identity_is_open_to_the_public(path):
-    """OWNER RULING, and a release gate. The Cloud project is External
-    and in Google's TESTING mode: only test users get through consent,
-    grants expire in about a week, and the screen says unverified. Saying
-    or implying otherwise would send a stranger at a door Google will
-    shut in their face."""
+def test_no_live_doc_claims_branding_review_has_passed(path):
+    """OWNER RULING, and a release gate. The Cloud project is now In
+    Production: it is NOT restricted to a test-user list, and testing
+    mode's week-long grant expiry does not apply to it. What is still
+    outstanding is Google's BRANDING review, so Google may withhold the
+    configured branding and show an unverified-app warning. The docs have
+    to say that, because a stranger who meets that screen unwarned reads
+    it as this tool being broken or shady.
+
+    This guard used to assert the opposite text, word for word --
+    "testing", "test users", "expire after about a week". Those were true
+    and have stopped being true, so the guard MOVED WITH THE FACT rather
+    than being deleted. A guard that still enforces a retired claim is
+    worse than no guard at all: it fails the honest edit and passes the
+    dishonest one, and the person who hits it learns to delete tests.
+    """
     lowered = _flat(path)
 
-    assert "testing" in lowered
-    assert "test users" in lowered
-    assert ("expire after about a week" in lowered
-            or "expire after roughly a week" in lowered)
+    assert "in production" in lowered
+    assert "branding" in lowered
+    assert "unverified-app warning" in lowered
+
+    # The retired restriction must not come back as prose.
+    for claim in ("only test users", "turned away by google",
+                  "google will stop everybody else"):
+        assert claim not in lowered, f"{path.name}: {claim!r}"
+
+
+# ---------------------------------------------------------------------------
+# The runbook has to describe the journey that actually ships
+# ---------------------------------------------------------------------------
+# WHY THESE EXIST. At the v1.9 cut the Quickstart still walked a stranger
+# through the RETIRED workflow: "run five commands", Snowflake as the
+# default, a six-command manual pipeline as the primary path, and the
+# Google workbook demoted to an optional step 6 afterwards. Every one of
+# those had been superseded by tools/create_public_almanac.py, which owns
+# extract -> parquet -> DuckDB -> dbt -> workbook in a single invocation.
+# A runbook that contradicts the shipped entrypoint is worse than no
+# runbook: it sends the first real stranger down a path the release does
+# not support, and every step they hit will half-work.
+
+
+def test_quickstart_makes_the_public_entrypoint_the_primary_run_step():
+    """The one command is the product. It has to be presented as such."""
+    lowered = _commands(QUICKSTART)
+
+    assert PUBLIC_ENTRYPOINT in lowered
+
+
+def test_quickstart_puts_the_one_command_ahead_of_the_manual_stages():
+    """ORDERING IS THE CLAIM. The lower-level extract/load/dbt commands
+    are real and still documented, but they are troubleshooting material
+    now. If they appear BEFORE the entrypoint, the document is once again
+    telling a stranger to run the pipeline by hand first -- which is the
+    exact regression this guards."""
+    lowered = _commands(QUICKSTART)
+
+    assert lowered.index(PUBLIC_ENTRYPOINT) < lowered.index("extract/extract.py")
+
+
+def test_quickstart_does_not_claim_there_is_no_bootstrap_command():
+    """It said "there is no single bootstrap command and no guided fields
+    file yet, so the five commands in step 5 are still five commands".
+    Half of that stopped being true; the guided fields file did not."""
+    lowered = _flat(QUICKSTART)
+
+    for claim in (
+        "no single bootstrap command",
+        "run five commands",
+        "still five commands",
+    ):
+        assert claim not in lowered, f"QUICKSTART.md: {claim!r}"
+
+
+@pytest.mark.parametrize("path", (QUICKSTART, SETUP), ids=lambda p: p.name)
+def test_no_live_doc_calls_snowflake_required(path):
+    """Snowflake is an advanced opt-in reached only by passing
+    --advanced-snowflake. The release journey never touches it, and every
+    extract the entrypoint runs passes --raw-target local explicitly."""
+    lowered = _flat(path)
+
+    for claim in (
+        "the snowflake path still exists, is still the default",
+        "a snowflake account**. free-tier",
+        "requires a snowflake account",
+    ):
+        assert claim not in lowered, f"{path.name}: {claim!r}"
+
+    assert "--advanced-snowflake" in lowered
+
+
+@pytest.mark.parametrize("path", (QUICKSTART, SETUP), ids=lambda p: p.name)
+def test_no_live_doc_calls_a_google_cloud_project_required(path):
+    """The release build ships its own identity. A Cloud project is only
+    for the BYO-client override in section 10b."""
+    lowered = _flat(path)
+
+    for claim in (
+        "you need a google cloud project",
+        "requires a google cloud project",
+        "a google cloud project is required",
+    ):
+        assert claim not in lowered, f"{path.name}: {claim!r}"
+
+
+def test_quickstart_sends_release_users_to_the_zip_and_says_why():
+    """A clone cannot exercise the shipped identity: the descriptor is
+    empty in source on purpose, because a credential in public git history
+    is reported to Google and cannot be removed afterwards. A stranger who
+    clones and then hits that wall needs to have been told first."""
+    lowered = _flat(QUICKSTART)
+
+    assert "releases" in lowered
+    assert "unzip" in lowered
+    assert "git clone" in lowered
+    assert "fantasy-league-almanac-<version>.zip" in lowered
+    assert "handles the google sign-in setup for you" in lowered
+    assert "source-code clone deliberately does not contain" in lowered
+
+
+def test_quickstart_tells_the_reader_to_configure_the_season_bounds():
+    """first_season/final_season are what the entrypoint asks the registry
+    for. A wrong first_season is the most likely way a real run produces a
+    short history, so the runbook has to name both fields and the file."""
+    lowered = _commands(QUICKSTART)
+
+    assert "config/leagues.yml" in lowered
+    assert "first_season" in lowered
+    assert "final_season" in lowered
+    assert "default_league" in lowered
+
+
+@pytest.mark.parametrize("path", LIVE_DOCS, ids=lambda p: p.name)
+def test_no_live_doc_repeats_the_retired_cbs_dbt_build_failure(path):
+    """`dbt build` used to trip assert_cbs_scoring_feed_matches_seed on an
+    ESPN-only install, so the docs said to run `dbt run` instead. That is
+    fixed -- the all-empty ESPN installation passes an unscoped build, and
+    the public entrypoint deliberately runs `dbt build`. A doc still
+    telling people to avoid it now contradicts the shipped command."""
+    lowered = _flat(path)
+
+    for claim in (
+        "assert_cbs_scoring_feed_matches_seed",
+        "`dbt run` rather than `dbt build`",
+        "trips one cbs data test",
+        "dbt run` and says why",
+    ):
+        assert claim not in lowered, f"{path.name}: {claim!r}"
+
+
+def test_env_example_does_not_say_duckdb_cannot_skip_snowflake():
+    """Both claims were true before v1.8 and are load-bearing now: the
+    supported public command lands RAW locally as parquet and builds
+    DuckDB from it."""
+    lowered = " ".join(ENV_EXAMPLE.read_text(encoding="utf-8").split()).lower()
+
+    for claim in (
+        "nothing lands raw there",
+        "not a way to skip snowflake",
+        "rather than a way to skip",
+    ):
+        assert claim not in lowered, f".env.example: {claim!r}"
 
 
 @pytest.mark.parametrize("path", (QUICKSTART, SETUP), ids=lambda p: p.name)
@@ -283,21 +505,34 @@ def test_no_live_doc_promises_production_readiness(path):
         assert claim not in lowered, f"{path.name}: {claim!r}"
 
 
-def test_the_quickstart_still_does_not_claim_one_command_orchestration():
-    """MLB-31/MLB-207 own chaining extract -> load -> dbt -> render. The
-    Google step is one more command, not a replacement for the other
-    five."""
-    text = _text(QUICKSTART)
+def test_the_quickstart_scopes_its_one_command_to_post_configuration():
+    """v1.9 DOES chain extract -> parquet -> DuckDB -> dbt -> workbook in
+    one invocation, so the old form of this guard -- asserting the words
+    "no single bootstrap command" and "still five commands" were present --
+    now enforces a retired claim. What must still not be claimed is that
+    the INPUTS are handled: `.env` and the registry are hand-edited, and
+    MLB-31/MLB-207 own fixing that."""
+    lowered = _commands(QUICKSTART)
 
-    assert "no single bootstrap command" in text
-    assert "still five commands" in text
+    assert PUBLIC_ENTRYPOINT in lowered
+    assert "edit two supplied text files" in lowered
+    assert "configuration is still manual" in lowered
+
+    for claim in (
+        "no configuration required",
+        "nothing to configure",
+        "zero configuration",
+        "no setup required",
+    ):
+        assert claim not in lowered, f"QUICKSTART.md: {claim!r}"
 
 
 def test_the_quickstart_still_does_not_claim_cbs_stranger_support():
     lowered = _flat(QUICKSTART)
 
     assert "espn leagues only" in lowered
-    assert "the local path is espn-only" in lowered
+    assert "no scripted setup" in lowered
+    assert "not part of this journey" in lowered
 
 
 def test_the_roadmap_records_the_automation_as_landed_with_its_scope():
@@ -335,7 +570,52 @@ def test_both_docs_call_a_clone_the_developer_path(path):
     lowered = _flat(path)
 
     assert "developer path" in lowered
-    assert "shipped no identity" in lowered
+    assert ("shipped no identity" in lowered
+            or "does not contain the google sign-in configuration" in lowered)
+
+
+def test_quickstart_contains_no_internal_ticket_shorthand():
+    """A stranger cannot interpret an internal tracker key. Future work is
+    described by outcome and release timing, not by PM database ids."""
+    lowered = _flat(QUICKSTART)
+
+    assert "mlb-" not in lowered
+
+
+def test_quickstart_limits_registry_edits_to_three_values():
+    lowered = _flat(QUICKSTART)
+
+    assert "change only these three values" in lowered
+    for name in ("display_name", "first_season", "final_season"):
+        assert name in lowered
+    assert "entire `sinks` section exactly as supplied" in lowered
+    assert "do not put your league id or cookies anywhere in this file" in lowered
+
+
+def test_release_env_template_is_blank_and_quickstart_first():
+    """A copied template must not look preconfigured for Snowflake or ask
+    a new user whether placeholder strings should be retained or erased."""
+    text = _text(ENV_EXAMPLE)
+    lowered = _flat(ENV_EXAMPLE)
+
+    for line in (
+        "LEAGUE_ID=", "ESPN_S2=", "SWID=",
+        "SNOWFLAKE_ACCOUNT=", "SNOWFLAKE_USER=",
+        "SNOWFLAKE_DATABASE=", "SNOWFLAKE_SCHEMA=",
+        "SNOWFLAKE_WAREHOUSE=", "SNOWFLAKE_PRIVATE_KEY_PATH=",
+        "GOOGLE_OAUTH_CLIENT_PATH=", "GOOGLE_PUBLIC_OAUTH_CLIENT_PATH=",
+        "SHEETS_DEV_ID=", "SHEETS_PROD_ID=",
+    ):
+        assert line in text.splitlines()
+    assert "leave this entire section blank when following quickstart.md" in lowered
+    assert "public command requires both" in lowered
+
+
+def test_quickstart_does_not_tell_users_to_run_the_app_as_administrator():
+    lowered = _flat(QUICKSTART)
+
+    assert "almanac commands" in lowered
+    assert "do not need administrator access" in lowered
 
 
 @pytest.mark.parametrize("path", (QUICKSTART, SETUP), ids=lambda p: p.name)

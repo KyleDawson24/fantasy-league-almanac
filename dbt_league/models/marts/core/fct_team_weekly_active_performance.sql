@@ -38,8 +38,10 @@
 --   2. Join team platform scores from stg_matchup_scores (the wrapper's
 --      final per-matchup team totals)
 --   3. Recompute rate stats via macros from team-level counting sums
---   4. Join matchup pairings from stg_matchup_pairs
---   5. Self-join for opponent context (home + away halves UNIONed)
+--   4. Join matchup pairings from stg_matchup_pairs, or the explicit type-5
+--      schedule spine for a season-long points league
+--   5. Self-join for H2H opponent context (home + away halves UNIONed), or
+--      retain NULL opponent/result for the type-5 multi-team container
 --   6. Join matchup_schedule for days_in_period metadata
 --
 -- Grain: one row per (league_key, season_year, matchup_period, team_id).
@@ -203,6 +205,18 @@ matchup_pairs as (
     from {{ ref('stg_matchup_pairs') }}
 ),
 
+season_points_periods as (
+    -- ESPN type 5 has one multi-team reporting container and deliberately no
+    -- opponent pair. It still needs a team-period spine so the same player ->
+    -- team -> season facts can serve its live record book.
+    select distinct
+        league_key,
+        season_year,
+        1::integer as matchup_period
+    from {{ ref('stg_matchup_schedule') }}
+    where current_league_type = 5
+),
+
 team_with_platform as (
     select
         tr.*,
@@ -213,11 +227,19 @@ team_with_platform as (
         -- here at team grain (see team_rollup, from unrounded player totals);
         -- platform_*_pts and negative_points inherit the player-fact NUMBER
         -- rounding upstream.
-        round(tps.platform_points, 1)            as platform_points,
+        round(
+            case when spp.league_key is not null
+                 then tr.platform_hitting_pts + tr.platform_pitching_pts
+                 else tps.platform_points end,
+            1
+        )                                        as platform_points,
         tr.platform_hitting_pts + tr.platform_pitching_pts
             as player_rollup_platform_points,
         round(
-            tps.platform_points - tr.calculated_points, 4
+            (case when spp.league_key is not null
+                  then tr.platform_hitting_pts + tr.platform_pitching_pts
+                  else tps.platform_points end) - tr.calculated_points,
+            4
         ) as platform_calculated_delta
     from team_rollup tr
     left join team_platform_scores tps
@@ -225,6 +247,10 @@ team_with_platform as (
         and tr.season_year = tps.season_year
         and tr.matchup_period = tps.matchup_period
         and tr.team_id = tps.team_id
+    left join season_points_periods spp
+        on tr.league_key = spp.league_key
+        and tr.season_year = spp.season_year
+        and tr.matchup_period = spp.matchup_period
 ),
 
 with_opponents as (
@@ -295,6 +321,24 @@ with_opponents as (
         and mp.season_year = opp.season_year
         and mp.matchup_period = opp.matchup_period
         and mp.home_team_id = opp.team_id
+
+    union all
+
+    -- Season-long points. These are real team-period totals but there is no
+    -- opponent and therefore no W/L result to invent. The explicit ESPN type
+    -- is the schedule spine in this format, parallel to matchup_pairs above.
+    select
+        t.*,
+        cast(null as integer) as opponent_id,
+        cast(null as {{ dbt.type_string() }}) as opponent_name,
+        cast(null as {{ dbt.type_string() }}) as opponent_owner,
+        cast(null as double) as opponent_points,
+        cast(null as {{ dbt.type_string() }}) as result
+    from team_with_platform t
+    inner join season_points_periods spp
+        on t.league_key = spp.league_key
+        and t.season_year = spp.season_year
+        and t.matchup_period = spp.matchup_period
 ),
 
 with_rates as (

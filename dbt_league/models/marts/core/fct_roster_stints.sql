@@ -52,13 +52,26 @@ with fact as (
         team_id,
         player_id
     from {{ ref('stg_box_scores') }}
-    -- Only seasons with a transaction log can classify trade vs drop+add
-    -- honestly; a season without one would silently label every team->team
-    -- move FA_ADD. Scope the fact to leagues/seasons that have transactions
-    -- (ESPN: current season only for now -- prior seasons aren't reachable via
-    -- leagueHistory's topics filter; they light up if/when a log lands).
+    -- Only seasons whose transaction board was actually READ can classify
+    -- trade vs drop+add honestly; a season without one would silently label
+    -- every team->team move FA_ADD.
+    --
+    -- GATED ON COVERAGE, NOT ON ROWS (MLB-243). This used to test for the
+    -- presence of exploded stg_transactions rows, which fails the case it
+    -- most needed to get right: a league whose board was read and genuinely
+    -- held nothing produces zero rows, exactly like a league whose board was
+    -- refused. The first is normal and should build -- with no trade edges,
+    -- every observed team-to-team handoff is correctly a drop/add -- and the
+    -- second must not. An empty board is now provable
+    -- (stg_transaction_coverage.is_proven_empty) instead of merely absent.
+    --
+    -- Additive: coverage treats existing staged transaction rows as proof the
+    -- board was read, so every league that built stints before this change
+    -- still does.
     where (league_key, season_year) in (
-        select distinct league_key, season_year from {{ ref('stg_transactions') }}
+        select league_key, season_year
+        from {{ ref('stg_transaction_coverage') }}
+        where has_transaction_log
     )
 ),
 

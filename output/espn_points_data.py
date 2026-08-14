@@ -35,6 +35,7 @@ TWO ESPN-SPECIFIC FACTS THIS MODULE ENCODES:
    expressed in scoring periods instead.
 """
 
+import re
 from datetime import date, timedelta
 
 from db import (
@@ -440,6 +441,186 @@ def late_draft_note(context):
         f'fair -- they all carry the same pre-league days -- but season and '
         f'career totals are larger than what was actually managed.'
     )
+
+
+def standings_rows(season_year, stat_specs):
+    """The per-team standings row the rich Advanced Standings builder eats,
+    sourced for a points league (MLB-243).
+
+    SAME CONTRACT, DIFFERENT SOURCE. `almanac_data.get_team_standings` reads
+    `mart_team_season_standings`, which aggregates matchup results and is
+    correctly EMPTY here -- a season-points league plays none. The identical
+    columns, including every scored counting stat, already exist on
+    `fct_team_season_performance`, so the tab's detailed-standings table and
+    its colour grading work unchanged once fed from there.
+
+    W/L/T come back as NULL rather than 0. There is no record in this
+    format, and zeroes would render as a real 0-0-0 result.
+    """
+    if not stat_specs:
+        raise RuntimeError('No scored standings stat specs found.')
+
+    columns = [_fact_stat_column(spec['stat_name']) for spec in stat_specs]
+    stat_select = ',\n            '.join(f't.{c}' for c in columns)
+
+    # One scoring day == one period in this format, so the per-period
+    # denominators the builder normalizes by are both the day count.
+    return query_snowflake(f"""
+        WITH days AS (
+            SELECT COUNT(DISTINCT scoring_period) AS n
+            FROM fct_player_daily_performance
+            WHERE {league_predicate()} AND season_year = {int(season_year)}
+        )
+        SELECT
+            t.team_id,
+            t.team_abbrev,
+            t.team_name,
+            t.owner_display,
+            CAST(NULL AS INTEGER) AS wins,
+            CAST(NULL AS INTEGER) AS losses,
+            CAST(NULL AS INTEGER) AS ties,
+            (SELECT n FROM days) AS matchup_periods_played,
+            (SELECT n FROM days) AS scoring_days_played,
+            -- The builder renders every stat cell as
+            -- value * standard_matchup_days / scoring_days_played, which is
+            -- a per-matchup average. This format has no matchup to average
+            -- over and the table is labelled Season Totals, so the two
+            -- denominators are set equal and the multiplier becomes 1 --
+            -- the cells are the counts themselves.
+            (SELECT n FROM days) AS standard_matchup_days,
+            t.calculated_hitting_pts,
+            t.calculated_pitching_pts,
+            t.calculated_points,
+            CAST(NULL AS DOUBLE) AS against_calculated_points,
+            {stat_select}
+        FROM fct_team_season_performance t
+        WHERE {league_predicate('t')}
+          AND t.season_year = {int(season_year)}
+        ORDER BY t.calculated_points DESC, t.team_id
+    """)
+
+
+def _fact_stat_column(stat_name):
+    """Scored-stat name -> its column on the team season fact. Mirrors
+    almanac_data._fact_stat_column_name and re-validates, because the value
+    is interpolated into SQL."""
+    import almanac_data
+
+    column = almanac_data._fact_stat_column_name(stat_name)
+    if not re.match(r'^[a-z][a-z0-9_]*$', column):
+        raise ValueError(f'Unsafe stat column name: {column!r}')
+    return column
+
+
+def rank_arc(season_year):
+    """Cumulative standing by SCORING PERIOD -- the points league's version
+    of the rank-by-week arc (MLB-243).
+
+    The H2H arc walks matchup periods and ranks on cumulative wins. This
+    format has one matchup period covering the whole season, so that arc is
+    a single point; the day is the unit that actually moves here, and the
+    standing is cumulative points.
+
+    Same output columns as `almanac_data.get_team_rank_arc`
+    (team_id, team_abbrev, period, standings_rank) so the chart machinery
+    is untouched.
+    """
+    return query_snowflake(f"""
+        WITH daily AS (
+            SELECT team_id, scoring_period,
+                   SUM(CAST(COALESCE(total_stat_pts, 0) AS DECIMAL(18, 6)))
+                       AS pts
+            FROM fct_player_daily_performance
+            WHERE {league_predicate()}
+              AND season_year = {int(season_year)}
+              AND team_id IS NOT NULL
+              AND is_active_slot
+            GROUP BY team_id, scoring_period
+        ),
+        labelled AS (
+            SELECT d.team_id, d.scoring_period, d.pts, f.team_abbrev
+            FROM daily d
+            LEFT JOIN fct_team_season_performance f
+                ON  f.team_id     = d.team_id
+                AND f.season_year = {int(season_year)}
+                AND {league_predicate('f')}
+        ),
+        cume AS (
+            SELECT team_id, team_abbrev, scoring_period,
+                   SUM(pts) OVER (PARTITION BY team_id
+                                  ORDER BY scoring_period) AS cume_pts
+            FROM labelled
+        )
+        SELECT team_id, team_abbrev, scoring_period AS period,
+               ROW_NUMBER() OVER (
+                   PARTITION BY scoring_period
+                   ORDER BY cume_pts DESC, team_id) AS standings_rank
+        FROM cume
+        ORDER BY period, standings_rank
+    """)
+
+
+def season_finishes():
+    """Season finishes for a points league.
+
+    `almanac_data.get_espn_season_finishes` reads the empty H2H standings
+    mart. The platform's own seed and final rank are on `stg_team_standings`,
+    which IS populated, so the finishes table renders from there instead.
+
+    `is_champion` stays False while nothing has finished -- the H2H version
+    derives it from sweeping the playoff weeks, and this format has none.
+    Crowning the points leader mid-season would invent a title.
+    """
+    return query_snowflake(f"""
+        SELECT
+            s.season_year,
+            s.team_id,
+            COALESCE(f.team_abbrev, s.team_abbrev) AS team_abbrev,
+            f.owner_display,
+            CAST(NULL AS INTEGER) AS wins,
+            CAST(NULL AS INTEGER) AS losses,
+            CAST(NULL AS INTEGER) AS ties,
+            COALESCE(
+                s.playoff_seed,
+                ROW_NUMBER() OVER (
+                    PARTITION BY s.season_year
+                    ORDER BY f.calculated_points DESC NULLS LAST, s.team_id)
+            ) AS finish,
+            s.final_rank,
+            FALSE AS is_champion
+        FROM stg_team_standings s
+        LEFT JOIN fct_team_season_performance f
+            ON  f.league_key  = s.league_key
+            AND f.season_year = s.season_year
+            AND f.team_id     = s.team_id
+        WHERE {league_predicate('s')}
+        ORDER BY s.season_year DESC, finish
+    """)
+
+
+def acquisition_channels(season_year):
+    """Production by acquisition channel, or None when the transaction log
+    was never read (MLB-243).
+
+    Returns None -- not [] -- when coverage says the board was unauthorized
+    or not served. The caller renders an explicit unavailable line rather
+    than a chart of zeroes, because "no adds" and "we could not look" are
+    different claims and only one of them is measured.
+    """
+    if not _transaction_log_was_read(season_year):
+        return None
+    import almanac_data
+    return almanac_data.get_team_acquisition_channels(season_year)
+
+
+def _transaction_log_was_read(season_year):
+    rows = query_snowflake(f"""
+        SELECT has_transaction_log
+        FROM stg_transaction_coverage
+        WHERE {league_predicate()}
+          AND season_year = {int(season_year)}
+    """)
+    return bool(rows and rows[0]['has_transaction_log'])
 
 
 def has_completed_season(season_year):

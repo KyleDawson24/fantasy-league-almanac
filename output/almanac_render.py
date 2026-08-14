@@ -317,6 +317,12 @@ DRAFT_ALLTIME_CELLS_LABEL = "Each Round × Pick's Historical Median Value"
 # standings_header().
 STANDINGS_FIXED_HEADER = ['Rank', 'Team', 'Owner', 'W-L']
 
+# The same four identity columns for a season-points league (MLB-243), where
+# the fourth is the standing itself. Same WIDTH, so every downstream column
+# offset -- gradients, chart helper block, acquisition and affinity spines --
+# lands exactly where it does in the H2H book.
+STANDINGS_FIXED_HEADER_SEASON_LONG = ['Rank', 'Team', 'Owner', 'Total Pts']
+
 
 def col_letter(n):
     """1-based column index -> A1 letters, dependency-free (both leagues'
@@ -328,15 +334,19 @@ def col_letter(n):
     return letters
 
 
-def standings_header(hitting_specs, pitching_specs):
+def standings_header(hitting_specs, pitching_specs, season_long=False):
     """Advanced Standings (Table A) header: identity columns, each scored
     hitting stat, the offense total, each scored pitching stat, the
     pitching total, then total points for / against -- with a buffer
     column between the groups. Stat set and order come from the scored
     stat specs (the Matchup History set), so a scoring change flows
-    through with no code edit."""
+    through with no code edit.
+
+    season_long swaps the W-L identity column for the points total; same
+    width, so every gradient and helper-block offset is unaffected."""
     return [
-        *STANDINGS_FIXED_HEADER,
+        *(STANDINGS_FIXED_HEADER_SEASON_LONG if season_long
+          else STANDINGS_FIXED_HEADER),
         *_team_week_stat_headers(hitting_specs),
         'Offense',
         '',
@@ -1147,17 +1157,25 @@ def format_draft_board_cell(pick):
     return _draft_initial_label(pick) if pick else ''
 
 
-def format_standings_row(rank, row, hitting_specs, pitching_specs):
+def format_standings_row(rank, row, hitting_specs, pitching_specs,
+                         season_long=False):
     """One Advanced Standings (Table A) data row, mirroring
     standings_header's layout. Every stat / points cell is a per-standard-
     matchup average (value * standard_matchup_days / scoring_days_played),
     so abnormal-length weeks (opening week, All-Star break) normalize by
     their actual gameplay days. W-L is the official platform record; ties
-    only show when present."""
-    wins = row.get('wins') or 0
-    losses = row.get('losses') or 0
-    ties = row.get('ties') or 0
-    record = f"{wins}-{losses}-{ties}" if ties else f"{wins}-{losses}"
+    only show when present.
+
+    season_long (MLB-243): a points league has no record, so the fourth
+    identity cell carries the season total instead. Rendering "0-0" there
+    would be a fabricated result, not a blank one."""
+    if season_long:
+        record = _round_half_up(float(row.get('calculated_points') or 0))
+    else:
+        wins = row.get('wins') or 0
+        losses = row.get('losses') or 0
+        ties = row.get('ties') or 0
+        record = f"{wins}-{losses}-{ties}" if ties else f"{wins}-{losses}"
     return [
         rank,
         row.get('team_abbrev') or '',

@@ -1847,6 +1847,14 @@ SNAPSHOT_TABLES = (
     # LEAGUE-SCOPED -- MLB's season is a fact about baseball. Staging keys it
     # on season_year alone; see stg_mlb__season_calendar.
     "MLB_SEASON_CALENDAR",
+    # MLB-243. The four-way verdict on whether the transaction board was
+    # actually READ for a league-season -- SERVED_NONEMPTY / SERVED_EMPTY /
+    # UNAUTHORIZED / NOT_SERVED. Its own table rather than a column on
+    # TRANSACTIONS because it must be written on the outcomes where there is
+    # no payload to attach it to: an unauthorized or not-served attempt
+    # writes no topics at all, and those are exactly the rows that stop a
+    # missing log from being read as a quiet league.
+    "TRANSACTION_COVERAGE",
 )
 
 # Every RAW table whose CREATE sits INSIDE a conditional write. A league
@@ -2090,6 +2098,66 @@ def load_draft_to_snowflake(conn, draft_rows, year, league_key):
         cursor.close()
 
 
+# ---------------------------------------------------------------------------
+# Transaction-capture coverage (MLB-243). Four outcomes, because the old
+# two-valued answer conflated states that mean opposite things downstream.
+# ---------------------------------------------------------------------------
+
+SERVED_NONEMPTY = 'SERVED_NONEMPTY'   # HTTP 200, >=1 topic. Build normally.
+SERVED_EMPTY = 'SERVED_EMPTY'         # HTTP 200, zero topics. PROVEN zero
+                                      # activity -- authoritative, and NOT the
+                                      # same as unavailable.
+UNAUTHORIZED = 'UNAUTHORIZED'         # stable 401/403 after retries.
+NOT_SERVED = 'NOT_SERVED'             # 404 -- ESPN serves no board for that
+                                      # season. Unavailable, never a proven zero.
+
+SERVED_OUTCOMES = frozenset({SERVED_NONEMPTY, SERVED_EMPTY})
+
+# A single 401 decides nothing. The feed measurably flaps: identical
+# well-formed requests against the same league minutes apart returned
+# 401 / 200 / 200 / 200 / 401 / 200 (measured 2026-08-14), while mTeam and
+# mRoster stayed 200 throughout -- so it is load-shedding on this endpoint,
+# not the credential. Treating the first 401 as terminal is how a league with
+# 121 topics captured nothing at all.
+TRANSACTION_AUTH_RETRIES = 5
+TRANSACTION_BACKOFF_SECONDS = 4
+TRANSACTION_TIMEOUT_SECONDS = 30
+
+
+class TransactionCapture:
+    """What the transaction feed actually said, and how sure we are.
+
+    `topics` is the payload for a served outcome and None otherwise --
+    an unavailable feed has no topic list, and must never be coerced to []
+    (which reads downstream as "proven zero activity").
+    """
+
+    def __init__(self, outcome, topics=None, http_status=None, attempts=1):
+        self.outcome = outcome
+        self.topics = topics
+        self.http_status = http_status
+        self.attempts = attempts
+
+    @property
+    def served(self):
+        return self.outcome in SERVED_OUTCOMES
+
+    @property
+    def topic_count(self):
+        return len(self.topics) if self.topics is not None else None
+
+    def as_evidence(self):
+        """The coverage row: what was asked, what came back, how hard we
+        tried. Persisted at league-season grain so the warehouse can prove
+        a zero rather than infer one from an absence of rows."""
+        return {
+            'outcome': self.outcome,
+            'topic_count': self.topic_count,
+            'http_status': self.http_status,
+            'attempts': self.attempts,
+        }
+
+
 def fetch_transactions(year):
     """Return the season's transaction activity as verbatim ESPN topic
     objects (add / drop / trade, plus lineup moves that share the feed),
@@ -2114,14 +2182,16 @@ def fetch_transactions(year):
     a similarly-shaped source, not this endpoint. A 404 here is treated as "no
     board for this season," returning [] so a backfill --year cleanly no-ops.
 
-    Returns [] when the board is empty (pre-draft) or not served for the season.
-    Returns None when ESPN refuses this otherwise-authenticated member access
-    to the communications feed. None means unavailable, not empty; callers
-    must preserve any older good snapshot and omit dependent claims.
+    Returns a TransactionCapture carrying one of four outcomes. The old
+    two-valued answer ([] or None) could not express the difference between
+    "checked, genuinely nothing happened" and "not served / not allowed",
+    and downstream both looked like an absence of rows.
     """
     url = f"{ESPN_API_BASE}/{year}/segments/0/leagues/{LEAGUE_ID}/communication/"
     topics = []
     offset, page_size, max_topics = 0, 200, 20000
+    total_attempts = 0
+
     while offset < max_topics:
         fantasy_filter = {
             "topics": {
@@ -2131,36 +2201,67 @@ def fetch_transactions(year):
                 "sortMessageDate": {"sortPriority": 1, "sortAsc": False},
             }
         }
+        response, attempts = _request_transaction_page(url, fantasy_filter)
+        total_attempts += attempts
+
+        # A past season's board is not served at all. That is UNAVAILABLE,
+        # never a proven zero: the old code returned [] here, which is the
+        # same value an empty board returns, so "ESPN has no board for 2024"
+        # and "nothing happened in 2024" became indistinguishable.
+        if response.status_code == 404:
+            print(f"  ESPN serves no transaction board for {year} "
+                  f"(current-season only) -- recorded as not served.")
+            return TransactionCapture(NOT_SERVED, None, 404, total_attempts)
+
+        if response.status_code in (401, 403):
+            print(
+                f"  [warn] ESPN did not authorize the transaction board for "
+                f"{year} (HTTP {response.status_code} after {attempts} "
+                f"attempts). Transaction-dependent output will be omitted "
+                f"rather than reported as empty, and any prior good snapshot "
+                f"is preserved."
+            )
+            return TransactionCapture(
+                UNAUTHORIZED, None, response.status_code, total_attempts)
+
+        response.raise_for_status()
+        page = response.json().get("topics") or []
+        topics.extend(page)
+        if len(page) < page_size:
+            break
+        offset += page_size
+
+    # HTTP 200 and nothing in it is EVIDENCE, and the most easily lost kind:
+    # a brand-new or quiet league genuinely has no activity, and proving that
+    # is what lets its roster stints build at all.
+    outcome = SERVED_NONEMPTY if topics else SERVED_EMPTY
+    return TransactionCapture(outcome, topics, 200, total_attempts)
+
+
+def _request_transaction_page(url, fantasy_filter):
+    """One page, retrying a 401/403 a bounded number of times.
+
+    Returns (response, attempts). Only 401/403 are retried -- they are the
+    statuses this endpoint uses when it sheds load, and a stable one after
+    the budget is exhausted is a real refusal. A 404 or a 200 is an answer
+    on the first ask and is returned immediately.
+    """
+    response = None
+    for attempt in range(1, TRANSACTION_AUTH_RETRIES + 1):
         response = requests.get(
             url,
             params={"view": "kona_league_communication"},
             cookies={"swid": SWID, "espn_s2": ESPN_S2},
             headers={"x-fantasy-filter": json.dumps(fantasy_filter)},
+            timeout=TRANSACTION_TIMEOUT_SECONDS,
         )
-        # A past season's board isn't served (the endpoint 404s). Treat that as
-        # "no transactions for this season" rather than an error, so pointing a
-        # backfill at any --year is safe.
-        if response.status_code == 404:
-            print(f"  ESPN serves no transaction board for {year} "
-                  f"(current-season only) -- skipping.")
-            return []
-        if response.status_code in (401, 403):
-            print(
-                f"  [warn] ESPN did not authorize the transaction board for "
-                f"{year} (HTTP {response.status_code}). Other league data may "
-                "still be available; transaction-dependent output will be "
-                "omitted rather than reported as empty."
-            )
-            return None
-        response.raise_for_status()
-        page = response.json().get("topics") or []
-        if not page:
-            break
-        topics.extend(page)
-        if len(page) < page_size:
-            break
-        offset += page_size
-    return topics
+        if response.status_code not in (401, 403):
+            return response, attempt
+        if attempt < TRANSACTION_AUTH_RETRIES:
+            # Linear backoff: the flap clears in seconds, and an exponential
+            # ramp would spend the budget waiting rather than asking.
+            time.sleep(TRANSACTION_BACKOFF_SECONDS * attempt)
+    return response, TRANSACTION_AUTH_RETRIES
 
 
 def load_transactions_to_snowflake(conn, topics, year, league_key):
@@ -2316,6 +2417,10 @@ class SnowflakeSink:
     def write_transactions(self, topics, year, league_key):
         load_transactions_to_snowflake(self.conn, topics, year, league_key)
 
+    def write_transaction_coverage(self, evidence, year, league_key):
+        load_snapshot_to_snowflake(self.conn, "TRANSACTION_COVERAGE", evidence,
+                                   year, league_key, "transaction coverage")
+
     # -- MLB-227: the blocks that were already being fetched ---------------
     def write_schedule_settings(self, payload, year, league_key):
         load_snapshot_to_snowflake(self.conn, "SCHEDULE_SETTINGS", payload,
@@ -2379,18 +2484,45 @@ def open_sink(raw_target, parquet_dir=None):
 
 
 def extract_transactions(sink, year, league_key):
-    """Pull the season transaction board from ESPN and load it to the sink."""
+    """Pull the season transaction board and record what the feed said.
+
+    COVERAGE IS ALWAYS WRITTEN, on every outcome. That row is the evidence
+    the warehouse needs to tell a proven zero from an absence, and it is
+    precisely what the old code threw away: an unavailable feed and an empty
+    one both wrote nothing, so `RAW.TRANSACTIONS` having no rows meant either
+    "quiet league" or "we never got in", with no way to distinguish them.
+
+    THE SNAPSHOT is written only when the feed was served. An unavailable
+    attempt must not overwrite or erase a good earlier capture -- the topics
+    table is append-only and simply gains no row, so the prior snapshot
+    stands and staging keeps reading it.
+    """
     print(f"\nTransactions for {year}:")
-    topics = fetch_transactions(year)
-    if topics is None:
+    capture = fetch_transactions(year)
+
+    if capture.served:
+        # An empty served board still writes its (empty) snapshot: the row
+        # itself is the proof the board was read and held nothing.
+        sink.write_transactions(capture.topics, year, league_key)
+        if capture.outcome == SERVED_NONEMPTY:
+            print(f"  Retrieved {capture.topic_count} transaction topics "
+                  f"for {year}")
+        else:
+            print(f"  Transaction board for {year} is served and EMPTY -- "
+                  f"recording proven-zero activity (not 'unavailable')")
+    else:
         print("  Transaction board unavailable -- preserving any prior "
               "snapshot and continuing.")
+
+    _write_transaction_coverage(sink, capture, year, league_key)
+
+
+def _write_transaction_coverage(sink, capture, year, league_key):
+    """Persist the coverage verdict, tolerating a sink that predates it."""
+    writer = getattr(sink, 'write_transaction_coverage', None)
+    if writer is None:
         return
-    if topics:
-        print(f"  Retrieved {len(topics)} transaction topics for {year}")
-        sink.write_transactions(topics, year, league_key)
-    else:
-        print(f"  No transaction activity found for {year} -- skipping transactions load")
+    writer(capture.as_evidence(), year, league_key)
 
 
 def extract_scoring_settings(sink, year, league_key):

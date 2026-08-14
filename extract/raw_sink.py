@@ -480,6 +480,13 @@ class LocalParquetSink:
     def write_transactions(self, topics, year, league_key):
         self._write_snapshot("TRANSACTIONS", topics, year, league_key)
 
+    def write_transaction_coverage(self, evidence, year, league_key):
+        """The four-way verdict on whether the transaction board was read
+        (MLB-243). Same append-only snapshot semantics as the rest; the
+        warehouse reads the latest SERVED row per league-season so a later
+        unavailable attempt cannot un-prove an earlier success."""
+        self._write_snapshot("TRANSACTION_COVERAGE", evidence, year, league_key)
+
     # -- MLB-227 ----------------------------------------------------------
     # Same append-only snapshot semantics as the five above, so they share
     # _write_snapshot rather than each restating it. The warehouse twin is

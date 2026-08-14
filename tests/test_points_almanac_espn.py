@@ -31,35 +31,60 @@ from almanac_render import TEAM_WEEKS_TAB
 # Two of them deliberately share an abbreviation.
 # --------------------------------------------------------------------------
 
+STAT_SPECS = [
+    {'stat_name': 'HR', 'stat_category': 'hitting'},
+    {'stat_name': 'K', 'stat_category': 'pitching'},
+]
+
+# The row shape espn_points_data.standings_rows produces: the SAME contract
+# almanac_data.get_team_standings returns, sourced from the season fact.
+# W/L/T are None -- this format has no record, and 0-0 would be a result.
 SEASON_TOTALS = [
     {'team_id': 1, 'team_name': 'Harbor Otters', 'team_abbrev': 'HAR',
-     'owner_display': 'Owner unavailable', 'calculated_points': 5361.0,
+     'owner_display': 'Owner unavailable', 'wins': None, 'losses': None,
+     'ties': None, 'matchup_periods_played': 142, 'scoring_days_played': 142,
+     'standard_matchup_days': 1, 'calculated_points': 5361.0,
      'calculated_hitting_pts': 2796.0, 'calculated_pitching_pts': 2565.0,
-     'negative_points': 328.0, 'platform_points': 5361.0, 'points_rank': 1},
+     'against_calculated_points': None, 'hr': 210, 'k': 1400},
     {'team_id': 2, 'team_name': 'Granite Owls', 'team_abbrev': 'GRN',
-     'owner_display': 'Owner unavailable', 'calculated_points': 4641.0,
+     'owner_display': 'Owner unavailable', 'wins': None, 'losses': None,
+     'ties': None, 'matchup_periods_played': 142, 'scoring_days_played': 142,
+     'standard_matchup_days': 1, 'calculated_points': 4641.0,
      'calculated_hitting_pts': 2614.0, 'calculated_pitching_pts': 2027.0,
-     'negative_points': 309.0, 'platform_points': 4641.0, 'points_rank': 2},
+     'against_calculated_points': None, 'hr': 180, 'k': 1200},
     {'team_id': 3, 'team_name': 'Gale Ridge Giants', 'team_abbrev': 'GRN',
-     'owner_display': 'Owner unavailable', 'calculated_points': 3669.0,
+     'owner_display': 'Owner unavailable', 'wins': None, 'losses': None,
+     'ties': None, 'matchup_periods_played': 142, 'scoring_days_played': 142,
+     'standard_matchup_days': 1, 'calculated_points': 3669.0,
      'calculated_hitting_pts': 2174.0, 'calculated_pitching_pts': 1495.0,
-     'negative_points': 415.0, 'platform_points': 3669.0, 'points_rank': 3},
+     'against_calculated_points': None, 'hr': 150, 'k': 1000},
 ]
 
 SLOT_ROWS = [
-    {'team_id': 1, 'team_name': 'Harbor Otters', 'lineup_slot': 'C',
-     'slot_calculated_points': 308.0, 'sort_order': 1,
+    {'team_id': 1, 'team_name': 'Harbor Otters', 'team_abbrev': 'HAR',
+     'owner_display': 'Owner unavailable', 'lineup_slot': 'C',
+     'slot_pts': 308.0, 'sort_order': 1,
      'is_active_lineup_slot': True, 'starter_count': 1},
-    {'team_id': 1, 'team_name': 'Harbor Otters', 'lineup_slot': 'P',
-     'slot_calculated_points': 2565.0, 'sort_order': 8,
+    {'team_id': 1, 'team_name': 'Harbor Otters', 'team_abbrev': 'HAR',
+     'owner_display': 'Owner unavailable', 'lineup_slot': 'P',
+     'slot_pts': 2565.0, 'sort_order': 8,
      'is_active_lineup_slot': True, 'starter_count': 7},
-    {'team_id': 2, 'team_name': 'Granite Owls', 'lineup_slot': 'C',
-     'slot_calculated_points': 242.0, 'sort_order': 1,
+    {'team_id': 2, 'team_name': 'Granite Owls', 'team_abbrev': 'GRN',
+     'owner_display': 'Owner unavailable', 'lineup_slot': 'C',
+     'slot_pts': 242.0, 'sort_order': 1,
      'is_active_lineup_slot': True, 'starter_count': 1},
-    {'team_id': 2, 'team_name': 'Granite Owls', 'lineup_slot': 'P',
-     'slot_calculated_points': 2027.0, 'sort_order': 8,
+    {'team_id': 2, 'team_name': 'Granite Owls', 'team_abbrev': 'GRN',
+     'owner_display': 'Owner unavailable', 'lineup_slot': 'P',
+     'slot_pts': 2027.0, 'sort_order': 8,
      'is_active_lineup_slot': True, 'starter_count': 7},
 ]
+
+
+def _standings(**kw):
+    """Advanced Standings through THE REAL BUILDER -- the one both mature
+    books use -- in points mode."""
+    return almanac_logic.build_advanced_standings_tab_rows(
+        SEASON_TOTALS, SLOT_ROWS, STAT_SPECS, 2026, season_long=True, **kw)
 
 
 def _cells(rows):
@@ -67,71 +92,149 @@ def _cells(rows):
 
 
 # --------------------------------------------------------------------------
-# Advanced Standings: current-season totals, not a W-L model
+# Advanced Standings: the REAL builder, in points mode
 # --------------------------------------------------------------------------
 
 def test_advanced_standings_is_populated_for_an_unfinished_first_season():
     """No completed matchup, no completed season, real numbers anyway."""
-    rows = almanac_logic.build_points_standings_tab_rows(
-        SEASON_TOTALS, SLOT_ROWS, 2026)
-    flat = _cells(rows)
-    assert 'Harbor Otters' in flat
-    assert '5361' in flat, 'the season total did not reach the table'
-    assert '2565' in flat, 'lineup-slot production did not reach the table'
-    assert 'Points by Lineup Slot' in flat
+    flat = _cells(_standings())
+    assert 'HAR' in flat
+    assert any('5361' in c for c in flat), 'the season total did not render'
+    assert 'Detailed Standings' in flat
 
 
-def test_advanced_standings_uses_no_h2h_win_loss_model():
-    """`mart_team_season_standings` is empty for this format by design.
-    Rendering its shape would have produced a grid of blanks under a W-L
-    header."""
-    rows = almanac_logic.build_points_standings_tab_rows(
-        SEASON_TOTALS, SLOT_ROWS, 2026)
+def test_the_points_tab_uses_the_rich_builder_not_a_simplified_twin():
+    """The earlier stand-in rendered two tables. The established books carry
+    detailed standings, slot grids and the rest, and a points league now
+    gets the same tab."""
+    flat = ' '.join(_cells(_standings()))
+    assert 'Detailed Standings' in flat
+    assert 'Lineup Slot' in flat
+
+
+def test_the_identity_column_is_points_not_a_win_loss_record():
+    """A points league has no record; "0-0" there is a fabricated result."""
+    rows = _standings()
     header = next(r for r in rows if r and r[0] == 'Rank')
-    assert 'W' not in header and 'L' not in header
-    assert 'Record' not in header
-    assert 'Total Points' in header
-    body = ' '.join(_cells(rows)).lower()
-    assert 'there are no matchups and no w-l record' in body
+    assert header[3] == 'Total Pts'
+    assert 'W-L' not in header
+    leader = next(r for r in rows if r and r[0] == 1 and r[1] == 'HAR')
+    assert leader[3] == 5361
+    assert '-' not in str(leader[3])
 
 
-def test_behind_leader_is_measured_from_the_leader():
-    rows = almanac_logic.build_points_standings_tab_rows(
-        SEASON_TOTALS, SLOT_ROWS, 2026)
-    data = [r for r in rows if r and r[0] in (1, 2, 3)]
-    assert data[0][-1] == 0
-    assert data[1][-1] == 5361 - 4641
+def test_the_h2h_identity_column_is_untouched():
+    """Same builder, default mode: the pinned corpus depends on this."""
+    h2h = [dict(r, wins=9, losses=4, ties=0) for r in SEASON_TOTALS]
+    rows = almanac_logic.build_advanced_standings_tab_rows(
+        h2h, SLOT_ROWS, STAT_SPECS, 2026)
+    header = next(r for r in rows if r and r[0] == 'Rank')
+    assert header[3] == 'W-L'
+    leader = next(r for r in rows if r and r[0] == 1)
+    assert leader[3] == '9-4'
 
 
-def test_absent_points_render_blank_rather_than_zero():
-    """"No data" and "zero points" are different answers."""
-    assert almanac_logic._points_cell(None) == ''
-    assert almanac_logic._points_cell(0) == 0
+def test_the_two_headers_are_the_same_width():
+    """Every gradient, chart helper column and block offset is positional,
+    so a different-width identity block would silently mispaint the tab."""
+    import almanac_render
+    assert (len(almanac_render.STANDINGS_FIXED_HEADER)
+            == len(almanac_render.STANDINGS_FIXED_HEADER_SEASON_LONG))
+    hit, pit = [STAT_SPECS[0]], [STAT_SPECS[1]]
+    assert (len(almanac_render.standings_header(hit, pit))
+            == len(almanac_render.standings_header(hit, pit, season_long=True)))
 
 
-def test_an_empty_season_says_so_instead_of_rendering_an_empty_grid():
-    rows = almanac_logic.build_points_standings_tab_rows([], [], 2026)
-    flat = ' '.join(_cells(rows))
-    assert 'No team production captured' in flat
-    assert 'No lineup-slot production captured' in flat
+def test_the_detailed_standings_scope_label_is_not_weekly_averages():
+    """There are no weeks to average over."""
+    flat = ' '.join(_cells(_standings()))
+    assert 'Season Totals, Current Season' in flat
+    assert 'Weekly Averages' not in flat
 
 
-def test_both_tables_put_their_team_names_in_the_same_column():
-    """The two tables stack and are read together. The same ten team names
-    landing in two different columns is what makes the tab look broken."""
-    rows = almanac_logic.build_points_standings_tab_rows(
-        SEASON_TOTALS, SLOT_ROWS, 2026)
-    standings_header = next(r for r in rows if r and r[0] == 'Rank')
-    slot_header = next(r for r in rows if len(r) > 1 and r[1] == 'Team')
-    assert standings_header.index('Team') == slot_header.index('Team') == 1
+def test_the_standings_note_drops_divisions_and_weeks():
+    flat = ' '.join(_cells(_standings()))
+    assert 'no matchups or W-L records' in flat
+    assert 'division winners first' not in flat
 
-    names = {r['team_name'] for r in SEASON_TOTALS}
-    for row in rows:
-        if not row:
-            continue
-        assert str(row[0]) not in names, (
-            f'a team name landed in column A: {row[:2]}'
+
+# --------------------------------------------------------------------------
+# Acquisition channels: only when the log was actually read
+# --------------------------------------------------------------------------
+
+ACQ_ROWS = [{
+    'team_id': 1, 'team_abbrev': 'HAR', 'owner_display': 'Owner unavailable',
+    'keeper_active_pts': 0, 'draft_active_pts': 500, 'trade_active_pts': 0,
+    'fa_add_active_pts': 40, 'acquired_active_pts': 540,
+    'dropped_active_pts': 0, 'traded_away_active_pts': 0,
+    'lost_active_pts': 0, 'fa_delta_active_pts': 40,
+    'trade_delta_active_pts': 0, 'keeper_rostered_pts': 0,
+    'draft_rostered_pts': 500, 'trade_rostered_pts': 0,
+    'fa_add_rostered_pts': 40, 'acquired_rostered_pts': 540,
+    'dropped_rostered_pts': 0, 'traded_away_rostered_pts': 0,
+    'lost_rostered_pts': 0, 'fa_delta_rostered_pts': 40,
+    'trade_delta_rostered_pts': 0,
+}]
+
+
+def test_a_read_log_renders_the_acquisition_tables():
+    flat = ' '.join(_cells(_standings(acquisition_rows=ACQ_ROWS)))
+    assert 'Production by Acquisition Channel' in flat
+
+
+def test_an_unread_log_says_so_instead_of_charting_zeroes():
+    """A grid of zeroes asserts nobody made a move all year. That is a
+    claim, and an unread log does not support it."""
+    note = points_almanac.ACQUISITION_UNAVAILABLE_NOTE
+    flat = ' '.join(_cells(_standings(acquisition_rows=None,
+                                      acquisition_unavailable=note)))
+    assert 'Production by Acquisition Channel' in flat
+    assert 'could not be read' in flat
+    assert 'does NOT mean there were no' in flat
+
+
+def test_an_unread_log_never_fabricates_a_channel_classification():
+    note = points_almanac.ACQUISITION_UNAVAILABLE_NOTE
+    rows = _standings(acquisition_rows=None, acquisition_unavailable=note)
+    cells = _cells(rows)
+    # The channel column headers only exist when a real table is drawn.
+    for fabricated in ('Keeper', 'Opening', 'Picks', 'Trade', 'FA'):
+        assert fabricated not in cells, (
+            f'{fabricated!r} rendered as a channel over an unread log'
         )
+
+
+def test_the_adapter_withholds_channels_when_coverage_is_absent(monkeypatch):
+    """The gate lives in the adapter, so no caller can accidentally chart an
+    unread log."""
+    monkeypatch.setattr(espn_points_data, 'query_snowflake',
+                        lambda sql, params=None: [{'has_transaction_log': False}])
+    monkeypatch.setattr(espn_points_data, 'league_predicate',
+                        lambda alias=None: "league_key = 'x'")
+    assert espn_points_data.acquisition_channels(2026) is None
+
+
+def test_the_adapter_returns_channels_when_coverage_is_proven(monkeypatch):
+    import almanac_data
+    monkeypatch.setattr(espn_points_data, 'query_snowflake',
+                        lambda sql, params=None: [{'has_transaction_log': True}])
+    monkeypatch.setattr(espn_points_data, 'league_predicate',
+                        lambda alias=None: "league_key = 'x'")
+    monkeypatch.setattr(almanac_data, 'get_team_acquisition_channels',
+                        lambda season: ACQ_ROWS)
+    assert espn_points_data.acquisition_channels(2026) == ACQ_ROWS
+
+
+# --------------------------------------------------------------------------
+# The standing-by-period chart walks scoring days
+# --------------------------------------------------------------------------
+
+def test_the_chart_apparatus_renders_for_a_points_league():
+    arc = [{'team_id': t, 'team_abbrev': a, 'period': p, 'standings_rank': r}
+           for p in (1, 2, 3)
+           for r, (t, a) in enumerate([(1, 'HAR'), (2, 'GRN')], start=1)]
+    flat = ' '.join(_cells(_standings(rank_arc_rows=arc))).lower()
+    assert 'time series' in flat
 
 
 # --------------------------------------------------------------------------
@@ -139,18 +242,20 @@ def test_both_tables_put_their_team_names_in_the_same_column():
 # --------------------------------------------------------------------------
 
 def test_an_unfinished_season_is_not_reinterpreted_as_a_rivalry_result():
-    rows = almanac_logic.build_points_standings_tab_rows(
-        SEASON_TOTALS, SLOT_ROWS, 2026,
-        rivalry_note=almanac_logic.RIVALRY_UNAVAILABLE_NOTE)
-    flat = ' '.join(_cells(rows))
-    assert 'Rivalry Matrix: unavailable' in flat
-    assert 'COMPLETED seasons' in flat
-
-
-def test_a_completed_season_gets_no_unavailable_note():
-    rows = almanac_logic.build_points_standings_tab_rows(
-        SEASON_TOTALS, SLOT_ROWS, 2026, rivalry_note=None)
-    assert 'Rivalry Matrix: unavailable' not in ' '.join(_cells(rows))
+    """The SHARED rivalry block already says this, so the points tab needs
+    no wording of its own -- that is the reapplication working."""
+    axes = [{'identity_key': 'fid:1', 'identity_name': 'Harbor Otters',
+             'identity_abbrev': 'HAR', 'sort_order': 1,
+             'identity_source': 'franchise_id', 'league_format': 'points',
+             'has_rivalry_evidence': False, 'active_platform_teams': 1,
+             'admissible_seasons': 0, 'current_season': 2026},
+            {'identity_key': 'fid:2', 'identity_name': 'Granite Owls',
+             'identity_abbrev': 'GRN', 'sort_order': 2,
+             'identity_source': 'franchise_id', 'league_format': 'points',
+             'has_rivalry_evidence': False, 'active_platform_teams': 1,
+             'admissible_seasons': 0, 'current_season': 2026}]
+    flat = ' '.join(_cells(_standings(rivalry_axes=axes, rivalry_pairs=[])))
+    assert 'RIVALRY RESULTS UNAVAILABLE' in flat
 
 
 # --------------------------------------------------------------------------
@@ -428,10 +533,23 @@ def assembled(monkeypatch):
         'season_opener': date(2026, 3, 25), 'latest_date': date(2026, 8, 13),
         'first_season': 2026,
     })
-    monkeypatch.setattr(espn_points_data, 'season_totals',
-                        lambda season: SEASON_TOTALS)
-    monkeypatch.setattr(espn_points_data, 'slot_production',
+    import almanac_data
+    monkeypatch.setattr(espn_points_data, 'standings_rows',
+                        lambda season, specs: SEASON_TOTALS)
+    monkeypatch.setattr(espn_points_data, 'rank_arc', lambda season: [])
+    monkeypatch.setattr(espn_points_data, 'season_finishes', lambda: [])
+    monkeypatch.setattr(espn_points_data, 'acquisition_channels',
+                        lambda season: None)
+    monkeypatch.setattr(almanac_data, 'get_team_week_stat_specs',
+                        lambda: STAT_SPECS)
+    monkeypatch.setattr(almanac_data, 'get_team_slot_points',
                         lambda season: SLOT_ROWS)
+    monkeypatch.setattr(almanac_data, 'get_team_slot_points_alltime',
+                        lambda: [])
+    monkeypatch.setattr(almanac_data, 'get_team_affinity_weights',
+                        lambda season: [])
+    monkeypatch.setattr(almanac_data, 'get_rivalry_axes', lambda: [])
+    monkeypatch.setattr(almanac_data, 'get_rivalry_matrix', lambda: [])
     monkeypatch.setattr(espn_points_data, 'home_boards',
                         lambda context, today=None: BOARDS)
     # No season has finished -- the first year is still in flight.
@@ -592,8 +710,7 @@ def test_the_warning_reaches_home_and_advanced_standings():
     home = almanac_logic.build_points_home_tab_rows(
         BOARDS, season_year=2026, month_window=BOARDS['month_window'],
         era_label='2026', team_titles=['HAR'], caveat=caveat)
-    standings = almanac_logic.build_points_standings_tab_rows(
-        SEASON_TOTALS, SLOT_ROWS, 2026, caveat=caveat)
+    standings = _standings(caveat=caveat)
     assert caveat in _cells(home)
     assert caveat in _cells(standings)
 
@@ -601,8 +718,7 @@ def test_the_warning_reaches_home_and_advanced_standings():
 def test_no_caveat_leaves_both_tabs_exactly_as_they_were():
     """An ordinary league must not gain a blank row where the warning
     would have gone."""
-    with_none = almanac_logic.build_points_standings_tab_rows(
-        SEASON_TOTALS, SLOT_ROWS, 2026, caveat=None)
+    with_none = _standings(caveat=None)
     assert all(r != [None] and r != [''] for r in with_none[:4])
     assert with_none[2] == []
 
@@ -610,10 +726,8 @@ def test_no_caveat_leaves_both_tabs_exactly_as_they_were():
 def test_the_warning_does_not_change_any_number():
     """Detected and stated -- never silently corrected. The totals with the
     caveat must equal the totals without it."""
-    without = almanac_logic.build_points_standings_tab_rows(
-        SEASON_TOTALS, SLOT_ROWS, 2026)
-    with_note = almanac_logic.build_points_standings_tab_rows(
-        SEASON_TOTALS, SLOT_ROWS, 2026, caveat='anything at all')
+    without = _standings()
+    with_note = _standings(caveat='anything at all')
     numbers = lambda rows: [c for r in rows for c in r
                             if isinstance(c, (int, float))]
     assert numbers(without) == numbers(with_note)
@@ -736,9 +850,7 @@ def test_the_ruling_is_recorded_for_2_0():
 
 def _standings_shape():
     """The real Advanced Standings shape: three prose rows above a table."""
-    return almanac_logic.build_points_standings_tab_rows(
-        SEASON_TOTALS, SLOT_ROWS, 2026,
-        rivalry_note=almanac_logic.RIVALRY_UNAVAILABLE_NOTE,
+    return _standings(
         caveat=('Heads up: this league drafted on July 31, 2026 -- 128 days '
                 'after the 2026 season opened on March 25. Totals on every '
                 'tab include MLB production from before the league existed, '
@@ -782,9 +894,10 @@ def test_the_team_column_is_sized_by_the_longest_team_name():
     rows = _standings_shape()
     width = max(len(r) for r in rows)
     widths = almanac_write._plain_tab_column_widths(rows, width)
-    longest_team = max(len(r['team_name']) for r in SEASON_TOTALS)
-    assert widths[1] >= longest_team * 4, (
-        'the Team column is too narrow to show a real team name'
+    # Table A identifies teams by ABBREV, so that is what sizes column B.
+    longest = max(len(r['team_abbrev']) for r in SEASON_TOTALS)
+    assert widths[1] >= longest * 7, (
+        'the Team column is too narrow to show a team abbreviation'
     )
 
 
@@ -865,3 +978,58 @@ def test_the_identity_repair_is_scoped_to_the_season_points_path():
     roster = (_MODELS / 'staging' / 'stg_box_scores__team_rosters.sql'
               ).read_text(encoding='utf-8')
     assert "ref('stg_team_standings')" in roster
+
+
+# --------------------------------------------------------------------------
+# The live write path (MLB-243)
+# --------------------------------------------------------------------------
+
+def test_the_write_path_routes_each_tab_to_its_own_writer(monkeypatch):
+    """A NameError here is invisible to every other test in this file --
+    nothing else executes write_points_almanac, and it only runs against
+    real Sheets. It shipped one, so it gets a stub-level smoke test."""
+    import almanac_data
+    import almanac_write
+
+    calls = {'plain': [], 'standings': [], 'home': [], 'sorted': []}
+
+    class _WS:
+        def __init__(self, title):
+            self.title, self.id = title, abs(hash(title)) % 1000
+
+    monkeypatch.setattr(points_almanac, '_build', lambda: (
+        [('Home', [['H']]), ('Records', [['R']]),
+         ('Advanced Standings', [['A']]), ('Draft Recap', [['D']]),
+         ('HAR', [['T']])],
+        {'season_year': 2026}, ['HAR'], lambda targets: [['HOME', targets]]))
+    monkeypatch.setattr(almanac_data, 'get_team_week_stat_specs',
+                        lambda: STAT_SPECS)
+    monkeypatch.setattr(almanac_write, '_replace_plain_tab',
+                        lambda sp, t, r: calls['plain'].append(t) or _WS(t))
+    monkeypatch.setattr(almanac_write, '_replace_records_tab',
+                        lambda sp, r: _WS('Records'))
+    monkeypatch.setattr(almanac_write, '_replace_draft_tab',
+                        lambda sp, r: _WS('Draft Recap'))
+    monkeypatch.setattr(almanac_write, '_replace_team_tab',
+                        lambda sp, t, r: _WS(t))
+    monkeypatch.setattr(
+        almanac_write, '_replace_advanced_standings_tab',
+        lambda sp, r, specs: calls['standings'].append(specs) or _WS('Advanced Standings'))
+    monkeypatch.setattr(almanac_write, '_replace_home_tab',
+                        lambda sp, r: calls['home'].append(r))
+    monkeypatch.setattr(almanac_write, '_sort_almanac_tabs',
+                        lambda sp, order: calls['sorted'].append(order))
+
+    class _Client:
+        def open_by_key(self, key):
+            return object()
+
+    points_almanac.write_points_almanac('SHEET', client=_Client())
+
+    assert calls['standings'] == [STAT_SPECS], (
+        'Advanced Standings did not reach the STYLED writer with its specs'
+    )
+    assert 'Advanced Standings' not in calls['plain'], (
+        'Advanced Standings fell back to the unstyled writer'
+    )
+    assert calls['home'], 'Home was never written'

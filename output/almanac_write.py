@@ -1371,7 +1371,12 @@ def _replace_advanced_standings_tab(spreadsheet, rows, stat_specs):
                                   'Points by Lineup Slot',
                                   'Production by Acquisition Channel',
                                   'Roster Affinity by MLB Team',
-                                  'Rank by Week',
+                                  # 'Rank by' covers both books: the H2H
+                                  # chart walks weeks, the season-points one
+                                  # walks scoring days (MLB-243). Prefixing
+                                  # here rather than listing both is the
+                                  # point of the prefix match above.
+                                  'Rank by',
                                   'Rivalry Matrix')
         # Two passes so every navy band runs as far as the WIDEST one
         # (Kyle round 12: unified band width).

@@ -30,10 +30,9 @@ import almanac_data
 import almanac_write
 import espn_points_data
 from almanac_logic import (
-    RIVALRY_UNAVAILABLE_NOTE,
+    build_advanced_standings_tab_rows,
     build_draft_tab_rows,
     build_points_home_tab_rows,
-    build_points_standings_tab_rows,
     build_records_tab_rows,
     build_team_history_tabs,
     build_trades_tab_rows,
@@ -46,6 +45,15 @@ from almanac_render import (
     TRADES_TAB,
 )
 
+
+# Said in place of the acquisition tables when the transaction board was
+# never successfully read. A chart of zeroes would assert that nobody made a
+# move all year; this asserts only what we actually know.
+ACQUISITION_UNAVAILABLE_NOTE = (
+    "Unavailable -- this league's transaction log could not be read, so how "
+    'each player was acquired is unknown. This does NOT mean there were no '
+    'adds, drops or trades. It fills in once a capture succeeds.'
+)
 
 # Said on Home when the transactions feed could not be read at all. The
 # distinction it protects is the whole point: an accessible feed with no
@@ -109,12 +117,30 @@ def _build(nav_targets=None, include_trades=True, context=None):
     # wrong.
     caveat = espn_points_data.late_draft_note(context)
 
-    standings_rows = build_points_standings_tab_rows(
-        espn_points_data.season_totals(season_year),
-        espn_points_data.slot_production(season_year),
+    # THE RICH BUILDER, not a simplified twin (MLB-243). Every section the
+    # established books carry -- the standing-by-period chart, historic
+    # finishes, the per-stat detailed standings with its colour grading, the
+    # slot grids, acquisition channels and the MLB affinity matrix -- already
+    # exists here. What a points league needed was points-shaped INPUTS, not
+    # a second renderer: the earlier two-table stand-in reproduced almost
+    # none of it.
+    stat_specs = almanac_data.get_team_week_stat_specs()
+    acquisition = espn_points_data.acquisition_channels(season_year)
+    standings_rows = build_advanced_standings_tab_rows(
+        espn_points_data.standings_rows(season_year, stat_specs),
+        almanac_data.get_team_slot_points(season_year),
+        stat_specs,
         season_year,
-        rivalry_note=(None if espn_points_data.has_completed_season(season_year)
-                      else RIVALRY_UNAVAILABLE_NOTE),
+        acquisition_rows=acquisition,
+        slot_rows_alltime=almanac_data.get_team_slot_points_alltime(),
+        affinity_rows=almanac_data.get_team_affinity_weights(season_year),
+        rank_arc_rows=espn_points_data.rank_arc(season_year),
+        finishes_rows=espn_points_data.season_finishes(),
+        rivalry_axes=almanac_data.get_rivalry_axes(),
+        rivalry_pairs=almanac_data.get_rivalry_matrix(),
+        season_long=True,
+        acquisition_unavailable=(
+            None if acquisition is not None else ACQUISITION_UNAVAILABLE_NOTE),
         caveat=caveat,
     )
 
@@ -208,6 +234,9 @@ def write_points_almanac(sheet_id, client=None):
     defaults to the maintainer client for configured dev/prod sheets.
     """
     tabs, context, team_titles, home_builder = _build()
+    # The styled Advanced Standings writer paints gradients from the same
+    # scored-stat specs the rows were built from, so it needs them here too.
+    stat_specs = almanac_data.get_team_week_stat_specs()
     client = client or almanac_write._get_authorized_client()
     spreadsheet = client.open_by_key(sheet_id)
 
@@ -226,12 +255,15 @@ def write_points_almanac(sheet_id, client=None):
         elif title == DRAFT_TAB:
             worksheets[title] = almanac_write._replace_draft_tab(
                 spreadsheet, rows)
+        elif title == ADVANCED_STANDINGS_TAB:
+            # The STYLED writer now (MLB-243). It paints gradients by
+            # column offset against standings_header's layout, and the
+            # points header is the same width as the H2H one, so every
+            # offset lands where it always did -- which is what makes the
+            # colour grading work here at all.
+            worksheets[title] = almanac_write._replace_advanced_standings_tab(
+                spreadsheet, rows, stat_specs)
         else:
-            # Advanced Standings takes the plain writer, NOT the H2H one:
-            # _replace_advanced_standings_tab paints gradients positioned
-            # against the per-stat weekly-average layout, and this tab has
-            # a different shape. Wrong formatting over right numbers is
-            # still a wrong tab.
             worksheets[title] = almanac_write._replace_plain_tab(
                 spreadsheet, title, rows)
 

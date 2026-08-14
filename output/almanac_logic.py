@@ -1229,145 +1229,12 @@ def build_draft_board_color_grid(board_rows):
     ]
 
 
-POINTS_STANDINGS_HEADER = [
-    'Rank', 'Team', 'Abbrev', 'Owner', 'Total Points', 'Offense', 'Defense',
-    'Negative', 'Behind Leader',
-]
-
-# The Rivalry Matrix keeps its completed-season requirement in every
-# format (RIVALRY_MATRIX_CONTRACT). A first year still in flight has no
-# finished season to compare, and reinterpreting one would publish a
-# rivalry result nobody has played out yet.
 RIVALRY_UNAVAILABLE_NOTE = (
     'Rivalry Matrix: unavailable. It compares COMPLETED seasons, and no '
     'season in this league has finished yet. It appears once one has.'
 )
 
 
-def build_points_standings_tab_rows(season_totals, slot_rows, season_year,
-                                    rivalry_note=None, caveat=None):
-    """Advanced Standings for a POINTS-format league (MLB-243).
-
-    THE H2H MODEL IS NOT REUSED HERE, and that is the point of the tab.
-    The head-to-head builder above is per-stat weekly averages over a W-L
-    standings ordered by the platform's playoff seed -- every one of those
-    concepts needs matchups. A season-points league has none, so
-    `mart_team_season_standings` is correctly EMPTY for it and rendering
-    that table would have produced a grid of blanks under a W-L header.
-
-    What decides a points league instead is simply points, so that is what
-    this shows: Table A ranks teams by season total with its offense /
-    defense / negative split, and Table B is the same team x
-    active-lineup-slot production grid the H2H tab carries -- that one is
-    format-agnostic and reads the same shared mart in both books.
-
-    Populated from the current season as it accrues. Nothing here waits
-    for a completed matchup or a completed season, because in this format
-    neither is what makes the numbers meaningful.
-    """
-    rows = [
-        [f'Advanced Standings: {season_year}'],
-        ['Season to date. This is a season-long points league, so the '
-         'standings are total calculated points -- there are no matchups '
-         'and no W-L record. Offense / Defense are the hitting and pitching '
-         'halves of that total; Negative is the size of the negative '
-         'scoring inside it.'],
-        *([[caveat]] if caveat else []),
-        [],
-        ['Season Points'],
-        list(POINTS_STANDINGS_HEADER),
-    ]
-
-    leader = None
-    for row in season_totals or []:
-        total = row.get('calculated_points') or 0
-        if leader is None:
-            leader = total
-        rows.append([
-            row.get('points_rank'),
-            row.get('team_name'),
-            row.get('team_abbrev'),
-            row.get('owner_display'),
-            _points_cell(total),
-            _points_cell(row.get('calculated_hitting_pts')),
-            _points_cell(row.get('calculated_pitching_pts')),
-            _points_cell(row.get('negative_points')),
-            _points_cell(leader - total) if leader is not None else '',
-        ])
-    if not season_totals:
-        rows.append(['No team production captured for this season yet.'])
-
-    rows.extend([[], [], ['Points by Lineup Slot']])
-    rows.extend(_points_slot_grid(slot_rows, season_totals))
-
-    if rivalry_note:
-        rows.extend([[], [], [rivalry_note]])
-    return rows
-
-
-def _points_slot_grid(slot_rows, season_totals):
-    """Team x active-lineup-slot points grid, teams in standings order.
-
-    INDENTED ONE COLUMN so its Team spine lands in column B, directly
-    under the Season Points table's Team column. The two tables stack on
-    the same page and are read together; starting one in A and the other
-    in B puts the same ten team names in two different places and makes
-    the tab look broken even when every value is right.
-
-    Bench/IL slots are carried as their own column rather than dropped:
-    in a points league what a manager left on the bench is a real part of
-    the season's story, and it is already separated by the mart's
-    is_active_lineup_slot flag.
-    """
-    if not slot_rows:
-        return [['', 'No lineup-slot production captured for this season yet.']]
-
-    by_team = defaultdict(dict)
-    slot_order, seen = [], set()
-    for row in slot_rows:
-        slot = row.get('lineup_slot')
-        by_team[row.get('team_id')][slot] = row.get('slot_calculated_points')
-        if slot not in seen:
-            seen.add(slot)
-            slot_order.append((row.get('sort_order'), slot))
-    slot_order = [slot for _, slot in sorted(
-        slot_order, key=lambda pair: (pair[0] if pair[0] is not None else 999,
-                                      pair[1] or ''))]
-
-    # Standings order when we have it, so both tables read down the same
-    # team spine; otherwise the mart's own team order.
-    ordered_teams = [r.get('team_id') for r in (season_totals or [])]
-    for row in slot_rows:
-        if row.get('team_id') not in ordered_teams:
-            ordered_teams.append(row.get('team_id'))
-
-    labels = {}
-    for row in slot_rows:
-        labels.setdefault(row.get('team_id'), row.get('team_name'))
-    for row in (season_totals or []):
-        labels[row.get('team_id')] = row.get('team_name')
-
-    grid = [['', 'Team', *slot_order]]
-    for team_id in ordered_teams:
-        if team_id not in by_team:
-            continue
-        cells = by_team[team_id]
-        grid.append(['', labels.get(team_id),
-                     *(_points_cell(cells.get(slot)) for slot in slot_order)])
-    return grid
-
-
-def _points_cell(value):
-    """Points as a plain whole number, blank when absent.
-
-    Whole numbers follow the points-format convention the CBS book already
-    uses: a season-long total carries no meaningful tenth. Absent renders
-    blank rather than 0 -- "no data" and "zero points" are different
-    answers and must not look the same.
-    """
-    if value is None:
-        return ''
-    return _round_half_up(float(value))
 
 
 def build_advanced_standings_tab_rows(standings_rows, slot_rows, stat_specs,
@@ -1379,7 +1246,10 @@ def build_advanced_standings_tab_rows(standings_rows, slot_rows, stat_specs,
                                       standings_rows_alltime=None,
                                       acquisition_rows_alltime=None,
                                       rivalry_axes=None,
-                                      rivalry_pairs=None):
+                                      rivalry_pairs=None,
+                                      season_long=False,
+                                      acquisition_unavailable=None,
+                                      caveat=None):
     """Build the Advanced Standings tab: the per-stat weekly-average
     standings (Table A) stacked over a team x active-lineup-slot points
     grid (Table B), an all-time twin of Table B shown as per-matchup
@@ -1414,10 +1284,18 @@ def build_advanced_standings_tab_rows(standings_rows, slot_rows, stat_specs,
         # Kyle 2026-08-09: platform-agnostic. The W-L clause named ESPN and
         # the standings/chart caveat moved down to sit with the table it
         # describes, which is also where a reader hits the disagreement.
-        [f'Regular season to date, shown as averages per {std_days} days of '
-         'gameplay (one standard matchup; abnormal-length weeks normalize by '
-         'their actual days with games). Offense / Defense / Total and '
-         'Against are calculated points (Against = points conceded).'],
+        #
+        # MLB-243: a season-points league has no matchup to normalize by, so
+        # the per-standard-matchup framing would describe arithmetic it does
+        # not perform -- its cells are season totals.
+        [('Season to date. This is a season-long points league, so every '
+          'figure is a season total and there are no matchups or W-L '
+          'records. Offense / Defense / Total are calculated points.')
+         if season_long else
+         (f'Regular season to date, shown as averages per {std_days} days of '
+          'gameplay (one standard matchup; abnormal-length weeks normalize by '
+          'their actual days with games). Offense / Defense / Total and '
+          'Against are calculated points (Against = points conceded).')],
         [],
     ]
 
@@ -1445,7 +1323,8 @@ def build_advanced_standings_tab_rows(standings_rows, slot_rows, stat_specs,
         title_idx = len(rows)               # anchor for the side table
         # Era scope rides the banner as italic text (MLB-142); the year
         # itself stays on the A1 tab title.
-        rows.append(['Rank by Week', '', '', 'Current Season'])
+        rows.append([('Rank by Scoring Day' if season_long
+                      else 'Rank by Week'), '', '', 'Current Season'])
         rows.append(['Chart teams:',
                      *(ab for _, ab in chart_teams), 'ALL'])
         rows.append(['(check to plot)', *[False] * n_teams, True])
@@ -1456,7 +1335,8 @@ def build_advanced_standings_tab_rows(standings_rows, slot_rows, stat_specs,
         # width would hide its tail (the Defense/Total/Against
         # truncation Kyle caught live, 2026-07-17).
         helper_col0 = max(
-            45, len(standings_header(hitting_specs, pitching_specs)) + 5)
+            45, len(standings_header(hitting_specs, pitching_specs,
+                                     season_long=season_long)) + 5)
         raw_col0 = helper_col0 + 1 + n_teams
         chart_first_row0 = len(rows)        # 0-based helper header row
         n_chart_rows = max(18, 1 + len(periods))
@@ -1520,9 +1400,14 @@ def build_advanced_standings_tab_rows(standings_rows, slot_rows, stat_specs,
                 entries = fin_by_team.get(tid, {})
                 titles = sum(1 for y, e in entries.items()
                              if y in closed and e.get('is_champion'))
-                w = sum(int(e['wins']) for e in entries.values())
-                losses = sum(int(e['losses']) for e in entries.values())
-                t = sum(int(e['ties']) for e in entries.values())
+                # A season-points league has no W-L, so these arrive NULL
+                # rather than 0 -- a 0-0 record would be a fabricated result
+                # (MLB-243). Summed as 0 for arithmetic; `games` then stays
+                # 0 and W% comes back None, which renders blank instead of
+                # an invented .000 win rate.
+                w = sum(int(e['wins'] or 0) for e in entries.values())
+                losses = sum(int(e['losses'] or 0) for e in entries.values())
+                t = sum(int(e['ties'] or 0) for e in entries.values())
                 games = w + losses + t
                 wpct = (w + 0.5 * t) / games if games else None
                 # Avg INCLUDES the in-flight season (Kyle round 13, 'I
@@ -1616,21 +1501,38 @@ def build_advanced_standings_tab_rows(standings_rows, slot_rows, stat_specs,
     # a platform or a scoring format, so the same sentence serves either
     # book. The chart half only appears when there IS a chart -- the caveat
     # is about a disagreement that cannot exist without one.
-    standings_note = ("Standings order is pulled from league's official "
-                      'standings, which may put division winners first.')
-    if rank_arc_rows:
-        standings_note += (' Rank by Week Time Series is reconstructed from '
-                           'weekly results alone and applies no divisions, '
-                           'so the chart can disagree with the official '
-                           'standings.')
+    if season_long:
+        # No divisions and no official seeding to disagree with: this format
+        # is ordered by points, and the chart walks scoring days rather than
+        # weeks.
+        standings_note = ('Season-long points scoring: standings are total '
+                          'calculated points, and there are no matchups or '
+                          'W-L records.')
+        if rank_arc_rows:
+            standings_note += (' The time series tracks the cumulative points '
+                               'standing day by day.')
+    else:
+        standings_note = ("Standings order is pulled from league's official "
+                          'standings, which may put division winners first.')
+        if rank_arc_rows:
+            standings_note += (' Rank by Week Time Series is reconstructed '
+                               'from weekly results alone and applies no '
+                               'divisions, so the chart can disagree with the '
+                               'official standings.')
     rows.append([standings_note])
+    # A known limitation belongs beside the numbers it qualifies (MLB-243).
+    if caveat:
+        rows.append([caveat])
 
     rows.append(['Detailed Standings', '', '',
-                 'Weekly Averages, Current Season'])
-    rows.append(standings_header(hitting_specs, pitching_specs))
+                 ('Season Totals, Current Season' if season_long
+                  else 'Weekly Averages, Current Season')])
+    rows.append(standings_header(hitting_specs, pitching_specs,
+                                 season_long=season_long))
     for rank, team in enumerate(standings_rows, start=1):
         rows.append(
-            format_standings_row(rank, team, hitting_specs, pitching_specs)
+            format_standings_row(rank, team, hitting_specs, pitching_specs,
+                                 season_long=season_long)
         )
 
     # All-time Table A twin (Kyle round 8): every season summed, same
@@ -1639,12 +1541,15 @@ def build_advanced_standings_tab_rows(standings_rows, slot_rows, stat_specs,
     if standings_rows_alltime:
         rows.append([])
         rows.append(['Detailed Standings', '', '',
-                     'Weekly Averages, All-Time'])
-        rows.append(standings_header(hitting_specs, pitching_specs))
+                     ('Season Totals, All-Time' if season_long
+                      else 'Weekly Averages, All-Time')])
+        rows.append(standings_header(hitting_specs, pitching_specs,
+                                     season_long=season_long))
         for rank, team in enumerate(standings_rows_alltime, start=1):
             rows.append(
                 format_standings_row(rank, team, hitting_specs,
-                                     pitching_specs)
+                                     pitching_specs,
+                                     season_long=season_long)
             )
 
     def _append_slot_grid(title, grid_rows, scope=None):
@@ -1732,7 +1637,15 @@ def build_advanced_standings_tab_rows(standings_rows, slot_rows, stat_specs,
     # acquired, and the production forfeited when they left, under two lenses.
     # Each block is ranked by its own Acquired total (the "rankings by
     # acquisition channel" deliverable), ties broken by abbrev for determinism.
-    if acquisition_rows:
+    if acquisition_unavailable:
+        # THE LOG WAS NEVER READ (MLB-243). Every channel figure here is
+        # derived from roster stints, which cannot be classified without a
+        # transaction log -- so the honest output is the reason, not a grid
+        # of zeroes that reads as "nobody made a move all year".
+        rows.append([])
+        rows.append(['Production by Acquisition Channel'])
+        rows.append([acquisition_unavailable])
+    elif acquisition_rows:
         rows.append([])
         # Era scopes ride the banner once for both lens tables below --
         # the halves sit at the same columns in each (MLB-142 round 2).

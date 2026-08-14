@@ -79,27 +79,50 @@ def _http_response(status_code):
 
 
 def test_transaction_feed_refusal_is_unavailable_not_empty(monkeypatch, capsys):
+    """Unchanged behaviour, richer return value (MLB-243). A stable refusal
+    is still unavailable and still carries NO topic list -- what changed is
+    that the verdict is now named, and that it takes a bounded retry to
+    reach, because this endpoint flaps."""
     response = _http_response(401)
     monkeypatch.setattr(extract.requests, "get", lambda *a, **k: response)
+    monkeypatch.setattr(extract.time, "sleep", lambda s: None)
 
-    assert extract.fetch_transactions(2026) is None
-    assert "transaction-dependent output will be omitted" in capsys.readouterr().out
+    capture = extract.fetch_transactions(2026)
+    assert capture.outcome == extract.UNAUTHORIZED
+    assert capture.served is False
+    assert capture.topics is None, (
+        'an unavailable feed must not carry [], which downstream reads as '
+        'proven-zero activity'
+    )
+    assert "ransaction-dependent output will be omitted" in capsys.readouterr().out
 
 
 def test_unavailable_transaction_feed_writes_nothing(monkeypatch):
+    """The snapshot is still withheld so a prior good capture survives. The
+    COVERAGE row is written, which is the new part: an absence of topics is
+    no longer the only trace of what happened."""
     class Sink:
         def __init__(self):
             self.writes = []
+            self.coverage = []
 
         def write_transactions(self, *args):
             self.writes.append(args)
 
+        def write_transaction_coverage(self, *args):
+            self.coverage.append(args)
+
     sink = Sink()
-    monkeypatch.setattr(extract, "fetch_transactions", lambda year: None)
+    monkeypatch.setattr(
+        extract, "fetch_transactions",
+        lambda year: extract.TransactionCapture(extract.UNAUTHORIZED, None,
+                                                401, 5))
 
     extract.extract_transactions(sink, 2026, "espn-test")
 
     assert sink.writes == []
+    assert len(sink.coverage) == 1
+    assert sink.coverage[0][0]['outcome'] == extract.UNAUTHORIZED
 
 
 # ---------------------------------------------------------------------------

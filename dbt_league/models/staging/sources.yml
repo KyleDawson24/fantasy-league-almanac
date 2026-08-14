@@ -69,6 +69,22 @@ sources:
           freshness:
             warn_after: {count: 210, period: day}
             error_after: {count: 420, period: day}
+      - name: transaction_coverage
+        description: >
+          Raw transaction-capture verdict, append-only, one payload per
+          (league, season, extract): {outcome, topic_count, http_status,
+          attempts} (MLB-243). Outcome is SERVED_NONEMPTY / SERVED_EMPTY /
+          UNAUTHORIZED / NOT_SERVED. EXISTS BECAUSE AN ABSENCE OF
+          TRANSACTION ROWS IS AMBIGUOUS: a quiet league and a refused feed
+          both produce none, and only the first is evidence. A served-empty
+          row is what proves zero activity; an unauthorized row never does.
+          Written on every outcome, including the failures -- that is the
+          whole point.
+        config:
+          loaded_at_field: extracted_at
+          freshness:
+            warn_after: {count: 210, period: day}
+            error_after: {count: 420, period: day}
       - name: draft_settings
         description: "Raw ESPN draftSettings JSON, append-only. Draft type, date, pick order and keeper count (5 in 2026, 0 in 2025 -- the league became a keeper league between seasons). Distinct from draft_picks, which is the resulting board. No staging model yet; captured because the payload was already being fetched."
         config:

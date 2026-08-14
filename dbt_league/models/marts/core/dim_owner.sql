@@ -111,7 +111,15 @@ select
         -- member. If the platform withholds every name field, retain a clear
         -- non-identity label; the team name still distinguishes the row.
         o.seen_name,
-        'Unknown owner'
+        -- WITHHELD, NOT MISSING (MLB-243). A public ESPN league serves the
+        -- stable owner GUID and NULLs every first/last/display name -- a
+        -- supported privacy shape, not a gap in our extract. "Unknown owner"
+        -- described it as our failure to identify somebody and invited a
+        -- reader to think the data is broken; this says what actually
+        -- happened. The identity itself is intact and keyed on the GUID --
+        -- only the label is unavailable, and no name is ever invented to
+        -- fill it.
+        '{{ var("owner_unavailable_label") }}'
     ) as owner_display
 from owners o
 left join nicknames n

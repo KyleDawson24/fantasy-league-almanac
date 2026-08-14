@@ -1413,8 +1413,14 @@ def format_trade_record_row(leg, team_sums=None, date_display=None):
 
 
 def format_record_matrix_row(spec, current_record=None, all_time_record=None,
-                             league_id=None, display_map=None, schedule_lookup=None):
-    """Project current/all-time holders into one side-by-side record row."""
+                             league_id=None, display_map=None, schedule_lookup=None,
+                             season_long=False):
+    """Project current/all-time holders into one side-by-side record row.
+
+    season_long (MLB-243): the league scores one season-long period rather
+    than weekly matchups, so the Period cell must not say "Week 1" or link
+    to a matchup boxscore. Defaults False -- every H2H caller is unchanged.
+    """
     display_map = display_map or stat_catalog.get_display_map()
     schedule_lookup = schedule_lookup or records.load_schedule_lookup()
     return [
@@ -1425,6 +1431,7 @@ def format_record_matrix_row(spec, current_record=None, all_time_record=None,
             league_id=league_id,
             display_map=display_map,
             schedule_lookup=schedule_lookup,
+            season_long=season_long,
         ),
         '',
         *_format_record_side(
@@ -1433,11 +1440,13 @@ def format_record_matrix_row(spec, current_record=None, all_time_record=None,
             league_id=league_id,
             display_map=display_map,
             schedule_lookup=schedule_lookup,
+            season_long=season_long,
         ),
     ]
 
 
-def _format_record_side(record, scope, league_id=None, display_map=None, schedule_lookup=None):
+def _format_record_side(record, scope, league_id=None, display_map=None,
+                        schedule_lookup=None, season_long=False):
     """Format one current-season or all-time side of a matrix row."""
     if not record:
         return ['', '', '', '', '']
@@ -1467,11 +1476,18 @@ def _format_record_side(record, scope, league_id=None, display_map=None, schedul
             if season is not None and matchup_period is not None
             else ''
         )
-    if scope == 'all_time' and not record.get('is_collapsed') and period and season:
-        period = f"{period}: {season}"
-    period = _period_boxscore_formula(
-        period, league_id, season, matchup_period, record.get('team_id')
-    )
+    if season_long:
+        # ONE PERIOD, WHICH IS THE SEASON (MLB-243). "Week 1" would be a
+        # matchup label over a league with no matchups, and the boxscore
+        # URL it links to is a matchup view that does not describe how this
+        # record was set. The season is the honest answer, as plain text.
+        period = str(season) if season is not None else ''
+    else:
+        if scope == 'all_time' and not record.get('is_collapsed') and period and season:
+            period = f"{period}: {season}"
+        period = _period_boxscore_formula(
+            period, league_id, season, matchup_period, record.get('team_id')
+        )
     return [
         holder,
         owner,

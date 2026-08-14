@@ -277,8 +277,11 @@ def no_warehouse(monkeypatch, events):
 
     monkeypatch.setattr(almanac_sheets, 'write_almanac', _write_almanac)
 
-    monkeypatch.setattr(gas.cbs_almanac_sheets, 'is_points_league',
-                        lambda: False)
+    # MLB-243: the workbook shape now comes from the canonical league-format
+    # dimension rather than a CBS-table row count. These tests are about the
+    # H2H stranger journey, so they pin that format.
+    monkeypatch.setattr(gas.league_format, 'resolve',
+                        lambda *a, **kw: gas.league_format.H2H)
     monkeypatch.setattr(gas.db, 'use_duckdb', lambda path=None: None)
     monkeypatch.setattr(gas.db, 'set_league', lambda key=None: None)
 

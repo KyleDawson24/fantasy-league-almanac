@@ -580,7 +580,7 @@ dbt deps                              # Install dbt_utils package (first
                                       # run only; idempotent)
 dbt seed                              # Load the 20 seed CSVs -- 6 reference
                                       # + 14 from league_config (section 7)
-dbt build                             # Build 95 models + run 717 tests
+dbt build                             # Build 96 models + run 720 tests
 
 cd ..
 python output/generate_summary.py     # Weekly recap BBCode
@@ -677,7 +677,7 @@ nothing in it should be a reflex.
 pytest tests/
 ```
 
-Fresh-clone collection at this cut: **1512** pure tests, with **27**
+Fresh-clone collection at this cut: **1585** pure tests, with **27**
 warehouse-marked tests deselected by default via `pytest.ini`; no
 credentials are involved and nothing is written. Those are what pytest
 COLLECTS, not a pass tally -- how many pass or skip varies by machine and

@@ -28,7 +28,8 @@ class _Args:
     def __init__(self, new_public_workbook=False, prod=False, no_sheets=False,
                  public_workbook_title=None, new_public_workbook_force=False,
                  confirm_link_sharing=False, advanced_snowflake=False,
-                 duckdb=None):
+                 duckdb=None, preview_dir=None, include_trades=False,
+                 print_all=False, season_year=None, matchup_period=None):
         self.new_public_workbook = new_public_workbook
         self.prod = prod
         self.no_sheets = no_sheets
@@ -37,6 +38,11 @@ class _Args:
         self.confirm_link_sharing = confirm_link_sharing
         self.advanced_snowflake = advanced_snowflake
         self.duckdb = duckdb
+        self.preview_dir = preview_dir
+        self.include_trades = include_trades
+        self.print_all = print_all
+        self.season_year = season_year
+        self.matchup_period = matchup_period
 
 
 class _Parser:
@@ -319,25 +325,136 @@ def test_a_policy_blocked_publish_prints_no_success_line(
     assert 'THE-URL' in out
 
 
-def test_the_points_league_almanac_is_not_wired_as_a_stranger_path(
-        monkeypatch):
-    """Wiring CBS is a separate, unrequested product decision. Refusing
-    beats rendering the points almanac into a workbook whose journey
-    nobody has designed."""
+def test_a_points_league_reaches_the_same_public_workbook_path(monkeypatch):
+    """MLB-243 REVERSES the old refusal.
+
+    This used to assert that `--new-public-workbook` errors for a points
+    league. That refusal was written when "points league" meant "CBS", and
+    once the dispatch started reading the canonical format it became the
+    blocker on the actual stranger journey: the rehearsal league is an ESPN
+    season-points league, and refusing it would leave the volunteer with no
+    workbook at all.
+
+    So the assertion inverts -- a points league publishes -- and what must
+    NOT change is the security path it publishes through. That is the next
+    test.
+    """
     monkeypatch.setattr('sys.argv',
                         ['generate_almanac_sheet.py', '--new-public-workbook'])
     monkeypatch.setattr(gas.db, 'set_league', lambda key: None)
-    monkeypatch.setattr(gas.cbs_almanac_sheets, 'is_points_league',
-                        lambda: True)
+    monkeypatch.setattr(gas.db, 'use_duckdb', lambda path=None: None)
+    monkeypatch.setattr(gas.league_format, 'resolve',
+                        lambda *a, **kw: gas.league_format.POINTS)
+    monkeypatch.setattr(gas.db, 'league', lambda: _EspnLeague())
 
-    def _explode(*a, **kw):
-        raise AssertionError('the CBS path started a stranger publish')
+    published = []
+    monkeypatch.setattr(
+        gas, 'publish_new_public_workbook',
+        lambda args, season, period, **kw: published.append(kw))
 
-    monkeypatch.setattr(gas, 'publish_new_public_workbook', _explode)
-    monkeypatch.setattr(gas, '_run_points_league_almanac', _explode)
+    gas.main()
 
-    with pytest.raises(SystemExit):
-        gas.main()
+    assert published, 'a points league did not reach the public publish path'
+    assert callable(published[0]['render']), (
+        'the points path must supply its own renderer rather than falling '
+        'back to the H2H almanac'
+    )
+
+
+def test_the_points_public_path_uses_the_points_renderer(monkeypatch):
+    """FORMAT decides what gets drawn. The points league must render the
+    points workbook into the app-created book, not the H2H one."""
+    monkeypatch.setattr(gas.db, 'league', lambda: _EspnLeague())
+    monkeypatch.setattr(gas.league_format, 'resolve',
+                        lambda *a, **kw: gas.league_format.POINTS)
+
+    rendered = []
+    monkeypatch.setattr(gas.points_almanac, 'write_points_almanac',
+                        lambda sheet_id, client=None:
+                            rendered.append((sheet_id, client)))
+
+    def _h2h(*a, **kw):
+        raise AssertionError('the H2H almanac rendered into a points workbook')
+
+    monkeypatch.setattr(gas.almanac_sheets, 'write_almanac', _h2h)
+
+    captured = {}
+    monkeypatch.setattr(
+        gas, 'publish_new_public_workbook',
+        lambda args, season, period, **kw: captured.update(kw))
+    gas._run_points_league_almanac(
+        _Args(new_public_workbook=True), _Parser())
+
+    captured['render']('SHEET-ID', 'PUBLIC-CLIENT')
+    assert rendered == [('SHEET-ID', 'PUBLIC-CLIENT')], (
+        'the points renderer did not receive the app-created workbook id '
+        'and the public drive.file client'
+    )
+
+
+def test_the_points_public_path_keeps_the_oauth_boundary(monkeypatch):
+    """The renderer changed; the SECURITY PATH must not have.
+
+    Same PUBLIC profile, same client threaded into the render, same
+    create -> render -> confirm -> share ordering. A points league needed a
+    different workbook shape, never a different way of obtaining a
+    workbook, and this is the test that stops the two from being confused
+    again.
+    """
+    events = []
+
+    class _Client:
+        pass
+
+    client = _Client()
+
+    monkeypatch.setattr(gas.sheets_auth, 'authorized_client',
+                        lambda profile: events.append(('auth', profile)) or client)
+    monkeypatch.setattr(gas.sheets_auth, 'consent_disclosure',
+                        lambda profile: 'DISCLOSURE')
+
+    def _publish(cl, title, render, resume=True, confirm_share=None, **kw):
+        assert cl is client, 'the publisher got a different client than the '\
+                             'one the public profile authorized'
+        events.append(('create', title))
+        render('NEW-ID')
+        events.append(('confirm', bool(confirm_share and confirm_share())))
+        events.append(('share', 'NEW-ID'))
+        return sheets_workbook.PublishResult(
+            spreadsheet_id='NEW-ID', url='U', title=title,
+            created=True, rendered=True, shared=True)
+
+    monkeypatch.setattr(gas.sheets_workbook, 'publish_workbook', _publish)
+    monkeypatch.setattr(gas.sheets_target, 'resolve_sheets_target',
+                        lambda *a, **kw: (_ for _ in ()).throw(
+                            AssertionError('a configured sheet was resolved')))
+
+    rendered = []
+    gas.publish_new_public_workbook(
+        _Args(new_public_workbook=True, confirm_link_sharing=True),
+        None, None,
+        render=lambda sheet_id, cl: rendered.append((sheet_id, cl)),
+    )
+
+    assert events[0] == ('auth', sheets_auth.PUBLIC), (
+        'the points path did not authorize through the PUBLIC drive.file '
+        'profile'
+    )
+    assert [e[0] for e in events[1:]] == ['create', 'confirm', 'share'], (
+        f'the publish sequence changed for the points format: {events}'
+    )
+    assert rendered == [('NEW-ID', client)], (
+        'the points renderer did not get the app-created id and the public '
+        'client'
+    )
+
+
+class _EspnLeague:
+    """Minimal stand-in for the registry League object."""
+
+    key = 'espn-main'
+    platform = 'espn'
+    display_name = 'ESPN main league'
 
 
 def test_the_ledger_default_never_points_at_a_test_path(monkeypatch, tmp_path):

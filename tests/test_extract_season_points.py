@@ -176,3 +176,95 @@ def test_owner_capture_preserves_public_display_name_when_names_are_private(
         "last_name": None,
         "display_name": "Public Manager",
     }]
+
+
+# ---------------------------------------------------------------------------
+# Team identity capture (MLB-243)
+# ---------------------------------------------------------------------------
+
+def _unlabelled_roster_document():
+    """The type-5 mRoster shape as ESPN actually serves it: no `name`, no
+    `location`, no `nickname`, no `abbrev`. This is what made the extract
+    fall through to "Team 7" / "7" and publish numbered teams."""
+    doc = _roster_document()
+    doc["teams"][0].pop("location")
+    doc["teams"][0].pop("nickname")
+    doc["teams"][0].pop("abbrev")
+    return doc
+
+
+def test_the_type_5_roster_payload_really_carries_no_labels(monkeypatch):
+    """Pin the premise. Without a served identity there is nothing to use,
+    and the placeholder is the honest last resort."""
+    monkeypatch.setattr(
+        extract, "fetch_season_points_rosters",
+        lambda year, scoring_period: _unlabelled_roster_document())
+    monkeypatch.setattr(
+        extract, "fetch_all_player_stats",
+        lambda year, scoring_period: _player_stats())
+
+    team = extract.serialize_season_points_rosters(2026, 12)["team_rosters"][0]
+    assert team["team_name"] == "Team 7"
+    assert team["team_abbrev"] == "7"
+
+
+def test_served_identity_replaces_the_numeric_placeholder(monkeypatch):
+    """THE FIX. mTeam knows the real name; the roster document does not."""
+    monkeypatch.setattr(
+        extract, "fetch_season_points_rosters",
+        lambda year, scoring_period: _unlabelled_roster_document())
+    monkeypatch.setattr(
+        extract, "fetch_all_player_stats",
+        lambda year, scoring_period: _player_stats())
+
+    team = extract.serialize_season_points_rosters(
+        2026, 12,
+        team_identity={7: {"name": "Served Sluggers", "abbrev": "SVD"}},
+    )["team_rosters"][0]
+    assert team["team_name"] == "Served Sluggers"
+    assert team["team_abbrev"] == "SVD"
+    assert team["team_id"] == 7, "identity must stay keyed on the team id"
+
+
+def test_a_label_in_the_roster_payload_still_wins(monkeypatch):
+    """The identity feed fills a GAP; it does not override an observation."""
+    monkeypatch.setattr(
+        extract, "fetch_season_points_rosters",
+        lambda year, scoring_period: _roster_document())
+    monkeypatch.setattr(
+        extract, "fetch_all_player_stats",
+        lambda year, scoring_period: _player_stats())
+
+    team = extract.serialize_season_points_rosters(
+        2026, 12,
+        team_identity={7: {"name": "Served Sluggers", "abbrev": "SVD"}},
+    )["team_rosters"][0]
+    assert team["team_name"] == "Example Club"
+    assert team["team_abbrev"] == "EX"
+
+
+def test_an_unreachable_identity_feed_degrades_instead_of_failing(monkeypatch):
+    """A capture that cannot reach mTeam must still land its rosters -- the
+    warehouse repairs the labels from RAW.TEAM_STANDINGS on the next build,
+    so this is recoverable without a re-extract."""
+    def _explode(year, views):
+        raise RuntimeError('ESPN said no')
+
+    monkeypatch.setattr(extract, "fetch_league_payload", _explode)
+    assert extract.fetch_team_identity(2026) == {}
+
+
+def test_identity_capture_reads_one_row_per_team(monkeypatch):
+    monkeypatch.setattr(
+        extract, "fetch_league_payload",
+        lambda year, views: {"teams": [
+            {"id": 1, "name": "Harbor Otters", "abbrev": "HAR"},
+            {"id": 2, "name": "  ", "abbrev": ""},
+            {"name": "no id at all"},
+        ]})
+
+    identity = extract.fetch_team_identity(2026)
+    assert identity[1] == {"name": "Harbor Otters", "abbrev": "HAR"}
+    # Blank is not a label. It stays None so the caller's fallback runs.
+    assert identity[2] == {"name": None, "abbrev": None}
+    assert len(identity) == 2, "a team without an id cannot be keyed"

@@ -137,6 +137,9 @@ class PublishResult:
     shared: bool = False
     share_error: str = None
     recovery: str = None
+    # Cosmetic, and deliberately NOT part of is_share_ready: leaving the
+    # blank default tab in place is untidy, not a broken workbook.
+    default_sheet_removed: bool = False
 
     @property
     def is_share_ready(self):
@@ -422,8 +425,63 @@ def verify_link_viewer(permissions):
     return None
 
 
+# Google names the sheet every new spreadsheet is born with "Sheet1", and
+# gives it grid id 0. Both are checked before deletion: the title alone is
+# not identifying, because a user may legitimately have a tab called
+# Sheet1 that they created and filled.
+_DEFAULT_SHEET_TITLE = 'Sheet1'
+_DEFAULT_SHEET_GID = 0
+
+
+def remove_default_sheet(client, spreadsheet_id):
+    """Drop the blank Sheet1 a new workbook is born with.
+
+    NARROW BY CONSTRUCTION, because the failure mode is deleting somebody's
+    data. Every one of these must hold or nothing happens:
+
+      * the tab is titled Sheet1 AND has grid id 0 -- together, that is
+        Google's default rather than a tab a person made;
+      * it is EMPTY -- no values in any cell. An untouched default is
+        disposable; a Sheet1 somebody typed in is theirs;
+      * at least one other sheet exists, which is how "real tabs are
+        already here" is proved -- a render that silently produced nothing
+        leaves only the default, and this then declines rather than
+        emptying the workbook.
+
+    Called ONLY from the app-created workbook lifecycle below, and after
+    the render. Configured dev/prod workbooks never reach it, which is
+    deliberate: those are the user's own long-lived books, and a tab in one
+    is nobody's to remove.
+
+    Returns True if the sheet was deleted. Never raises: a workbook that is
+    otherwise complete must not fail over a cosmetic leftover.
+    """
+    try:
+        spreadsheet = client.open_by_key(spreadsheet_id)
+        worksheets = spreadsheet.worksheets()
+        default = next(
+            (ws for ws in worksheets
+             if ws.title == _DEFAULT_SHEET_TITLE
+             and ws.id == _DEFAULT_SHEET_GID),
+            None,
+        )
+        if default is None or len(worksheets) < 2:
+            return False
+
+        if any(any(str(cell).strip() for cell in row)
+               for row in (default.get_all_values() or [])):
+            return False
+
+        spreadsheet.del_worksheet(default)
+        return True
+    except Exception as exc:                       # noqa: BLE001 -- cosmetic
+        print(f'[workbook] left the default {_DEFAULT_SHEET_TITLE} in place '
+              f'({exc})')
+        return False
+
+
 def publish_workbook(client, title, render, ledger=None, resume=True,
-                     confirm_share=None):
+                     confirm_share=None, tidy_default_sheet=True):
     """Create (or resume) a workbook, render into it, then share it.
 
     `render` is called with the spreadsheet id and does the caller's
@@ -458,6 +516,14 @@ def publish_workbook(client, title, render, ledger=None, resume=True,
     render(result.spreadsheet_id)
     result.rendered = True
     ledger.mark_rendered(result.spreadsheet_id)
+
+    # AFTER the render, never before: "real tabs already exist" is only
+    # provable once they do, and a workbook is not allowed to pass through
+    # a state with no sheets in it.
+    if tidy_default_sheet:
+        result.default_sheet_removed = remove_default_sheet(
+            client, result.spreadsheet_id,
+        )
 
     if confirm_share is not None and not confirm_share():
         result.shared = False

@@ -529,6 +529,34 @@ models:
         tests:
           - not_null
 
+  - name: stg_draft_settings
+    description: >
+      One row per (league_key, season_year): the season's draft
+      configuration from RAW.DRAFT_SETTINGS (latest snapshot per league +
+      season). Exists so the late-start limitation is DETECTABLE (MLB-243)
+      -- a type-5 extraction walks every scoring day of the MLB season, so
+      a league that drafted in July carries months of pre-league production
+      in its totals, and drafted_at beside stg_mlb__season_calendar's
+      season_opener is what lets a workbook say so. It corrects nothing.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - season_year
+    columns:
+      - name: league_key
+        tests:
+          - not_null
+      - name: season_year
+        tests:
+          - not_null
+      - name: drafted_at
+        description: >
+          When the draft completed. NULL for a season whose draft has not
+          happened, which is a real answer -- consumers must not read the
+          absence as an on-time draft.
+
   - name: stg_team_standings
     description: >
       One row per (league_key, season_year, team_id): the platform's own

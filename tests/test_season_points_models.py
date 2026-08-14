@@ -55,6 +55,14 @@ def built(tmp_path_factory):
             SEASON_YEAR decimal(38,0), RAW_JSON json,
             EXTRACTED_AT timestamp, LEAGUE_KEY varchar)
     """)
+    # F8, the identity feed (MLB-243). The type-5 mRoster payload carries no
+    # team labels, so the roster staging model reads them from here instead
+    # of publishing the extract's "Team {id}" placeholder.
+    con.execute("""
+        create table RAW.TEAM_STANDINGS (
+            SEASON_YEAR decimal(38,0), RAW_JSON json,
+            EXTRACTED_AT timestamp, LEAGUE_KEY varchar)
+    """)
     con.execute("""
         create table ANALYTICS.player_nicknames (
             player_id integer, nickname varchar)
@@ -68,11 +76,15 @@ def built(tmp_path_factory):
         [("espn", "1B", "hitting"), ("espn", "BE", "inactive"),
          ("espn", "FA", "inactive")])
 
+    # Team 1's labels are the PLACEHOLDERS the type-5 extract wrote before
+    # MLB-243 -- exactly what the rehearsal warehouse contained. Team 2
+    # carries real labels in the payload, so the fallback branch is covered
+    # too. Both are synthetic.
     blob = {
         "matchups": [],
         "team_rosters": [
-            {"team_name": "Example One", "team_id": 1,
-             "team_abbrev": "ONE", "owner": "Sample One",
+            {"team_name": "Team 1", "team_id": 1,
+             "team_abbrev": "1", "owner": "Sample One",
              "lineup": [_lineup(101, "Active Player", "1B", 3.0)]},
             {"team_name": "Example Two", "team_id": 2,
              "team_abbrev": "TWO", "owner": "Sample Two",
@@ -84,6 +96,13 @@ def built(tmp_path_factory):
     con.execute(
         "insert into RAW.BOX_SCORES values (?, ?, ?, ?, ?, ?)",
         [SEASON, 1, 1, json.dumps(blob), stamped, LEAGUE])
+    # mTeam knows team 1's real name; it says nothing about team 2, whose
+    # roster payload therefore keeps its own label.
+    con.execute(
+        "insert into RAW.TEAM_STANDINGS values (?, ?, ?, ?)",
+        [SEASON, json.dumps([
+            {"id": 1, "name": "Served Sluggers", "abbrev": "SVD"},
+        ]), stamped, LEAGUE])
     schedule = {
         "seasonId": SEASON,
         "status": {"currentMatchupPeriod": 1, "latestScoringPeriod": 1,
@@ -100,7 +119,7 @@ def built(tmp_path_factory):
         [sys.executable, "-m", "dbt.cli.main", "run", "--select",
          "stg_box_scores__matchups", "stg_box_scores__team_rosters",
          "stg_box_scores__season_points_players",
-         "stg_box_scores__free_agents",
+         "stg_box_scores__free_agents", "stg_team_standings",
          "stg_box_scores", "stg_matchup_pairs", "stg_matchup_schedule",
          "--project-dir", str(PROJECT_DIR), "--profiles-dir",
          str(PROFILES_DIR), "--target", "duckdb"],
@@ -125,6 +144,52 @@ def test_every_team_reaches_player_staging(built):
 
 def test_no_opponent_pair_is_fabricated(built):
     assert built("select count(*) from ANALYTICS.stg_matchup_pairs") == [(0,)]
+
+
+# ---------------------------------------------------------------------------
+# Team identity through the type-5 path (MLB-243)
+# ---------------------------------------------------------------------------
+
+def test_the_served_team_name_and_abbrev_survive_the_type_5_path(built):
+    """THE DATA-LOSS BUG. The type-5 mRoster document carries no team
+    labels, so the extract wrote "Team 1" / "1" and the workbook published
+    numbered teams. ESPN served the real name on mTeam the whole time."""
+    assert built("""
+        select team_name, team_abbrev
+        from ANALYTICS.stg_box_scores__team_rosters
+        where team_id = 1
+    """) == [("Served Sluggers", "SVD")]
+
+
+def test_the_placeholder_never_reaches_staging_when_identity_is_served(built):
+    rows = built("""
+        select team_name, team_abbrev
+        from ANALYTICS.stg_box_scores__team_rosters
+    """)
+    flat = {value for row in rows for value in row}
+    assert "Team 1" not in flat and "1" not in flat, (
+        f"the numeric placeholder survived into staging: {rows}"
+    )
+
+
+def test_the_roster_payload_label_is_kept_when_identity_is_silent(built):
+    """A season captured before mTeam was must not be blanked. The identity
+    feed WINS where it speaks; it does not overwrite with NULL where it
+    does not."""
+    assert built("""
+        select team_name, team_abbrev
+        from ANALYTICS.stg_box_scores__team_rosters
+        where team_id = 2
+    """) == [("Example Two", "TWO")]
+
+
+def test_identity_is_keyed_on_team_id_not_the_display_string(built):
+    """Two teams may legitimately share an abbreviation, and a rename does
+    not make a new franchise. The join is on the id."""
+    sql = (PROJECT_DIR / "models" / "staging" /
+           "stg_box_scores__team_rosters.sql").read_text(encoding="utf-8")
+    assert "f.team_id     = i.team_id" in sql
+    assert "team_name = i.team_name" not in sql
 
 
 def test_the_measured_format_field_reaches_staging(built):

@@ -16,6 +16,61 @@ _Release notes are built from the commit range at each cut rather than
 accumulated here, so this section staying short is not a sign the
 repository is idle._
 
+### Fixed
+
+- **A season-points league gets the points workbook** (MLB-243). The
+  renderer chose the head-to-head almanac unless `mart_period_standings`
+  had rows -- a CBS-shaped feed standing in for "is this a points
+  league". An ESPN season-long points league (`currentLeagueType = 5`)
+  delivers no period standings, so the first fresh-device rehearsal was
+  handed a matchup workbook over a league that has never played a
+  matchup. Format now comes from `dim_league_format` and is read in one
+  place (`output/league_format.py`); an `unknown` format raises instead
+  of silently meaning H2H. **The v1.9.0 release artifact predates this
+  fix.**
+
+  Format decides the workbook's shape; platform decides only which data
+  fills it. The ESPN points book renders Team of the Month / Season /
+  All-Time on Home, a points record book, and Advanced Standings built
+  from season totals and lineup-slot production rather than a W-L model
+  the format has no rows for -- all populated for a first season still in
+  flight, with no completed matchup required. Matchup History is omitted
+  rather than shown empty, and the Rivalry Matrix keeps its
+  completed-season requirement and says so plainly.
+
+- **Served team names survive the type-5 path** (MLB-243). The daily
+  mRoster document carries no team labels, so the extract wrote
+  `Team 1` / `1` and the workbook published numbered teams. ESPN served
+  the real names on mTeam throughout; the extract now captures them once
+  per season and the season-points staging model reads identity from that
+  feed. A configured canonical name still wins, and identity stays keyed
+  on team id -- two teams that share an abbreviation now get distinct team
+  tabs instead of one overwriting the other.
+
+- **A withheld owner name is labelled, not invented** (MLB-243). A public
+  ESPN league serves the stable member GUID and nulls every name field.
+  That fallback now reads `Owner unavailable` rather than
+  `Unknown owner`, which described a platform privacy limitation as our
+  failure to identify somebody.
+
+- **An app-created workbook loses its blank `Sheet1`** (MLB-243), and
+  only that one: removal requires the untouched default grid, real tabs
+  beside it, and the app-created publish path. Configured dev/prod
+  workbooks are never touched.
+
+### Known limitation
+
+- **A league that drafted late still counts the whole MLB season**
+  (MLB-243). Type-5 extraction walks every scoring day, so a league that
+  drafted in July carries months of pre-league production, credited to
+  whoever first rostered each player. Comparisons between teams stay fair;
+  absolute totals are inflated. Detected and stated -- Home and Advanced
+  Standings carry a plain-language warning naming the draft date and how
+  far it trailed the opener -- and deliberately **not** silently
+  corrected: pre-league production is properly its own category rather
+  than a filter, and the fix touches extraction, the facts and every
+  aggregate at once.
+
 ## [1.9.0] - 2026-08-13
 
 The almanac ends in a shareable Google workbook. 29 commits. Full story

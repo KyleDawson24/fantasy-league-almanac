@@ -314,7 +314,12 @@ def run_extract(monkeypatch):
             lambda league, sp, mp: (serialized or {"scoring_period": sp}))
         monkeypatch.setattr(
             extract, "serialize_season_points_rosters",
-            lambda year, sp, period: (serialized or {"scoring_period": sp}))
+            lambda year, sp, period, team_identity=None: (
+                serialized or {"scoring_period": sp}))
+        # MLB-243: the season-points path now resolves team labels from
+        # mTeam once per season, because the type-5 roster document carries
+        # none. Stubbed so this stays an offline test of period selection.
+        monkeypatch.setattr(extract, "fetch_team_identity", lambda year: {})
 
         from contextlib import contextmanager
 

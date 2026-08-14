@@ -949,24 +949,86 @@ def _owner_display(owner_ids, members):
     return " / ".join(name.split()[0] for name in names)
 
 
-def _team_display_name(team):
-    """Use ESPN's direct name when present, else its location + nickname."""
+def _team_display_name(team, identity=None):
+    """Use ESPN's direct name when present, else its location + nickname.
+
+    `identity` is the season's mTeam roll-up (see fetch_team_identity). It
+    is consulted BEFORE the placeholder because the type-5 mRoster payload
+    carries none of the three label fields, and falling through to
+    "Team {id}" there is not a graceful degradation -- it is data loss.
+    ESPN served the real name on mTeam the whole time; this is where it
+    gets used (MLB-243).
+    """
     direct = (team.get("name") or "").strip()
     if direct:
         return direct
     parts = ((team.get("location") or "").strip(),
              (team.get("nickname") or "").strip())
     composed = " ".join(part for part in parts if part)
-    return composed or f"Team {team['id']}"
+    if composed:
+        return composed
+    served = (identity or {}).get(team["id"], {}).get("name")
+    return served or f"Team {team['id']}"
 
 
-def serialize_season_points_rosters(year, scoring_period, reporting_period=1):
+def _team_display_abbrev(team, identity=None):
+    """The team's abbreviation, same precedence as the display name: the
+    roster payload if it carries one, then the season's mTeam record, and
+    only then the numeric id -- which is an identifier, not a label."""
+    direct = (team.get("abbrev") or "").strip()
+    if direct:
+        return direct
+    served = (identity or {}).get(team["id"], {}).get("abbrev")
+    return served or str(team["id"])
+
+
+def fetch_team_identity(year):
+    """{team_id: {'name', 'abbrev'}} for the season, from mTeam.
+
+    THE IDENTITY FEED (adapter contract F8). One request, one row per team,
+    present whether or not the team has an owner -- which is why it is used
+    rather than the owner bridge, whose grain drops an unowned team
+    entirely.
+
+    Returns {} rather than raising: a season-points capture that cannot
+    reach mTeam should still land its rosters, with the labels degrading to
+    what the roster payload carries. The warehouse repairs the same gap
+    from RAW.TEAM_STANDINGS on the next build, so a run that hits this is
+    recoverable without a re-extract.
+    """
+    try:
+        payload = fetch_league_payload(year, ["mTeam"])
+    except Exception as exc:                       # noqa: BLE001 -- reported
+        print(f"  !! could not read team identity from mTeam ({exc}); "
+              f"team labels will fall back to the roster payload")
+        return {}
+
+    identity = {}
+    for team in payload.get("teams") or []:
+        if not isinstance(team, dict) or team.get("id") is None:
+            continue
+        identity[team["id"]] = {
+            # Team names are user data and can be anything -- numeric-looking
+            # strings, emoji, sentinels. Carried verbatim.
+            "name": (team.get("name") or "").strip() or None,
+            "abbrev": (team.get("abbrev") or "").strip() or None,
+        }
+    return identity
+
+
+def serialize_season_points_rosters(year, scoring_period, reporting_period=1,
+                                    team_identity=None):
     """Serialize a season-long points day without manufacturing a matchup.
 
     RAW gains a parallel ``team_rosters`` array. The ordinary ``matchups``
     array stays empty, so matchup-pair and W/L models correctly see no games;
     staging flattens the roster array into the same player-day contract used
     by the format-agnostic player and team season facts.
+
+    `team_identity` is the season's mTeam labels, fetched ONCE by the caller
+    and threaded through every scoring day rather than re-requested 142
+    times. Without it this path wrote "Team 1" / "1" for every team, because
+    the type-5 mRoster document carries no labels at all (MLB-243).
     """
     roster_doc = fetch_season_points_rosters(year, scoring_period)
     all_player_stats = fetch_all_player_stats(year, scoring_period)
@@ -1038,9 +1100,9 @@ def serialize_season_points_rosters(year, scoring_period, reporting_period=1):
             })
 
         team_rosters.append({
-            "team_name": _team_display_name(team),
+            "team_name": _team_display_name(team, team_identity),
             "team_id": team["id"],
-            "team_abbrev": team.get("abbrev") or str(team["id"]),
+            "team_abbrev": _team_display_abbrev(team, team_identity),
             "owner": _owner_display(team.get("owners"), members),
             "lineup": lineup,
         })
@@ -3450,10 +3512,14 @@ def run(args):
             league = None if season_points is not None else connect_espn(year)
             serializer = None
             if season_points is not None:
+                # Once per season, not once per scoring day: the labels do
+                # not vary by day, and this loop runs ~142 times.
+                team_identity = fetch_team_identity(year)
                 serializer = (
                     lambda scoring_period, reporting_period:
                     serialize_season_points_rosters(
-                        year, scoring_period, reporting_period))
+                        year, scoring_period, reporting_period,
+                        team_identity=team_identity))
 
             for mp in periods:
                 label = ("Season-long reporting period" if season_points

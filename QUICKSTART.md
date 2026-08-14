@@ -485,6 +485,35 @@ Said plainly, because finding out later is worse:
   scoring day and its fantasy rosters without inventing weekly opponents or
   wins and losses. **Rotisserie remains unproven** and still refuses rather
   than guessing.
+- **A league that drafted late still counts the whole MLB season.** This is
+  the one number-affecting limitation in v1.9, so it is spelled out rather
+  than left to be discovered.
+
+  The extractor walks every scoring day of the baseball season. If your
+  league drafted in June or July, the months of MLB production **before
+  your league existed** are still counted, and each player's share is
+  credited to whichever team first rostered him. The rehearsal league
+  drafted on July 31 and began counting on August 1, so roughly four
+  months of every season total came from days nobody managed.
+
+  What that does and does not distort:
+
+  - **Comparisons between your teams stay fair.** Every team carries the
+    same pre-league days, so the standings order, the boards and the
+    rivalry comparisons are not tilted toward anyone.
+  - **Absolute totals are inflated.** Season points, career points, the
+    record book and draft-value deltas are all larger than what was
+    actually managed in your league.
+
+  The workbook says so itself: a league that drafted more than two weeks
+  after opening day gets a plain-language warning on Home and on Advanced
+  Standings, naming the draft date and how many days it trailed the
+  opener. Nothing is silently adjusted.
+
+  A future release will treat pre-league production as its own category --
+  neither active nor inactive -- rather than filtering it away. That
+  correction touches extraction, the facts and every aggregate at once, so
+  it is deliberately not bolted on here.
 - **The unfinished current matchup in a weekly H2H league is still
   excluded.** Closed matchups update normally; showing a live matchup day by
   day is a separate enhancement, not part of the season-long-points fix.

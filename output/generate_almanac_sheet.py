@@ -17,6 +17,8 @@ db.init()
 import almanac_data
 import almanac_sheets
 import cbs_almanac_sheets
+import league_format
+import points_almanac
 import sheets_auth
 import sheets_target
 import sheets_workbook
@@ -123,19 +125,23 @@ def _configure_data_source(args):
 def _generate(args, parser):
     """Generate after argument validation and data-source selection."""
 
-    # Format dispatch by DATA PRESENCE (the format-modularity rule): a
-    # league with delivered period standings is a points league -- no
-    # matchups exist, so the H2H almanac shape below cannot apply. The
-    # ESPN league has no period-standings rows and flows on unchanged.
-    if cbs_almanac_sheets.is_points_league():
-        if args.new_public_workbook:
-            # Wiring CBS as a stranger path is a separate, unrequested
-            # decision. Refusing here is better than rendering the points
-            # almanac into a workbook whose journey nobody has designed.
-            parser.error(
-                '--new-public-workbook is wired for the ESPN/H2H almanac '
-                'only. This league renders the points-league almanac.'
-            )
+    # FORMAT DECIDES THE WORKBOOK; PLATFORM DECIDES THE DATA (MLB-243).
+    #
+    # This used to dispatch on whether `mart_period_standings` had rows --
+    # a CBS-shaped feed standing in for "is this a points league". An ESPN
+    # season-long points league (currentLeagueType = 5) delivers no period
+    # standings, so it read as H2H and the first stranger rehearsal was
+    # handed a matchup almanac over a league that has never played a
+    # matchup. The canonical answer lives in dim_league_format and is read
+    # in exactly one place now (output/league_format.py), which also means
+    # an UNKNOWN format raises instead of quietly selecting H2H.
+    try:
+        fmt = league_format.resolve()
+    except league_format.LeagueFormatError as exc:
+        parser.error(str(exc))
+        return                                     # unreachable; parser exits
+
+    if fmt == league_format.POINTS:
         _run_points_league_almanac(args, parser)
         return
 
@@ -322,7 +328,8 @@ def safe_workbook_title(raw):
 
 
 def publish_new_public_workbook(args, season_year, matchup_period,
-                                client=None, publish=None, input_fn=None):
+                                client=None, publish=None, input_fn=None,
+                                render=None):
     """The stranger path (MLB-209): create a workbook, render into it,
     share it, announce it.
 
@@ -337,6 +344,16 @@ def publish_new_public_workbook(args, season_year, matchup_period,
     The separate data-sharing disclosure is printed after rendering and
     immediately before the permission call, where an affirmative answer is
     required.
+
+    `render` (MLB-243) supplies the FORMAT'S renderer, called with
+    (spreadsheet_id, client). It changes what is drawn inside the
+    workbook and nothing about how the workbook is obtained: the same
+    public profile, the same Credential Locker token, the same
+    create -> render -> confirm -> share -> read-back sequence, in the
+    same order. A points league needed a different renderer, never a
+    different security path -- which is precisely why the wiring goes here
+    rather than a parallel publish function. Defaults to the H2H almanac
+    so every existing caller is unchanged.
     """
     title = safe_workbook_title(args.public_workbook_title)
     input_fn = input_fn or input
@@ -347,6 +364,9 @@ def publish_new_public_workbook(args, season_year, matchup_period,
         publish = sheets_workbook.publish_workbook
 
     def _render(spreadsheet_id):
+        if render is not None:
+            render(spreadsheet_id, client)
+            return
         almanac_sheets.write_almanac(
             spreadsheet_id,
             season_year=season_year,
@@ -411,14 +431,95 @@ def report_publish_result(result):
     sheets_workbook.report_result(result)
 
 
+def _points_adapter(parser):
+    """Pick the platform's data adapter for the points workbook.
+
+    THIS IS THE ONE PLACE PLATFORM IS ALLOWED TO DECIDE SOMETHING, and it
+    decides only where the numbers come from. The SHAPE was already fixed
+    by dim_league_format before we got here. Both adapters render the same
+    points-format product; they differ because CBS and ESPN deliver
+    genuinely different feeds (CBS has period standings and a UI-parsed
+    history; ESPN has the shared daily facts and no period standings at
+    all). Choosing an adapter by platform is correct. Choosing a WORKBOOK
+    by platform is the bug this ticket fixes.
+
+    Returns (build_preview, write, public_render). `public_render` is None
+    for an adapter whose writer cannot render into an app-created workbook
+    -- it must accept the caller's `drive.file` client, because under that
+    scope no other client may open the file.
+    """
+    platform = db.league().platform
+    if platform == 'cbs':
+        # CBS has no live-API tab, so the flag is accepted and ignored
+        # rather than left off the signature -- normalizing here means the
+        # caller never has to know which adapter it got, and no call site
+        # needs an exception handler that could swallow a real TypeError.
+        def _cbs_preview(include_trades=False):
+            del include_trades
+            return cbs_almanac_sheets.build_all_tabs()
+        # No public renderer: write_cbs_almanac authorizes its own
+        # maintainer client and takes none. CBS also has no scripted
+        # credential path at all (its token is browser-extracted from
+        # behind a reCAPTCHA), so the stranger journey does not reach it.
+        return _cbs_preview, cbs_almanac_sheets.write_cbs_almanac, None
+    if platform == 'espn':
+        # Previews stay network-free unless --include-trades is typed, the
+        # same rule the H2H path follows; the Sheets write always includes
+        # the live tab.
+        def _espn_preview(include_trades=False):
+            return points_almanac.build_all_tabs(include_trades=include_trades)
+        return (_espn_preview, points_almanac.write_points_almanac,
+                points_almanac.write_points_almanac)
+    parser.error(
+        f"League '{db.league_key()}' is a points-format league on platform "
+        f"'{platform}', which has no points-format data adapter yet. Add one "
+        f"rather than rendering another platform's queries against it."
+    )
+
+
+def _build_preview(args, build_tabs):
+    """Preview tabs from whichever adapter is active. Both accept the
+    live-tab flag; only one of them has a live tab to gate."""
+    return build_tabs(include_trades=args.include_trades)[0]
+
+
 def _run_points_league_almanac(args, parser):
-    """The points-league almanac path (MLB-66 v2): the ESPN-architecture
-    workbook (nav-first Home + Records + Standings + Best-Lineup team
-    pages) on the unified fact family. Same preview / dev-default /
-    explicit-prod UX as the H2H path; the sheet resolves from the
-    league's registry sinks (MLB-58). --season-year / --matchup-period
-    are H2H concepts and are ignored here (the points almanac's horizon
-    comes from the data)."""
+    """The points-league almanac path (MLB-66 v2, generalized MLB-243):
+    the ESPN-architecture workbook (nav-first Home + Records + Standings +
+    Best-Lineup team pages) on the unified fact family. Same preview /
+    dev-default / explicit-prod UX as the H2H path; the sheet resolves
+    from the league's registry sinks (MLB-58). --season-year /
+    --matchup-period are H2H concepts and are ignored here (the points
+    almanac's horizon comes from the data)."""
+    build_tabs, write_tabs, public_render = _points_adapter(parser)
+
+    # The stranger path owns its own destination: it CREATES one. Handled
+    # before target resolution so no configured dev/prod workbook is read,
+    # opened or written on this path -- the same ordering the H2H branch
+    # relies on, and the reason --new-public-workbook can no longer be
+    # refused here (MLB-243). A points league is a workbook shape, not a
+    # second-class journey.
+    if args.new_public_workbook:
+        if public_render is None:
+            parser.error(
+                f"League '{db.league_key()}' renders the points almanac "
+                f"through an adapter that cannot write into an app-created "
+                f"workbook: the public path authorizes with drive.file, "
+                f"under which only the client that created the file may "
+                f"open it, and this adapter authorizes its own. Use the "
+                f"configured dev/prod sheet for this league."
+            )
+        if args.preview_dir:
+            preview_tabs = [(title, rows)
+                            for title, rows, *_ in _build_preview(args, build_tabs)]
+            _write_preview_dir(preview_tabs, args.preview_dir)
+        publish_new_public_workbook(
+            args, args.season_year, args.matchup_period,
+            render=lambda spreadsheet_id, client: public_render(
+                spreadsheet_id, client=client),
+        )
+        return
+
     # Resolve the sink FIRST, then decide what to build (MLB-201).
     #
     # This used to build preview tabs under `--preview-dir or --no-sheets`
@@ -441,8 +542,11 @@ def _run_points_league_almanac(args, parser):
     # Built whenever the preview path is reachable: explicitly asked for, or
     # implied because there is no sheet to write to.
     if args.preview_dir or not sheet_id:
-        tabs, _, _ = cbs_almanac_sheets.build_all_tabs()
-        preview_tabs = [(title, rows) for title, rows, _ in tabs]
+        # CBS hands back (title, rows, formats); the ESPN points assembly
+        # has no per-tab format payload and hands back (title, rows). Both
+        # previews want the first two.
+        preview_tabs = [(title, rows)
+                        for title, rows, *_ in _build_preview(args, build_tabs)]
         if args.preview_dir:
             _write_preview_dir(preview_tabs, args.preview_dir)
 
@@ -459,9 +563,9 @@ def _run_points_league_almanac(args, parser):
     else:
         print(f"[almanac] writing to dev sheet: {sheet_id}")
 
-    # write_cbs_almanac builds its own tabs: the two-pass nav-link write
-    # needs the real sheet gids before Home's rows exist.
-    cbs_almanac_sheets.write_cbs_almanac(sheet_id)
+    # The writer builds its own tabs: the two-pass nav-link write needs the
+    # real sheet gids before Home's rows exist.
+    write_tabs(sheet_id)
 
 
 def _print_preview(tabs, print_all=False):

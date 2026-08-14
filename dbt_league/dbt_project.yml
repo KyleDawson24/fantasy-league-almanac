@@ -98,6 +98,17 @@ vars:
   holding_pen_franchise_id: 9999
   holding_pen_label: '####'
 
+  # WHAT A WITHHELD OWNER NAME IS CALLED (MLB-243). A public ESPN league
+  # serves the stable member GUID and NULLs firstName / lastName /
+  # displayName -- a platform privacy limitation, not an extraction gap
+  # and never an invitation to guess. dim_owner falls back to this label
+  # so the surface stays honest: the owner IS identified (by GUID, which
+  # is what franchise continuity actually joins on); only the human-
+  # readable name is unavailable. Pinned as a var so the wording has one
+  # home -- it renders on Home, the team pages, the draft board and the
+  # record book.
+  owner_unavailable_label: 'Owner unavailable'
+
 seeds:
   dbt_league:
     # ==================================================================

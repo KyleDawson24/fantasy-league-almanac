@@ -627,6 +627,141 @@ def build_home_tab_rows(weekly_rows, season_rows, weekly_all_rows,
     ]
 
 
+def build_points_home_tab_rows(boards, season_year, month_window, era_label,
+                               team_titles=None, league_id=None,
+                               nav_targets=None, trades_note=None,
+                               caveat=None):
+    """Build Home for a POINTS-format league (MLB-243).
+
+    Same two-band dashboard, same row formatters, same band merge as the
+    head-to-head Home above -- what changes is which sections a points
+    league has. This is the format axis doing its job: one presentation
+    layer, two section selections, and no platform anywhere in the
+    decision.
+
+    RIGHT BAND is the three boards the points product shows (Kyle's lean,
+    carried over from the CBS points Home so the two agree): Team of the
+    Month -- the one live board, rolling over on the 8th -- then Team of
+    the Season, then the All-Time Team.
+
+    WHY ALL-TIME MOVES RIGHT. In the H2H book the right band holds Week +
+    Season and all-time sits thin on the left. A points league has no
+    week, so the slot that board occupied is where Month goes, and
+    All-Time joins the full-width stack rather than staying in a thin
+    left-hand column it no longer needs to share space with.
+
+    THE NAV OMITS WHAT DOES NOT EXIST. Matchup History is not built for a
+    points league (it is a matchup archive over a league with no
+    matchups), so it is absent from the nav rather than linking nowhere.
+    Trades appears only when the transactions feed was actually readable
+    -- `trades_note` carries the reason when it was not, and an
+    unavailable feed is stated, never rendered as zero trades.
+    """
+    stamp = updated_stamp()
+    banner = [
+        ['Fantasy League Almanac'],
+        [_HOME_SCORING_CALLOUT],
+        [stamp] if stamp else [],
+    ]
+    # A known limitation belongs where the reader meets the numbers, not in
+    # a doc they may never open (MLB-243, the late-draft case). Sits under
+    # the banner so it cannot be scrolled past.
+    if caveat:
+        banner.append([caveat])
+    right_rows = _points_home_right_rows(
+        boards, season_year, month_window, era_label, league_id,
+    )
+    left_rows = _points_home_left_rows(team_titles, nav_targets, trades_note)
+    right_width = len(HOME_HEADER) + 2
+    return [
+        *banner,
+        *_merge_home_bands(left_rows, right_rows, _HOME_LEFT_WIDTH, right_width),
+    ]
+
+
+def _points_home_left_rows(team_titles, nav_targets, trades_note=None):
+    """Left band for the points shape: nav hub + team grid + glossary.
+
+    No all-time block -- it is on the right band here -- and no Matchup
+    History link, because a points league does not get that tab.
+    """
+    rows = [['Navigate']]
+    rows.append([
+        home_nav_link('Records', RECORDS_TAB, nav_targets),
+        'All-time & current-season record book.',
+    ])
+    rows.append([
+        home_nav_link('Advanced Standings', ADVANCED_STANDINGS_TAB, nav_targets),
+        'Season points + points by lineup slot.',
+    ])
+    if trades_note is None:
+        rows.append([
+            home_nav_link('Trades', TRADES_TAB, nav_targets),
+            'Live trade block + interest marks.',
+        ])
+    rows.append(['Team Pages', 'Historic production by team.'])
+    rows.extend(_home_team_grid_rows(team_titles, nav_targets))
+    rows.append([home_nav_link('Draft Recap', DRAFT_TAB, nav_targets),
+                 'Draft board + best-value / bust picks.'])
+
+    rows.append([])
+    rows.append(['Points Glossary'])
+    rows.extend([term, definition] for term, definition in _HOME_GLOSSARY)
+
+    # An unavailable feed is reported where the reader would otherwise
+    # wonder why a tab is missing. Saying nothing here is what turns
+    # "we could not read it" into "there were none".
+    if trades_note:
+        rows.append([])
+        rows.append(['Trades'])
+        rows.append([trades_note])
+    return rows
+
+
+def _points_home_right_rows(boards, season_year, month_window, era_label,
+                            league_id):
+    """Right band for the points shape: Month, Season, All-Time, each in
+    the standard All-League board columns with the Total-Pts deviation
+    pair."""
+    header = [*HOME_HEADER, HOME_DEVIATION_LABEL, '']
+    lo, hi = month_window if month_window else (None, None)
+    if lo is not None:
+        month_label = (f'Team of the Month - {lo:%B %Y} '
+                       f'(rolls over on the 8th of each new month)')
+    else:
+        # No date anchor -- say so rather than labelling the board with a
+        # month it cannot prove.
+        month_label = 'Team of the Month - window unavailable (no season calendar captured)'
+
+    stack = [
+        (month_label, boards.get('month_rows') or [],
+         boards.get('month_all_rows') or []),
+        (f'Team of the Season: {season_year}', boards.get('season_rows') or [],
+         boards.get('season_all_rows') or []),
+        (f'All-Time Team ({era_label})', boards.get('alltime_rows') or [],
+         boards.get('alltime_all_rows') or []),
+    ]
+
+    rows = []
+    for index, (title, lineup, partner) in enumerate(stack):
+        if index:
+            rows.append([])          # separator
+            rows.append([])          # spacer above the title
+        rows.append([title])
+        rows.append(header)
+        if not lineup:
+            rows.append(['No qualifying production in this window yet.'])
+            continue
+        deviations = _deviation_by_slot(lineup, partner)
+        rows.extend(
+            format_all_league_team_row_with_deviation(
+                row, deviations.get(row.get('slot_label')), league_id=league_id,
+            )
+            for row in lineup
+        )
+    return rows
+
+
 def _home_left_rows(all_time_rows, team_titles, nav_targets, align_alltime_to=None):
     """Left band (cols A-D): nav hub + per-team grid + glossary + all-time
     All-League Team. Rows are padded to _HOME_LEFT_WIDTH by the merge.
@@ -1089,6 +1224,141 @@ def build_draft_board_color_grid(board_rows):
         ]
         for slot in range(max_slots)
     ]
+
+
+POINTS_STANDINGS_HEADER = [
+    'Rank', 'Team', 'Abbrev', 'Owner', 'Total Points', 'Offense', 'Defense',
+    'Negative', 'Behind Leader',
+]
+
+# The Rivalry Matrix keeps its completed-season requirement in every
+# format (RIVALRY_MATRIX_CONTRACT). A first year still in flight has no
+# finished season to compare, and reinterpreting one would publish a
+# rivalry result nobody has played out yet.
+RIVALRY_UNAVAILABLE_NOTE = (
+    'Rivalry Matrix: unavailable. It compares COMPLETED seasons, and no '
+    'season in this league has finished yet. It appears once one has.'
+)
+
+
+def build_points_standings_tab_rows(season_totals, slot_rows, season_year,
+                                    rivalry_note=None, caveat=None):
+    """Advanced Standings for a POINTS-format league (MLB-243).
+
+    THE H2H MODEL IS NOT REUSED HERE, and that is the point of the tab.
+    The head-to-head builder above is per-stat weekly averages over a W-L
+    standings ordered by the platform's playoff seed -- every one of those
+    concepts needs matchups. A season-points league has none, so
+    `mart_team_season_standings` is correctly EMPTY for it and rendering
+    that table would have produced a grid of blanks under a W-L header.
+
+    What decides a points league instead is simply points, so that is what
+    this shows: Table A ranks teams by season total with its offense /
+    defense / negative split, and Table B is the same team x
+    active-lineup-slot production grid the H2H tab carries -- that one is
+    format-agnostic and reads the same shared mart in both books.
+
+    Populated from the current season as it accrues. Nothing here waits
+    for a completed matchup or a completed season, because in this format
+    neither is what makes the numbers meaningful.
+    """
+    rows = [
+        [f'Advanced Standings: {season_year}'],
+        ['Season to date. This is a season-long points league, so the '
+         'standings are total calculated points -- there are no matchups '
+         'and no W-L record. Offense / Defense are the hitting and pitching '
+         'halves of that total; Negative is the size of the negative '
+         'scoring inside it.'],
+        *([[caveat]] if caveat else []),
+        [],
+        ['Season Points'],
+        list(POINTS_STANDINGS_HEADER),
+    ]
+
+    leader = None
+    for row in season_totals or []:
+        total = row.get('calculated_points') or 0
+        if leader is None:
+            leader = total
+        rows.append([
+            row.get('points_rank'),
+            row.get('team_name'),
+            row.get('team_abbrev'),
+            row.get('owner_display'),
+            _points_cell(total),
+            _points_cell(row.get('calculated_hitting_pts')),
+            _points_cell(row.get('calculated_pitching_pts')),
+            _points_cell(row.get('negative_points')),
+            _points_cell(leader - total) if leader is not None else '',
+        ])
+    if not season_totals:
+        rows.append(['No team production captured for this season yet.'])
+
+    rows.extend([[], [], ['Points by Lineup Slot']])
+    rows.extend(_points_slot_grid(slot_rows, season_totals))
+
+    if rivalry_note:
+        rows.extend([[], [], [rivalry_note]])
+    return rows
+
+
+def _points_slot_grid(slot_rows, season_totals):
+    """Team x active-lineup-slot points grid, teams in standings order.
+
+    Bench/IL slots are carried as their own column rather than dropped:
+    in a points league what a manager left on the bench is a real part of
+    the season's story, and it is already separated by the mart's
+    is_active_lineup_slot flag.
+    """
+    if not slot_rows:
+        return [['No lineup-slot production captured for this season yet.']]
+
+    by_team = defaultdict(dict)
+    slot_order, seen = [], set()
+    for row in slot_rows:
+        slot = row.get('lineup_slot')
+        by_team[row.get('team_id')][slot] = row.get('slot_calculated_points')
+        if slot not in seen:
+            seen.add(slot)
+            slot_order.append((row.get('sort_order'), slot))
+    slot_order = [slot for _, slot in sorted(
+        slot_order, key=lambda pair: (pair[0] if pair[0] is not None else 999,
+                                      pair[1] or ''))]
+
+    # Standings order when we have it, so both tables read down the same
+    # team spine; otherwise the mart's own team order.
+    ordered_teams = [r.get('team_id') for r in (season_totals or [])]
+    for row in slot_rows:
+        if row.get('team_id') not in ordered_teams:
+            ordered_teams.append(row.get('team_id'))
+
+    labels = {}
+    for row in slot_rows:
+        labels.setdefault(row.get('team_id'), row.get('team_name'))
+    for row in (season_totals or []):
+        labels[row.get('team_id')] = row.get('team_name')
+
+    grid = [['Team', *slot_order]]
+    for team_id in ordered_teams:
+        if team_id not in by_team:
+            continue
+        cells = by_team[team_id]
+        grid.append([labels.get(team_id),
+                     *(_points_cell(cells.get(slot)) for slot in slot_order)])
+    return grid
+
+
+def _points_cell(value):
+    """Points as a plain whole number, blank when absent.
+
+    Whole numbers follow the points-format convention the CBS book already
+    uses: a season-long total carries no meaningful tenth. Absent renders
+    blank rather than 0 -- "no data" and "zero points" are different
+    answers and must not look the same.
+    """
+    if value is None:
+        return ''
+    return _round_half_up(float(value))
 
 
 def build_advanced_standings_tab_rows(standings_rows, slot_rows, stat_specs,
@@ -2057,12 +2327,21 @@ def build_team_weeks_tab_rows(team_week_rows, stat_specs, league_id=None,
 
 def build_records_tab_rows(all_time_records, current_season_records, league_id=None,
                            display_map=None, schedule_lookup=None, record_specs=None,
-                           hall_of_fame=None, hall_of_shame=None):
+                           hall_of_fame=None, hall_of_shame=None,
+                           season_long=False):
     """Build the almanac Records tab as a side-by-side record book.
 
     MLB-164: the two Halls are appended below the matrix when their rows are
     supplied. They are optional so a caller that only wants the record matrix
-    (and the tests that inject synthetic records) is unaffected."""
+    (and the tests that inject synthetic records) is unaffected.
+
+    season_long (MLB-243): this is the SAME record book, read by a league
+    that scores one season-long period instead of weekly matchups. The
+    records themselves come from the same shared leaderboard either way --
+    what changes is the language around them. The standing captions talk
+    about standard-length matchups and records "set last week", and both
+    describe a structure a season-points league does not have. Defaults
+    False, so the H2H book is byte-identical."""
     display_map = display_map or stat_catalog.get_display_map()
     schedule_lookup = schedule_lookup or records.load_schedule_lookup()
     record_specs = record_specs or [
@@ -2083,20 +2362,36 @@ def build_records_tab_rows(all_time_records, current_season_records, league_id=N
     _ab_min = max((m for q, m in _rate_quals.values() if q == 'ab'), default=0)
     _outs_min = max((m for q, m in _rate_quals.values() if q == 'outs'), default=0)
     _ip_min = _outs_min // 3
-    rows = [
-        ['League Records'],
-        [
-            'Counting Stats only look at standard-length matchups. '
-            f'Pitching Rate stats require min {_ip_min} IP, '
-            f'Hitting Rate stats require min {_ab_min} AB. '
-            'Boxscore links go to the most recent instance of the record.'
-        ],
-        [
-            'Current Season records set last week are italicized. '
-            'All-Time records set this year are italicized. '
-            'All-Time records set last week are italicized and highlighted.'
-        ],
-    ]
+    if season_long:
+        # No matchups to be standard-length, no weeks for a record to have
+        # been set in. Same records, described by what this format is.
+        rows = [
+            ['League Records'],
+            [
+                'Season-long points scoring, so every counting record is a '
+                'season total rather than a single week. '
+                f'Pitching Rate stats require min {_ip_min} IP, '
+                f'Hitting Rate stats require min {_ab_min} AB.'
+            ],
+            [
+                'All-Time records set this season are italicized.'
+            ],
+        ]
+    else:
+        rows = [
+            ['League Records'],
+            [
+                'Counting Stats only look at standard-length matchups. '
+                f'Pitching Rate stats require min {_ip_min} IP, '
+                f'Hitting Rate stats require min {_ab_min} AB. '
+                'Boxscore links go to the most recent instance of the record.'
+            ],
+            [
+                'Current Season records set last week are italicized. '
+                'All-Time records set this year are italicized. '
+                'All-Time records set last week are italicized and highlighted.'
+            ],
+        ]
 
     for section_title, specs in _group_record_specs(record_specs):
         section_rows = []
@@ -2119,6 +2414,7 @@ def build_records_tab_rows(all_time_records, current_season_records, league_id=N
                     league_id=league_id,
                     display_map=display_map,
                     schedule_lookup=schedule_lookup,
+                    season_long=season_long,
                 ))
 
         if section_rows:
@@ -2357,6 +2653,45 @@ def _team_history_header_row(placements, width=TEAM_ROSTER_MATRIX_WIDTH):
     return row
 
 
+def _unique_team_titles(teams, base_title_fn):
+    """Wrap a tab-title function so two franchises can never share a tab.
+
+    TAB TITLES ARE KEYS, NOT JUST LABELS. The ESPN title is the team's
+    abbreviation, and abbreviations are user-chosen free text -- nothing
+    stops two managers from picking the same one. The rehearsal league has
+    a duplicate pair, and the result was that ten teams produced nine tabs:
+    same title, so the second team's page overwrote the first's, in the
+    preview and on the live Sheet alike. One franchise's whole season
+    silently disappeared from the book.
+
+    A franchise's IDENTITY is its team_id and always was; only the
+    DISPLAY collided. So the collision is resolved in display, by
+    appending the id -- and ONLY for the teams actually colliding, so a
+    league whose abbreviations are already distinct keeps every title
+    exactly as it was. That is what keeps this invisible to the existing
+    ESPN and CBS books.
+
+    Returns a callable with the same (team_meta) -> title signature the
+    caller already uses.
+    """
+    by_title = defaultdict(list)
+    for team_id, meta in teams.items():
+        by_title[str(base_title_fn(meta))].append(team_id)
+
+    overrides = {}
+    for title, team_ids in by_title.items():
+        if len(team_ids) < 2:
+            continue
+        for team_id in team_ids:
+            overrides[team_id] = _safe_sheet_title(f'{title} {team_id}')
+
+    def _title(meta):
+        team_id = meta.get('team_id')
+        return overrides.get(team_id, base_title_fn(meta))
+
+    return _title
+
+
 def build_team_history_tabs(history_data, season_year, league_id=None, slot_caps=None,
                             optimal_team_fn=None, title_fn=None,
                             lineup_data=None, team_order=None,
@@ -2415,7 +2750,7 @@ def build_team_history_tabs(history_data, season_year, league_id=None, slot_caps
         teams.setdefault(team_id, row)
         players_by_team_scope[(team_id, scope)].append(row)
 
-    _title = title_fn or team_tab_title
+    _title = _unique_team_titles(teams, title_fn or team_tab_title)
     if team_order is not None:
         order_index = {tid: i for i, tid in enumerate(team_order)}
         sort_key = lambda tid: (order_index.get(tid, len(order_index)),)

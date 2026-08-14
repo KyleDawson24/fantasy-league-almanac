@@ -301,6 +301,57 @@ def _reset_sheet_formats(spreadsheet, worksheet):
     }])
 
 
+def _replace_plain_tab(spreadsheet, title, rows):
+    """Clear/create a tab and write rows with no layout-specific painting.
+
+    The specialized `_replace_*` writers each position gradients, merges
+    and column bands against ONE table shape, so reusing one over a
+    different layout paints the wrong cells -- right numbers under wrong
+    formatting is still a wrong tab. This is the writer for a tab whose
+    shape has no bespoke painter yet: values, a frozen header, bold
+    section labels, nothing that can land off-target.
+    """
+    width = max((len(row) for row in rows), default=20)
+    try:
+        worksheet = spreadsheet.worksheet(title)
+    except gspread.WorksheetNotFound:
+        worksheet = _sheets_call(
+            f'create {title}',
+            lambda: spreadsheet.add_worksheet(
+                title=title, rows=max(len(rows) + 10, 50),
+                cols=max(width, 20),
+            ),
+        )
+
+    _sheets_call(f'clear {title}', worksheet.clear)
+    # clear() leaves merges behind, and a value written into a non-anchor
+    # cell of a stale merge is silently DISCARDED rather than rejected
+    # (the Trades-tab lesson, da8093b). Unmerge before writing values.
+    _sheets_batch_update(spreadsheet, f'unmerge {title}', [
+        {'unmergeCells': {'range': {'sheetId': worksheet.id}}},
+    ])
+    _sheets_call(
+        f'update {title}',
+        lambda: worksheet.update(rows, 'A1', value_input_option='USER_ENTERED'),
+    )
+
+    try:
+        _reset_sheet_formats(spreadsheet, worksheet)
+        last_col = _a1_col(width)
+        _batch_format(worksheet, [
+            {'range': f'A1:{last_col}1',
+             'format': {'textFormat': {'bold': True, 'fontSize': 14}}},
+        ])
+        _sheets_batch_update(
+            spreadsheet, f'autosize {title}',
+            [_auto_resize_columns_request(worksheet.id, 0, width)])
+    except Exception as exc:                       # noqa: BLE001 -- cosmetic
+        # Formatting is polish. A tab whose values wrote correctly must not
+        # be failed by its cosmetics.
+        print(f'[almanac] {title}: formatting pass skipped ({exc})')
+    return worksheet
+
+
 def _replace_home_tab(spreadsheet, rows):
     """Clear/create Home and write the two-band almanac front page (#23)."""
     width = max((len(row) for row in rows), default=20)

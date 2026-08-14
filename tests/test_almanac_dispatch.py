@@ -34,11 +34,26 @@ class _Args:
     """The subset of the parsed namespace this path reads."""
 
     def __init__(self, no_sheets=False, preview_dir=None, prod=False,
-                 print_all=False):
+                 print_all=False, new_public_workbook=False,
+                 include_trades=False, season_year=None, matchup_period=None):
         self.no_sheets = no_sheets
         self.preview_dir = preview_dir
         self.prod = prod
         self.print_all = print_all
+        self.new_public_workbook = new_public_workbook
+        self.include_trades = include_trades
+        self.season_year = season_year
+        self.matchup_period = matchup_period
+
+
+class _CbsLeague:
+    """Stand-in for the registry League object. The points path now picks
+    its DATA ADAPTER by platform (the shape was already settled by format),
+    so these CBS-path tests have to say which platform they are."""
+
+    key = 'cbs-bsb'
+    platform = 'cbs'
+    display_name = 'Box Score Baseball (CBS)'
 
 
 class _Parser:
@@ -60,7 +75,7 @@ def stubs(monkeypatch):
                         lambda sheet_id: calls["written"].append(sheet_id))
     monkeypatch.setattr(gas, "_write_preview_dir",
                         lambda tabs, d: calls["preview_dirs"].append((tabs, d)))
-    monkeypatch.setattr(gas.db, "league", lambda: None)
+    monkeypatch.setattr(gas.db, "league", lambda: _CbsLeague())
     monkeypatch.setattr(gas.db, "league_key", lambda: "cbs-bsb")
     return calls
 

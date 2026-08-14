@@ -2965,8 +2965,49 @@ def get_scored_record_specs():
 
 
 
-def get_lineup_slot_record_specs():
-    """Return active lineup-slot point record specs for the current league."""
+# The head-to-head book's name for this section. Pinned as a constant
+# because the write layer keys formatting off it AND the golden corpus
+# contains it verbatim -- renaming it is a byte change to a pinned fixture.
+LINEUP_SLOT_SECTION = 'Lineup Slot Records'
+
+# The points book's name for the same section (MLB-243, Kyle 2026-08-14).
+#
+# WHY IT DIFFERS FROM HOME. This section ranks points a player scored
+# WHILE ACTUALLY STARTED in a slot; Home's boards rank the best player
+# ELIGIBLE at a position. Those are different questions and they can
+# name different players -- in the rehearsal league the best C-eligible
+# bat was started at 1B all season, so Home called him the catcher and
+# this section called someone else. Both numbers were right and the
+# labels did not say so.
+#
+# The PRODUCT RULING (Kyle 2026-08-14) is that position-eligible active
+# points is the lens for Home, Records and ordinary by-position
+# leaderboards, and deployed slot belongs only to explicitly slot-based
+# analysis. Unifying the data path is 2.0 work
+# (docs/decisions/POSITION_ELIGIBLE_LENS.md). For v1.9 the distinction is
+# foregrounded instead of hidden: the section says what it measures.
+LINEUP_SLOT_SECTION_SEASON_LONG = 'Production by Actual Lineup Slot'
+
+# Kyle's wording, 2026-08-14. Deliberately short and free of internal
+# roadmap vocabulary: the reader needs to know the two surfaces measure
+# different things and that it may change, not how the ticket is filed.
+LINEUP_SLOT_SEASON_LONG_CAPTION = (
+    'Actual-slot production: ranks points scored while a player was '
+    'started in each lineup slot. Home boards rank position-eligible '
+    'players, so the leaders may differ. Likely to align in future '
+    'releases, let me know which you prefer.'
+)
+
+
+def get_lineup_slot_record_specs(season_long=False):
+    """Return active lineup-slot point record specs for the current league.
+
+    season_long (MLB-243): title the section for a points league, where the
+    contrast with Home's position-eligible boards is sharpest because a
+    single season-long period makes every row a season total.
+    """
+    section = (LINEUP_SLOT_SECTION_SEASON_LONG if season_long
+               else LINEUP_SLOT_SECTION)
     rows = query_snowflake(f"""
         SELECT lineup_slot, starter_count AS slots_to_fill
         FROM dim_roster_slot_counts
@@ -2982,8 +3023,16 @@ def get_lineup_slot_record_specs():
     """)
     return [
         {
-            'section': 'Lineup Slot Records',
-            'label': slot_label(row['lineup_slot'], slot_rank, int(row['slots_to_fill'])),
+            'section': section,
+            # The row label carries the qualification too, not just the
+            # section heading. A reader scanning a table sees "C | Liam
+            # Hicks" beside his name and reads "the catcher record"; the
+            # heading three rows up does not travel with the row.
+            'label': _slot_record_label(
+                slot_label(row['lineup_slot'], slot_rank,
+                           int(row['slots_to_fill'])),
+                season_long,
+            ),
             'grain': 'player',
             'stat_name': _lineup_slot_stat_name(row['lineup_slot'], slot_rank),
             'direction': 'most',
@@ -2993,6 +3042,16 @@ def get_lineup_slot_record_specs():
         for slot_rank in range(1, int(row['slots_to_fill']) + 1)
     ]
 
+
+
+def _slot_record_label(label, season_long):
+    """Qualify a slot row label so it cannot be read as a position record.
+
+    "C" beside a player's name says "the catcher record". "C (as started)"
+    says what was actually measured, in the two words it takes. Untouched
+    for the H2H book, whose golden corpus pins these labels.
+    """
+    return f'{label} (as started)' if season_long else label
 
 
 def _lineup_slot_stat_name(slot, slot_rank):

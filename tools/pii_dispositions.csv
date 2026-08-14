@@ -105,6 +105,8 @@ docs/archive/WALKBACK_PROGRESS.md,owner,781e5b55575c50ab,collision,"an MLB playe
 docs/archive/WALKBACK_PROGRESS.md,owner,9ec026a61105bae3,collision,"an MLB player's name, not a league member",2026-08-10
 docs/archive/WALKBACK_PROGRESS.md,owner,deddcfc7c9b4c6d6,collision,"the ordinary English word, used in its ordinary sense",2026-08-10
 docs/decisions/CBS_EARLY_ANCHORS_BACKFILL.md,owner,94041aa8712bc28a,collision,"an MLB player's name, not a league member",2026-08-10
+docs/decisions/POSITION_ELIGIBLE_LENS.md,owner,4611e7ede0abf5e0,collision,MLB-243 synthetic test fixture: invented team names and small integer team_ids authored for these tests; no real league data,2026-08-14
+docs/decisions/POSITION_ELIGIBLE_LENS.md,owner,9b9ae46403de1cc2,collision,MLB-243 synthetic test fixture: invented team names and small integer team_ids authored for these tests; no real league data,2026-08-14
 docs/index.html,owner,04c33ac5f2b5b26a,collision,"an MLB player's name, not a league member",2026-08-10
 docs/index.html,owner,1a8a4c553e4d8c77,collision,"an MLB player's name, not a league member",2026-08-10
 docs/index.html,owner,3dd2492485e787b8,collision,"an MLB player's name, not a league member",2026-08-10
@@ -256,6 +258,7 @@ tests/test_points_almanac_espn.py,team-id,31f7f4b18b839fcf,collision,MLB-243 syn
 tests/test_points_almanac_espn.py,team-id,352830543dc92ac3,collision,MLB-243 synthetic test fixture: invented team names and small integer team_ids authored for these tests; no real league data,2026-08-14
 tests/test_points_almanac_espn.py,team-id,3da43c0640501961,collision,MLB-243 synthetic test fixture: invented team names and small integer team_ids authored for these tests; no real league data,2026-08-14
 tests/test_points_almanac_espn.py,team-id,5f0014e422f589b3,collision,MLB-243 synthetic test fixture: invented team names and small integer team_ids authored for these tests; no real league data,2026-08-14
+tests/test_points_almanac_espn.py,team-id,7727dedc228ced55,collision,MLB-243 synthetic test fixture: invented team names and small integer team_ids authored for these tests; no real league data,2026-08-14
 tests/test_points_almanac_espn.py,team-id,98f4254fb7744a86,collision,MLB-243 synthetic test fixture: invented team names and small integer team_ids authored for these tests; no real league data,2026-08-14
 tests/test_points_almanac_espn.py,team-id,ba9d86300b5cebf4,collision,MLB-243 synthetic test fixture: invented team names and small integer team_ids authored for these tests; no real league data,2026-08-14
 tests/test_points_almanac_espn.py,team-id,cb5d33bcf32e064e,collision,MLB-243 synthetic test fixture: invented team names and small integer team_ids authored for these tests; no real league data,2026-08-14

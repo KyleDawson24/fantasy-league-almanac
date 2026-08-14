@@ -116,6 +116,24 @@ def test_an_empty_season_says_so_instead_of_rendering_an_empty_grid():
     assert 'No lineup-slot production captured' in flat
 
 
+def test_both_tables_put_their_team_names_in_the_same_column():
+    """The two tables stack and are read together. The same ten team names
+    landing in two different columns is what makes the tab look broken."""
+    rows = almanac_logic.build_points_standings_tab_rows(
+        SEASON_TOTALS, SLOT_ROWS, 2026)
+    standings_header = next(r for r in rows if r and r[0] == 'Rank')
+    slot_header = next(r for r in rows if len(r) > 1 and r[1] == 'Team')
+    assert standings_header.index('Team') == slot_header.index('Team') == 1
+
+    names = {r['team_name'] for r in SEASON_TOTALS}
+    for row in rows:
+        if not row:
+            continue
+        assert str(row[0]) not in names, (
+            f'a team name landed in column A: {row[:2]}'
+        )
+
+
 # --------------------------------------------------------------------------
 # The Rivalry Matrix keeps its completed-season requirement
 # --------------------------------------------------------------------------
@@ -599,6 +617,183 @@ def test_the_warning_does_not_change_any_number():
     numbers = lambda rows: [c for r in rows for c in r
                             if isinstance(c, (int, float))]
     assert numbers(without) == numbers(with_note)
+
+
+# --------------------------------------------------------------------------
+# The slot section says what it measures (MLB-243 ruling, 2026-08-14)
+# --------------------------------------------------------------------------
+
+_SLOT_SPECS = [
+    {'section': 'Production by Actual Lineup Slot', 'label': 'C (as started)',
+     'grain': 'player', 'stat_name': 'LINEUP_SLOT_POINTS__C__1',
+     'direction': 'most'},
+]
+
+_SLOT_RECORD = [{
+    'entity_grain': 'player', 'stat_name': 'LINEUP_SLOT_POINTS__C__1',
+    'record_direction': 'most', 'rank': 1, 'season_year': 2026,
+    'matchup_period': 1, 'team_id': 1, 'team_name': 'Harbor Otters',
+    'team_abbrev': 'HAR', 'owner_name': 'Owner unavailable',
+    'player_id': 9001, 'player_name': 'Rowan Pike',
+    'display_name': 'Rowan Pike', 'stat_value': 292.0,
+}]
+
+
+def _slot_section(season_long):
+    import almanac_data
+    return almanac_logic.build_records_tab_rows(
+        all_time_records=_SLOT_RECORD, current_season_records=_SLOT_RECORD,
+        record_specs=[dict(s, section=(
+            almanac_data.LINEUP_SLOT_SECTION_SEASON_LONG if season_long
+            else almanac_data.LINEUP_SLOT_SECTION),
+            label=almanac_data._slot_record_label('C', season_long))
+            for s in _SLOT_SPECS],
+        schedule_lookup={}, season_long=season_long)
+
+
+def test_the_points_slot_section_is_renamed():
+    import almanac_data
+    flat = _cells(_slot_section(True))
+    assert almanac_data.LINEUP_SLOT_SECTION_SEASON_LONG in flat
+    assert almanac_data.LINEUP_SLOT_SECTION not in flat
+
+
+def test_the_points_slot_section_carries_the_contrast_caption():
+    """A reader must meet the qualification before the first name."""
+    rows = _slot_section(True)
+    titles = [i for i, r in enumerate(rows)
+              if r and r[0] == 'Production by Actual Lineup Slot']
+    assert titles, 'the renamed section heading is missing'
+    caption_row = rows[titles[0] + 1]
+    caption = str(caption_row[0])
+    assert 'while a player was started' in caption
+    assert 'position-eligible' in caption
+    assert 'may differ' in caption
+    # It precedes the column header, so it cannot be scrolled past.
+    assert rows[titles[0] + 2][0] == 'Record'
+
+
+def test_a_slot_row_is_not_labelled_as_a_bare_position():
+    """"C | Rowan Pike" reads as the catcher record. The heading three rows
+    up does not travel with the row a reader is looking at."""
+    rows = _slot_section(True)
+    # The holder cell is a Baseball-Reference =HYPERLINK, so match inside it.
+    holder_rows = [r for r in rows
+                   if len(r) > 1 and 'Rowan Pike' in str(r[1])]
+    assert holder_rows, 'the slot record holder did not render'
+    assert holder_rows[0][0] == 'C (as started)'
+    assert holder_rows[0][0] != 'C'
+
+
+def test_the_h2h_slot_section_is_untouched():
+    """Its heading and bare labels are pinned by the golden corpus."""
+    import almanac_data
+    rows = _slot_section(False)
+    flat = _cells(rows)
+    assert almanac_data.LINEUP_SLOT_SECTION in flat
+    assert almanac_data.LINEUP_SLOT_SECTION_SEASON_LONG not in flat
+    assert 'as started' not in ' '.join(flat)
+    # The holder cell is a Baseball-Reference =HYPERLINK, so match inside it.
+    holder_rows = [r for r in rows
+                   if len(r) > 1 and 'Rowan Pike' in str(r[1])]
+    assert holder_rows[0][0] == 'C'
+
+
+def test_the_golden_corpus_still_pins_the_h2h_heading():
+    """If this fixture ever stops containing the old heading, the H2H book
+    moved and the scoping argument above no longer holds."""
+    from pathlib import Path
+    fixture = (Path(__file__).resolve().parents[1] / 'tests' / 'fixtures' /
+               'almanac_v1_1_0' / 'Records.tsv')
+    if not fixture.exists():
+        pytest.skip('private golden corpus not present')
+    assert 'Lineup Slot Records' in fixture.read_text(encoding='utf-8')
+
+
+def test_both_slot_headings_keep_the_one_decimal_value_rule():
+    """The write layer keys number formatting off the section name, so a
+    rename must not silently drop the points formatting."""
+    import almanac_data
+    import almanac_write
+    assert almanac_data.LINEUP_SLOT_SECTION in almanac_write._ONE_DECIMAL_SECTIONS
+    assert (almanac_data.LINEUP_SLOT_SECTION_SEASON_LONG
+            in almanac_write._ONE_DECIMAL_SECTIONS)
+
+
+def test_the_ruling_is_recorded_for_2_0():
+    from pathlib import Path
+    doc = (Path(__file__).resolve().parents[1] / 'docs' / 'decisions' /
+           'POSITION_ELIGIBLE_LENS.md')
+    assert doc.exists(), 'the 2.0 lens ruling was not written down'
+    text = doc.read_text(encoding='utf-8')
+    assert 'required for 2.0' in text
+    assert 'fct_player_position_pts' in text
+
+
+# --------------------------------------------------------------------------
+# Column widths: a caption must not size the column it sits in
+# --------------------------------------------------------------------------
+
+def _standings_shape():
+    """The real Advanced Standings shape: three prose rows above a table."""
+    return almanac_logic.build_points_standings_tab_rows(
+        SEASON_TOTALS, SLOT_ROWS, 2026,
+        rivalry_note=almanac_logic.RIVALRY_UNAVAILABLE_NOTE,
+        caveat=('Heads up: this league drafted on July 31, 2026 -- 128 days '
+                'after the 2026 season opened on March 25. Totals on every '
+                'tab include MLB production from before the league existed, '
+                'credited to whoever first rostered each player.'),
+    )
+
+
+def test_a_long_caption_does_not_widen_the_column_it_sits_in():
+    """THE WRECKED TAB. autoResizeDimensions sized column A to fit a
+    300-character sentence, so the whole table sat off the right edge of
+    the screen -- every value in the correct cell and the sheet unreadable.
+    """
+    import almanac_write
+
+    rows = _standings_shape()
+    width = max(len(r) for r in rows)
+    widths = almanac_write._plain_tab_column_widths(rows, width)
+
+    longest_prose = max(len(str(r[0])) for r in rows
+                        if len(r) == 1 and str(r[0]).strip())
+    assert longest_prose > 200, 'fixture lost its long caption'
+    assert widths[0] <= almanac_write._PLAIN_MAX_PX
+    assert widths[0] < longest_prose * 2, (
+        f'column A ({widths[0]}px) is still being sized by the caption'
+    )
+
+
+def test_no_column_exceeds_the_ceiling_and_none_collapses():
+    import almanac_write
+
+    rows = _standings_shape()
+    width = max(len(r) for r in rows)
+    for px in almanac_write._plain_tab_column_widths(rows, width):
+        assert almanac_write._PLAIN_MIN_PX <= px <= almanac_write._PLAIN_MAX_PX
+
+
+def test_the_team_column_is_sized_by_the_longest_team_name():
+    """Prose is excluded; real table content still drives the width."""
+    import almanac_write
+
+    rows = _standings_shape()
+    width = max(len(r) for r in rows)
+    widths = almanac_write._plain_tab_column_widths(rows, width)
+    longest_team = max(len(r['team_name']) for r in SEASON_TOTALS)
+    assert widths[1] >= longest_team * 4, (
+        'the Team column is too narrow to show a real team name'
+    )
+
+
+def test_an_all_prose_tab_still_gets_usable_widths():
+    import almanac_write
+
+    rows = [['Advanced Standings: 2026'], ['a very long explanatory line ' * 12]]
+    widths = almanac_write._plain_tab_column_widths(rows, 1)
+    assert widths == [almanac_write._PLAIN_MIN_PX]
 
 
 # --------------------------------------------------------------------------

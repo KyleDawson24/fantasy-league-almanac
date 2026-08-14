@@ -58,7 +58,7 @@ repository is idle._
   beside it, and the app-created publish path. Configured dev/prod
   workbooks are never touched.
 
-### Known limitation
+### Known limitations
 
 - **A league that drafted late still counts the whole MLB season**
   (MLB-243). Type-5 extraction walks every scoring day, so a league that
@@ -70,6 +70,22 @@ repository is idle._
   corrected: pre-league production is properly its own category rather
   than a filter, and the fix touches extraction, the facts and every
   aggregate at once.
+
+- **Two tabs can still name different "best catchers"** (MLB-243). Home's
+  boards rank the best player ELIGIBLE at a position; the record book's
+  slot section ranks points scored WHILE ACTUALLY STARTED there. Both
+  numbers are correct and they diverge whenever a manager plays someone
+  out of position. The ruling is that position-eligible active points is
+  the lens for Home, Records and ordinary by-position leaderboards, and
+  deployed slot belongs only to explicitly slot-based analysis; unifying
+  the data path is **required for 2.0**
+  ([POSITION_ELIGIBLE_LENS.md](docs/decisions/POSITION_ELIGIBLE_LENS.md)).
+
+  For v1.9 the points book foregrounds the distinction instead: the
+  section is titled **Production by Actual Lineup Slot**, carries a
+  caption naming the contrast, and labels its rows `C (as started)`. The
+  head-to-head book is unchanged -- its golden corpus pins the old
+  wording, and that byte change belongs with the unification.
 
 ## [1.9.0] - 2026-08-13
 

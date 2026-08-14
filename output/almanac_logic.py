@@ -35,6 +35,9 @@ from almanac_data import (
     _lineup_slot_stat_name,
     _team_record_label,
     get_lineup_slot_record_specs,
+    LINEUP_SLOT_SECTION,
+    LINEUP_SLOT_SECTION_SEASON_LONG,
+    LINEUP_SLOT_SEASON_LONG_CAPTION,
     get_scored_record_specs,
     slot_label,
 )
@@ -1305,13 +1308,19 @@ def build_points_standings_tab_rows(season_totals, slot_rows, season_year,
 def _points_slot_grid(slot_rows, season_totals):
     """Team x active-lineup-slot points grid, teams in standings order.
 
+    INDENTED ONE COLUMN so its Team spine lands in column B, directly
+    under the Season Points table's Team column. The two tables stack on
+    the same page and are read together; starting one in A and the other
+    in B puts the same ten team names in two different places and makes
+    the tab look broken even when every value is right.
+
     Bench/IL slots are carried as their own column rather than dropped:
     in a points league what a manager left on the bench is a real part of
     the season's story, and it is already separated by the mart's
     is_active_lineup_slot flag.
     """
     if not slot_rows:
-        return [['No lineup-slot production captured for this season yet.']]
+        return [['', 'No lineup-slot production captured for this season yet.']]
 
     by_team = defaultdict(dict)
     slot_order, seen = [], set()
@@ -1338,12 +1347,12 @@ def _points_slot_grid(slot_rows, season_totals):
     for row in (season_totals or []):
         labels[row.get('team_id')] = row.get('team_name')
 
-    grid = [['Team', *slot_order]]
+    grid = [['', 'Team', *slot_order]]
     for team_id in ordered_teams:
         if team_id not in by_team:
             continue
         cells = by_team[team_id]
-        grid.append([labels.get(team_id),
+        grid.append(['', labels.get(team_id),
                      *(_points_cell(cells.get(slot)) for slot in slot_order)])
     return grid
 
@@ -2348,7 +2357,7 @@ def build_records_tab_rows(all_time_records, current_season_records, league_id=N
         *SCORE_RECORD_SPECS,
         *get_scored_record_specs(),
         *RATE_RECORD_SPECS,
-        *get_lineup_slot_record_specs(),
+        *get_lineup_slot_record_specs(season_long=season_long),
     ]
 
     all_time_index = _index_records(all_time_records)
@@ -2418,10 +2427,14 @@ def build_records_tab_rows(all_time_records, current_season_records, league_id=N
                 ))
 
         if section_rows:
-            rows.extend([
-                _records_matrix_scope_header(section_title),
-                RECORDS_MATRIX_DETAIL_HEADER,
-            ])
+            rows.append(_records_matrix_scope_header(section_title))
+            # The caption sits between the heading and the column header,
+            # where a reader meets it before the first name (MLB-243). Only
+            # the points book carries it; the H2H section keeps its pinned
+            # shape byte for byte.
+            if section_title == LINEUP_SLOT_SECTION_SEASON_LONG:
+                rows.append([LINEUP_SLOT_SEASON_LONG_CAPTION])
+            rows.append(RECORDS_MATRIX_DETAIL_HEADER)
             rows.extend(section_rows)
             rows.append([])
 

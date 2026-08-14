@@ -343,13 +343,57 @@ def _replace_plain_tab(spreadsheet, title, rows):
              'format': {'textFormat': {'bold': True, 'fontSize': 14}}},
         ])
         _sheets_batch_update(
-            spreadsheet, f'autosize {title}',
-            [_auto_resize_columns_request(worksheet.id, 0, width)])
+            spreadsheet, f'widths {title}',
+            [_column_width_request(worksheet.id, i, i + 1, px)
+             for i, px in enumerate(_plain_tab_column_widths(rows, width))])
     except Exception as exc:                       # noqa: BLE001 -- cosmetic
         # Formatting is polish. A tab whose values wrote correctly must not
         # be failed by its cosmetics.
         print(f'[almanac] {title}: formatting pass skipped ({exc})')
     return worksheet
+
+
+# Width model for _replace_plain_tab. Roughly one character per 7px at the
+# default font, plus cell padding, held between a readable floor and a
+# ceiling no single column may exceed.
+_PLAIN_CHAR_PX = 7
+_PLAIN_PAD_PX = 18
+_PLAIN_MIN_PX = 64
+_PLAIN_MAX_PX = 300
+
+
+def _plain_tab_column_widths(rows, width):
+    """Column widths measured from the TABLE rows only.
+
+    WHY NOT autoResizeDimensions. It sizes a column to its widest cell and
+    has no idea which cells are prose. This tab's captions -- the format
+    explainer and the late-draft warning -- are single cells in column A
+    running to several hundred characters, so auto-resize made column A
+    about as wide as the sentence and shoved the entire table off the right
+    edge of the screen. The values were all in the correct cells; the sheet
+    was simply unreadable.
+
+    A prose row is one with a single populated cell. Those are excluded
+    from the measurement and left to overflow rightwards across the empty
+    cells beside them, which is how a caption is meant to read. Rows with
+    two or more populated cells are the real tables, and they alone decide
+    the widths.
+    """
+    table_rows = [row for row in rows
+                  if sum(1 for cell in row if str(cell).strip()) >= 2]
+    if not table_rows:
+        return [_PLAIN_MIN_PX] * width
+
+    widths = []
+    for index in range(width):
+        longest = max(
+            (len(str(row[index])) for row in table_rows
+             if index < len(row) and str(row[index]).strip()),
+            default=0,
+        )
+        pixels = longest * _PLAIN_CHAR_PX + _PLAIN_PAD_PX
+        widths.append(max(_PLAIN_MIN_PX, min(_PLAIN_MAX_PX, pixels)))
+    return widths
 
 
 def _replace_home_tab(spreadsheet, rows):
@@ -2139,6 +2183,16 @@ def _record_side_is_small_tie(holder):
     return True
 
 
+# Sections whose Value columns are points and therefore carry one decimal.
+# The slot section has two headings -- the H2H book's and the points book's
+# (MLB-243) -- and both are the same table underneath.
+_ONE_DECIMAL_SECTIONS = frozenset({
+    'Score Records',
+    almanac_data.LINEUP_SLOT_SECTION,
+    almanac_data.LINEUP_SLOT_SECTION_SEASON_LONG,
+})
+
+
 def _records_score_value_formats(rows):
     """Force score/points values to one decimal without affecting count stats."""
     formats = []
@@ -2156,7 +2210,10 @@ def _records_score_value_formats(rows):
             break
         if len(row) < RECORDS_MATRIX_WIDTH:
             continue
-        if active_section == 'Score Records' or active_section == 'Lineup Slot Records':
+        # Both spellings of the slot section get the one-decimal rule: the
+        # points book renames the heading (MLB-243) and the formatting has
+        # to follow the section, not the wording.
+        if active_section in _ONE_DECIMAL_SECTIONS:
             formats.extend([
                 {
                     'range': f'D{row_number}:D{row_number}',

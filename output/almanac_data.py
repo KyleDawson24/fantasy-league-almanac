@@ -3,7 +3,9 @@
 Tier 2c.1 (v1.1.1): SQL data-access surface of the league almanac.
 
 Every function in this module issues at least one Snowflake query via
-`query_snowflake` (or wraps a project-level data module like `records`),
+`query_for_presentation` -- the raw seam PLUS the owner-label fallback,
+because everything here is read to be rendered (MLB-243; see db.py for why
+that is opt-in) -- or wraps a project-level data module like `records`,
 with one exception: the MLB-103 Trades-tab fetches read the live ESPN
 league API at build time -- the trading block is ephemeral current-state
 and the executed-trade ledger lives only in the communication feed, so
@@ -30,7 +32,7 @@ from datetime import datetime
 
 import requests
 
-from db import latest_by, league_predicate, listagg, query_snowflake
+from db import latest_by, league_predicate, listagg, query_for_presentation
 from formatters import TOP_SCORER_STAT_DISPLAY
 import records
 import slot_catalog
@@ -156,7 +158,7 @@ HITTING_RECORD_ORDER = {
 
 def get_latest_matchup_period():
     """Return latest loaded (season_year, matchup_period)."""
-    rows = query_snowflake(f"""
+    rows = query_for_presentation(f"""
         SELECT season_year, matchup_period
         FROM fct_team_weekly_active_performance
         WHERE {league_predicate()}
@@ -172,7 +174,7 @@ def get_latest_matchup_period():
 
 def get_team_week_stat_specs():
     """Return scored hitting/pitching stat columns for the Team Weeks tab."""
-    rows = query_snowflake(f"""
+    rows = query_for_presentation(f"""
         SELECT
             d.leaderboard_name AS stat_name,
             d.display_name,
@@ -216,7 +218,7 @@ def get_team_weeks(stat_specs):
             raise ValueError(f"Unsafe stat column name: {column!r}")
 
     stat_select = ',\n            '.join(stat_columns)
-    rows = query_snowflake(f"""
+    rows = query_for_presentation(f"""
         SELECT
             season_year,
             matchup_period,
@@ -291,7 +293,7 @@ def get_team_week_record_marks(stat_specs):
             GROUP BY record_value
         """)
 
-    rows = query_snowflake("\nUNION ALL\n".join(selects))
+    rows = query_for_presentation("\nUNION ALL\n".join(selects))
     return {
         row['stat_name']: {
             'direction': row.get('record_direction'),
@@ -413,7 +415,7 @@ def get_optimal_team_candidates(season_year=None, matchup_period=None,
         params.append(team_id)
     where_sql = ' AND '.join(where_clauses)
 
-    rows = query_snowflake(f"""
+    rows = query_for_presentation(f"""
         SELECT
             -- player_key is the grain (MLB-72): 1:1 with player_id on ESPN
             -- rows; the only identity on CBS ui-only synthetics (whose
@@ -459,7 +461,7 @@ def get_optimal_season_candidates(team_id):
     block builder synthesizes key|season candidate ids so the shared
     selector can reuse a player across slots while burning each
     player-season once."""
-    return query_snowflake(f"""
+    return query_for_presentation(f"""
         SELECT
             player_key,
             MAX(player_id)    AS player_id,
@@ -489,7 +491,7 @@ def get_team_player_season_stats():
     carry (active/inactive points, hitting/pitching split, games, days,
     stat tail, current fantasy team), one query for all teams. The CBS
     almanac builds its equivalent in get_cbs_team_history_data."""
-    return query_snowflake(f"""
+    return query_for_presentation(f"""
         WITH latest_day AS (
             SELECT season_year, MAX(scoring_period) AS scoring_period
             FROM mart_daily_roster_snapshot
@@ -706,7 +708,7 @@ def _enrich_optimal_team_with_stats(selected_rows, season_year, matchup_period,
         for col in _OPTIMAL_TEAM_STAT_COLUMNS
     )
 
-    rows = query_snowflake(f"""
+    rows = query_for_presentation(f"""
         SELECT
             player_id,
             -- Roster-context fields the renderer reads, all taken from the
@@ -851,7 +853,7 @@ def get_draft_board(season_year):
     early pick); a large negative is a bust (drafted early, underproduced).
     Rows ordered by overall_pick.
     """
-    return query_snowflake(f"""
+    return query_for_presentation(f"""
         SELECT
             overall_pick,
             round_num,
@@ -882,7 +884,7 @@ def get_draft_history_boards(through_season):
     lens as get_draft_board. Carries team_abbrev so the re-cut board can
     name each round's straight top pick. Rows ordered (season, pick).
     """
-    return query_snowflake(f"""
+    return query_for_presentation(f"""
         SELECT
             season_year,
             overall_pick,
@@ -908,7 +910,7 @@ def get_season_scoring_periods():
     so a partial ongoing season is scaled to a full-season equivalent,
     the same standard-season-clock idea as the CBS gameplay-days weight.
     """
-    return query_snowflake(f"""
+    return query_for_presentation(f"""
         SELECT season_year, COUNT(DISTINCT scoring_period) AS clock
         FROM fct_player_daily_performance
         WHERE {league_predicate()}
@@ -950,7 +952,7 @@ def get_team_standings(season_year, stat_specs):
             raise ValueError(f"Unsafe stat column name: {column!r}")
 
     stat_select = ',\n            '.join(f'm.{c}' for c in stat_columns)
-    return query_snowflake(f"""
+    return query_for_presentation(f"""
         SELECT
             m.team_id,
             m.team_abbrev,
@@ -991,7 +993,7 @@ def get_team_slot_points(season_year):
     Ordered by the roster dim's sort_order so consumers can lay columns out
     without a hardcoded slot list.
     """
-    return query_snowflake(f"""
+    return query_for_presentation(f"""
         SELECT
             team_id,
             lineup_slot,
@@ -1013,7 +1015,7 @@ def get_team_slot_points_alltime():
     mart the season grid reads -- same scope rules (regular season only,
     active slots only). 'All-time' means every season the warehouse
     holds; slot vocabulary drift across seasons unions in the builder."""
-    return query_snowflake(f"""
+    return query_for_presentation(f"""
         WITH slots AS (
             SELECT team_id, lineup_slot,
                    CAST(SUM(CAST(slot_calculated_points AS DECIMAL(18, 6))) AS DOUBLE) AS pts,
@@ -1065,7 +1067,7 @@ def get_espn_season_finishes():
     That fallback is the ordering MLB-227 proved wrong; it cannot silently
     mix with real seeds within a season, because ESPN assigns playoffSeed to
     every team in a season or to none of them."""
-    return query_snowflake(f"""
+    return query_for_presentation(f"""
         WITH ranked AS (
             SELECT m.season_year, m.team_id, m.team_abbrev, m.owner_display,
                    m.wins, m.losses, m.ties,
@@ -1115,7 +1117,7 @@ def get_team_standings_alltime(stat_specs):
             raise ValueError(f"Unsafe stat column name: {column!r}")
     stat_select = ',\n            '.join(
         f'SUM({c}) AS {c}' for c in stat_columns)
-    return query_snowflake(f"""
+    return query_for_presentation(f"""
         SELECT * FROM (
         SELECT
             team_id,
@@ -1159,7 +1161,7 @@ def get_team_acquisition_channels_alltime():
     transaction era starts 2026 (the 2025 topics log isn't cleanly
     reachable -- MLB-16), so today this equals the season table and
     deepens as seasons accrue."""
-    return query_snowflake(f"""
+    return query_for_presentation(f"""
         SELECT
             team_id,
             MAX_BY(team_abbrev, season_year) AS team_abbrev,
@@ -1199,7 +1201,7 @@ def get_team_rank_arc(season_year):
     the tiebreak, team_id as the deterministic last resort); mid-season
     the OFFICIAL site tiebreakers could order a tied pair differently.
     Feeds the rank-by-week chart (Kyle 2026-07-17)."""
-    return query_snowflake(f"""
+    return query_for_presentation(f"""
         WITH weekly AS (
             SELECT team_id, team_abbrev, matchup_period,
                    CASE result WHEN 'W' THEN 1 ELSE 0 END AS w,
@@ -1241,7 +1243,7 @@ def get_rivalry_axes():
     that the league has given one configured canonical name are one team
     here and two rows there, and a franchise that changed ids keeps its old
     eras on the axis its current id resolves to."""
-    return query_snowflake(
+    return query_for_presentation(
         f"SELECT identity_key, identity_name, identity_abbrev,"
         f"       identity_source, active_platform_teams, league_format,"
         f"       has_rivalry_evidence, sort_order"
@@ -1267,7 +1269,7 @@ def get_rivalry_matrix():
     holds everything, including the folded franchises an active team's
     record was built against. Filtering here would make a team's totals
     depend on who else is still playing."""
-    return query_snowflake(
+    return query_for_presentation(
         f"SELECT row_identity_key, opponent_identity_key,"
         f"       row_team_name, opponent_team_name,"
         f"       matchup_meetings, matchup_wins, matchup_losses, matchup_ties,"
@@ -1352,7 +1354,7 @@ def get_team_affinity_weights(season_year):
     # the same 'BE', 'FA', 'IL' this line used to spell out, sorted so the
     # generated SQL is stable run to run.
     inactive_slots = slot_catalog.sql_in_list(slot_catalog.get_inactive_slots())
-    return query_snowflake(f"""
+    return query_for_presentation(f"""
         SELECT team_id,
                CASE WHEN pro_team IS NULL OR pro_team = 'FA'
                     THEN '{AFFINITY_UNATTRIBUTED}'
@@ -1376,7 +1378,7 @@ def get_team_acquisition_channels(season_year):
     the builder orders each lens block by its own Acquired total. Feeds the two
     transaction blocks stacked under the Advanced Standings weekly grid.
     """
-    return query_snowflake(f"""
+    return query_for_presentation(f"""
         SELECT
             team_id,
             team_abbrev,
@@ -1512,7 +1514,7 @@ def get_player_season_points(season_year):
     fantasy-credited production (performance_status = 'active').
     Returns {player_id: {'total_pts', 'active_pts'}}.
     """
-    rows = query_snowflake(f"""
+    rows = query_for_presentation(f"""
         SELECT
             player_id,
             ROUND(CAST(SUM(CAST(calculated_points AS DECIMAL(18, 6))) AS DOUBLE), 1) AS total_pts,
@@ -1548,7 +1550,7 @@ def _get_season_opener(season_year):
     is a genuine state and the caller must treat it as one -- see the note in
     get_trades_tab_data on what used to happen instead.
     """
-    rows = query_snowflake(f"""
+    rows = query_for_presentation(f"""
         SELECT MIN(start_date) AS opener
         FROM dim_matchup_period
         WHERE season_year = %s
@@ -1594,7 +1596,7 @@ def _get_since_trade_points(season_year, player_ids):
     if not player_ids:
         return []
     placeholders = ', '.join(['%s'] * len(player_ids))
-    return query_snowflake(f"""
+    return query_for_presentation(f"""
         SELECT
             player_id,
             team_id,
@@ -1775,7 +1777,7 @@ def get_trades_tab_data(season_year):
 
 def get_slot_capacities(season_year, matchup_period):
     """Return configured active roster slot counts for one season."""
-    rows = query_snowflake(f"""
+    rows = query_for_presentation(f"""
         SELECT
             lineup_slot,
             starter_count AS slots_to_fill
@@ -1804,7 +1806,7 @@ def get_slot_capacities(season_year, matchup_period):
 def get_roster_slot_capacities(season_year, include_inactive=False):
     """Return configured roster slot counts."""
     inactive_filter = "" if include_inactive else "AND is_active_lineup_slot"
-    rows = query_snowflake("""
+    rows = query_for_presentation("""
         SELECT
             lineup_slot,
             starter_count AS slots_to_fill
@@ -1833,7 +1835,7 @@ def get_roster_slot_capacities(season_year, include_inactive=False):
 
 def get_team_roster_history_stats(season_year):
     """Return team/player roster history for current-season and all-time views."""
-    player_rows = query_snowflake(f"""
+    player_rows = query_for_presentation(f"""
         WITH latest_day AS (
             SELECT
                 season_year,
@@ -2206,7 +2208,7 @@ def get_team_roster_history_stats(season_year):
 
 def get_current_team_roster_stats(season_year):
     """Return latest roster snapshot with season-to-date team/player stats."""
-    rows = query_snowflake(f"""
+    rows = query_for_presentation(f"""
         WITH latest_day AS (
             SELECT
                 season_year,
@@ -2350,7 +2352,7 @@ def get_current_team_roster_stats(season_year):
 
 def get_almanac_records(scope):
     """Return rank-one record rows for the almanac Records tab."""
-    rows = query_snowflake(f"""
+    rows = query_for_presentation(f"""
         SELECT
             entity_grain,
             stat_name,
@@ -2426,7 +2428,7 @@ def count_value_occurrences_for_scope(scope, grain, stat_name, value):
     }.get(stat_name, stat_name.lower())
     fct = ('fct_team_weekly_active_performance' if grain == 'team'
            else 'fct_player_weekly_active_performance')
-    rows = query_snowflake(f"""
+    rows = query_for_presentation(f"""
         SELECT COUNT(*) AS n
         FROM {fct}
         WHERE is_record_eligible
@@ -2465,7 +2467,7 @@ def get_lineup_slot_records(scope):
     elif scope != 'all_time':
         raise ValueError(f"Unsupported record scope: {scope!r}")
 
-    rows = query_snowflake(f"""
+    rows = query_for_presentation(f"""
         WITH current_slots AS (
             SELECT lineup_slot, starter_count
             FROM dim_roster_slot_counts
@@ -2559,7 +2561,7 @@ def _get_rate_record_rows(scope, spec):
     if qualifier_col not in ('ab', 'outs'):
         raise ValueError(f"Unsupported qualifier column: {qualifier_col!r}")
 
-    rows = query_snowflake(f"""
+    rows = query_for_presentation(f"""
         SELECT
             l.entity_grain,
             l.stat_name,
@@ -2598,7 +2600,7 @@ def _get_rate_record_rows(scope, spec):
 
 def get_wasted_points_records(scope):
     """Return wasted-points records, which live at inactive-team grain."""
-    rows = query_snowflake(f"""
+    rows = query_for_presentation(f"""
         SELECT
             entity_grain,
             stat_name,
@@ -2681,7 +2683,7 @@ def get_franchise_hall_of_fame(limit=25):
             raise ValueError(f"Unsafe stat column name: {column!r}")
     stat_select = ',\n                '.join(
         f'SUM({c}) AS {c}, SUM({c}_pts) AS {c}_pts' for c in stat_keys)
-    return query_snowflake(f"""
+    return query_for_presentation(f"""
         WITH totals AS (
             SELECT
                 player_id,
@@ -2762,7 +2764,7 @@ def get_wasted_hall_of_shame(limit=25):
     pitching days (MLB-174). Not corrected here and not caveated on the
     sheet; it is upstream of this block.
     """
-    return query_snowflake(f"""
+    return query_for_presentation(f"""
         WITH labels AS (
             SELECT
                 team_id,
@@ -2913,7 +2915,7 @@ def get_wasted_career_total():
     double-count in the discipline split -- the two boards' full (not
     top-N) totals must add up to this.
     """
-    rows = query_snowflake(f"""
+    rows = query_for_presentation(f"""
         WITH inactive_total AS (
             SELECT ROUND(CAST(SUM(CAST(calculated_points AS DECIMAL(18, 6)))
                 AS DOUBLE), 6) AS pts
@@ -2937,7 +2939,7 @@ def get_wasted_career_total():
 
 def get_scored_record_specs():
     """Return best-only team specs for scored and auto-tracked stats."""
-    rows = query_snowflake(f"""
+    rows = query_for_presentation(f"""
         SELECT DISTINCT
             d.leaderboard_name AS stat_name,
             d.display_name,
@@ -2965,33 +2967,36 @@ def get_scored_record_specs():
 
 
 
-# The head-to-head book's name for this section. Pinned as a constant
-# because the write layer keys formatting off it AND the golden corpus
-# contains it verbatim -- renaming it is a byte change to a pinned fixture.
+# This section's name, in BOTH books. Pinned as a constant because the
+# write layer keys formatting off it AND the golden corpus contains it
+# verbatim -- renaming it is a byte change to a pinned fixture.
+#
+# THE POINTS BOOK USED TO RENAME IT (MLB-243, "Production by Actual Lineup
+# Slot", with "(as started)" on every row label). That was an overreach and
+# is reverted: one section of a shared record book should not be titled two
+# different ways depending on which league is reading it, and a
+# parenthetical on eighteen row labels shouts a caveat the reader needs
+# once. The distinction it was protecting is real, so it survives as a
+# single caption -- see LINEUP_SLOT_LENS_CAPTION.
 LINEUP_SLOT_SECTION = 'Lineup Slot Records'
 
-# The points book's name for the same section (MLB-243, Kyle 2026-08-14).
+# The one sentence that survives the rename. Kyle's wording, 2026-08-14.
 #
-# WHY IT DIFFERS FROM HOME. This section ranks points a player scored
-# WHILE ACTUALLY STARTED in a slot; Home's boards rank the best player
-# ELIGIBLE at a position. Those are different questions and they can
-# name different players -- in the rehearsal league the best C-eligible
-# bat was started at 1B all season, so Home called him the catcher and
-# this section called someone else. Both numbers were right and the
-# labels did not say so.
+# WHAT IT PROTECTS. This section ranks points a player scored WHILE
+# ACTUALLY DEPLOYED in a slot; Home's boards rank the best player ELIGIBLE
+# at a position. Those are different questions and they can name different
+# players -- in the rehearsal league the best C-eligible bat was started at
+# 1B all season, so Home called him the catcher and this section called
+# someone else. Both numbers were right and nothing said so.
 #
 # The PRODUCT RULING (Kyle 2026-08-14) is that position-eligible active
 # points is the lens for Home, Records and ordinary by-position
 # leaderboards, and deployed slot belongs only to explicitly slot-based
 # analysis. Unifying the data path is 2.0 work
-# (docs/decisions/POSITION_ELIGIBLE_LENS.md). For v1.9 the distinction is
-# foregrounded instead of hidden: the section says what it measures.
-LINEUP_SLOT_SECTION_SEASON_LONG = 'Production by Actual Lineup Slot'
-
-# Kyle's wording, 2026-08-14. Deliberately short and free of internal
-# roadmap vocabulary: the reader needs to know the two surfaces measure
-# different things and that it may change, not how the ticket is filed.
-LINEUP_SLOT_SEASON_LONG_CAPTION = (
+# (docs/decisions/POSITION_ELIGIBLE_LENS.md); for v1.9 the caption states
+# the difference and marks itself temporary. Carried by the points book
+# only, so the H2H section keeps its pinned shape byte for byte.
+LINEUP_SLOT_LENS_CAPTION = (
     'Actual-slot production: ranks points scored while a player was '
     'started in each lineup slot. Home boards rank position-eligible '
     'players, so the leaders may differ. Likely to align in future '
@@ -3002,13 +3007,16 @@ LINEUP_SLOT_SEASON_LONG_CAPTION = (
 def get_lineup_slot_record_specs(season_long=False):
     """Return active lineup-slot point record specs for the current league.
 
-    season_long (MLB-243): title the section for a points league, where the
-    contrast with Home's position-eligible boards is sharpest because a
-    single season-long period makes every row a season total.
+    season_long is accepted and no longer changes the section title or the
+    row labels (MLB-243 correction) -- both books call this section
+    "Lineup Slot Records" and label its rows with the bare slot. Kept on
+    the signature because the caller passes it positionally alongside the
+    rest of the record book's format switches, and because the points
+    book's caption is still selected by it one level up.
     """
-    section = (LINEUP_SLOT_SECTION_SEASON_LONG if season_long
-               else LINEUP_SLOT_SECTION)
-    rows = query_snowflake(f"""
+    del season_long
+    section = LINEUP_SLOT_SECTION
+    rows = query_for_presentation(f"""
         SELECT lineup_slot, starter_count AS slots_to_fill
         FROM dim_roster_slot_counts
         WHERE {league_predicate()}
@@ -3024,15 +3032,12 @@ def get_lineup_slot_record_specs(season_long=False):
     return [
         {
             'section': section,
-            # The row label carries the qualification too, not just the
-            # section heading. A reader scanning a table sees "C | Liam
-            # Hicks" beside his name and reads "the catcher record"; the
-            # heading three rows up does not travel with the row.
-            'label': _slot_record_label(
-                slot_label(row['lineup_slot'], slot_rank,
-                           int(row['slots_to_fill'])),
-                season_long,
-            ),
+            # The bare slot, in both books. A "(as started)" suffix here
+            # repeated the caption's point on every row and made a
+            # normal-looking table read like a disclaimer (MLB-243
+            # correction).
+            'label': slot_label(row['lineup_slot'], slot_rank,
+                                int(row['slots_to_fill'])),
             'grain': 'player',
             'stat_name': _lineup_slot_stat_name(row['lineup_slot'], slot_rank),
             'direction': 'most',
@@ -3041,17 +3046,6 @@ def get_lineup_slot_record_specs(season_long=False):
         if row.get('lineup_slot')
         for slot_rank in range(1, int(row['slots_to_fill']) + 1)
     ]
-
-
-
-def _slot_record_label(label, season_long):
-    """Qualify a slot row label so it cannot be read as a position record.
-
-    "C" beside a player's name says "the catcher record". "C (as started)"
-    says what was actually measured, in the two words it takes. Untouched
-    for the H2H book, whose golden corpus pins these labels.
-    """
-    return f'{label} (as started)' if season_long else label
 
 
 def _lineup_slot_stat_name(slot, slot_rank):

@@ -64,25 +64,44 @@ import pytest
 # load-bearing rather than decorative: it is `inactive` too, so a stub
 # without it would still pass if the platform filter broke, and with it the
 # ESPN answer stays {BE, IL, FA} only while that filter works.
+#
+# `canonical_key` rides every row because the seed has it and Python now
+# READS it (MLB-243): slot_catalog.canonical_lineup_slot resolves U/UTIL to
+# one key from this column rather than from a Python alias table. A stub
+# without it would leave that function silently un-normalizing.
 _SLOT_CATALOG_ROWS = (
     {'platform': 'espn', 'lineup_slot': 'C', 'slot_category': 'hitting',
-     'is_starting_slot': True, 'sort_order': 10, 'notes': None},
+     'is_starting_slot': True, 'sort_order': 10, 'notes': None,
+     'canonical_key': 'catcher'},
     {'platform': 'espn', 'lineup_slot': 'UTIL', 'slot_category': 'hitting',
-     'is_starting_slot': True, 'sort_order': 120, 'notes': None},
+     'is_starting_slot': True, 'sort_order': 120, 'notes': None,
+     'canonical_key': 'utility'},
     {'platform': 'espn', 'lineup_slot': 'P', 'slot_category': 'pitching',
-     'is_starting_slot': True, 'sort_order': 130, 'notes': None},
+     'is_starting_slot': True, 'sort_order': 130, 'notes': None,
+     'canonical_key': 'pitcher'},
     {'platform': 'espn', 'lineup_slot': 'SP', 'slot_category': 'pitching',
-     'is_starting_slot': True, 'sort_order': 140, 'notes': None},
+     'is_starting_slot': True, 'sort_order': 140, 'notes': None,
+     'canonical_key': 'starting_pitcher'},
     {'platform': 'espn', 'lineup_slot': 'RP', 'slot_category': 'pitching',
-     'is_starting_slot': True, 'sort_order': 150, 'notes': None},
+     'is_starting_slot': True, 'sort_order': 150, 'notes': None,
+     'canonical_key': 'relief_pitcher'},
     {'platform': 'espn', 'lineup_slot': 'BE', 'slot_category': 'inactive',
-     'is_starting_slot': False, 'sort_order': 900, 'notes': None},
+     'is_starting_slot': False, 'sort_order': 900, 'notes': None,
+     'canonical_key': 'bench'},
     {'platform': 'espn', 'lineup_slot': 'IL', 'slot_category': 'inactive',
-     'is_starting_slot': False, 'sort_order': 910, 'notes': None},
+     'is_starting_slot': False, 'sort_order': 910, 'notes': None,
+     'canonical_key': 'injured'},
     {'platform': 'espn', 'lineup_slot': 'FA', 'slot_category': 'inactive',
-     'is_starting_slot': False, 'sort_order': 920, 'notes': 'SYNTHETIC.'},
+     'is_starting_slot': False, 'sort_order': 920, 'notes': 'SYNTHETIC.',
+     'canonical_key': 'free_agent'},
     {'platform': 'cbs', 'lineup_slot': 'RS', 'slot_category': 'inactive',
-     'is_starting_slot': False, 'sort_order': 900, 'notes': None},
+     'is_starting_slot': False, 'sort_order': 900, 'notes': None,
+     'canonical_key': 'bench'},
+    # The CBS spelling of the ESPN UTIL row above -- the pair whose shared
+    # canonical_key is the whole reason Python reads this column.
+    {'platform': 'cbs', 'lineup_slot': 'U', 'slot_category': 'hitting',
+     'is_starting_slot': True, 'sort_order': 120, 'notes': None,
+     'canonical_key': 'utility'},
 )
 
 

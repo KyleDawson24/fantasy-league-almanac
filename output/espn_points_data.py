@@ -38,11 +38,13 @@ TWO ESPN-SPECIFIC FACTS THIS MODULE ENCODES:
 import re
 from datetime import date, timedelta
 
+import almanac_render
+import owner_labels
 from db import (
     flatten_array,
     json_text,
     league_predicate,
-    query_snowflake,
+    query_for_presentation,
 )
 
 
@@ -59,7 +61,7 @@ def season_context():
     MLB season opener that anchors periods to dates, and the latest date
     the capture reaches.
     """
-    row = query_snowflake(f"""
+    row = query_for_presentation(f"""
         SELECT
             MAX(season_year)     AS season_year,
             MIN(scoring_period)  AS first_period,
@@ -75,14 +77,14 @@ def season_context():
         }
     season_year = int(season_year)
 
-    opener = query_snowflake(f"""
+    opener = query_for_presentation(f"""
         SELECT season_opener
         FROM stg_mlb__season_calendar
         WHERE season_year = {season_year}
     """)
     opener = opener[0]['season_opener'] if opener else None
 
-    first_season = query_snowflake(f"""
+    first_season = query_for_presentation(f"""
         SELECT MIN(season_year) AS lo
         FROM fct_team_season_performance
         WHERE {league_predicate()}
@@ -170,7 +172,7 @@ def window_lineup(first_period, last_period, points_type='active'):
 
     weight = ('COALESCE(active_weight, 0)' if points_type == 'active' else '1')
     slot = json_text('slot.value')
-    candidates = query_snowflake(f"""
+    candidates = query_for_presentation(f"""
         WITH exploded AS (
             SELECT
                 player_key, player_id, player_name, display_name, pro_team,
@@ -213,6 +215,18 @@ def window_lineup(first_period, last_period, points_type='active'):
     slot_caps = almanac_data.get_slot_capacities(caps_year, matchup_period=None)
     selected = get_optimal_team_selections(candidates, slot_caps)
     _enrich_window_lineup(selected, first_period, last_period, points_type)
+    # THE DAILY FACT'S OWN SENTINEL (MLB-243). Attribution comes straight
+    # off `fct_player_daily_performance`, whose `owner_name` predates
+    # dim_owner's resolution and falls back to a bare "Unknown" -- so the
+    # month board printed it once per row while every other board on the
+    # same page carried the team name. Scoped to this read rather than
+    # widened at the shared seam, because on a dim_owner-resolved column
+    # "Unknown" is the platform's own label for the unmanned sentinel team
+    # and is true there.
+    for row in selected:
+        owner_labels.apply_row(
+            row, owner_keys=('owner_name',),
+            labels=owner_labels.DAILY_FACT_UNAVAILABLE_LABELS)
     for row in selected:
         # No single boxscore stands behind a multi-day window, so the
         # renderer must not offer a link to one.
@@ -221,7 +235,7 @@ def window_lineup(first_period, last_period, points_type='active'):
 
 
 def _caps_year():
-    row = query_snowflake(f"""
+    row = query_for_presentation(f"""
         SELECT MAX(season_year) AS sy
         FROM fct_player_daily_performance
         WHERE {league_predicate()}
@@ -246,7 +260,7 @@ def _enrich_window_lineup(lineup, first_period, last_period, points_type):
     key_list = ', '.join("'" + str(k).replace("'", "''") + "'" for k in keys)
     weight = ('COALESCE(active_weight, 0)' if points_type == 'active' else '1')
 
-    stats = query_snowflake(f"""
+    stats = query_for_presentation(f"""
         WITH scoped AS (
             SELECT *
             FROM fct_player_daily_performance
@@ -297,6 +311,35 @@ def _enrich_window_lineup(lineup, first_period, last_period, points_type):
                     row.setdefault(column, value)
 
 
+def with_unique_team_abbrevs(rows):
+    """Give a board's Fantasy Team cells the league's disambiguated labels.
+
+    The Home boards name the rostering team by abbreviation, and this
+    league has two teams abbreviated GGT -- so two different franchises
+    appeared under one label, and neither matched the team-page tabs, which
+    ARE disambiguated (MLB-243). The rule is the shared one; a league whose
+    abbreviations are already distinct gets identical strings back.
+
+    Keyed on team_id and applied to the DISPLAY column only: rows that
+    carry no team_id, or a team the franchise registry does not know, keep
+    whatever they had.
+    """
+    labels = {fid: meta['abbrev'] for fid, meta in franchise_map().items()
+              if meta.get('abbrev')}
+    labels = almanac_render.disambiguated_abbrev_map(labels)
+    out = []
+    for row in rows or ():
+        row = dict(row)
+        try:
+            label = labels.get(int(row.get('team_id')))
+        except (TypeError, ValueError):
+            label = None
+        if label:
+            row['team_abbrev'] = label
+        out.append(row)
+    return out
+
+
 def home_boards(context, today=None):
     """The three Home boards a points workbook shows, plus the
     total-points partner lineup each deviation column is read against.
@@ -308,8 +351,7 @@ def home_boards(context, today=None):
 
     season_year = context['season_year']
     lo, hi, sp_lo, sp_hi = month_window(context, today=today)
-    return {
-        'month_window': (lo, hi),
+    boards = {
         'month_rows': window_lineup(sp_lo, sp_hi, points_type='active'),
         'month_all_rows': window_lineup(sp_lo, sp_hi, points_type='all'),
         'season_rows': almanac_data.get_optimal_team(
@@ -321,6 +363,9 @@ def home_boards(context, today=None):
         'alltime_all_rows': almanac_data.get_optimal_team(
             season_year=None, points_type='all'),
     }
+    return {'month_window': (lo, hi),
+            **{key: with_unique_team_abbrevs(rows)
+               for key, rows in boards.items()}}
 
 
 def season_totals(season_year):
@@ -331,7 +376,7 @@ def season_totals(season_year):
     is correctly empty. The team season fact carries the totals that
     actually decide this format's standings, and rank comes from points.
     """
-    return query_snowflake(f"""
+    return query_for_presentation(f"""
         SELECT
             team_id,
             team_name,
@@ -353,7 +398,7 @@ def season_totals(season_year):
 def slot_production(season_year):
     """Points by lineup slot per team -- the second half of the points
     Advanced Standings table (`mart_team_slot_production`)."""
-    return query_snowflake(f"""
+    return query_for_presentation(f"""
         SELECT
             team_id, team_name, team_abbrev, owner_display,
             lineup_slot, slot_calculated_points, starter_count,
@@ -372,7 +417,7 @@ def stat_leaders(season_year, limit_per_stat=1):
     already use, and it is populated for this league (8,160 rows). Scoped
     to record-eligible rows and ranked within each stat.
     """
-    return query_snowflake(f"""
+    return query_for_presentation(f"""
         SELECT
             record_scope, record_direction, entity_grain, performance_status,
             season_year, team_id, team_name, team_abbrev, owner_display,
@@ -415,7 +460,7 @@ def late_draft_note(context):
     if opener is None or season_year is None:
         return None
 
-    rows = query_snowflake(f"""
+    rows = query_for_presentation(f"""
         SELECT drafted_at
         FROM stg_draft_settings
         WHERE {league_predicate()}
@@ -465,7 +510,7 @@ def standings_rows(season_year, stat_specs):
 
     # One scoring day == one period in this format, so the per-period
     # denominators the builder normalizes by are both the day count.
-    return query_snowflake(f"""
+    return query_for_presentation(f"""
         WITH days AS (
             SELECT COUNT(DISTINCT scoring_period) AS n
             FROM fct_player_daily_performance
@@ -525,7 +570,7 @@ def rank_arc(season_year):
     (team_id, team_abbrev, period, standings_rank) so the chart machinery
     is untouched.
     """
-    return query_snowflake(f"""
+    return query_for_presentation(f"""
         WITH daily AS (
             SELECT team_id, scoring_period,
                    SUM(CAST(COALESCE(total_stat_pts, 0) AS DECIMAL(18, 6)))
@@ -571,7 +616,7 @@ def season_finishes():
     derives it from sweeping the playoff weeks, and this format has none.
     Crowning the points leader mid-season would invent a title.
     """
-    return query_snowflake(f"""
+    return query_for_presentation(f"""
         SELECT
             s.season_year,
             s.team_id,
@@ -625,7 +670,7 @@ def franchise_map():
     resolves the configured-name override, so canonical_id is the
     franchise's own id unless a lineage seed says otherwise.
     """
-    rows = query_snowflake(f"""
+    rows = query_for_presentation(f"""
         SELECT franchise_id, canonical_franchise_id, canonical_abbrev,
                canonical_name
         FROM dim_franchise
@@ -666,7 +711,7 @@ def dense_rank_arc(season_year):
     Rows carry the presenter's arc contract: team_id, team_name, period,
     standings_rank, is_latest_period.
     """
-    return query_snowflake(f"""
+    return query_for_presentation(f"""
         WITH days AS (
             SELECT DISTINCT scoring_period
             FROM fct_player_daily_performance
@@ -740,7 +785,7 @@ def presenter_finishes(season_year):
     evidence a season finished -- a league can be mid-season in its only
     year, which is exactly this case.
     """
-    return query_snowflake(f"""
+    return query_for_presentation(f"""
         SELECT
             f.season_year,
             f.team_id                       AS franchise_id,
@@ -762,7 +807,7 @@ def presenter_finishes(season_year):
 
 
 def presenter_active_franchises(season_year):
-    return query_snowflake(f"""
+    return query_for_presentation(f"""
         SELECT team_id, team_name
         FROM fct_team_season_performance
         WHERE {league_predicate()} AND season_year = {int(season_year)}
@@ -773,13 +818,45 @@ def presenter_active_franchises(season_year):
 def presenter_season_days():
     """{season_year, days} -- the standard-season clock. One scoring day is
     one gameplay day in this format."""
-    return query_snowflake(f"""
+    return query_for_presentation(f"""
         SELECT season_year, COUNT(DISTINCT scoring_period) AS days
         FROM fct_player_daily_performance
         WHERE {league_predicate()}
         GROUP BY season_year
         ORDER BY season_year
     """)
+
+
+def presenter_slot_columns():
+    """The league's CONFIGURED active lineup slots, in its own order.
+
+    THE COLUMNS OF POINTS BY LINEUP SLOT ARE A LEAGUE SETTING (MLB-243
+    correction), and `dim_roster_slot_counts` is where the platform's own
+    roster rules land. Rendering a fixed list instead gave this league a
+    blank DH column -- it has no DH slot, so nobody could ever have
+    started one -- while its UTIL production had no column to land in,
+    because the fixed list spelled that slot U.
+
+    `starter_count > 0` is the test for "a slot this league actually
+    rosters": ESPN reports every slot it knows about and zeroes the ones
+    the league did not configure, so presence in the feed proves nothing.
+    A configured slot that happens to have scored nothing still gets its
+    column -- an empty column for a real slot is information, an empty
+    column for a slot that does not exist is a defect.
+    """
+    return [row['lineup_slot'] for row in query_for_presentation(f"""
+        SELECT lineup_slot
+        FROM dim_roster_slot_counts
+        WHERE {league_predicate()}
+          AND season_year = (
+              SELECT MAX(season_year)
+              FROM dim_roster_slot_counts
+              WHERE {league_predicate()}
+          )
+          AND is_active_lineup_slot
+          AND starter_count > 0
+        ORDER BY sort_order
+    """) if row.get('lineup_slot')]
 
 
 def presenter_slot_rows(season_year=None):
@@ -790,7 +867,7 @@ def presenter_slot_rows(season_year=None):
     # season_year rides every row: the all-time half weighs each season by
     # the days it played, so the presenter needs to know which seasons the
     # capture actually covers.
-    return query_snowflake(f"""
+    return query_for_presentation(f"""
         SELECT team_id, season_year, lineup_slot,
                ROUND(SUM(CAST(slot_calculated_points AS DECIMAL(18, 6))), 1)
                    AS slot_pts
@@ -806,7 +883,7 @@ def presenter_alltime_pitching(season_year=None):
     separately because CBS's pitching slot spans eras its hitter slots do
     not. ESPN captures every slot in every season, so this is simply the P
     slot summed over all of them."""
-    return query_snowflake(f"""
+    return query_for_presentation(f"""
         SELECT team_id,
                ROUND(SUM(CAST(slot_calculated_points AS DECIMAL(18, 6))), 1)
                    AS p_pts
@@ -833,7 +910,7 @@ def presenter_detailed_alltime():
     cols = ',\n            '.join(
         f'ROUND(SUM(CAST({c} AS DECIMAL(18, 6))), 1) AS {c}'
         for c in _DETAILED_COLUMNS)
-    return query_snowflake(f"""
+    return query_for_presentation(f"""
         SELECT
             team_id,
             {cols},
@@ -857,7 +934,7 @@ def presenter_affinity(season_year):
     # identifies clubs by abbreviation, so one is derived by dense rank over
     # the abbreviations -- stable for a given set of clubs, and only ever
     # used to group and order the spine. The abbreviation stays the label.
-    return query_snowflake(f"""
+    return query_for_presentation(f"""
         SELECT
             team_id,
             DENSE_RANK() OVER (ORDER BY pro_team)      AS mlb_team_id,
@@ -876,35 +953,20 @@ def presenter_affinity(season_year):
     """)
 
 
-# Labels dim_owner falls back to when the platform withholds every name
-# field. They are honest, but they are a statement about OUR ACCESS, and a
-# workbook should not foreground that where it holds a perfectly good team
-# identity (MLB-243, Kyle 2026-08-14).
-_OWNER_UNAVAILABLE_LABELS = frozenset({
-    'Owner unavailable', 'Unknown owner', 'Unknown', '',
-})
-
-
 def with_owner_fallback(rows, name_key='team_name', owner_key='owner_display'):
     """Replace an inaccessible Owner value with the team's canonical name.
 
-    A public ESPN league serves stable member GUIDs and no names at all, so
-    every Owner cell in the book would otherwise read "Owner unavailable" --
-    ten identical rows of our own limitation, in a column that exists to
-    tell teams apart. The canonical team name does tell them apart, and it
-    is true. The GUID-keyed identity underneath is untouched; only the label
-    changes.
+    THE RULE ITSELF NOW LIVES IN `owner_labels` AND RUNS AT THE OUTPUT
+    LAYER'S DATA SEAM (MLB-243), so every tab of both workbooks gets it
+    without any renderer opting in -- which is what this function used to
+    be, and it reached two surfaces out of six. Kept as a named, copying
+    entry point for the two call sites that want it stated at the seam
+    they own, and for callers holding rows that never came from a query.
     """
-    out = []
-    for row in rows or ():
-        row = dict(row)
-        owner = (row.get(owner_key) or '').strip()
-        if owner in _OWNER_UNAVAILABLE_LABELS:
-            fallback = (row.get(name_key) or '').strip()
-            if fallback:
-                row[owner_key] = fallback
-        out.append(row)
-    return out
+    rows = [dict(row) for row in rows or ()]
+    return [owner_labels.apply_row(row, owner_keys=(owner_key,),
+                                   name_keys=(name_key,))
+            for row in rows]
 
 
 def acquisition_channels(season_year):
@@ -924,7 +986,7 @@ def acquisition_channels(season_year):
 
 
 def _transaction_log_was_read(season_year):
-    rows = query_snowflake(f"""
+    rows = query_for_presentation(f"""
         SELECT has_transaction_log
         FROM stg_transaction_coverage
         WHERE {league_predicate()}
@@ -941,7 +1003,7 @@ def has_completed_season(season_year):
     season as a finished rivalry result would publish a standing nobody
     has earned yet, so this stays a real question with a real answer.
     """
-    rows = query_snowflake(f"""
+    rows = query_for_presentation(f"""
         SELECT COUNT(*) AS n
         FROM int_league_season_closure
         WHERE {league_predicate()}

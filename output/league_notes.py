@@ -152,7 +152,7 @@ def mismatch(ctx):
     margin = top['platform_points'] - bottom['platform_points']
     # team_id < opponent_id dedupes matchup pairings (each appears twice
     # in the fct, once per team).
-    hist = records.query_snowflake(f"""
+    hist = records.query_for_presentation(f"""
         WITH all_margins AS (
           SELECT ABS(t.platform_points - t.opponent_points) AS m
           FROM fct_team_weekly_active_performance t
@@ -254,7 +254,7 @@ def hero(ctx):
     # to the other ordinal-providing callouts (scapegoat, baseblunders,
     # mismatch). Gated behind the "qualifying" check above so we don't
     # pay the cost on weeks where no hero fires.
-    hist_n = records.query_snowflake(f"""
+    hist_n = records.query_for_presentation(f"""
         WITH wins AS (
           SELECT t.season_year, t.matchup_period, t.team_id,
                  (t.platform_points - t.opponent_points) AS margin
@@ -356,7 +356,7 @@ def scapegoat_net_negative(ctx):
     # Games-played per qualifying player (active-slot rows only)
     pids = [d['worst_net_p']['player_id'] for _, d in rows]
     placeholders = ','.join(['%s'] * len(pids))
-    games = records.query_snowflake(
+    games = records.query_for_presentation(
         f"""SELECT player_id, SUM(games_played) AS games
             FROM fct_player_daily_performance
             WHERE season_year = %s AND matchup_period = %s
@@ -368,7 +368,7 @@ def scapegoat_net_negative(ctx):
     )
     games_by_pid = {r['player_id']: r['games'] for r in games}
     # Historical: team-MPs where worst player's net flipped the loss.
-    hist_n = records.query_snowflake(f"""
+    hist_n = records.query_for_presentation(f"""
         WITH p AS (
           SELECT season_year, matchup_period, team_id,
                  MIN(platform_points) AS worst_net
@@ -432,7 +432,7 @@ def scapegoat_gross_negative(ctx):
     # Negative-day count per qualifying player
     pids = [d['worst_gross_p']['player_id'] for _, d in rows]
     placeholders = ','.join(['%s'] * len(pids))
-    neg = records.query_snowflake(
+    neg = records.query_for_presentation(
         f"""SELECT player_id, COUNT(*) AS neg_days
             FROM fct_player_daily_performance
             WHERE season_year = %s AND matchup_period = %s
@@ -445,7 +445,7 @@ def scapegoat_gross_negative(ctx):
     )
     neg_days_by_pid = {r['player_id']: r['neg_days'] for r in neg}
     # Historical: gross-qualifying losses that did NOT also meet net.
-    hist_n = records.query_snowflake(f"""
+    hist_n = records.query_for_presentation(f"""
         WITH p AS (
           SELECT season_year, matchup_period, team_id,
                  MAX(negative_points) AS worst_neg,
@@ -569,7 +569,7 @@ def cycles(ctx):
     cumulative = records.league_history_count(
         'player', 'CYC', 1, op='>=',
     )
-    season_total = records.query_snowflake(f"""
+    season_total = records.query_for_presentation(f"""
         SELECT COALESCE(SUM(cyc), 0) AS n
         FROM fct_player_weekly_active_performance
         WHERE season_year = %s
@@ -627,7 +627,7 @@ def no_negative_days(ctx):
     # actually appeared in a game. games_played is a daily-grain column
     # carried on fct_player_daily_performance; the weekly facts don't
     # expose it (they roll up to MP grain).
-    fielded_rows = records.query_snowflake(f"""
+    fielded_rows = records.query_for_presentation(f"""
         SELECT team_id,
                COUNT(DISTINCT player_id) AS fielded_players
         FROM fct_player_daily_performance
@@ -650,7 +650,7 @@ def no_negative_days(ctx):
     # MP. Mirrors the trigger criteria exactly (neg_days = 0 AND fielded
     # > 0) so the count and the trigger never disagree. Abnormal MPs
     # excluded to match records.league_history_count's convention.
-    hist = records.query_snowflake(f"""
+    hist = records.query_for_presentation(f"""
         WITH team_mp AS (
           SELECT
             d.season_year,
@@ -732,7 +732,7 @@ def baseblunders(ctx):
     if not teams:
         return []
     teams.sort(key=lambda s: s.get('team_abbrev') or '')
-    hist = records.query_snowflake(f"""
+    hist = records.query_for_presentation(f"""
         SELECT
           SUM(CASE WHEN t.cs > t.sb THEN 1 ELSE 0 END) AS cs_gt_sb_n,
           SUM(CASE WHEN t.cs >= 1 AND t.sb = 0 THEN 1 ELSE 0 END) AS zero_sb_n
@@ -790,7 +790,7 @@ def no_quality_starts(ctx):
         return []
     team_ids = [t['team_id'] for t in candidates]
     placeholders = ','.join(['%s'] * len(team_ids))
-    gs_rows = records.query_snowflake(
+    gs_rows = records.query_for_presentation(
         f"""SELECT team_id, COUNT(*) AS gs_count
             FROM fct_player_daily_performance
             WHERE season_year = %s AND matchup_period = %s
@@ -811,7 +811,7 @@ def no_quality_starts(ctx):
     # league_history_count('team','QS',0) would include team-MPs where no
     # SP started at all (which the trigger excludes), drifting the ordinal
     # upward from the actual trigger definition.
-    hist_rows = records.query_snowflake(f"""
+    hist_rows = records.query_for_presentation(f"""
         WITH team_mp_starts AS (
             SELECT
                 season_year, matchup_period, team_id,
@@ -896,7 +896,7 @@ def _hr_streak_data(ctx):
         return _HR_STREAK_CACHE[key]
     recap_year = ctx['season_year']
     recap_mp   = ctx['matchup_period']
-    mp_bounds = records.query_snowflake(f"""
+    mp_bounds = records.query_for_presentation(f"""
         SELECT MIN(scoring_period) AS first_sp,
                MAX(scoring_period) AS last_sp
         FROM fct_player_daily_performance
@@ -905,7 +905,7 @@ def _hr_streak_data(ctx):
     """, (recap_year, recap_mp))[0]
     recap_first_sp = mp_bounds['first_sp']
     recap_last_sp  = mp_bounds['last_sp']
-    rows = records.query_snowflake(f"""
+    rows = records.query_for_presentation(f"""
         SELECT season_year, matchup_period, scoring_period,
                team_id, team_abbrev, team_name,
                SUM(ab) AS ab_total, SUM(hr) AS hr_total
@@ -1178,7 +1178,7 @@ def build_ctx(season_year, matchup_period, schedule_lookup):
     # pattern used elsewhere in the codebase (e.g. fct incremental filter).
     random.seed(season_year * 100 + matchup_period)
 
-    scores = records.query_snowflake(f"""
+    scores = records.query_for_presentation(f"""
         SELECT *
         FROM fct_team_weekly_active_performance
         WHERE season_year = %s AND matchup_period = %s
@@ -1189,7 +1189,7 @@ def build_ctx(season_year, matchup_period, schedule_lookup):
     # active-only filter applied during the int -> fct rollup, so this
     # query returns the same player set generate_summary already uses for
     # top-N callouts.
-    players = records.query_snowflake(f"""
+    players = records.query_for_presentation(f"""
         SELECT *
         FROM fct_player_weekly_active_performance
         WHERE season_year = %s AND matchup_period = %s

@@ -28,7 +28,7 @@ not a manager's shame).
 
 import db
 db.init()
-from db import latest_by, league_predicate, query_snowflake
+from db import latest_by, league_predicate, query_for_presentation
 
 import almanac_data
 import note_files
@@ -52,14 +52,14 @@ from generate_summary import (
 
 
 def get_active_season():
-    return query_snowflake(
+    return query_for_presentation(
         f"SELECT MAX(season_year) AS sy FROM fct_team_weekly_active_performance"
         f" WHERE {league_predicate()}"
     )[0]['sy']
 
 
 def get_latest_matchup_period(season_year):
-    return query_snowflake(f"""
+    return query_for_presentation(f"""
         SELECT MAX(matchup_period) AS mp
         FROM fct_team_weekly_active_performance
         WHERE season_year = %s
@@ -71,7 +71,7 @@ def get_season_standings(season_year):
     """One row per team from mart_team_season_standings (regular season,
     abnormal weeks in -- the gameplay-day denominators normalize them),
     ordered by season calculated points."""
-    return query_snowflake(f"""
+    return query_for_presentation(f"""
         SELECT team_id, team_name, team_abbrev, owner_display,
                wins, losses, ties,
                scoring_days_played, standard_matchup_days,
@@ -146,7 +146,7 @@ def get_season_player_totals(season_year):
     entity -- same identity the lines print ("Player (ABBR)"). Rates are
     recomputed from the summed counting stats (see MLB-39).
     """
-    rows = query_snowflake(f"""
+    rows = query_for_presentation(f"""
         SELECT *
         FROM fct_player_weekly_active_performance
         WHERE season_year = %s
@@ -178,7 +178,7 @@ def get_biggest_hero(season_year):
     Mirrors the league_notes.hero convention exactly -- platform lens
     (the lens that decides W/L), abnormal weeks excluded. The
     "most-heroic" (largest would-have-been deficit) variant is MLB-40."""
-    rows = query_snowflake(f"""
+    rows = query_for_presentation(f"""
         WITH wins AS (
             SELECT t.matchup_period, t.team_id, t.team_name, t.opponent_name,
                    (t.platform_points - t.opponent_points) AS margin
@@ -224,7 +224,7 @@ def get_biggest_hero(season_year):
 def get_biggest_blowout(season_year):
     """Largest calculated-lens margin of the season (winner's row).
     Abnormal weeks excluded, matching the records convention."""
-    rows = query_snowflake(f"""
+    rows = query_for_presentation(f"""
         SELECT matchup_period, team_name, opponent_name,
                calculated_points, opponent_calculated_points, calculated_margin
         FROM mart_team_matchup
@@ -242,7 +242,7 @@ def get_result_extreme(season_year, result, best):
     in a win (result='W', best=False). W/L is the official platform
     outcome; the displayed points stay on the calculated lens like every
     other score in the report. Abnormal weeks excluded."""
-    rows = query_snowflake(f"""
+    rows = query_for_presentation(f"""
         SELECT t.matchup_period, t.team_name,
                COALESCE(tod.owner_display, t.owner_name) AS owner_name,
                t.calculated_points
@@ -265,7 +265,7 @@ def get_gotw_lotw_counts(season_year):
     weekly Best/Worst Overall awards. Abnormal weeks count (each week
     still produces exactly one GotW; within a week every team plays the
     same length). DENSE_RANK so a dead-heat week credits both teams."""
-    return query_snowflake(f"""
+    return query_for_presentation(f"""
         SELECT team_abbrev,
                SUM(CASE WHEN hi_rk = 1 THEN 1 ELSE 0 END) AS gotw_n,
                SUM(CASE WHEN lo_rk = 1 THEN 1 ELSE 0 END) AS lotw_n
@@ -315,7 +315,7 @@ def get_alltime_record_buffer():
     the visibility buffer the records section needs to distinguish a
     brand-new record (possibly shared by several teams this season) from
     a tie of an older standing mark."""
-    return query_snowflake(f"""
+    return query_for_presentation(f"""
         SELECT l.entity_grain, l.stat_name, l.record_direction, l.rank,
                l.season_year, l.matchup_period,
                l.team_id, l.team_name, l.team_abbrev,
@@ -343,7 +343,7 @@ def get_season_wasted_players(season_year, limit=5):
     is player-pool trivia, not a manager's waste. FULL OUTER between the
     bench and active legs so a pure self-harm starter (never benched,
     plenty of negative days) still appears."""
-    return query_snowflake(f"""
+    return query_for_presentation(f"""
         WITH bench AS (
             SELECT player_id,
                    MAX(player_name) AS player_name,
@@ -410,7 +410,7 @@ def get_team_wasted_totals(season_year):
     negative-active magnitude, on the same player-week net convention the
     player list uses. FA-pool waste belongs to no roster and is absent
     here too."""
-    return query_snowflake(f"""
+    return query_for_presentation(f"""
         WITH bench AS (
             SELECT team_id, CAST(SUM(CAST(calculated_points AS DECIMAL(18, 6))) AS DOUBLE) AS bench_pts
             FROM fct_team_weekly_inactive_performance

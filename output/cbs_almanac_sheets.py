@@ -59,7 +59,7 @@ import gspread
 
 import db
 from config.dbt_vars import get_dbt_var
-from db import flatten_array, json_text, league_predicate, listagg, query_snowflake
+from db import flatten_array, json_text, league_predicate, listagg, query_for_presentation
 from almanac_data import get_optimal_season_candidates, get_optimal_team_candidates
 from cbs_draft_recap_data import get_draft_history
 # Shared board machinery ((a) reuse per Kyle 2026-07-13): the CBS Home
@@ -87,6 +87,8 @@ from almanac_render import (
     HOME_DEVIATION_LABEL,
     HOME_HEADER,
     SLOT_ORDER,
+    disambiguate_abbrevs,
+    with_standard_acquisition_channels,
     _bref_link,
     _bref_player_cell,
     draft_initial_text,
@@ -379,6 +381,10 @@ CBS_COPY = {
     'affinity_provenance': ('2004-2020 is estimated by start share; other '
                             "years reconstruct from the league's own "
                             'lineup logs (2026 captured live). '),
+    # How THIS platform records a season's opening roster.
+    'acquisition_opening_note': (
+        'Opening = on the roster at first pitch -- CBS never logged drafts, '
+        'so draft and keeper both live there'),
 }
 
 # Nothing asserted that this league's inputs do not show. A season-points
@@ -393,6 +399,12 @@ NEUTRAL_COPY = {
     # Every season this league has is captured live, so there is no
     # estimated era to caveat.
     'affinity_provenance': '',
+    # Says what the column MEANS without claiming anything about how a
+    # particular platform files a draft. True of any league: whatever was
+    # on the roster when scoring began arrived there before the season did.
+    'acquisition_opening_note': (
+        'Opening = already on the roster when scoring began, i.e. drafted '
+        'or kept'),
 }
 _GOLD = {'red': 1.0, 'green': 0.95, 'blue': 0.75}
 # Season-finish scale: the Sheets-standard green -> yellow -> red preset
@@ -561,7 +573,7 @@ def _person_name_sql(col):
 def is_points_league():
     """Format dispatch by data presence: delivered period standings exist
     only for non-H2H leagues (F7). Zero rows -> not a points league."""
-    rows = query_snowflake(
+    rows = query_for_presentation(
         f"SELECT COUNT(*) AS n FROM mart_period_standings"
         f" WHERE {league_predicate()}"
     )
@@ -572,19 +584,19 @@ def get_season_context():
     """The almanac's data horizon: active season, latest closed period,
     latest captured roster date, historic era span. All from the data --
     no wall clock."""
-    season = query_snowflake(
+    season = query_for_presentation(
         f"SELECT MAX(season_year) AS sy FROM mart_period_standings"
         f" WHERE {league_predicate()}"
     )[0]['sy']
-    period = query_snowflake(
+    period = query_for_presentation(
         f"SELECT MAX(period) AS p FROM mart_period_standings"
         f" WHERE {league_predicate()} AND season_year = {season}"
     )[0]['p']
-    roster_date = query_snowflake(
+    roster_date = query_for_presentation(
         f"SELECT MAX(roster_date) AS d FROM stg_cbs__rosters"
         f" WHERE {league_predicate()} AND season_year = {season}"
     )[0]['d']
-    era = query_snowflake(
+    era = query_for_presentation(
         f"SELECT MIN(season_year) AS lo, MAX(season_year) AS hi"
         f" FROM stg_cbs__ui_standings WHERE {league_predicate()}"
     )[0]
@@ -613,7 +625,7 @@ def _entity_where(entity_id, alias=''):
 
 def get_standings_arc(season_year):
     """Every period row for the season, standings-ordered within period."""
-    return query_snowflake(
+    return query_for_presentation(
         f"SELECT period, team_id, team_name, division_name, standings_rank,"
         f"       points, period_points, rank_change, points_behind_leader,"
         f"       is_latest_period"
@@ -640,7 +652,7 @@ def get_historic_finishes():
     would render perfectly while doing it). The batting/pitching split
     and points_behind joined the select for that tab; the Standings tab
     reads this same list by key and ignores the additions."""
-    return query_snowflake(
+    return query_for_presentation(
         f"SELECT season_year, franchise_id, team_name, division_name,"
         f"       standings_rank, is_champion, batting_points, pitching_points,"
         f"       total_points, points_behind, teams_in_season"
@@ -687,7 +699,7 @@ def get_season_owners():
     rollup: on a tab whose whole point is the historic record, showing
     today's owner beside a 2003 season would misattribute it. Co-owners
     join with ' & ' (a comma reads as 'Last, First')."""
-    rows = query_snowflake(
+    rows = query_for_presentation(
         f"SELECT season_year, team_id, owner_display"
         f" FROM dim_team_owner WHERE {league_predicate()}")
     return {(int(r['season_year']), int(r['team_id'])):
@@ -709,7 +721,7 @@ def get_acquisition_channels(season_year):
     other franchises' started points; the rostered lens adds unowned
     (free-agent) production. Season-scoped like ESPN's."""
     yr = int(season_year)
-    return query_snowflake(f"""
+    return query_for_presentation(f"""
         WITH attr AS (
             SELECT cbs_player_id, stat_group, game_date, game_pk, game_index,
                    franchise_id,
@@ -862,7 +874,7 @@ def get_acquisition_channels(season_year):
 def get_active_franchises(roster_date):
     """The currently-active franchises (the 2026 capture is the roster of
     record): [(franchise_id, current_name)] -- ONLY these get team tabs."""
-    return query_snowflake(
+    return query_for_presentation(
         f"SELECT DISTINCT team_id, team_name"
         f" FROM stg_cbs__rosters"
         f" WHERE {league_predicate()} AND roster_date = '{roster_date}'"
@@ -878,7 +890,7 @@ def get_rivalry_axes():
     platform-general mart. Not shared as one function because the two books
     reach the warehouse through their own query helpers; the CONTRACT is shared
     one layer up, in rivalry_matrix_grid."""
-    return query_snowflake(
+    return query_for_presentation(
         f"SELECT identity_key, identity_name, identity_abbrev,"
         f"       identity_source, active_platform_teams, league_format,"
         f"       has_rivalry_evidence, sort_order"
@@ -895,7 +907,7 @@ def get_rivalry_matrix():
     NOT filtered to active teams -- the axes decide what is drawn, the ledger
     holds everything, including the folded franchises an active team's record
     was built against."""
-    return query_snowflake(
+    return query_for_presentation(
         f"SELECT row_identity_key, opponent_identity_key,"
         f"       row_team_name, opponent_team_name,"
         f"       matchup_meetings, matchup_wins, matchup_losses, matchup_ties,"
@@ -910,7 +922,7 @@ def get_franchise_map():
     MLB-64 continuity overlay that stitches a franchise's re-minted ids
     (Foster's Folly 13 + 30) into one identity. Every surface that keys by
     franchise rolls up through this. The #### sentinel is excluded."""
-    rows = query_snowflake(
+    rows = query_for_presentation(
         f"SELECT franchise_id, canonical_franchise_id, canonical_name,"
         f"       canonical_abbrev"
         f" FROM dim_franchise WHERE {league_predicate()}"
@@ -930,7 +942,7 @@ def get_slot_points(season_year):
     active-roster shape, so reconstruction placeholders (ACT/RS/EST) and
     any future bench vocabulary can never leak in as columns."""
     slots = ", ".join(f"'{s}'" for s in CBS_SLOT_CAPS)
-    return query_snowflake(f"""
+    return query_for_presentation(f"""
         SELECT team_id, lineup_slot,
                ROUND(CAST(SUM(CAST(total_stat_pts AS DECIMAL(18, 6))) AS DOUBLE), 1) AS slot_pts
         FROM fct_player_daily_performance
@@ -949,7 +961,7 @@ def get_slot_points_alltime():
     era-complete P column comes from get_pitching_points_alltime (the
     Records-page convention -- Kyle 2026-07-17 round 3)."""
     slots = ", ".join(f"'{s}'" for s in CBS_SLOT_CAPS if s != 'P')
-    return query_snowflake(f"""
+    return query_for_presentation(f"""
         SELECT team_id, lineup_slot, season_year,
                ROUND(CAST(SUM(CAST(total_stat_pts AS DECIMAL(18, 6))) AS DOUBLE), 1) AS slot_pts
         FROM fct_player_daily_performance
@@ -964,7 +976,7 @@ def get_pitching_points_alltime():
     all-time P column. Pitching production IS the P slot by construction
     in every era (a started pitcher can only have occupied P), unlike
     hitter slots which only exist where captured."""
-    return query_snowflake(f"""
+    return query_for_presentation(f"""
         SELECT team_id,
                ROUND(CAST(SUM(CAST(total_pitching_stat_pts
                          * COALESCE(active_weight, 0) AS DECIMAL(18, 6))) AS DOUBLE), 1) AS p_pts
@@ -985,7 +997,7 @@ def get_detailed_stats_alltime():
     col_select = ',\n               '.join(
         f'ROUND(CAST(SUM(CAST({c} * COALESCE(active_weight, 0) AS DECIMAL(18, 6))) AS DOUBLE), 1) AS {c}'
         for c in stat_cols)
-    return query_snowflake(f"""
+    return query_for_presentation(f"""
         SELECT team_id,
                {col_select},
                ROUND(CAST(SUM(CAST(total_hitting_stat_pts
@@ -1008,7 +1020,7 @@ def get_season_gameplay_days():
     flight count exactly what they played; an accidental short season
     (late draft, a missed Japan opener) self-reports short instead of
     diluting a per-season average."""
-    return query_snowflake(f"""
+    return query_for_presentation(f"""
         SELECT season_year, COUNT(DISTINCT game_date) AS days
         FROM fct_cbs_player_game_attribution
         WHERE {league_predicate()} AND franchise_id <> {_CBS_SENTINEL_FID}
@@ -1030,7 +1042,7 @@ def get_mlb_affinity(season_year):
     int_cbs__player_game_points on the engine's own game key (mart
     promotion is a candidate follow-up). Names label as the club's
     latest-era name (Expos rows read Nationals; the id is the spine)."""
-    return query_snowflake(f"""
+    return query_for_presentation(f"""
         WITH involvement AS (
             SELECT a.franchise_id AS team_id,
                    g.team_id AS mlb_team_id,
@@ -1096,7 +1108,7 @@ def get_acquisition_channels_alltime(last_closed_season):
     if last_closed_season is None:
         return []
     yr = int(last_closed_season)
-    return query_snowflake(f"""
+    return query_for_presentation(f"""
         WITH attr AS (
             SELECT cbs_player_id, stat_group, season_year, game_date,
                    game_pk, game_index, franchise_id,
@@ -1248,7 +1260,7 @@ def get_acquisition_channels_alltime(last_closed_season):
 def get_season_records():
     wanted = ", ".join(f"'{s}'" for s in
                        _RECORDS_POINTS + _RECORDS_HITTING + _RECORDS_PITCHING)
-    return query_snowflake(
+    return query_for_presentation(
         f"SELECT stat_name, display_name, rank, player_name, season_year,"
         f"       stat_value"
         f" FROM mart_player_season_records"
@@ -1260,7 +1272,7 @@ def get_season_records():
 def get_career_records():
     wanted = ", ".join(f"'{s}'" for s in
                        _RECORDS_POINTS + _RECORDS_HITTING + _RECORDS_PITCHING)
-    return query_snowflake(
+    return query_for_presentation(
         f"SELECT stat_name, display_name, rank, player_name, seasons_played,"
         f"       first_season, last_season, stat_value"
         f" FROM mart_player_career_records"
@@ -1285,7 +1297,7 @@ def get_cbs_record_catalog():
     # both identify a stat by stat_name (2B/3B/HR/...), whereas leaderboard_name
     # diverges for some (2B->DOUBLES, 3B->TRIPLES) and would silently drop them.
     carryable = ", ".join(f"'{n}'" for n in _REC_STAT_COL)
-    rows = query_snowflake(f"""
+    rows = query_for_presentation(f"""
         SELECT DISTINCT d.stat_name, d.display_name,
                d.stat_category, d.polarity
         FROM dim_stat d
@@ -1323,7 +1335,7 @@ def _rec_agg(group_cols, extra_selects=''):
     cols = ", ".join(
         f'ROUND(CAST(SUM(CAST({c} * COALESCE(active_weight, 0) AS DECIMAL(18, 6))) AS DOUBLE), 6) AS "{n}"'
         for n, c in {**_REC_STAT_COL, **_REC_RATE_COL, **_REC_POINTS_COL}.items())
-    return query_snowflake(f"""
+    return query_for_presentation(f"""
         SELECT {group_cols}{extra_selects}, {cols}
         FROM fct_player_daily_performance
         WHERE {league_predicate()} AND game_date IS NOT NULL
@@ -1343,7 +1355,7 @@ def _franchise_owner_labels():
     latest owner. Multi-owner names join with ' & ' (a comma read as
     'Last, First'). (Per-SEASON owner on a season record is the next refinement,
     for the team-pages session.)"""
-    rows = query_snowflake(f"""
+    rows = query_for_presentation(f"""
         WITH canon_owner AS (
             SELECT df.canonical_franchise_id AS cid,
                    MAX(df.canonical_abbrev)  AS abbrev,
@@ -1487,7 +1499,7 @@ def get_cbs_records_data():
 
     _abbrev_of = {f: _code_of.get(_canon_fid(f), m['abbrev'])
                   for f, m in owner_label.items()}
-    active_fids = {int(r['team_id']) for r in query_snowflake(
+    active_fids = {int(r['team_id']) for r in query_for_presentation(
         f"SELECT DISTINCT team_id FROM stg_cbs__rosters WHERE {league_predicate()}"
         f" AND roster_date = (SELECT MAX(roster_date) FROM stg_cbs__rosters"
         f"                    WHERE {league_predicate()})")}
@@ -1524,7 +1536,7 @@ def get_cbs_records_data():
     _full_len = {s for s, m in _season_max.items() if m >= 0.6 * _median_max}
     # Completed seasons only: the live season is half-played, so its trailing
     # teams are trivially low. Year-end standings exist only for closed seasons.
-    _closed = {int(r['season_year']) for r in query_snowflake(
+    _closed = {int(r['season_year']) for r in query_for_presentation(
         f"SELECT DISTINCT season_year FROM stg_cbs__ui_standings"
         f" WHERE {league_predicate()}")}
     # Attribution-complete seasons only: a team's total is only its 'fewest
@@ -1533,7 +1545,7 @@ def get_cbs_records_data():
     # Track B backfill), so those team totals under-count and would trivially
     # own every worst line. Gate on anchor presence -- self-healing: the
     # moment the backfill lands 2001-2002 anchors, those seasons qualify.
-    _anchored = {int(r['season_year']) for r in query_snowflake(
+    _anchored = {int(r['season_year']) for r in query_for_presentation(
         f"SELECT DISTINCT season_year FROM stg_cbs__ui_rosters"
         f" WHERE {league_predicate()}")}
     team_season_complete = [
@@ -1840,7 +1852,7 @@ def get_cbs_records_data():
     # row order changes when the table is rebuilt, which walked the rendered
     # all-time slot totals by 1. Same two bugs _rec_agg documents; these
     # sibling queries just never got the fix.
-    slot_rows = query_snowflake(f"""
+    slot_rows = query_for_presentation(f"""
         SELECT position, season_year, team_id, player_key,
                MAX(display_name) AS display_name,
                ROUND(CAST(SUM(CAST(weighted_active_pts AS DECIMAL(18, 6))) AS DOUBLE), 6) AS pts
@@ -1870,7 +1882,7 @@ def get_cbs_records_data():
     # lineup_slot -- but the league only logged specific hitter positions from
     # the 2026 daily capture on (2001-25 recorded 'active', not which slot), so
     # pre-2026 hitter slotting is zeroed rather than guessed.
-    slot_actual_rows = query_snowflake(f"""
+    slot_actual_rows = query_for_presentation(f"""
         SELECT lineup_slot AS position, season_year, team_id, player_key,
                MAX(display_name) AS display_name,
                ROUND(CAST(SUM(CAST(total_hitting_stat_pts * COALESCE(active_weight, 0) AS DECIMAL(18, 6))) AS DOUBLE), 6)
@@ -1998,7 +2010,7 @@ def get_cbs_records_data():
     # (####) rows count as rostered/active but never as the shame franchise.
     # MLB-128: 6dp + ORDER BY the grain, as slot_rows above -- these totals
     # are accumulated in Python and rounded again at display.
-    hos_rows = query_snowflake(f"""
+    hos_rows = query_for_presentation(f"""
         SELECT player_key, team_id, MAX(display_name) AS display_name,
                ROUND(CAST(SUM(CAST(total_stat_pts * COALESCE(active_weight, 0) AS DECIMAL(18, 6))) AS DOUBLE), 6) AS act,
                ROUND(CAST(SUM(CAST(total_stat_pts * (1 - COALESCE(active_weight, 0)) AS DECIMAL(18, 6))) AS DOUBLE), 6)
@@ -2018,7 +2030,7 @@ def get_cbs_records_data():
         GROUP BY player_key, team_id
         ORDER BY player_key, team_id
     """)
-    total_by_pk = {r['cbs_player_id']: _rec_fnum(r['pts']) for r in query_snowflake(f"""
+    total_by_pk = {r['cbs_player_id']: _rec_fnum(r['pts']) for r in query_for_presentation(f"""
         SELECT cbs_player_id, CAST(SUM(CAST(stat_value AS DECIMAL(18, 6))) AS DOUBLE) AS pts
         FROM int_cbs__player_season_stats
         WHERE {league_predicate()} AND stat_name = 'CALCULATED_POINTS'
@@ -2027,7 +2039,7 @@ def get_cbs_records_data():
     # Discipline split (Kyle 2026-07-15): the shame list runs Pitchers | Hitters
     # side by side. A player is a pitcher if his career pitching production
     # outweighs his hitting (two-way 900/901 pseudo-ids fall out cleanly).
-    disc_pit = {r['player_key'] for r in query_snowflake(f"""
+    disc_pit = {r['player_key'] for r in query_for_presentation(f"""
         SELECT player_key FROM fct_player_daily_performance
         WHERE {league_predicate()}
         GROUP BY player_key
@@ -2116,7 +2128,7 @@ def get_provenance_mix(entity_id=None):
     League-wide when entity_id is None, else franchise-scoped. Season
     grain so the sentence can bucket by ERA (Kyle 2026-07-17)."""
     scope = f' AND {_entity_where(entity_id)}' if entity_id is not None else ''
-    return query_snowflake(
+    return query_for_presentation(
         f"SELECT season_year, provenance, COUNT(*) AS n"
         f" FROM fct_player_daily_performance"
         f" WHERE {league_predicate()} AND provenance IS NOT NULL"
@@ -2138,7 +2150,7 @@ def get_stat_sources():
     for r in get_provenance_mix():
         mix[r['provenance']] = mix.get(r['provenance'], 0) + r['n']
     total = sum(mix.values()) or 1
-    seasons = query_snowflake(
+    seasons = query_for_presentation(
         f"SELECT season_year, provenance, COUNT(*) AS n"
         f" FROM fct_player_daily_performance"
         f" WHERE {league_predicate()} AND provenance IS NOT NULL"
@@ -2158,7 +2170,7 @@ def get_stat_sources():
     tier_years = {}
     for r in seasons:
         tier_years.setdefault(tier_of.get(r['provenance']), []).append(r['season_year'])
-    cap_start = query_snowflake(
+    cap_start = query_for_presentation(
         f"SELECT MIN(game_date) AS d FROM fct_player_daily_performance"
         f" WHERE {league_predicate()} AND provenance = 'captured'"
     )[0]['d']
@@ -2202,7 +2214,7 @@ def get_current_rostered():
     names (a shared current-roster name) are excluded from the fallback to
     avoid a Will-Smith collision."""
     from collections import Counter
-    rows = query_snowflake(f"""
+    rows = query_for_presentation(f"""
         SELECT r.player_id            AS player_key,
                r.player_name          AS player_name,
                f.abbrev               AS abbrev,
@@ -2242,7 +2254,7 @@ def get_years_of_service(keys, entity_id=None):
                "game_date IS NOT NULL"]
     if entity_id is not None:
         filters.append(_entity_where(entity_id))
-    rows = query_snowflake(f"""
+    rows = query_for_presentation(f"""
         SELECT player_key, season_year
         FROM fct_player_daily_performance
         WHERE {' AND '.join(filters)}
@@ -2382,7 +2394,7 @@ def _month_window():
     today = date.today()
     anchor = today if today.day >= 8 else (today.replace(day=1) - timedelta(days=1))
     first = anchor.replace(day=1)
-    max_d = query_snowflake(
+    max_d = query_for_presentation(
         f"SELECT MAX(game_date) AS d FROM fct_player_daily_performance"
         f" WHERE {league_predicate()} AND game_date IS NOT NULL"
     )[0]['d']
@@ -2401,7 +2413,7 @@ def get_window_lineup(date_from, date_to, weighted=True):
     lens that drives the Total-Pts Best deviation. Feeds the Team of the
     Month board + its deviation."""
     weight = 'COALESCE(active_weight, 0)' if weighted else '1'
-    candidates = query_snowflake(f"""
+    candidates = query_for_presentation(f"""
         WITH exploded AS (
             SELECT
                 player_key, player_id, player_name, display_name,
@@ -2463,7 +2475,7 @@ def _enrich_lineup(lineup, entity_id=None, season_year=None,
         filters.append(f"season_year = {season_year}")
     if entity_id is not None:
         filters.append(_entity_where(entity_id))
-    rows = query_snowflake(f"""
+    rows = query_for_presentation(f"""
         SELECT
             player_key,
             MIN(season_year)                          AS first_season,
@@ -2530,7 +2542,7 @@ def _apply_alltime_board_context(lineup, current_key, current_name, years_map, t
     franchises = {}
     if keys:
         quoted = ", ".join("'%s'" % k.replace("'", "''") for k in keys)
-        rows = query_snowflake(f"""
+        rows = query_for_presentation(f"""
             WITH per_franchise AS (
                 SELECT
                     player_key,
@@ -2590,7 +2602,7 @@ def get_roster_days(entity_id, season_year=None):
     name_key_expr = _name_key_sql(person_name)
     stint_season = (f" AND season_year = {int(season_year)}"
                     if season_year is not None else '')
-    return query_snowflake(f"""
+    return query_for_presentation(f"""
         WITH stint_days AS (
             SELECT name_key,
                    SUM(DATEDIFF('day', stint_start, attribution_end_exclusive))
@@ -2629,7 +2641,7 @@ def get_roster_days_by_season(entity_id):
     person's tenure) + captured 2026 dates."""
     person_name = _person_name_sql("p.player_name")
     name_key_expr = _name_key_sql(person_name)
-    rows = query_snowflake(f"""
+    rows = query_for_presentation(f"""
         WITH players AS (
             SELECT DISTINCT p.player_key, p.player_name
             FROM fct_player_daily_performance p
@@ -2793,7 +2805,7 @@ def get_cbs_team_history_data(context, franchises, franchise_map):
     # 632.000000 rostered points for FLV. Python's sort is stable, so a tie
     # keeps input order, which without an ORDER BY is whatever the warehouse
     # happened to return. That silently swapped the two rows between runs.
-    rows = query_snowflake(f"""
+    rows = query_for_presentation(f"""
         WITH {current_club_cte},
         scoped AS (
             SELECT 'current_season' AS scope, f.*, cc.current_club
@@ -2841,7 +2853,7 @@ def get_cbs_team_history_data(context, franchises, franchise_map):
 
     # Season-grain rows for the Best Individual Seasons block (Kyle
     # 2026-07-17): same aggregates, +season_year in the grain.
-    season_rows = query_snowflake(f"""
+    season_rows = query_for_presentation(f"""
         WITH {current_club_cte}
         SELECT
             team_id, player_key, season_year,
@@ -3604,7 +3616,8 @@ def build_standings_rows(context, arc, finishes, active_franchises,
                          affinity_rows=None,
                          rivalry_axes=None, rivalry_pairs=None,
                          franchise_map=None, period_label='Period',
-                         compact_chart=False, subtitle=None, copy=None):
+                         compact_chart=False, subtitle=None, copy=None,
+                         slot_columns=None, slot_key=None):
     """Advanced Standings: the rank-by-period arc with its toggleable
     line chart, the points-by-slot grids (season totals by deployed slot
     left; all-time PACES PER STANDARD SEASON right -- P era-complete,
@@ -3643,10 +3656,26 @@ def build_standings_rows(context, arc, finishes, active_franchises,
     copy           a COPY PROFILE (CBS_COPY / NEUTRAL_COPY). Several
                    sentences here carried this league's own history --
                    franchise counts in named years, a short 2020, which
-                   eras logged a lineup slot -- as if universal. They are
-                   kept for the caller they describe and replaced with
-                   measured copy for everyone else. Defaults to CBS_COPY,
-                   so the existing book reads exactly as before."""
+                   eras logged a lineup slot, how CBS records a draft --
+                   as if universal. They are kept for the caller they
+                   describe and replaced with measured copy for everyone
+                   else. Defaults to CBS_COPY, so the existing book reads
+                   exactly as before.
+    slot_columns   the league's CONFIGURED active lineup slots, in the
+                   order it lists them, as the display labels for the
+                   Points by Lineup Slot grid. Defaults to this league's
+                   own roster shape, so existing callers are unchanged. A
+                   slot the league does not roster (this book's DH in a
+                   league that has none) never becomes an all-blank column.
+    slot_key       label -> aggregation key, applied to the display columns
+                   AND to the data rows so the two agree however each
+                   spells a slot. Defaults to plain upper-casing, which is
+                   what keeps this builder QUERYLESS -- the promise at the
+                   top of this docstring. A caller that wants the
+                   cross-platform vocabulary passes
+                   slot_catalog.canonical_lineup_slot, which reads the
+                   slot_classification seed and is therefore a warehouse
+                   read this function must not make on its own."""
     copy = CBS_COPY if copy is None else copy
     season = context['season_year']
     period = context['latest_period']
@@ -3733,20 +3762,18 @@ def build_standings_rows(context, arc, finishes, active_franchises,
         if cid not in canon_label:
             ranked_canon.append(cid)
             canon_label[cid] = row['team_name']
-    # Chart controls, helper headers and series names all read from this
-    # one list, so a duplicate abbreviation shows up as two identical
-    # checkboxes and two identical legend entries with no way to tell which
-    # team is which (MLB-243). Abbreviations are user-chosen free text and
-    # nothing stops two managers picking the same one. Same disambiguation
-    # rule the team tabs use: a unique abbrev is untouched, and only the
-    # colliding ones gain their franchise id.
-    _raw_abbrevs = [fmap.get(cid, {}).get('abbrev') or f'#{cid}'
-                    for cid in ranked_canon]
-    _abbrev_counts = {}
-    for a in _raw_abbrevs:
-        _abbrev_counts[a] = _abbrev_counts.get(a, 0) + 1
-    canon_abbrevs = [f'{a} {cid}' if _abbrev_counts[a] > 1 else a
-                     for a, cid in zip(_raw_abbrevs, ranked_canon)]
+    # Chart controls, helper headers, series names AND the affinity chart's
+    # column spine all read from this ONE list, so a duplicate abbreviation
+    # shows up as two identical checkboxes, two identical legend entries and
+    # two identical columns with no way to tell which team is which
+    # (MLB-243). The rule is shared with the draft board and the team tabs
+    # -- see almanac_render.disambiguate_abbrevs -- because a label that is
+    # disambiguated on one surface and bare on the next is worse than either
+    # answer applied consistently.
+    canon_abbrevs = disambiguate_abbrevs(
+        ranked_canon,
+        [fmap.get(cid, {}).get('abbrev') or f'#{cid}' for cid in ranked_canon],
+    )
     n_teams = len(ranked_canon)
 
     # Closed seasons per canonical franchise (membership windows).
@@ -3761,11 +3788,24 @@ def build_standings_rows(context, arc, finishes, active_franchises,
     # year counts its days so far, and an accidental short season (late
     # draft) self-reports short. Shared by the slot grids and the
     # all-time detailed standings.
+    #
+    # THE FIRST-YEAR RULE (MLB-243 correction). A league in its first season
+    # has no closed season to take a median of, and N was therefore None --
+    # which made every season-equivalent None, blanked BOTH all-time halves
+    # (the slot grid's right side and the whole Detailed Standings table),
+    # and printed "the None-gameplay-day clock above" in the caption
+    # explaining them. The honest standard for a league with one season on
+    # file is that season's own MEASURED captured duration: N = the days it
+    # has actually played. Every weight then comes out to 1.0, so the
+    # all-time halves equal the current season -- which is exactly what
+    # all-time MEANS here, and is a real answer rather than an empty table.
     days_by_season = {int(r['season_year']): int(r['days'])
                       for r in season_days or ()}
     closed_days = sorted(d for s, d in days_by_season.items()
                          if s != int(season))
-    n_std = closed_days[len(closed_days) // 2] if closed_days else None
+    first_year_clock = not closed_days
+    n_std = (closed_days[len(closed_days) // 2] if closed_days
+             else days_by_season.get(int(season)))
 
     def _season_equivalents(season_set):
         if not n_std or not season_set:
@@ -4100,18 +4140,32 @@ def build_standings_rows(context, arc, finishes, active_franchises,
 
     # ---- points by lineup slot (season totals left, all-time paces right)
     if slot_rows or alltime_slot_rows or alltime_pitching_rows:
-        season_slots = list(CBS_SLOT_CAPS)
+        # THE COLUMNS ARE THE LEAGUE'S OWN ROSTER SHAPE (MLB-243
+        # correction), not this book's. Rendering a fixed list produced a
+        # blank DH column for a league with no DH slot, and an empty U
+        # column beside it holding none of the UTIL production the league
+        # actually recorded -- two wrong answers from the same cause.
+        season_slots = list(slot_columns if slot_columns is not None
+                            else CBS_SLOT_CAPS)
+        # Display label -> aggregation key. The header keeps the league's
+        # own spelling; the buckets agree across platforms. The default is
+        # a plain upper-case so this builder stays queryless (see the
+        # slot_key note above); the season-points callers hand in the
+        # seed-backed resolver.
+        _key = slot_key or (lambda s: str(s or '').strip().upper())
+        slot_keys = [_key(s) for s in season_slots]
         n_l = len(season_slots)
         grid_width = 2 + 2 * n_l            # Team + left + buffer + right
         grid_last_col = _col(grid_width)
+        pitching_key = _key('P')
 
         slot_by, capture_by, p_by = {}, {}, {}
         capture_seasons = set()
         for r in slot_rows or ():
-            key = (_canon(int(r['team_id'])), r['lineup_slot'])
+            key = (_canon(int(r['team_id'])), _key(r['lineup_slot']))
             slot_by[key] = slot_by.get(key, 0.0) + float(r['slot_pts'] or 0)
         for r in alltime_slot_rows or ():
-            key = (_canon(int(r['team_id'])), r['lineup_slot'])
+            key = (_canon(int(r['team_id'])), _key(r['lineup_slot']))
             capture_by[key] = (capture_by.get(key, 0.0)
                                + float(r['slot_pts'] or 0))
             capture_seasons.add(int(r['season_year']))
@@ -4129,11 +4183,17 @@ def build_standings_rows(context, arc, finishes, active_franchises,
                          (2 + n_l, 'Pace per Standard Season, All-Time')],
                  width=grid_last_col)
         # The parenthetical is dropped rather than printed as "= None
-        # gameplay days" when no season has closed and there is therefore
-        # no standard length to quote (MLB-222 C-4).
+        # gameplay days" when there is no measured length to quote at all
+        # (MLB-222 C-4). A first season HAS one -- its own captured
+        # duration -- and says so, rather than leaving the reader to
+        # wonder why the two halves carry identical numbers.
         _std_len = f' (= {n_std} gameplay days)' if n_std else ''
+        _first_year_clause = (
+            ' With one season on file the standard season IS this one, so '
+            'the all-time half equals the current season.'
+            if first_year_clock and n_std else '')
         _note('All-time cells are paces per standard season'
-              f'{_std_len}; {copy["slot_capture_note"]}',
+              f'{_std_len}; {copy["slot_capture_note"]}{_first_year_clause}',
               width=grid_last_col)
         _header(['Team', *season_slots, '', *season_slots],
                 width=grid_last_col)
@@ -4141,13 +4201,13 @@ def build_standings_rows(context, arc, finishes, active_franchises,
         for cid in ranked_canon:
             member = set(seasons_played.get(cid, set())) | {int(season)}
             member_eq = _season_equivalents(member)
-            left = [slot_by.get((cid, s), '') for s in season_slots]
+            left = [slot_by.get((cid, key), '') for key in slot_keys]
             right = []
-            for s in season_slots:
-                if s == 'P':
+            for key in slot_keys:
+                if key == pitching_key:
                     pts, eq = p_by.get(cid), member_eq
                 else:
-                    pts, eq = capture_by.get((cid, s)), capture_eq
+                    pts, eq = capture_by.get((cid, key)), capture_eq
                 right.append(round(pts / eq, 1) if pts and eq else '')
             rows.append([canon_label.get(cid, f'#{cid}'), *left, '', *right])
         grid_last = len(rows)
@@ -4187,9 +4247,22 @@ def build_standings_rows(context, arc, finishes, active_franchises,
         _section('DETAILED STANDINGS',
                  scopes=[(1, 'Pace per Standard Season, All-Time')],
                  width=det_last_col)
-        _note('Active-lens production paced per standard season (the '
-              f'{n_std}-gameplay-day clock above); IP = innings pitched. '
-              'Ordered by total pace.', width=det_last_col)
+        # The clock is named only when there is one to name -- printing
+        # "the None-gameplay-day clock above" was how a missing standard
+        # season announced itself in prose while the table under it sat
+        # empty (MLB-243 correction).
+        _clock = (f' (the {n_std}-gameplay-day clock above)' if n_std else '')
+        # In a first year the all-time table IS the current season, and the
+        # reader is owed that sentence rather than left to infer it from a
+        # banner that says All-Time over numbers they just read as season
+        # totals two sections up.
+        _det_first_year = (' This league has one season on file, so these '
+                           'all-time figures are the current season.'
+                           if first_year_clock and n_std else '')
+        _note(f'Active-lens production paced per standard season{_clock}; '
+              f'IP = innings pitched. Ordered by total pace.'
+              f'{_det_first_year}',
+              width=det_last_col)
         _header(det_header, width=det_last_col)
         det_first = len(rows) + 1
 
@@ -4230,7 +4303,13 @@ def build_standings_rows(context, arc, finishes, active_franchises,
     if acquisition_rows or alltime_acquisition_rows:
         def _bucketize(rowset):
             out = {}
-            for r in rowset or ():
+            # SHARED CHANNEL VOCABULARY FIRST (MLB-243 correction): the
+            # Opening column is a meaning, not a column name, and the two
+            # platforms report it under different ones. Normalizing here
+            # rather than in either renderer is what keeps this presenter
+            # platform-neutral -- see
+            # almanac_render.with_standard_acquisition_channels.
+            for r in with_standard_acquisition_channels(rowset):
                 cid = _canon(int(r['team_id']))
                 bucket = out.setdefault(cid, {})
                 for k, v in r.items():
@@ -4239,14 +4318,26 @@ def build_standings_rows(context, arc, finishes, active_franchises,
             return out
 
         season_acq = _bucketize(acquisition_rows)
-        # All-time = the walk-back-era rows (through the last closed
-        # season, stint-channeled) + this season's log-channeled rows.
-        alltime_acq = _bucketize(alltime_acquisition_rows)
-        if alltime_acq:
-            for cid, bucket in season_acq.items():
-                target = alltime_acq.setdefault(cid, {})
-                for k, v in bucket.items():
-                    target[k] = target.get(k, 0.0) + v
+        # All-time = the PRIOR-ERA rows (through the last closed season,
+        # stint-channeled) plus this season's log-channeled rows.
+        #
+        # WHAT THIS USED TO GET WRONG (MLB-243 correction), in two ways
+        # that met in the middle. The presenter only built the all-time
+        # half when prior-era rows existed -- so a league in its first
+        # season, which correctly has none, got a blank right half. The
+        # points caller worked around that by passing THIS SEASON as the
+        # prior era, and the season rows were then added on top of
+        # themselves: every all-time figure was exactly double the season
+        # beside it. Building on a COPY of the prior era, and rendering
+        # whenever there is anything to render, gives a first-year league
+        # its true answer -- all-time equals the current season -- without
+        # any caller having to fake an era it does not have.
+        prior_acq = _bucketize(alltime_acquisition_rows)
+        alltime_acq = {cid: dict(bucket) for cid, bucket in prior_acq.items()}
+        for cid, bucket in season_acq.items():
+            target = alltime_acq.setdefault(cid, {})
+            for k, v in bucket.items():
+                target[k] = target.get(k, 0.0) + v
 
         half = ['Opening', 'Pickup', 'Trade', 'Total', '',
                 'Release', 'Trade', 'Total', '', 'FA', 'Trade']
@@ -4261,10 +4352,13 @@ def build_standings_rows(context, arc, finishes, active_franchises,
                          (2 + n_half,
                           f'All-Time ({context["first_season"]}-{season})')],
                  width=acq_last_col)
+        # The Opening parenthetical is a COPY-PROFILE sentence: how a
+        # platform records the start of a season is a fact about that
+        # platform, and "CBS never logged drafts" was being printed into an
+        # ESPN workbook that has a full draft log (MLB-243 correction).
         _note("Points each franchise's roster produced, split by how each "
-              "player arrived (Opening = on the roster at first pitch -- "
-              "CBS never logged drafts, so draft and keeper both live "
-              "there), against what departed players went on to produce "
+              f"player arrived ({copy['acquisition_opening_note']}), against "
+              "what departed players went on to produce "
               "after leaving. Lost is season-bounded everywhere: a "
               "departure's window ends with that season (or the player's "
               "return). Net FA = pickups acquired minus releases lost; "
@@ -4379,8 +4473,11 @@ def build_standings_rows(context, arc, finishes, active_franchises,
                       for cid in ranked_canon}
         alltime_tot = {cid: sum(alltime_g.get((cid, m), 0.0) for m in mlb_ids)
                        for cid in ranked_canon}
-        abbrevs = [fmap.get(cid, {}).get('abbrev') or f'#{cid}'
-                   for cid in ranked_canon]
+        # The SAME labels the chart controls use (MLB-243 correction): this
+        # block used to build its own bare-abbrev list, so a league with two
+        # teams sharing an abbreviation got disambiguated checkboxes above
+        # and two indistinguishable columns down here.
+        abbrevs = canon_abbrevs
         n_t = len(ranked_canon)
         aff_width = 2 + 2 * n_t
         aff_last_col = _col(aff_width)

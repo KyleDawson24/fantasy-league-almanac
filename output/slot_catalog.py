@@ -83,6 +83,59 @@ def slot_category(slot, platform: str = 'espn') -> str:
     return DEFAULT_SLOT_CATEGORY
 
 
+@lru_cache(maxsize=1)
+def _canonical_slot_index() -> dict:
+    """{lookup token -> canonical_key}, built from the seed and nothing else.
+
+    Two tokens resolve to each key: the platform's own SLOT LABEL, and the
+    canonical key itself. The first is what a feed or a league's roster
+    settings say ('UTIL' on ESPN, 'U' on CBS); the second is what a
+    hand-written config or a doc tends to say ('Utility'). Both are the
+    seed's own vocabulary -- neither is a second list maintained here.
+    """
+    index = {}
+    for row in _load_catalog():
+        key = (row.get('canonical_key') or '').strip()
+        if not key:
+            continue
+        index.setdefault(key.upper(), key)
+        label = (row.get('lineup_slot') or '').strip()
+        if label:
+            index.setdefault(label.upper(), key)
+    return index
+
+
+def canonical_lineup_slot(slot) -> str:
+    """The cross-platform aggregation key for a lineup-slot label.
+
+    THE VOCABULARY IS THE SEED'S, NOT THIS MODULE'S (MLB-243, Kyle
+    2026-08-15). Every platform has a batter-anywhere slot and every
+    platform spells it differently -- ESPN serves 'UTIL', CBS's rules call
+    it 'U' -- and `slot_classification.csv` already records that they are
+    one slot, by giving both rows `canonical_key = 'utility'`. The project
+    joins CBS and ESPN STATS on that same column
+    (`int_cbs__player_game_points`), so the slot side had no business
+    carrying a second hand-maintained alias table: this function reads the
+    catalog, and adding a platform's spelling to the seed is the whole of
+    the change needed to make it converge here.
+
+    What the sheet DISPLAYS is untouched -- this is only ever a KEY, so
+    each book keeps its own column header ('U' on CBS, 'UTIL' on ESPN)
+    while both fill the same bucket.
+
+    An unknown slot comes back upper-cased rather than dropped or
+    reclassified. That keeps it visible -- it simply matches no configured
+    column, which reads as an empty cell rather than as production quietly
+    filed under the wrong position.
+    """
+    if slot is None:
+        return ''
+    token = str(slot).strip()
+    if not token:
+        return ''
+    return _canonical_slot_index().get(token.upper(), token.upper())
+
+
 def sql_in_list(slots) -> str:
     """Render a slot set as a SQL IN-list body, sorted.
 

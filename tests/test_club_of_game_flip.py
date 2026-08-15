@@ -139,11 +139,11 @@ class TestUnattributedBandStaysRenderable:
             self, monkeypatch, stub_slot_catalog):
         # stub_slot_catalog is load-bearing: the query renders its
         # lineup-slot exclusion from the slot seed, and slot_catalog carries
-        # its own binding of query_snowflake that the patch below cannot
+        # its own binding of query_for_presentation that the patch below cannot
         # reach. Without it this test opens a real connection.
         import almanac_data
         calls = []
-        monkeypatch.setattr(almanac_data, 'query_snowflake',
+        monkeypatch.setattr(almanac_data, 'query_for_presentation',
                             lambda sql, params=None: calls.append(sql) or [])
         almanac_data.get_team_affinity_weights(2026)
         sql = calls[0]

@@ -303,7 +303,7 @@ class TestSlotCapacities:
                 {'lineup_slot': 'SP', 'slots_to_fill': 5},
             ]
 
-        monkeypatch.setattr(almanac_data, 'query_snowflake', fake_query)
+        monkeypatch.setattr(almanac_data, 'query_for_presentation', fake_query)
 
         result = almanac_sheets.get_slot_capacities(2026, 8)
 
@@ -312,7 +312,7 @@ class TestSlotCapacities:
         assert calls[0][1] == (2026,)
 
     def test_missing_configured_counts_raises_helpful_error(self, monkeypatch):
-        monkeypatch.setattr(almanac_data, 'query_snowflake', lambda *_: [])
+        monkeypatch.setattr(almanac_data, 'query_for_presentation', lambda *_: [])
 
         with pytest.raises(RuntimeError, match='No roster slot counts found'):
             almanac_sheets.get_slot_capacities(2026, 8)
@@ -604,7 +604,7 @@ class TestRecordsRows:
             calls.append((sql, params))
             return [{'n': 14}]
 
-        monkeypatch.setattr(almanac_data, 'query_snowflake', fake_query)
+        monkeypatch.setattr(almanac_data, 'query_for_presentation', fake_query)
 
         result = almanac_sheets.count_value_occurrences_for_scope(
             'current_season',
@@ -634,7 +634,7 @@ class TestRecordsRows:
             calls.append((sql, params))
             return [_record(stat='WASTED_POINTS', value=88.6)]
 
-        monkeypatch.setattr(almanac_data, 'query_snowflake', fake_query)
+        monkeypatch.setattr(almanac_data, 'query_for_presentation', fake_query)
 
         result = almanac_sheets.get_wasted_points_records('current_season')
 
@@ -698,7 +698,7 @@ class TestRecordsRows:
         assert 'Week 8: 2026' in data_row[10]
 
     def test_lineup_slot_specs_expand_repeated_roster_slots(self, monkeypatch):
-        monkeypatch.setattr(almanac_data, 'query_snowflake', lambda *_: [
+        monkeypatch.setattr(almanac_data, 'query_for_presentation', lambda *_: [
             {'lineup_slot': 'C', 'slots_to_fill': 1},
             {'lineup_slot': 'SP', 'slots_to_fill': 3},
         ])
@@ -1415,7 +1415,7 @@ class TestAdvancedStandingsRows:
 
         `stub_slot_catalog` is not optional scaffolding: this query renders
         its exclusion list from the slot seed, and slot_catalog holds its
-        OWN binding of query_snowflake, so the monkeypatch below cannot
+        OWN binding of query_for_presentation, so the monkeypatch below cannot
         reach it. Without the fixture this test opens a real connection.
 
         Those two FAs mean different things: pro_team 'FA' is ESPN's
@@ -1430,7 +1430,7 @@ class TestAdvancedStandingsRows:
             calls.append((sql, params))
             return []
 
-        monkeypatch.setattr(almanac_data, 'query_snowflake', fake_query)
+        monkeypatch.setattr(almanac_data, 'query_for_presentation', fake_query)
 
         almanac_sheets.get_team_affinity_weights(2026)
 

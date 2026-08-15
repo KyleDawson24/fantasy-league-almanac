@@ -21,7 +21,7 @@ Public API:
 - load_schedule_lookup()                -- (season, mp) -> playoff metadata
 """
 
-from db import league_predicate, query_snowflake
+from db import league_predicate, query_for_presentation
 
 
 # ---------- Rank-1 record fetches ----------
@@ -48,7 +48,7 @@ def get_current_season_records():
 
 
 def _fetch_rank1_records(scope):
-    return query_snowflake(f"""
+    return query_for_presentation(f"""
         SELECT entity_grain, stat_name, record_direction,
                team_id, team_name, team_abbrev,
                COALESCE(owner_display, owner_name) AS owner_name,
@@ -73,7 +73,7 @@ def get_record_top_n(stat_name, grain='team', direction='most',
     'best' / 'worst' at the mart layer). Default limit dropped to 5 to
     match the mart's new top-5 cap.
     """
-    return query_snowflake(f"""
+    return query_for_presentation(f"""
         SELECT rank, season_year, matchup_period, team_id, team_name,
                COALESCE(owner_display, owner_name) AS owner_name, stat_value
         FROM mart_stat_leaderboard
@@ -91,7 +91,7 @@ def get_record_top_n(stat_name, grain='team', direction='most',
 def get_tracked_team_stats():
     """Distinct stat_names present in the team-grain all-time 'most' leaderboard.
     Used by the records report to discover what stats to iterate."""
-    rows = query_snowflake(f"""
+    rows = query_for_presentation(f"""
         SELECT DISTINCT stat_name
         FROM mart_stat_leaderboard
         WHERE entity_grain = 'team'
@@ -118,7 +118,7 @@ def get_team_contributors(season_year, matchup_period, team_id, stat_column):
     # --full-refresh). Same flake mode as the mart's ROW_NUMBER fix in
     # B1; deterministic by display_name keeps golden output stable AND
     # reads as "alphabetical within a tie" to a human.
-    return query_snowflake(f"""
+    return query_for_presentation(f"""
         SELECT display_name, {stat_column} AS stat_value
         FROM fct_player_weekly_active_performance
         WHERE season_year = %s
@@ -198,7 +198,7 @@ def get_team_contributors_bulk(tuples, top_n=3):
     team_weeks = sorted({(s, mp, tid) for (s, mp, tid, _) in tuples})
     placeholders = ", ".join(["(%s, %s, %s)"] * len(team_weeks))
     params = [v for tw in team_weeks for v in tw]
-    rows = query_snowflake(f"""
+    rows = query_for_presentation(f"""
         SELECT *
         FROM fct_player_weekly_active_performance
         WHERE (season_year, matchup_period, team_id) IN ({placeholders})
@@ -254,7 +254,7 @@ def get_player_contributors_bulk(tuples, top_n=3, positives_only=True):
     unique = sorted({t for t in tuples})
     placeholders = ", ".join(["(%s, %s, %s)"] * len(unique))
     params = [v for t in unique for v in t]
-    rows = query_snowflake(f"""
+    rows = query_for_presentation(f"""
         SELECT *
         FROM fct_player_weekly_active_performance
         WHERE (season_year, matchup_period, player_id) IN ({placeholders})
@@ -354,7 +354,7 @@ def league_history_count(grain, stat_name, value, op='='):
     col_expr = _DERIVED_STAT_FCT_EXPR.get(stat_name, stat_name.lower())
     # v1.1.0: is_abnormal is now denormalized onto the weekly facts, so
     # this filter doesn't need the separate dim/seed JOIN anymore.
-    rows = query_snowflake(f"""
+    rows = query_for_presentation(f"""
         SELECT COUNT(*) AS n
         FROM {fct} f
         WHERE f.is_record_eligible
@@ -379,7 +379,7 @@ def load_schedule_lookup():
     (e.g., historical-record iterators in generate_records_report.py).
     Deletion candidate once all callers migrate.
     """
-    rows = query_snowflake(f"""
+    rows = query_for_presentation(f"""
         SELECT season_year, matchup_period, is_playoff, playoff_round
         FROM dim_matchup_period
         -- MLB-235: the dimension is keyed on league now, so an unscoped read

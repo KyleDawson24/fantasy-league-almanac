@@ -32,6 +32,7 @@ import almanac_data
 import almanac_write
 import cbs_almanac_sheets
 import espn_points_data
+import slot_catalog
 from almanac_logic import (
     build_advanced_standings_tab_rows,
     build_draft_tab_rows,
@@ -157,7 +158,15 @@ def _build(nav_targets=None, include_trades=True, context=None):
         season_days=espn_points_data.presenter_season_days(),
         detailed_alltime_rows=espn_points_data.presenter_detailed_alltime(),
         acquisition_rows=acquisition,
-        alltime_acquisition_rows=acquisition,
+        # NO PRIOR ERA, and saying so is the point (MLB-243 correction).
+        # This argument is the CLOSED-season history the presenter adds the
+        # current season on top of; passing the current season here made
+        # every all-time acquisition figure exactly double the season figure
+        # beside it. A first-year league has no closed history, so it passes
+        # none, and the presenter's all-time half comes out equal to the
+        # season -- which is what all-time means when there has only been
+        # one.
+        alltime_acquisition_rows=None,
         affinity_rows=espn_points_data.presenter_affinity(season_year),
         rivalry_axes=almanac_data.get_rivalry_axes(),
         rivalry_pairs=almanac_data.get_rivalry_matrix(),
@@ -170,6 +179,15 @@ def _build(nav_targets=None, include_trades=True, context=None):
         # 142 scoring days must not become 142 blank display rows.
         compact_chart=True,
         subtitle=_standings_subtitle(context, caveat),
+        # This league's own roster shape decides the slot grid's columns,
+        # rather than the shape of the book the layout came from -- and the
+        # slot_classification seed decides which spellings are the same
+        # slot, so a league that says UTIL fills the column a book that says
+        # U would fill. The presenter takes the resolver rather than calling
+        # it, because reading that seed is a warehouse round-trip and the
+        # presenter is queryless by contract.
+        slot_columns=espn_points_data.presenter_slot_columns(),
+        slot_key=slot_catalog.canonical_lineup_slot,
     )
 
     team_tabs = build_team_history_tabs(

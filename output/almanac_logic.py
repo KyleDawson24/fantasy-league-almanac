@@ -36,8 +36,7 @@ from almanac_data import (
     _team_record_label,
     get_lineup_slot_record_specs,
     LINEUP_SLOT_SECTION,
-    LINEUP_SLOT_SECTION_SEASON_LONG,
-    LINEUP_SLOT_SEASON_LONG_CAPTION,
+    LINEUP_SLOT_LENS_CAPTION,
     get_scored_record_specs,
     slot_label,
 )
@@ -48,6 +47,7 @@ from almanac_render import (
     ESPN_PRO_TEAM_NAMES,
     ESPN_UNATTRIBUTED_CLUB,
     col_letter,
+    disambiguated_abbrev_map,
     finish_medal,
     ADVANCED_STANDINGS_TAB,
     HOME_ALLTIME_HEADER,
@@ -977,9 +977,12 @@ def build_draft_tab_rows(board_rows, season_year, league_id=None,
     rows.append(['', 'Best Value Picks', '', '', '', '', '', 'Biggest Busts'])
     rows.append(['', *DRAFT_VALUE_HEADER, '', *DRAFT_VALUE_HEADER])
     blank = [''] * len(DRAFT_VALUE_HEADER)
+    labels = draft_team_labels(board_rows)
     for index in range(max(len(best_value), len(biggest_bust))):
-        left = format_draft_value_row(best_value[index]) if index < len(best_value) else list(blank)
-        right = format_draft_value_row(biggest_bust[index]) if index < len(biggest_bust) else list(blank)
+        left = (format_draft_value_row(best_value[index], labels)
+                if index < len(best_value) else list(blank))
+        right = (format_draft_value_row(biggest_bust[index], labels)
+                 if index < len(biggest_bust) else list(blank))
         rows.append(['', *left, '', *right])
 
     rows.append([])
@@ -1095,6 +1098,25 @@ def _alltime_draft_grid(history_rows, team_count, factors):
     return grid
 
 
+def draft_team_labels(board_rows):
+    """{team_id: compact board label} for one season's picks.
+
+    The board's column headers, its Top Pick cell and its value
+    leaderboards all name a team by abbreviation, and two teams may
+    legitimately share one -- which put two identical headers over two
+    different teams' columns with nothing to tell them apart (MLB-243
+    correction). One map, built once per board, so those three surfaces
+    cannot disagree; the shared rule leaves a league with no collision
+    exactly as it was.
+    """
+    abbrev_by_id = {}
+    for r in board_rows or ():
+        tid = r.get('team_id')
+        if tid is not None:
+            abbrev_by_id.setdefault(tid, r.get('team_abbrev') or str(tid))
+    return disambiguated_abbrev_map(abbrev_by_id)
+
+
 def _draft_sorted_columns(board_rows):
     """Return (team_order, team_abbrev, sorted_cols).
 
@@ -1117,6 +1139,7 @@ def _draft_sorted_columns(board_rows):
             round1_pick[tid] = r.get('round_pick')
 
     team_order = sorted(by_team, key=lambda tid: (round1_pick.get(tid) or 999, tid))
+    team_abbrev = draft_team_labels(board_rows)
     sorted_cols = {}
     for tid, picks in by_team.items():
         keepers = sorted(
@@ -1200,7 +1223,9 @@ def _draft_board_grid(board_rows):
                       key=lambda p: (float(p.get('season_points') or 0),
                                      p.get('overall_pick') or 0))
             pts = [float(p.get('season_points') or 0) for p in present]
-            head = [top.get('round_pick'), top.get('team_abbrev') or '',
+            head = [top.get('round_pick'),
+                    team_abbrev.get(top.get('team_id'))
+                    or top.get('team_abbrev') or '',
                     _draft_player_label(top), _whole(max(pts)),
                     _whole(statistics.median(pts))]
         else:
@@ -2342,11 +2367,15 @@ def build_records_tab_rows(all_time_records, current_season_records, league_id=N
         if section_rows:
             rows.append(_records_matrix_scope_header(section_title))
             # The caption sits between the heading and the column header,
-            # where a reader meets it before the first name (MLB-243). Only
-            # the points book carries it; the H2H section keeps its pinned
-            # shape byte for byte.
-            if section_title == LINEUP_SLOT_SECTION_SEASON_LONG:
-                rows.append([LINEUP_SLOT_SEASON_LONG_CAPTION])
+            # where a reader meets it before the first name (MLB-243). Keyed
+            # on `season_long` rather than on the section TITLE, because
+            # both books now spell that title the same way -- the caption is
+            # the whole of what the points book adds, and the H2H section
+            # keeps its pinned shape byte for byte. The write layer paints
+            # it with the house explainer token (almanac_write), so it reads
+            # as the caption it is rather than as a stray record row.
+            if season_long and section_title == LINEUP_SLOT_SECTION:
+                rows.append([LINEUP_SLOT_LENS_CAPTION])
             rows.append(RECORDS_MATRIX_DETAIL_HEADER)
             rows.extend(section_rows)
             rows.append([])

@@ -46,22 +46,25 @@ whose flexibility was most useful.
 Deployment is still a real and interesting question. It is just a
 different one, and it belongs on a tab that says so.
 
-## v1.9: foregrounded, not unified
+## v1.9: stated once, not unified
 
 Rewriting the data path was judged too risky for a release already cut.
-Instead the points book states the distinction (`output/almanac_data.py`):
+Instead the points book states the distinction **in one caption**
+(`almanac_data.LINEUP_SLOT_LENS_CAPTION`), sitting between the section
+heading and the column header so a reader meets it before the first name.
+The write layer paints it with the house explainer token, so it reads as
+the caption it is rather than as a stray record row.
 
-* the section is titled **"Production by Actual Lineup Slot"**, not
-  "Lineup Slot Records";
-* it carries a caption naming the contrast with Home's boards and marking
-  itself temporary;
-* row labels read **"C (as started)"**, because a heading three rows above
-  does not travel with the row a reader is looking at.
+**The section keeps its normal name in both books.** A first pass renamed
+it to "Production by Actual Lineup Slot" and suffixed every row label with
+"(as started)"; Kyle reverted both on 2026-08-15. One section of a shared
+record book should not be titled two different ways depending on which
+league is reading it, and eighteen parenthetical row labels shout a caveat
+the reader needs once. What survives is the caption, and it is carried by
+the points book only -- the head-to-head record book is pinned byte for
+byte by `tests/fixtures/almanac_v1_1_0/Records.tsv`.
 
-**Scoped to the points format only.** The head-to-head book keeps the old
-heading and bare labels byte for byte -- `tests/fixtures/almanac_v1_1_0/
-Records.tsv` pins that string, and moving a golden was not in scope. The
-same clarification is owed to the H2H book and should land with the
+The same clarification is owed to the H2H book and should land with the
 unification rather than as a second unreviewed byte change.
 
 ## 2.0: the required change
@@ -74,8 +77,8 @@ Unify every non-slot-based surface onto position-eligible active points:
    and Score by Slot.
 2. Re-point the record-book slot section at `fct_player_position_pts`,
    which already carries per-position active points at the right grain.
-3. Drop the v1.9 wording above once the surfaces agree -- the caption
-   exists to explain a discrepancy that should no longer exist.
+3. Delete `LINEUP_SLOT_LENS_CAPTION` once the surfaces agree -- it exists
+   to explain a discrepancy that should no longer exist.
 4. Re-anchor the ESPN H2H goldens deliberately, with the diff reviewed:
    this WILL move record holders in the pinned corpus, and that movement
    is the point rather than a regression.

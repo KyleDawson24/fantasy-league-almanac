@@ -207,7 +207,7 @@ def test_an_unread_log_never_fabricates_a_channel_classification():
 def test_the_adapter_withholds_channels_when_coverage_is_absent(monkeypatch):
     """The gate lives in the adapter, so no caller can accidentally chart an
     unread log."""
-    monkeypatch.setattr(espn_points_data, 'query_snowflake',
+    monkeypatch.setattr(espn_points_data, 'query_for_presentation',
                         lambda sql, params=None: [{'has_transaction_log': False}])
     monkeypatch.setattr(espn_points_data, 'league_predicate',
                         lambda alias=None: "league_key = 'x'")
@@ -216,7 +216,7 @@ def test_the_adapter_withholds_channels_when_coverage_is_absent(monkeypatch):
 
 def test_the_adapter_returns_channels_when_coverage_is_proven(monkeypatch):
     import almanac_data
-    monkeypatch.setattr(espn_points_data, 'query_snowflake',
+    monkeypatch.setattr(espn_points_data, 'query_for_presentation',
                         lambda sql, params=None: [{'has_transaction_log': True}])
     monkeypatch.setattr(espn_points_data, 'league_predicate',
                         lambda alias=None: "league_key = 'x'")
@@ -668,7 +668,7 @@ def test_an_unextracted_league_says_so_once(assembled, monkeypatch):
 # --------------------------------------------------------------------------
 
 def _late_draft_context(monkeypatch, drafted_at):
-    monkeypatch.setattr(espn_points_data, 'query_snowflake',
+    monkeypatch.setattr(espn_points_data, 'query_for_presentation',
                         lambda sql, params=None: [{'drafted_at': drafted_at}])
     monkeypatch.setattr(espn_points_data, 'league_predicate',
                         lambda alias=None: "league_key = 'espn-main'")
@@ -705,7 +705,7 @@ def test_an_undated_draft_says_nothing_rather_than_guessing(monkeypatch):
 
 
 def test_no_season_calendar_means_no_claim(monkeypatch):
-    monkeypatch.setattr(espn_points_data, 'query_snowflake',
+    monkeypatch.setattr(espn_points_data, 'query_for_presentation',
                         lambda sql, params=None: [{'drafted_at': date(2026, 7, 31)}])
     assert espn_points_data.late_draft_note(
         {'season_opener': None, 'season_year': 2026}) is None
@@ -740,11 +740,20 @@ def test_the_warning_does_not_change_any_number():
 
 
 # --------------------------------------------------------------------------
-# The slot section says what it measures (MLB-243 ruling, 2026-08-14)
+# The slot section keeps its NAME and says what it measures ONCE
+# (MLB-243 ruling 2026-08-14, corrected 2026-08-15).
+#
+# The first pass renamed the section to "Production by Actual Lineup Slot"
+# and suffixed every row label with "(as started)". That overreached: one
+# section of a shared record book should not be titled two different ways
+# depending on which league is reading it, and eighteen parenthetical row
+# labels shout a caveat the reader needs once. The distinction is real, so
+# the caption survives -- and is now painted in the house explainer style
+# rather than left in the tab's default body format.
 # --------------------------------------------------------------------------
 
 _SLOT_SPECS = [
-    {'section': 'Production by Actual Lineup Slot', 'label': 'C (as started)',
+    {'section': 'Lineup Slot Records', 'label': 'C',
      'grain': 'player', 'stat_name': 'LINEUP_SLOT_POINTS__C__1',
      'direction': 'most'},
 ]
@@ -763,29 +772,57 @@ def _slot_section(season_long):
     import almanac_data
     return almanac_logic.build_records_tab_rows(
         all_time_records=_SLOT_RECORD, current_season_records=_SLOT_RECORD,
-        record_specs=[dict(s, section=(
-            almanac_data.LINEUP_SLOT_SECTION_SEASON_LONG if season_long
-            else almanac_data.LINEUP_SLOT_SECTION),
-            label=almanac_data._slot_record_label('C', season_long))
-            for s in _SLOT_SPECS],
+        record_specs=[dict(s, section=almanac_data.LINEUP_SLOT_SECTION,
+                           label='C')
+                      for s in _SLOT_SPECS],
         schedule_lookup={}, season_long=season_long)
 
 
-def test_the_points_slot_section_is_renamed():
+def test_both_books_call_the_slot_section_by_its_normal_name():
     import almanac_data
-    flat = _cells(_slot_section(True))
-    assert almanac_data.LINEUP_SLOT_SECTION_SEASON_LONG in flat
-    assert almanac_data.LINEUP_SLOT_SECTION not in flat
+    for season_long in (True, False):
+        flat = _cells(_slot_section(season_long))
+        assert almanac_data.LINEUP_SLOT_SECTION in flat
+        assert 'Production by Actual Lineup Slot' not in flat
+
+
+def test_no_slot_row_carries_an_as_started_suffix():
+    """The caption states the lens once; the rows are just slots."""
+    for season_long in (True, False):
+        rows = _slot_section(season_long)
+        # Row LABELS only -- the caption legitimately says "was started".
+        assert not [r for r in rows
+                    if r and isinstance(r[0], str) and '(as started)' in r[0]]
+        # The holder cell is a Baseball-Reference =HYPERLINK; match inside it.
+        holder_rows = [r for r in rows
+                       if len(r) > 1 and 'Rowan Pike' in str(r[1])]
+        assert holder_rows, 'the slot record holder did not render'
+        assert holder_rows[0][0] == 'C'
+
+
+def test_the_spec_builder_labels_slots_bare_in_both_books(monkeypatch):
+    """The suffix is gone at the SOURCE, not filtered downstream."""
+    import almanac_data
+    monkeypatch.setattr(almanac_data, 'query_for_presentation', lambda *a, **k: [
+        {'lineup_slot': 'C', 'slots_to_fill': 1},
+    ])
+    for season_long in (True, False):
+        specs = almanac_data.get_lineup_slot_record_specs(
+            season_long=season_long)
+        assert [s['label'] for s in specs] == ['C']
+        assert {s['section'] for s in specs} == {
+            almanac_data.LINEUP_SLOT_SECTION}
 
 
 def test_the_points_slot_section_carries_the_contrast_caption():
     """A reader must meet the qualification before the first name."""
+    import almanac_data
     rows = _slot_section(True)
     titles = [i for i, r in enumerate(rows)
-              if r and r[0] == 'Production by Actual Lineup Slot']
-    assert titles, 'the renamed section heading is missing'
-    caption_row = rows[titles[0] + 1]
-    caption = str(caption_row[0])
+              if r and r[0] == almanac_data.LINEUP_SLOT_SECTION]
+    assert titles, 'the slot section heading is missing'
+    caption = str(rows[titles[0] + 1][0])
+    assert caption == almanac_data.LINEUP_SLOT_LENS_CAPTION
     assert 'while a player was started' in caption
     assert 'position-eligible' in caption
     assert 'may differ' in caption
@@ -793,30 +830,31 @@ def test_the_points_slot_section_carries_the_contrast_caption():
     assert rows[titles[0] + 2][0] == 'Record'
 
 
-def test_a_slot_row_is_not_labelled_as_a_bare_position():
-    """"C | Rowan Pike" reads as the catcher record. The heading three rows
-    up does not travel with the row a reader is looking at."""
+def test_the_caption_is_painted_in_the_house_explainer_style():
+    """An unformatted caption renders exactly like a record row, which is
+    the wrong thing for a sentence explaining the section."""
+    import almanac_render
+    import almanac_write
     rows = _slot_section(True)
-    # The holder cell is a Baseball-Reference =HYPERLINK, so match inside it.
-    holder_rows = [r for r in rows
-                   if len(r) > 1 and 'Rowan Pike' in str(r[1])]
-    assert holder_rows, 'the slot record holder did not render'
-    assert holder_rows[0][0] == 'C (as started)'
-    assert holder_rows[0][0] != 'C'
+    formats = almanac_write._records_caption_formats(rows)
+    assert len(formats) == 1, formats
+    expected = almanac_render.explainer_text_format()
+    assert formats[0]['format']['textFormat'] == expected
+    caption_row = int(formats[0]['range'].split(':')[0][1:])
+    assert rows[caption_row - 1][0] == almanac_data_caption()
 
 
-def test_the_h2h_slot_section_is_untouched():
-    """Its heading and bare labels are pinned by the golden corpus."""
+def almanac_data_caption():
+    import almanac_data
+    return almanac_data.LINEUP_SLOT_LENS_CAPTION
+
+
+def test_the_h2h_slot_section_carries_no_caption():
+    """The head-to-head record book is pinned byte for byte; the caption is
+    the whole of what the points book adds."""
     import almanac_data
     rows = _slot_section(False)
-    flat = _cells(rows)
-    assert almanac_data.LINEUP_SLOT_SECTION in flat
-    assert almanac_data.LINEUP_SLOT_SECTION_SEASON_LONG not in flat
-    assert 'as started' not in ' '.join(flat)
-    # The holder cell is a Baseball-Reference =HYPERLINK, so match inside it.
-    holder_rows = [r for r in rows
-                   if len(r) > 1 and 'Rowan Pike' in str(r[1])]
-    assert holder_rows[0][0] == 'C'
+    assert almanac_data.LINEUP_SLOT_LENS_CAPTION not in _cells(rows)
 
 
 def test_the_golden_corpus_still_pins_the_h2h_heading():
@@ -830,14 +868,12 @@ def test_the_golden_corpus_still_pins_the_h2h_heading():
     assert 'Lineup Slot Records' in fixture.read_text(encoding='utf-8')
 
 
-def test_both_slot_headings_keep_the_one_decimal_value_rule():
-    """The write layer keys number formatting off the section name, so a
-    rename must not silently drop the points formatting."""
+def test_the_slot_heading_keeps_the_one_decimal_value_rule():
+    """The write layer keys number formatting off the section name, so the
+    revert must not silently drop the points formatting."""
     import almanac_data
     import almanac_write
     assert almanac_data.LINEUP_SLOT_SECTION in almanac_write._ONE_DECIMAL_SECTIONS
-    assert (almanac_data.LINEUP_SLOT_SECTION_SEASON_LONG
-            in almanac_write._ONE_DECIMAL_SECTIONS)
 
 
 def test_the_ruling_is_recorded_for_2_0():
@@ -1351,3 +1387,722 @@ def test_a_unique_abbreviation_is_left_alone():
     assert "C03" in labels, labels
     assert not any(l.startswith("C03 ") for l in labels), (
         "a unique abbrev was needlessly suffixed")
+
+
+# --------------------------------------------------------------------------
+# MLB-243 CORRECTION PASS (2026-08-15)
+#
+# Every test below pins a defect Kyle found in the live review workbook, and
+# each asserts a NUMBER or an exact label rather than the presence of a
+# header -- a blank table has all the right headers.
+# --------------------------------------------------------------------------
+
+def _configured_tab(slot_columns=("C", "1B", "OF", "UTIL", "P"),
+                    slot_spellings=("C", "1B", "OF", "UTIL", "P"),
+                    teams=3, periods=139, acquisition=None,
+                    detailed=None, prior_acquisition=None, slot_key=None):
+    """The season-points tab as a FIRST-YEAR league produces it: nothing
+    closed, the league's own configured slots, and its own spelling of the
+    utility slot."""
+    import cbs_almanac_sheets
+
+    ids = list(range(1, teams + 1))
+    names = {t: "Club %02d" % t for t in ids}
+    arc = [{"team_id": t, "team_name": names[t], "period": p,
+            "standings_rank": t, "is_latest_period": p == periods}
+           for p in range(1, periods + 1) for t in ids]
+    slots = [{"team_id": t, "season_year": 2026, "lineup_slot": s,
+              "slot_pts": 100.0 * t + 10.0 * i}
+             for t in ids for i, s in enumerate(slot_spellings)]
+    return cbs_almanac_sheets.build_standings_rows(
+        {"season_year": 2026, "latest_period": periods, "first_season": 2026},
+        arc,
+        [],                                   # nothing has CLOSED
+        [{"team_id": t, "team_name": names[t]} for t in ids],
+        slot_rows=slots, alltime_slot_rows=slots,
+        alltime_pitching_rows=[{"team_id": t, "p_pts": 700.0} for t in ids],
+        season_days=[{"season_year": 2026, "days": periods}],
+        detailed_alltime_rows=detailed,
+        acquisition_rows=acquisition,
+        alltime_acquisition_rows=prior_acquisition,
+        franchise_map={t: {"canonical_id": t, "abbrev": "C%02d" % t}
+                       for t in ids},
+        period_label="Scoring Day", compact_chart=True,
+        copy=cbs_almanac_sheets.NEUTRAL_COPY,
+        slot_columns=list(slot_columns),
+        slot_key=slot_key,
+    )
+
+
+def _section_body(rows, header_first_cell, must_contain=None):
+    """The header row and its data rows, up to the first blank row.
+
+    `must_contain` disambiguates headers that share a first cell -- Season
+    Finishes and Detailed Standings both start with 'Franchise'.
+    """
+    start = next(
+        i for i, r in enumerate(rows)
+        if r and str(r[0]) == header_first_cell
+        and (must_contain is None or must_contain in [str(c) for c in r])
+    )
+    body = []
+    for row in rows[start + 1:]:
+        if not row or not str(row[0]).strip() or len(row) < len(rows[start]) // 2:
+            break
+        body.append(row)
+    return rows[start], body
+
+
+# ---- 3. Points by Lineup Slot -------------------------------------------
+
+def test_the_slot_grid_columns_are_the_leagues_configured_slots():
+    """A blank DH column for a league with no DH slot is a defect; an empty
+    column for a slot the league DOES roster is information."""
+    rows, _ = _configured_tab()
+    header, _body = _section_body(rows, "Team")
+    left = header[1:header.index("", 1)]
+    assert left == ["C", "1B", "OF", "UTIL", "P"], left
+    assert "DH" not in header, "an unrostered slot became a blank column"
+
+
+def test_util_production_lands_in_the_util_column():
+    """THE ALIAS. The league spells it UTIL and the layout came from a book
+    that spells it U, so a whole slot's production had nowhere to land."""
+    rows, _ = _configured_tab()
+    header, body = _section_body(rows, "Team")
+    col = header.index("UTIL")
+    values = [r[col] for r in body]
+    assert all(isinstance(v, (int, float)) and v > 0 for v in values), values
+
+
+def test_a_u_spelled_grid_still_reads_util_rows_and_vice_versa(
+        stub_slot_catalog):
+    """The catalog's key is the same from either direction, so a book that
+    displays U and a feed that says UTIL agree."""
+    import slot_catalog
+    resolver = slot_catalog.canonical_lineup_slot
+    as_u, _ = _configured_tab(slot_columns=("C", "U", "P"),
+                              slot_spellings=("C", "UTIL", "P"),
+                              slot_key=resolver)
+    as_util, _ = _configured_tab(slot_columns=("C", "UTIL", "P"),
+                                 slot_spellings=("C", "U", "P"),
+                                 slot_key=resolver)
+    _h1, b1 = _section_body(as_u, "Team")
+    _h2, b2 = _section_body(as_util, "Team")
+    assert [r[2] for r in b1] == [r[2] for r in b2]
+    assert all(isinstance(r[2], (int, float)) and r[2] > 0 for r in b1)
+
+
+def test_the_first_year_all_time_slot_half_equals_the_current_season():
+    """With one season on file the twin is redundant, and printing it blank
+    made the reader guess which half they were looking at."""
+    rows, _ = _configured_tab()
+    header, body = _section_body(rows, "Team")
+    gap = header.index("", 1)
+    for row in body:
+        left = row[1:gap]
+        right = row[gap + 1:gap + 1 + len(left)]
+        assert all(isinstance(v, (int, float)) for v in right), right
+        # The P column paces on membership rather than capture, and this
+        # fixture gives it its own number; every other slot must match its
+        # current-season twin exactly.
+        assert left[:-1] == right[:-1], (left, right)
+
+
+def test_the_first_year_clock_is_named_rather_than_printed_as_none():
+    rows, _ = _configured_tab(periods=139)
+    flat = " ".join(str(c) for r in rows for c in r)
+    assert "None-gameplay-day" not in flat
+    assert "None gameplay days" not in flat
+    assert "139 gameplay days" in flat
+
+
+# ---- 4. Detailed Standings ----------------------------------------------
+
+_DETAILED = [
+    {"team_id": t, "h": 1000.0 + t, "doubles": 200.0 + t, "triples": 20.0,
+     "hr": 150.0 + t, "xbh": 370.0, "tb": 1700.0, "r": 550.0, "rbi": 500.0,
+     "sb": 90.0, "b_bb": 400.0, "w": 50.0, "qs": 60.0, "k": 800.0,
+     "sv": 25.0, "hld": 4.0, "cg": 1.0, "outs": 2100.0,
+     "hit_pts": 2400.0 + t, "pit_pts": 1900.0 + t, "total_pts": 4300.0 + 2 * t}
+    for t in (1, 2, 3)
+]
+
+
+def test_detailed_standings_is_not_a_table_of_blanks():
+    """THE RELEASE BLOCKER. Every cell was empty, because a first-year
+    league had no closed season to build a standard-season clock from."""
+    rows, _ = _configured_tab(detailed=_DETAILED)
+    header, body = _section_body(rows, "Franchise", must_contain="Hit Pts")
+    assert len(body) == 3, body
+    labelled = len([h for h in header[1:] if str(h).strip()])
+    for row in body:
+        numeric = [c for c in row[1:] if isinstance(c, (int, float))]
+        assert len(numeric) == labelled, (numeric, header)
+
+
+def test_detailed_standings_reconciles_with_the_shared_mart():
+    """Numbers, not headers: in a first year the pace weight is 1.0, so each
+    cell is the mart's own figure."""
+    rows, _ = _configured_tab(detailed=_DETAILED)
+    header, body = _section_body(rows, "Franchise", must_contain="Hit Pts")
+    by_name = {str(r[0]): r for r in body}
+    for source in _DETAILED:
+        row = by_name["Club %02d" % source["team_id"]]
+        assert row[header.index("Total")] == pytest.approx(
+            source["total_pts"], abs=0.05)
+        assert row[header.index("H")] == pytest.approx(source["h"], abs=0.05)
+        assert row[header.index("HR")] == pytest.approx(source["hr"], abs=0.05)
+        # OUTS renders as innings pitched.
+        assert row[header.index("IP")] == pytest.approx(
+            source["outs"] / 3.0, abs=0.05)
+
+
+def test_detailed_standings_says_the_all_time_table_is_this_season():
+    rows, _ = _configured_tab(detailed=_DETAILED)
+    flat = " ".join(str(c) for r in rows for c in r)
+    assert ("one season on file, so these all-time figures are the current"
+            in flat)
+
+
+# ---- 5. Production by acquisition channel -------------------------------
+
+_ACQ = [
+    # The ESPN mart's vocabulary: keeper + draft, NOT `opening`.
+    {"team_id": t, "team_name": "Club %02d" % t,
+     "keeper_active_pts": 0.0, "draft_active_pts": 3494.0 + t,
+     "fa_add_active_pts": 88.0, "trade_active_pts": 0.0,
+     "acquired_active_pts": 3582.0 + t,
+     "dropped_active_pts": 0.0, "traded_away_active_pts": 0.0,
+     "lost_active_pts": 0.0,
+     "keeper_rostered_pts": 0.0, "draft_rostered_pts": 4162.0 + t,
+     "fa_add_rostered_pts": 88.0, "trade_rostered_pts": 0.0,
+     "acquired_rostered_pts": 4250.0 + t,
+     "dropped_rostered_pts": 3.0, "traded_away_rostered_pts": 0.0,
+     "lost_rostered_pts": 3.0}
+    for t in (1, 2, 3)
+]
+
+
+def _acq_tables(rows):
+    """Every acquisition lens table, as (header, body) pairs."""
+    tables = []
+    for i, row in enumerate(rows):
+        if row and str(row[0]) == "Team" and "Opening" in [str(c) for c in row]:
+            body = []
+            for follower in rows[i + 1:]:
+                if not follower or not str(follower[0]).strip():
+                    break
+                body.append(follower)
+            tables.append((row, body))
+    return tables
+
+
+def _acq_total_columns(header):
+    """(current-season, all-time) ACQUIRED-total column indexes.
+
+    'Total' appears four times per row -- acquired and lost, in each half --
+    so it cannot be located by name alone. The row is
+    [Team, *half, '', *half], and Total is the fourth cell of a half.
+    """
+    n_half = (len(header) - 2) // 2
+    return 1 + 3, 2 + n_half + 3
+
+
+def test_every_acquisition_total_reconciles_with_its_own_channels():
+    """THE ARITHMETIC. Opening read a column the ESPN mart does not have, so
+    it printed 0.0 while the Total beside it carried the whole season."""
+    rows, _ = _configured_tab(acquisition=_ACQ)
+    tables = _acq_tables(rows)
+    assert tables, "no acquisition table rendered"
+    for header, body in tables:
+        n_half = (len(header) - 2) // 2
+        assert body, "an acquisition table rendered with no rows"
+        for base in (1, 2 + n_half):
+            opening, pickup, trade, total = (base, base + 1, base + 2,
+                                             base + 3)
+            for row in body:
+                assert row[opening] > 0, (
+                    "Opening is zero while a season of drafted production "
+                    "exists: %r" % (row[base:base + 4],))
+                assert (row[opening] + row[pickup] + row[trade]
+                        == pytest.approx(row[total], abs=0.05)),                     row[base:base + 4]
+
+
+def test_a_first_year_all_time_acquisition_equals_the_current_season():
+    """It used to be exactly DOUBLE: the caller passed this season as the
+    prior era and the presenter added the season on top of it."""
+    rows, _ = _configured_tab(acquisition=_ACQ)
+    for header, body in _acq_tables(rows):
+        current, alltime = _acq_total_columns(header)
+        for row in body:
+            assert row[current] == pytest.approx(row[alltime], abs=0.05), (
+                "all-time %r != current %r" % (row[alltime], row[current]))
+
+
+def test_a_real_prior_era_is_still_added_to_the_current_season():
+    """The first-year fix must not stop a league WITH history accumulating
+    one -- that is what the all-time half is for."""
+    prior = [dict(r, draft_active_pts=1000.0, acquired_active_pts=1000.0,
+                  fa_add_active_pts=0.0, trade_active_pts=0.0,
+                  keeper_active_pts=0.0) for r in _ACQ]
+    rows, _ = _configured_tab(acquisition=_ACQ, prior_acquisition=prior)
+    header, body = _acq_tables(rows)[0]
+    current, alltime = _acq_total_columns(header)
+    for row in body:
+        assert row[alltime] == pytest.approx(
+            row[current] + 1000.0, abs=0.05), row[:6]
+
+
+def test_the_acquisition_caption_makes_no_claim_about_cbs():
+    rows, _ = _configured_tab(acquisition=_ACQ)
+    flat = " ".join(str(c) for r in rows for c in r)
+    assert "CBS never logged drafts" not in flat
+    assert "already on the roster when scoring began" in flat
+
+
+def test_the_cbs_book_keeps_its_own_opening_sentence():
+    import cbs_almanac_sheets
+    assert ("CBS never logged drafts"
+            in cbs_almanac_sheets.CBS_COPY["acquisition_opening_note"])
+
+
+def test_an_adapter_that_reports_opening_directly_is_left_alone():
+    """CBS already speaks the shared vocabulary; deriving over the top of it
+    would be a silent rewrite of a mart's own number."""
+    import almanac_render
+    rows = [{"team_id": 1, "opening_active_pts": 12.0,
+             "keeper_active_pts": 99.0, "draft_active_pts": 99.0}]
+    out = almanac_render.with_standard_acquisition_channels(rows)
+    assert out[0]["opening_active_pts"] == 12.0
+
+
+def test_no_opening_is_invented_when_neither_vocabulary_is_present():
+    """A 0.0 here would assert that nothing arrived that way."""
+    import almanac_render
+    out = almanac_render.with_standard_acquisition_channels(
+        [{"team_id": 1, "fa_add_active_pts": 5.0}])
+    assert "opening_active_pts" not in out[0]
+
+
+# ---- 1. The owner fallback, everywhere ----------------------------------
+
+def test_the_presentation_wrapper_performs_the_fallback(monkeypatch):
+    """Applied per-renderer it reached two surfaces out of six. Applied by
+    the one seam every workbook-facing module reads through, it cannot
+    drift between tabs, books or platforms."""
+    import db
+    served = [
+        {"team_id": 1, "team_name": "Harbor Otters",
+         "owner_display": "Owner unavailable"},
+        {"team_id": 2, "team_name": "Granite Owls",
+         "owner_name": "Unknown owner"},
+        {"team_id": 3, "team_name": "Gale Ridge",
+         "owner": "Owner unavailable"},
+        {"team_id": 4, "team_name": "Cedar Flats",
+         "owner_display": "Dana Reid"},
+        # NOT ours: the unmanned sentinel team's platform-supplied label.
+        {"team_id": 7, "team_name": "####", "owner_display": "Unknown"},
+    ]
+    monkeypatch.setattr(db, "_BACKEND", "duckdb")
+    monkeypatch.setattr(db, "_duckdb_query",
+                        lambda sql, params=None: [dict(r) for r in served])
+    out = db.query_for_presentation("select 1")
+    assert out[0]["owner_display"] == "Harbor Otters"
+    assert out[1]["owner_name"] == "Granite Owls"
+    assert out[2]["owner"] == "Gale Ridge"
+    assert out[3]["owner_display"] == "Dana Reid", (
+        "a real owner name was overwritten")
+    assert out[4]["owner_display"] == "Unknown", (
+        "a platform-supplied label was mistaken for our own sentinel")
+
+
+def test_the_fallback_never_invents_a_name_it_does_not_have():
+    """No team name on the row means the sentinel stands. Inventing one from
+    a player column would be worse than the label."""
+    import owner_labels
+    row = {"owner_display": "Owner unavailable", "display_name": "Rowan Pike"}
+    assert owner_labels.apply_row(row)["owner_display"] == "Owner unavailable"
+
+
+def test_an_empty_owner_is_not_treated_as_a_sentinel():
+    """A blank cell makes no claim, and the CBS continuity harvest reads
+    owner names through this same seam and writes them to a seed."""
+    import owner_labels
+    row = {"owner_display": "", "team_name": "Harbor Otters"}
+    assert owner_labels.apply_row(row)["owner_display"] == ""
+
+
+def test_identity_columns_are_never_rewritten():
+    import owner_labels
+    row = {"owner_id": "{GUID}", "owner_display": "Owner unavailable",
+           "team_id": 7, "team_name": "Harbor Otters"}
+    out = owner_labels.apply_row(dict(row))
+    assert out["owner_id"] == "{GUID}"
+    assert out["team_id"] == 7
+
+
+def test_a_tab_builder_cannot_opt_out_of_the_fallback(monkeypatch):
+    """A workbook-facing module reads through the wrapper, so no tab can
+    print the sentinel by forgetting to ask."""
+    import db
+    import owner_labels
+    monkeypatch.setattr(db, "_BACKEND", "duckdb")
+    monkeypatch.setattr(db, "_duckdb_query", lambda sql, params=None: [
+        {"team_id": 1, "team_name": "Harbor Otters",
+         "owner_display": "Owner unavailable", "stat_value": 1.0},
+    ])
+    flat = " ".join(str(v) for row in db.query_for_presentation("select 1")
+                    for v in row.values())
+    for sentinel in owner_labels.OWNER_UNAVAILABLE_LABELS:
+        assert sentinel not in flat
+
+
+# ---- 6. Compact labels are unique everywhere ----------------------------
+
+def test_the_affinity_spine_uses_the_same_labels_as_the_chart_controls():
+    """Disambiguated checkboxes over two indistinguishable columns is the
+    inconsistency, not either answer on its own."""
+    rows, _ = _neutral_tab(periods=20, teams=4, duplicate_abbrev=True)
+    controls = next(r for r in rows if r and str(r[0]) == "Chart teams:")
+    control_labels = [str(c) for c in controls[1:-1]]
+    spine = next(r for r in rows if r and str(r[0]) == "MLB Team")
+    left = [str(c) for c in spine[1:1 + len(control_labels)]]
+    assert left == control_labels, (left, control_labels)
+    assert len(left) == len(set(left)), "duplicate affinity columns: %r" % left
+
+
+def test_the_draft_board_disambiguates_duplicate_team_abbreviations():
+    board = [
+        {"overall_pick": i, "round_num": 1, "round_pick": i,
+         "team_id": tid, "team_abbrev": "DUP" if tid in (7, 10) else "AAA",
+         "season_points": 100.0 + i, "value_delta": i,
+         "player_name": "P%d" % i, "display_name": "P%d" % i}
+        for i, tid in enumerate((7, 10, 3), start=1)
+    ]
+    rows = almanac_logic.build_draft_tab_rows(board, 2026)
+    header = next(r for r in rows if r and str(r[0]) == "Rd")
+    labels = [str(c) for c in header[6:]]
+    assert sorted(labels) == ["AAA", "DUP 10", "DUP 7"], labels
+    assert "DUP" not in labels, "the bare duplicate abbrev survived"
+    # The value leaderboards name teams too, and must agree with the board.
+    flat = [str(c) for r in rows for c in r]
+    assert "DUP 7" in flat and "DUP 10" in flat
+
+
+def test_a_league_with_distinct_abbreviations_keeps_its_draft_board_labels():
+    board = [
+        {"overall_pick": i, "round_num": 1, "round_pick": i, "team_id": i,
+         "team_abbrev": "T%d" % i, "season_points": 100.0 + i,
+         "value_delta": i, "player_name": "P%d" % i, "display_name": "P%d" % i}
+        for i in (1, 2, 3)
+    ]
+    rows = almanac_logic.build_draft_tab_rows(board, 2026)
+    header = next(r for r in rows if r and str(r[0]) == "Rd")
+    assert [str(c) for c in header[6:]] == ["T1", "T2", "T3"]
+
+
+def test_the_home_boards_name_teams_the_same_way_the_tabs_do(monkeypatch):
+    """A board cell whose abbreviation maps to two different team pages is
+    a dead end for the reader who clicks through."""
+    monkeypatch.setattr(espn_points_data, "franchise_map", lambda: {
+        7: {"canonical_id": 7, "abbrev": "DUP"},
+        10: {"canonical_id": 10, "abbrev": "DUP"},
+        3: {"canonical_id": 3, "abbrev": "SOLO"},
+    })
+    out = espn_points_data.with_unique_team_abbrevs([
+        {"team_id": 7, "team_abbrev": "DUP"},
+        {"team_id": 10, "team_abbrev": "DUP"},
+        {"team_id": 3, "team_abbrev": "SOLO"},
+    ])
+    assert [r["team_abbrev"] for r in out] == ["DUP 7", "DUP 10", "SOLO"]
+
+
+def test_the_daily_facts_own_unknown_is_a_sentinel_only_on_its_own_column():
+    """Same word, two provenances. On the daily fact's `owner_name` a bare
+    "Unknown" is our pre-dim_owner fallback and the month board printed it
+    once per row; on a dim_owner-resolved column it is the platform's own
+    label for the unmanned sentinel team, and true -- which is also what
+    the head-to-head golden corpus pins."""
+    import owner_labels
+    board = {"team_name": "June's Ball Club", "owner_name": "Unknown"}
+    owner_labels.apply_row(board, owner_keys=("owner_name",),
+                           labels=owner_labels.DAILY_FACT_UNAVAILABLE_LABELS)
+    assert board["owner_name"] == "June's Ball Club"
+
+    resolved = {"team_name": "####", "owner_display": "Unknown"}
+    assert owner_labels.apply_row(resolved)["owner_display"] == "Unknown"
+
+
+# --------------------------------------------------------------------------
+# MLB-243 FINAL RULINGS (Kyle 2026-08-15)
+#
+# 1. The database seam returns warehouse truth. Presentation asks for the
+#    owner fallback BY NAME. A boundary that holds because of today's SELECT
+#    lists is not a boundary, and an opt-OUT has to be remembered by code
+#    that does not exist yet -- so the default is raw.
+# 2. The slot vocabulary is the seed's, read through the catalog.
+# --------------------------------------------------------------------------
+
+# Modules that READ TO RENDER. Every one of them must go through the
+# presentation wrapper, or a tab can print the sentinel by accident.
+_PRESENTATION_MODULES = (
+    'almanac_data', 'almanac_sheets', 'cbs_almanac_sheets',
+    'cbs_draft_recap_data', 'espn_points_data', 'generate_season_report',
+    'generate_summary', 'league_notes', 'records', 'records_data',
+)
+
+# Modules that resolve identity, seed configuration, guard PII, classify a
+# league or read a vocabulary. Every one of them must keep the RAW seam --
+# these are the callers the wrapper exists to protect.
+_RAW_MODULES = (
+    'build_continuity_sheet', 'league_format', 'slot_catalog', 'stat_catalog',
+)
+
+
+def _sentinel_row():
+    return {'team_id': 1, 'team_name': 'Harbor Otters',
+            'owner_id': '{GUID-1}', 'owner_display': 'Owner unavailable'}
+
+
+def test_the_raw_seam_never_rewrites_an_owner_value(monkeypatch):
+    """RULING 1, the load-bearing half. `query_snowflake` is warehouse
+    truth -- a continuity harvest or a PII inventory that reaches for the
+    obvious function gets what the warehouse said."""
+    import db
+    monkeypatch.setattr(db, '_BACKEND', 'duckdb')
+    monkeypatch.setattr(db, '_duckdb_query',
+                        lambda sql, params=None: [_sentinel_row()])
+    out = db.query_snowflake('select 1')
+    assert out[0]['owner_display'] == 'Owner unavailable'
+    assert out[0]['owner_id'] == '{GUID-1}'
+
+
+def test_an_identity_shaped_caller_receives_raw_owner_truth(monkeypatch):
+    """The continuity sheet becomes owner SEEDS. Whatever it reads is what
+    a future league's owner history is built from, so it must never see a
+    team name standing in for a person."""
+    import build_continuity_sheet
+    import db
+    monkeypatch.setattr(db, '_BACKEND', 'duckdb')
+    monkeypatch.setattr(db, '_duckdb_query',
+                        lambda sql, params=None: [_sentinel_row()])
+    row = build_continuity_sheet._q('select 1')[0]
+    assert row['owner_display'] == 'Owner unavailable'
+    assert row['team_name'] == 'Harbor Otters'
+
+
+def _module_source(name):
+    from pathlib import Path
+    return (Path(__file__).resolve().parents[1] / 'output' / (name + '.py')
+            ).read_text(encoding='utf-8')
+
+
+def test_every_rendering_module_reads_through_the_presentation_seam():
+    """The structural guarantee behind "no tab can drift".
+
+    Read from the SOURCE rather than from a binding, because the two ways
+    a module can reach the seam are both legitimate -- most `from db
+    import query_for_presentation`, while league_notes goes through
+    `records.query_for_presentation` -- and only one of them puts a name
+    on the module."""
+    for name in _PRESENTATION_MODULES:
+        src = _module_source(name)
+        assert 'query_for_presentation' in src, (
+            '%s renders but does not read through the presentation seam'
+            % name)
+        assert 'query_snowflake' not in src, (
+            '%s still reaches the raw seam; an owner sentinel can arrive '
+            'in a rendered cell through it' % name)
+
+
+def test_every_identity_or_seed_module_keeps_the_raw_seam():
+    for name in _RAW_MODULES:
+        src = _module_source(name)
+        assert 'query_snowflake' in src, (
+            '%s must read warehouse truth' % name)
+        assert 'query_for_presentation' not in src, (
+            '%s is not a rendering module and must not have a display rule '
+            'applied to warehouse truth' % name)
+
+
+def test_the_pii_guard_and_the_row_count_fixture_stay_on_the_raw_seam():
+    """Named separately because these two are the ones a mistake would
+    hurt most: the guard decides whether a push is blocked, and the fixture
+    is tracked."""
+    from pathlib import Path
+    repo = Path(__file__).resolve().parents[1]
+    for rel in ('tools/check_pii.py', 'tests/capture_row_counts.py'):
+        src = (repo / rel).read_text(encoding='utf-8')
+        assert 'query_for_presentation' not in src, rel
+        assert 'query_snowflake' in src, rel
+
+
+def test_a_real_owner_name_and_every_identifier_survive_the_wrapper(
+        monkeypatch):
+    import db
+    served = [
+        {'team_id': 4, 'team_name': 'Cedar Flats', 'owner_id': '{GUID-4}',
+         'owner_display': 'Dana Reid'},
+        {'team_id': 1, 'team_name': 'Harbor Otters', 'owner_id': '{GUID-1}',
+         'owner_display': 'Owner unavailable'},
+    ]
+    monkeypatch.setattr(db, '_BACKEND', 'duckdb')
+    monkeypatch.setattr(db, '_duckdb_query',
+                        lambda sql, params=None: [dict(r) for r in served])
+    out = db.query_for_presentation('select 1')
+    assert out[0]['owner_display'] == 'Dana Reid'
+    assert [r['owner_id'] for r in out] == ['{GUID-4}', '{GUID-1}']
+    assert [r['team_id'] for r in out] == [4, 1]
+    assert [r['team_name'] for r in out] == ['Cedar Flats', 'Harbor Otters']
+
+
+def test_a_whole_workbook_payload_carries_no_owner_sentinel(monkeypatch):
+    """RULING 1's product half, over a COMPLETE payload rather than a row:
+    every tab of the points book, assembled, with a warehouse that withheld
+    every owner name."""
+    import db
+    import owner_labels
+    monkeypatch.setattr(db, '_BACKEND', 'duckdb')
+    monkeypatch.setattr(
+        db, '_duckdb_query',
+        lambda sql, params=None: [
+            {'season_year': 2026, 'team_id': 1, 'team_name': 'Harbor Otters',
+             'owner_display': 'Owner unavailable',
+             'owner_name': 'Owner unavailable', 'stat_value': 1.0},
+        ])
+    rows = db.query_for_presentation('select 1')
+    flat = ' '.join(str(v) for row in rows for v in row.values())
+    for sentinel in owner_labels.OWNER_UNAVAILABLE_LABELS:
+        assert sentinel not in flat
+    assert 'Harbor Otters' in flat
+
+
+# ---- RULING 2: the slot vocabulary is the seed's -------------------------
+
+def test_every_utility_spelling_converges_on_the_catalog_key(
+        stub_slot_catalog):
+    import slot_catalog
+    keys = {slot_catalog.canonical_lineup_slot(s)
+            for s in ('U', 'UTIL', 'Util', 'utility', 'Utility', ' util ')}
+    assert keys == {'utility'}, keys
+
+
+def test_the_key_is_the_catalogs_own_vocabulary_not_a_python_spelling(
+        stub_slot_catalog):
+    """'UTIL' was this module's invented answer. The catalog's answer is
+    'utility', and it is the same column the project joins CBS and ESPN
+    stats on."""
+    import slot_catalog
+    assert slot_catalog.canonical_lineup_slot('U') == 'utility'
+    assert slot_catalog.canonical_lineup_slot('P') == 'pitcher'
+
+
+def test_no_hand_maintained_alias_table_remains():
+    from pathlib import Path
+    src = (Path(__file__).resolve().parents[1] / 'output' / 'slot_catalog.py'
+           ).read_text(encoding='utf-8')
+    assert '_SLOT_ALIASES' not in src, (
+        'a second Python slot vocabulary reappeared beside the seed')
+
+
+def test_editing_the_catalog_changes_python_without_editing_python(
+        monkeypatch):
+    """THE REGRESSION KYLE ASKED FOR. A platform whose utility slot is
+    spelled FLEX converges the moment the SEED says so -- no Python edit,
+    no release."""
+    import slot_catalog
+
+    def _catalog_with_flex(sql, params=None):
+        return [
+            {'platform': 'espn', 'lineup_slot': 'UTIL', 'slot_category':
+             'hitting', 'is_starting_slot': True, 'sort_order': 120,
+             'notes': None, 'canonical_key': 'utility'},
+            {'platform': 'yahoo', 'lineup_slot': 'FLEX', 'slot_category':
+             'hitting', 'is_starting_slot': True, 'sort_order': 120,
+             'notes': None, 'canonical_key': 'utility'},
+        ]
+
+    for name in dir(slot_catalog):
+        clear = getattr(getattr(slot_catalog, name, None), 'cache_clear', None)
+        if clear is not None:
+            clear()
+    monkeypatch.setattr(slot_catalog, 'query_snowflake', _catalog_with_flex)
+    try:
+        assert slot_catalog.canonical_lineup_slot('FLEX') == 'utility'
+        assert slot_catalog.canonical_lineup_slot('UTIL') == 'utility'
+    finally:
+        for name in dir(slot_catalog):
+            clear = getattr(getattr(slot_catalog, name, None),
+                            'cache_clear', None)
+            if clear is not None:
+                clear()
+
+
+def test_an_unknown_slot_stays_visible_rather_than_being_reclassified(
+        stub_slot_catalog):
+    """It must not be dropped and it must not be filed under a position it
+    is not -- it comes back as itself and simply matches no column."""
+    import slot_catalog
+    assert slot_catalog.canonical_lineup_slot('ROVER') == 'ROVER'
+    assert slot_catalog.canonical_lineup_slot('') == ''
+    assert slot_catalog.canonical_lineup_slot(None) == ''
+
+
+def test_the_presenter_stays_queryless_and_takes_the_resolver(monkeypatch):
+    """The builder's own promise is that it queries nothing. Reading the
+    seed is a warehouse round-trip, so the resolver is handed IN -- and the
+    default is a pure upper-case, which is what keeps the mature book's
+    tests (and its layout-only callers) free of a connection."""
+    import db
+    import cbs_almanac_sheets
+
+    def _explode(*a, **k):
+        raise AssertionError('build_standings_rows reached the warehouse')
+
+    monkeypatch.setattr(db, 'query_snowflake', _explode)
+    monkeypatch.setattr(db, 'query_for_presentation', _explode)
+    monkeypatch.setattr(cbs_almanac_sheets, 'query_for_presentation', _explode)
+    rows, _formats = _configured_tab(
+        slot_columns=('C', 'U', 'P'), slot_spellings=('C', 'UTIL', 'P'))
+    header, body = _section_body(rows, 'Team')
+    assert header[1:4] == ['C', 'U', 'P']
+    # Without a resolver the U column cannot see UTIL rows -- honest, and
+    # visible as an empty column rather than as misfiled production.
+    assert all(not str(r[2]).strip() for r in body)
+
+
+def test_the_points_caller_hands_in_the_seed_backed_resolver():
+    """Which is what makes the live Util column fill."""
+    from pathlib import Path
+    src = (Path(__file__).resolve().parents[1] / 'output' /
+           'points_almanac.py').read_text(encoding='utf-8')
+    assert 'slot_key=slot_catalog.canonical_lineup_slot' in src
+
+
+def test_util_rows_reach_a_u_column_when_the_resolver_is_supplied(
+        stub_slot_catalog):
+    """End to end for the ruling: a book that displays U, a feed that says
+    UTIL, and the seed saying they are one slot."""
+    import slot_catalog
+    rows, _formats = _configured_tab(
+        slot_columns=('C', 'U', 'P'), slot_spellings=('C', 'UTIL', 'P'),
+        slot_key=slot_catalog.canonical_lineup_slot)
+    header, body = _section_body(rows, 'Team')
+    assert header[1:4] == ['C', 'U', 'P']
+    assert all(isinstance(r[2], (int, float)) and r[2] > 0 for r in body)
+
+
+# ---- RULING 3: the acquisition bridge is named for what it is ------------
+
+def test_the_acquisition_bridge_is_not_described_as_warehouse_convergence():
+    from pathlib import Path
+    repo = Path(__file__).resolve().parents[1]
+    src = (repo / 'output' / 'almanac_render.py').read_text(encoding='utf-8')
+    start = src.index('def with_standard_acquisition_channels')
+    doc = src[start:start + 2600]
+    assert 'MLB-249' in doc, 'the owning ticket is not named'
+    assert 'NOT the semantic model' in doc or 'not the semantic model' in doc
+    changelog = (repo / 'CHANGELOG.md').read_text(encoding='utf-8')
+    assert 'not warehouse convergence' in changelog
+    assert 'MLB-249' in changelog

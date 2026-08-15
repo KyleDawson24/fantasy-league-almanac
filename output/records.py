@@ -40,9 +40,11 @@ Public orchestrator API:
 - get_records_with_contributors(...)  -- leaderboard-dump orchestrator
 """
 
-# Backward-compat re-export so league_notes.py (records.query_snowflake)
-# keeps working without consumer-side import changes.
-from db import league_predicate, query_snowflake
+# Backward-compat re-export so league_notes.py
+# (records.query_for_presentation) keeps working without consumer-side
+# import changes. The recap is rendered output, so the presentation seam is
+# the right one for both modules (MLB-243).
+from db import league_predicate, query_for_presentation
 
 import stat_catalog
 
@@ -103,7 +105,7 @@ def get_records_set_this_week(season_year, matchup_period):
     polarity = stat_catalog.get_polarity_map()
     auto_tracked = stat_catalog.get_auto_tracked()
 
-    candidates = query_snowflake(f"""
+    candidates = query_for_presentation(f"""
         SELECT *
         FROM mart_stat_leaderboard
         WHERE rank = 1
@@ -124,7 +126,7 @@ def get_records_set_this_week(season_year, matchup_period):
 
         # Rank 2 = prior holder. With recency tiebreak, also tells us
         # whether we tied (rank-2 stat_value == rank-1).
-        prior_rows = query_snowflake(f"""
+        prior_rows = query_for_presentation(f"""
             SELECT *
             FROM mart_stat_leaderboard
             WHERE entity_grain = %s
@@ -162,7 +164,7 @@ def get_records_set_this_week(season_year, matchup_period):
             # entities set simultaneously (e.g. the first-ever cycle, by two
             # teams at once) -- flag it so the recap frames it as a new record
             # rather than "the Nth to do so."
-            tied = query_snowflake(f"""
+            tied = query_for_presentation(f"""
                 SELECT season_year, matchup_period, team_abbrev, team_name,
                        owner_name, display_name, player_name
                 FROM mart_stat_leaderboard
@@ -216,7 +218,7 @@ def get_records_with_contributors(scope, top_n=5):
     polarity = stat_catalog.get_polarity_map()
     auto_tracked = stat_catalog.get_auto_tracked()
 
-    rows = query_snowflake(f"""
+    rows = query_for_presentation(f"""
         SELECT entity_grain, stat_name, record_direction, rank,
                season_year, matchup_period,
                team_id, team_name, team_abbrev, owner_name,

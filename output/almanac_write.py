@@ -2074,6 +2074,7 @@ def _replace_records_tab(spreadsheet, rows):
             },
         ]
         formats.extend(_records_header_formats(rows))
+        formats.extend(_records_caption_formats(rows))
         formats.extend(_fresh_record_formats(rows))
         formats.extend(_records_score_value_formats(rows))
         formats.extend(_records_hall_formats(rows))
@@ -2106,6 +2107,35 @@ def _is_records_scope_header(row):
         and row[1] == 'Current Season'
         and row[7] == 'All-Time'
     )
+
+
+# Section captions this tab can carry. A caption is a one-cell row sitting
+# between a scope header and the detail header, and it has to be painted or
+# it renders in the tab's default body style -- i.e. exactly like a record
+# row, which is the wrong thing for a sentence explaining the section
+# (MLB-243 correction). Matched by VALUE rather than by position so a
+# caption cannot pick up the format of whatever else lands on that row.
+_RECORDS_SECTION_CAPTIONS = frozenset({
+    almanac_data.LINEUP_SLOT_LENS_CAPTION,
+})
+
+
+def _records_caption_formats(rows):
+    """The house explainer token (MLB-170) on each section caption.
+
+    Applied AFTER the header formats for the same reason the Halls'
+    captions are: `textFormat` is replaced WHOLESALE by the field mask, so
+    a token applied before a bold/banner pass over the same cell would be
+    overwritten by it.
+    """
+    return [
+        {
+            'range': f'A{row_number}:O{row_number}',
+            'format': {'textFormat': explainer_text_format()},
+        }
+        for row_number, row in enumerate(rows, 1)
+        if len(row) == 1 and row[0] in _RECORDS_SECTION_CAPTIONS
+    ]
 
 
 # Burnt orange / gold background for a brand-new ALL-TIME record set in the
@@ -2189,12 +2219,9 @@ def _record_side_is_small_tie(holder):
 
 
 # Sections whose Value columns are points and therefore carry one decimal.
-# The slot section has two headings -- the H2H book's and the points book's
-# (MLB-243) -- and both are the same table underneath.
 _ONE_DECIMAL_SECTIONS = frozenset({
     'Score Records',
     almanac_data.LINEUP_SLOT_SECTION,
-    almanac_data.LINEUP_SLOT_SECTION_SEASON_LONG,
 })
 
 
@@ -2215,9 +2242,6 @@ def _records_score_value_formats(rows):
             break
         if len(row) < RECORDS_MATRIX_WIDTH:
             continue
-        # Both spellings of the slot section get the one-decimal rule: the
-        # points book renames the heading (MLB-243) and the formatting has
-        # to follow the section, not the wording.
         if active_section in _ONE_DECIMAL_SECTIONS:
             formats.extend([
                 {

@@ -377,12 +377,19 @@ class TestAcquisitionBlocks:
         assert alpha[4] == 190.0
         assert alpha[10] == 30.0               # Net FA = 50 - 20 released
         assert beta[11] == 290.0               # Net Trade = 300 - 10
-        # No all-time rows -> the right half renders blank.
-        assert alpha[13:24] == [''] * 11
-        # Gradient polarity: 9 per lens season-half (no all-time half),
-        # on top of the 3 finish-year rules.
+        # NO PRIOR ERA -> the all-time half IS the current season
+        # (MLB-243 correction). This used to render blank, which is the
+        # right answer for no data and the wrong one for "this league has
+        # played exactly one season": all-time means every season on file,
+        # and when that is one season, it equals it. The points caller was
+        # working around the blank by passing the current season AS the
+        # prior era, which doubled every all-time figure.
+        assert alpha[13:24] == alpha[1:12]
+        assert alpha[13] == 140.0
+        # Gradient polarity: 9 per half, both halves, per lens, on top of
+        # the 3 finish-year rules.
         acq_gradients = [s for s in formats if 'gradient' in s]
-        assert len(acq_gradients) == 9 * 2 + 3
+        assert len(acq_gradients) == 9 * 2 * 2 + 3
         # The band row carries the group labels over both halves.
         band = next(r for r in rows
                     if len(r) > 13 and r[1] == 'Points Acquired Via')

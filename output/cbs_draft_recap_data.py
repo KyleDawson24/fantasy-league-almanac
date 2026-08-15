@@ -43,7 +43,7 @@ from __future__ import annotations
 
 import json
 
-from db import query_snowflake, league_predicate
+from db import query_for_presentation, league_predicate
 
 FIRST_DRAFT_SEASON = 2011
 
@@ -85,7 +85,7 @@ def fetch_picks() -> list[dict]:
         order by assembly_seq
     """
     return [{f: _coerce(f, row[f]) for f in PICK_FIELDS}
-            for row in query_snowflake(sql)]
+            for row in query_for_presentation(sql)]
 
 
 def fetch_report() -> dict:
@@ -115,7 +115,7 @@ def fetch_report() -> dict:
         order by p.season_year
     """
     report = {}
-    for row in query_snowflake(sql):
+    for row in query_for_presentation(sql):
         info = {
             "picks": int(row["picks"]),
             "order": row["order_tier"],
@@ -136,7 +136,7 @@ def fetch_report() -> dict:
         from mart_cbs_draft_zip_fill
         where {league_predicate()}
     """
-    for row in query_snowflake(fill_sql):
+    for row in query_for_presentation(fill_sql):
         year = int(row["season_year"])
         if year in report:
             report[year]["unfilled_slots"] = int(row["unfilled_slots"])
@@ -148,7 +148,7 @@ def fetch_report() -> dict:
         where {league_predicate()}
         group by season_year, resolution
     """
-    for row in query_snowflake(tally_sql):
+    for row in query_for_presentation(tally_sql):
         year = int(row["season_year"])
         report[year].setdefault("resolution", {})[row["resolution"]] = int(row["n"])
     return report

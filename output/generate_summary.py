@@ -13,7 +13,7 @@ import json
 # Snowflake config) lives in db.py. init() is idempotent.
 import db
 db.init()
-from db import latest_by, league_predicate, query_snowflake
+from db import latest_by, league_predicate, query_for_presentation
 
 from formatters import (
     format_hitter_stats_line,
@@ -31,7 +31,7 @@ import stat_catalog
 
 def get_weekly_scores(season_year, matchup_period=None):
     if matchup_period is None:
-        result = query_snowflake(f"""
+        result = query_for_presentation(f"""
             SELECT MAX(matchup_period) as mp
             FROM fct_team_weekly_active_performance
             WHERE season_year = %s
@@ -39,7 +39,7 @@ def get_weekly_scores(season_year, matchup_period=None):
         """, (season_year,))
         matchup_period = result[0]['mp']
 
-    scores = query_snowflake(f"""
+    scores = query_for_presentation(f"""
         SELECT season_year, matchup_period, team_name, team_id,
                calculated_points, calculated_hitting_pts, calculated_pitching_pts,
                owner_name, opponent_name,
@@ -66,7 +66,7 @@ def get_player_contributions(season_year, matchup_period):
     tedious and error-prone (missing column -> formatter silently drops
     that stat from consideration). Per-row data volume is small.
     """
-    return query_snowflake(f"""
+    return query_for_presentation(f"""
         SELECT *
         FROM fct_player_weekly_active_performance
         WHERE matchup_period = %s
@@ -159,7 +159,7 @@ def format_league_this_week(season_year, matchup_period):
     for (season_year, matchup_period) -- defensive only; the mart
     builds from the same fact the recap reads.
     """
-    rows = query_snowflake(f"""
+    rows = query_for_presentation(f"""
         SELECT calculated_points_mean,        calculated_points_rank,
                calculated_hitting_pts_mean,   calculated_hitting_pts_rank,
                calculated_pitching_pts_mean,  calculated_pitching_pts_rank,
@@ -242,7 +242,7 @@ def get_wasted_points(season_year, matchup_period, limit=5):
       2. Bench team (from fct_player_weekly_inactive_performance ROSTERED_INACTIVE row)
       3. 'Free Agent' fallback when neither active nor bench association
     """
-    return query_snowflake(f"""
+    return query_for_presentation(f"""
         WITH wasted_combined AS (
             SELECT
                 player_id,
@@ -947,7 +947,7 @@ if __name__ == "__main__":
             f"(sinks.bbcode in config/leagues.yml); nothing to generate."
         )
 
-    active_season = query_snowflake(
+    active_season = query_for_presentation(
         f"SELECT MAX(season_year) as sy FROM fct_team_weekly_active_performance"
         f" WHERE {league_predicate()}"
     )[0]['sy']

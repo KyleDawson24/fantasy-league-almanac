@@ -53,6 +53,78 @@ repository is idle._
   `Unknown owner`, which described a platform privacy limitation as our
   failure to identify somebody.
 
+- **A withheld owner shows the team's name, in every workbook and on
+  every tab** (MLB-243). `Owner unavailable` is honest, but it is a
+  statement about our access, and repeating it once per row down a column
+  whose only job is telling teams apart makes a workbook unreadable. Where
+  the platform served no owner name, the Owner cell now shows the
+  franchise's full canonical team name. The rule lives in
+  `output/owner_labels.py` and is applied by `db.query_for_presentation`,
+  which every workbook-facing data module reads through -- so Records,
+  Home, Advanced Standings, the team pages and the draft board cannot
+  drift from each other, while `db.query_snowflake` keeps returning
+  warehouse truth unmodified for identity resolution, the continuity sheet
+  that becomes owner seeds, the PII guard's inventory, extraction, contract
+  generation and analysis. Raw by default, presentation by request: a new
+  non-rendering caller is safe without having to remember a flag. Identity
+  is untouched:
+  the owner GUID and team id still key everything, and a row with no team
+  name to fall back to keeps the label rather than inventing one.
+
+- **The season-points Advanced Standings shows the league's own roster
+  shape** (MLB-243). Points by Lineup Slot rendered a fixed slot list, so
+  a league with no DH slot got a permanently blank DH column while its
+  UTIL production had nowhere to land -- the fixed list spelled that slot
+  `U`. Columns now come from `dim_roster_slot_counts`, and slot spellings
+  resolve to one aggregation key while each book keeps its own displayed
+  label. That key is the `slot_classification` seed's own
+  `canonical_key` -- the column the project already joins CBS and ESPN
+  stats on -- rather than a second alias table maintained in Python, so
+  adding a platform's spelling to the seed is the whole of the change
+  needed to make it converge.
+
+- **Detailed Standings and the all-time slot half populate in a league's
+  first season** (MLB-243). Both are paced against a standard season
+  defined as the median CLOSED season's gameplay days -- which does not
+  exist in year one, so every cell came out blank and the caption
+  explaining them read "the None-gameplay-day clock above". With no closed
+  season the standard is now the in-flight season's own measured captured
+  duration, so the all-time figures equal the current season and say so.
+
+- **Production by acquisition channel reconciles** (MLB-243). Opening read
+  `opening_*_pts`, a column `mart_team_acquisition_channels` does not
+  have -- ESPN reports `keeper` and `draft` separately -- so Opening
+  printed 0.0 while the Total beside it carried the whole season. The two
+  vocabularies now meet in one shared normalization at the adapter seam
+  rather than in a renderer branch. **This is a v1.9 compatibility bridge,
+  not warehouse convergence:** there is no shared acquisition contract to
+  converge on yet -- `mart_team_acquisition_channels` carries ESPN rows
+  only, and the CBS book builds its channels from its own Python query.
+  Landing CBS stints in `fct_roster_stints` and emitting one vocabulary
+  from one mart is **MLB-249**, urgent. The all-time half was
+  also exactly double the season beside it, because the caller passed the
+  current season as its own prior era to work around a blank right half;
+  the presenter now builds the all-time half from a copy of the prior era,
+  so a first-year league's all-time equals its current season. The Opening
+  caption no longer tells ESPN readers that "CBS never logged drafts".
+
+- **A duplicate team abbreviation is disambiguated everywhere** (MLB-243).
+  Abbreviations are user-chosen free text and two managers may pick the
+  same one. The chart controls already appended the franchise id; the MLB
+  affinity spine, the Draft Board's column headers and Top Pick cell, its
+  value leaderboards and the Home boards' Fantasy Team column did not, so
+  two teams appeared under one label on four surfaces -- none of which
+  matched the team tabs. One shared rule now serves all of them, and a
+  league whose abbreviations are already distinct is untouched.
+
+- **The record book's slot section keeps its normal name** (MLB-243). An
+  earlier pass renamed it to "Production by Actual Lineup Slot" in the
+  points book and suffixed every row label with "(as started)". Reverted:
+  one section of a shared record book should not be titled two different
+  ways depending on which league is reading it. The distinction it was
+  protecting survives as a single caption, now painted in the house
+  explainer style instead of the tab's default body format.
+
 - **An app-created workbook loses its blank `Sheet1`** (MLB-243), and
   only that one: removal requires the untouched default grid, real tabs
   beside it, and the app-created publish path. Configured dev/prod
@@ -81,11 +153,11 @@ repository is idle._
   the data path is **required for 2.0**
   ([POSITION_ELIGIBLE_LENS.md](docs/decisions/POSITION_ELIGIBLE_LENS.md)).
 
-  For v1.9 the points book foregrounds the distinction instead: the
-  section is titled **Production by Actual Lineup Slot**, carries a
-  caption naming the contrast, and labels its rows `C (as started)`. The
-  head-to-head book is unchanged -- its golden corpus pins the old
-  wording, and that byte change belongs with the unification.
+  For v1.9 the points book states the distinction in one caption between
+  the section heading and its column header. The section keeps its normal
+  name and bare slot labels in both books; the head-to-head book carries
+  no caption at all, because its golden corpus pins that section byte for
+  byte and the same clarification belongs with the unification.
 
 ## [1.9.0] - 2026-08-13
 

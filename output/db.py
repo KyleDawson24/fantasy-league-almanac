@@ -5,14 +5,20 @@ had their own copy of SNOWFLAKE_CONFIG + query_snowflake) and the
 script-top boilerplate (utf-8 stdout reconfig + load_dotenv) duplicated
 across both output scripts.
 
-Five things live here:
+Six things live here:
   - init()             one-call script startup: utf-8 stdout + load_dotenv
                        + warm the Snowflake config. Output scripts call
                        this once at start.
-  - query_snowflake()  the only database entry point. Lazily opens a
-                       single connection on first call and reuses it for
-                       the lifetime of the process. atexit cleanup.
-  - use_duckdb()       point that entry point at a local DuckDB file
+  - query_snowflake()  the database entry point, and the only one that
+                       opens a connection. Lazily opens a single
+                       connection on first call and reuses it for the
+                       lifetime of the process. atexit cleanup. Returns
+                       warehouse truth, unmodified.
+  - query_for_presentation()
+                       query_snowflake() PLUS the owner-label fallback.
+                       What a module that READS TO RENDER calls, and see
+                       below for why it is not the default.
+  - use_duckdb()       point those entry points at a local DuckDB file
                        instead of Snowflake (MLB-10 phase 5).
   - set_league() /     the process-wide target league (MLB-57). Every
     league_predicate() league-scoped mart query filters on
@@ -23,6 +29,45 @@ Five things live here:
                        behaves identically.
   - close()            explicit cleanup; rarely needed (atexit handles it).
 
+RAW BY DEFAULT, PRESENTATION BY REQUEST (MLB-243, Kyle 2026-08-15).
+
+`query_snowflake` returns warehouse truth, always, unmodified. The
+owner-label fallback -- swapping a withheld-owner sentinel for the row's
+own canonical team name -- is a PRESENTATION rule, and it is applied only
+by `query_for_presentation`.
+
+It briefly lived inside `query_snowflake` itself, on the argument that one
+seam cannot drift. It cannot, but the wrong things flow through it: the PII
+guard's identity inventory, the continuity sheet that becomes owner seeds,
+the row-count fixture. Those were all provably untouched -- but only
+because of the shape of their SELECT lists, and a boundary that holds by
+coincidence is not a boundary. An opt-OUT flag would have been no better,
+because it has to be remembered by code that does not exist yet.
+
+So the default is raw and the presentation modules ask for the other
+behaviour by name. A new identity, seeding, extraction, contract or
+analysis caller that reaches for the obvious function gets the truth
+without knowing this rule exists.
+
+Which modules sit on which side, as of MLB-243:
+
+  query_for_presentation  almanac_data, almanac_sheets, cbs_almanac_sheets,
+                          cbs_draft_recap_data, espn_points_data,
+                          generate_season_report, generate_summary,
+                          league_notes, records, records_data
+  query_snowflake         build_continuity_sheet (its output becomes owner
+                          seeds), league_format, slot_catalog,
+                          stat_catalog, tools/check_pii.py,
+                          tools/explain_corpus.py,
+                          tools/analyze_negative_metrics.py,
+                          tests/capture_row_counts.py
+
+The first list and the first four of the second are not a convention
+anybody has to remember: tests/test_points_almanac_espn.py asserts them
+from module source, and pins the PII guard and the row-count fixture by
+name, so a module that changes sides has to say so in a diff. The two
+analysis tools are not pinned -- they read nothing that is rendered.
+
 Connection consolidation rationale: pre-Phase-7, every records.py /
 generate_summary.py call to query_snowflake opened and closed its own
 connection — ~15-20 handshakes per script run. Acceptable at 14-team
@@ -32,17 +77,19 @@ gives one connection per process without requiring callers to thread
 promote this to an explicit context-manager pattern; for v1.0 the
 implicit shared connection is the right complexity tradeoff.
 
-Library modules (records.py, league_notes.py) only need
-`from db import query_snowflake` — the connection opens lazily on first
-query whether or not init() was called. init() is a script-only entry
-point for the stdout reconfig.
+Library modules only need one import -- `from db import query_snowflake`,
+or `query_for_presentation` for the rendering ones -- and the connection
+opens lazily on first query whether or not init() was called. init() is a
+script-only entry point for the stdout reconfig.
 
-TWO BACKENDS (MLB-10 phase 5). `query_snowflake()` keeps its name -- 131
-call sites across 10 modules use it and renaming them is a separate
+TWO BACKENDS (MLB-10 phase 5). `query_snowflake()` keeps its name -- it is
+called from well over a hundred sites and renaming them is a separate
 change -- but it dispatches on the selected backend. Snowflake stays the
 default and its path is untouched, because it is what the live weekly run
 uses. `use_duckdb()` swaps in a local DuckDB file, which is what makes a
-clone with no Snowflake account able to render the almanac at all.
+clone with no Snowflake account able to render the almanac at all. The
+backend switch sits UNDER both entry points, so `query_for_presentation`
+follows it without knowing it exists.
 
 Note that `import snowflake.connector` is DELIBERATELY LAZY. At module
 scope it made the connector a hard import dependency of the whole output
@@ -58,6 +105,12 @@ import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
+
+# The owner-label presentation fallback (MLB-243). Pure Python with no
+# dependencies of its own, and applied ONLY by query_for_presentation below
+# -- never by the raw seam. See that function, and owner_labels itself for
+# why the rule lives in presentation rather than in dim_owner.
+import owner_labels
 
 # League registry import: repo root on sys.path so the shared config/
 # namespace package resolves when output scripts run as files.
@@ -302,7 +355,15 @@ def _duckdb_query(sql, params=None):
 
 
 def query_snowflake(sql, params=None):
-    """Run a query and return results as a list of dicts (cols lowercased).
+    """Run a query and return WAREHOUSE TRUTH as a list of dicts (cols
+    lowercased). Nothing here rewrites a value.
+
+    That last sentence is the contract (MLB-243). A caller resolving
+    identity, seeding configuration, guarding PII, extracting or
+    generating the schema contract wants exactly this and gets it by
+    default; `query_for_presentation` below is where a display rule is
+    added, and it is asked for by name. See the module docstring for why
+    the default runs this way round.
 
     Uses the process-wide connection (opened lazily on first call,
     closed via atexit at process exit). Cursor is opened and closed per
@@ -312,7 +373,8 @@ def query_snowflake(sql, params=None):
     records.py and generate_summary.py prior to consolidation.
 
     MLB-10: dispatches to DuckDB when use_duckdb() has been called. The
-    name is now a mild misnomer and stays anyway -- 131 call sites.
+    name is now a mild misnomer and stays anyway -- the call-site count
+    is in the hundreds.
     """
     if _BACKEND == 'duckdb':
         return _duckdb_query(sql, params)
@@ -324,6 +386,23 @@ def query_snowflake(sql, params=None):
         return [dict(zip(columns, row)) for row in cursor.fetchall()]
     finally:
         cursor.close()
+
+
+def query_for_presentation(sql, params=None):
+    """`query_snowflake`, then the owner-label presentation fallback.
+
+    THE ONE THING THIS DOES that the raw seam does not: where the platform
+    withheld every owner name and the warehouse therefore says "Owner
+    unavailable", the row's own canonical team name is shown instead. See
+    `owner_labels` for why that is a display rule rather than a dim_owner
+    one, and `query_snowflake` above for why it is opt-in.
+
+    Use this from a module that RENDERS. Everything else -- identity
+    resolution, the continuity sheet that becomes owner seeds, the PII
+    guard's inventory, extraction, contract generation, analysis -- wants
+    `query_snowflake` and should keep calling it.
+    """
+    return owner_labels.scrub_rows(query_snowflake(sql, params))
 
 
 def close():

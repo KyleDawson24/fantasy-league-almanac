@@ -16,7 +16,7 @@ from collections import defaultdict
 
 import gspread
 
-from db import query_snowflake
+from db import query_for_presentation
 import records
 import stat_catalog
 from formatters import fmt_avg, fmt_ip, fmt_record_value, format_top_scorer_stats_line

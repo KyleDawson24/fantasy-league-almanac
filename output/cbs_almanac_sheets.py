@@ -348,6 +348,52 @@ _DISPLAY_FIX = {'RBIs': 'RBI'}
 _NAVY = {'red': 0.12, 'green': 0.20, 'blue': 0.30}
 _WHITE = {'red': 1, 'green': 1, 'blue': 1}
 _PALE_BLUE = {'red': 0.95, 'green': 0.97, 'blue': 0.99}
+
+# How tall the rank chart's visible area is under compact_chart (MLB-243).
+# Sized to the chart itself rather than to the data behind it: the helper
+# block is one row per period, and a season-points league has 142 of them.
+_COMPACT_CHART_ROWS = 20
+
+
+# ---------------------------------------------------------------------------
+# COPY PROFILES (MLB-243). The layout is platform-neutral; several of its
+# sentences were not. They carried this league's own history as if it were
+# universal -- "2002 ran 15 teams and 2020 ran 12", "short seasons (2020)",
+# "2001-25 logged active, not the slot" -- which is true here and false in
+# any other book. The facts are preserved for the caller they describe and
+# every other caller gets copy derived from its own measured inputs.
+# ---------------------------------------------------------------------------
+
+CBS_COPY = {
+    # Franchise-count and short-season history for THIS league.
+    'finishes_history': ' 2002 ran 15 teams and 2020 ran 12.',
+    # Which eras have daily lineup capture, and what the gaps mean.
+    'slot_capture_note': (
+        'short seasons (2020) and the season in flight weigh exactly the '
+        'days they played. The P column spans all years -- started pitching '
+        'is the P slot in every era -- while hitter slots exist only where '
+        'daily lineups are captured (2001-25 logged "active", not the slot), '
+        'matching the Records page.'),
+    'has_divisions': True,
+    # Which affinity years are estimated versus logged.
+    'affinity_provenance': ('2004-2020 is estimated by start share; other '
+                            "years reconstruct from the league's own "
+                            'lineup logs (2026 captured live). '),
+}
+
+# Nothing asserted that this league's inputs do not show. A season-points
+# ESPN league captures every slot in every season it has, has no division
+# structure to award a title in, and has no short-season history to explain.
+NEUTRAL_COPY = {
+    'finishes_history': '',
+    'slot_capture_note': (
+        'each season weighs exactly the days it played, so the season in '
+        'flight counts its days so far rather than a full year.'),
+    'has_divisions': False,
+    # Every season this league has is captured live, so there is no
+    # estimated era to caveat.
+    'affinity_provenance': '',
+}
 _GOLD = {'red': 1.0, 'green': 0.95, 'blue': 0.75}
 # Season-finish scale: the Sheets-standard green -> yellow -> red preset
 # colors. Champions render as a trophy -- a TEXT cell the numeric gradient
@@ -3556,7 +3602,9 @@ def build_standings_rows(context, arc, finishes, active_franchises,
                          detailed_alltime_rows=None,
                          acquisition_rows=None, alltime_acquisition_rows=None,
                          affinity_rows=None,
-                         rivalry_axes=None, rivalry_pairs=None):
+                         rivalry_axes=None, rivalry_pairs=None,
+                         franchise_map=None, period_label='Period',
+                         compact_chart=False, subtitle=None, copy=None):
     """Advanced Standings: the rank-by-period arc with its toggleable
     line chart, the points-by-slot grids (season totals by deployed slot
     left; all-time PACES PER STANDARD SEASON right -- P era-complete,
@@ -3566,15 +3614,49 @@ def build_standings_rows(context, arc, finishes, active_franchises,
     franchises folded into a hidden row group), and the MLB affinity
     chart (share of games by MLB club, season left / all-time right) at
     the bottom. The optional row sets render their sections only when
-    supplied, so layout-only callers skip the heavier queries."""
+    supplied, so layout-only callers skip the heavier queries.
+
+    THE SEASON-POINTS LAYOUT CONTRACT, AND IT IS PLATFORM-NEUTRAL
+    (MLB-243). Every argument is data; the body queries nothing. This is
+    what a season-points Advanced Standings tab looks like in this
+    project, and an ESPN season-points league gets the same tab by
+    supplying the same shapes from ESPN's own facts -- not by having CBS
+    models queried on its behalf. It still lives in this module because
+    moving 900 lines of pinned layout is a bigger risk than importing it
+    from one; the name is historical, the code is not CBS-specific.
+
+    franchise_map  {franchise_id: {'canonical_id', 'abbrev'}}. Defaults to
+                   the CBS registry read, so existing callers are
+                   unchanged; ESPN passes its own.
+    period_label   what one column of the arc IS -- 'Period' for a
+                   matchup league, 'Scoring Day' for a season-points one.
+                   It reaches the hidden helper header, the chart title
+                   and the section banner, so no matchup vocabulary
+                   survives into a book that has no matchups.
+    compact_chart  cap the chart's VISIBLE height and hide the helper
+                   rows underneath it. A matchup league's ~20 periods fit
+                   the chart area already; 142 scoring days would
+                   otherwise open a 142-row blank canyon between the
+                   chart and the next section. Default False, so no
+                   existing book's row anchors move.
+    subtitle       overrides the dateline under the title.
+    copy           a COPY PROFILE (CBS_COPY / NEUTRAL_COPY). Several
+                   sentences here carried this league's own history --
+                   franchise counts in named years, a short 2020, which
+                   eras logged a lineup slot -- as if universal. They are
+                   kept for the caller they describe and replaced with
+                   measured copy for everyone else. Defaults to CBS_COPY,
+                   so the existing book reads exactly as before."""
+    copy = CBS_COPY if copy is None else copy
     season = context['season_year']
     period = context['latest_period']
 
     rows = [
         ['Advanced Standings'],
-        [f'{season} through period {period} · finishes back to '
-         f'{context["first_season"]} from the league\'s own year-end '
-         f'standings pages.'],
+        [subtitle or
+         (f'{season} through period {period} · finishes back to '
+          f'{context["first_season"]} from the league\'s own year-end '
+          f'standings pages.')],
         [],
     ]
     formats = [
@@ -3637,7 +3719,7 @@ def build_standings_rows(context, arc, finishes, active_franchises,
     # Roll up by CANONICAL franchise (MLB-64): a club that left and returned
     # under a new id (Foster's Folly 13 -> 30) is ONE row/column on every
     # franchise-keyed surface below.
-    fmap = get_franchise_map()
+    fmap = get_franchise_map() if franchise_map is None else franchise_map
 
     def _canon(fid):
         return fmap.get(fid, {}).get('canonical_id', fid)
@@ -3651,8 +3733,20 @@ def build_standings_rows(context, arc, finishes, active_franchises,
         if cid not in canon_label:
             ranked_canon.append(cid)
             canon_label[cid] = row['team_name']
-    canon_abbrevs = [fmap.get(cid, {}).get('abbrev') or f'#{cid}'
-                     for cid in ranked_canon]
+    # Chart controls, helper headers and series names all read from this
+    # one list, so a duplicate abbreviation shows up as two identical
+    # checkboxes and two identical legend entries with no way to tell which
+    # team is which (MLB-243). Abbreviations are user-chosen free text and
+    # nothing stops two managers picking the same one. Same disambiguation
+    # rule the team tabs use: a unique abbrev is untouched, and only the
+    # colliding ones gain their franchise id.
+    _raw_abbrevs = [fmap.get(cid, {}).get('abbrev') or f'#{cid}'
+                    for cid in ranked_canon]
+    _abbrev_counts = {}
+    for a in _raw_abbrevs:
+        _abbrev_counts[a] = _abbrev_counts.get(a, 0) + 1
+    canon_abbrevs = [f'{a} {cid}' if _abbrev_counts[a] > 1 else a
+                     for a, cid in zip(_raw_abbrevs, ranked_canon)]
     n_teams = len(ranked_canon)
 
     # Closed seasons per canonical franchise (membership windows).
@@ -3684,7 +3778,7 @@ def build_standings_rows(context, arc, finishes, active_franchises,
 
     # ---- the season arc: the chart IS the section (Kyle round 7 -- the
     # rank matrix went away entirely; its data lives in the hidden helper).
-    _section('RANK BY PERIOD', scopes=[(1, 'Current Season')])
+    _section(f'RANK BY {period_label.upper()}', scopes=[(1, 'Current Season')])
     periods = sorted({int(r['period']) for r in arc})
     rank_by = {}
     for r in arc:
@@ -3713,35 +3807,71 @@ def build_standings_rows(context, arc, finishes, active_franchises,
     # transformed and the axis is windowed).
     helper_col0 = 36                        # 0-based col AK, past the grid
     chart_first_row0 = len(rows)            # 0-based helper header row
+    # THE CHART AREA IS A FIXED HEIGHT WHEN ASKED (MLB-243). The helper
+    # block is one row per period, hidden only by COLUMN -- so the rows it
+    # occupies are still full-height blank rows in columns A..Z. At ~20
+    # matchup periods that is invisible; at 142 scoring days it is a
+    # 142-row canyon between the chart and the next section. Under
+    # compact_chart the visible area stays chart-sized and everything past
+    # it is hidden by ROW as well.
     n_chart_rows = max(18, 1 + len(periods))
+    visible_chart_rows = (min(n_chart_rows, _COMPACT_CHART_ROWS)
+                          if compact_chart else n_chart_rows)
     flip = n_teams + 1
     all_cell = f'${_col(2 + n_teams)}${checkbox_row}'
     raw_col0 = helper_col0 + 1 + n_teams    # first raw-rank column, 0-based
-    helper = [[''] * helper_col0
-              + ['Period', *canon_abbrevs, *canon_abbrevs]]
-    for j, p in enumerate(periods):
-        cells = [''] * helper_col0 + [p]
-        helper_row = chart_first_row0 + 1 + j + 1   # 1-based sheet row
-        for t in range(n_teams):
-            own = f'{_col(2 + t)}${checkbox_row}'
-            raw_cell = f'{_col(raw_col0 + t + 1)}{helper_row}'
-            cells.append(f'=IF(AND(OR({all_cell},{own}),{raw_cell}<>""),'
-                         f'{flip}-{raw_cell},NA())')
-        for t, team in enumerate(latest_sorted):
-            cells.append(rank_by.get((team['team_id'], p), ''))
-        helper.append(cells)
-    rows.extend(helper)
-    rows.extend([[]] * (n_chart_rows - len(helper)))
+    def _build_helper(block_row0):
+        """The hidden helper block, anchored at 0-based sheet row
+        `block_row0`. The plot formulas name their own raw-rank cell by
+        absolute row, so the block cannot be generated until its final
+        position is known -- which is the whole reason this is a function
+        rather than a literal."""
+        built = [[''] * helper_col0
+                 + [period_label, *canon_abbrevs, *canon_abbrevs]]
+        for j, p in enumerate(periods):
+            cells = [''] * helper_col0 + [p]
+            helper_row = block_row0 + 1 + j + 1     # 1-based sheet row
+            for t in range(n_teams):
+                own = f'{_col(2 + t)}${checkbox_row}'
+                raw_cell = f'{_col(raw_col0 + t + 1)}{helper_row}'
+                cells.append(f'=IF(AND(OR({all_cell},{own}),{raw_cell}<>""),'
+                             f'{flip}-{raw_cell},NA())')
+            for t, team in enumerate(latest_sorted):
+                cells.append(rank_by.get((team['team_id'], p), ''))
+            built.append(cells)
+        return built
+
+    helper = _build_helper(chart_first_row0)
+    deferred_helper = None
+    if compact_chart:
+        # THE HELPER GOES LAST (MLB-243). It is one row per period, hidden
+        # only by COLUMN, so inline it still occupies full-height blank rows
+        # in columns A..Z -- 142 of them for a season-points league, which
+        # is the canyon that pushed every section below it off the screen.
+        # Reserved chart area here; the data lands after the last section
+        # and its rows are hidden there, so the chart reads from a range
+        # nobody has to scroll through.
+        deferred_helper = _build_helper
+        rows.extend([[]] * visible_chart_rows)
+        helper_row0 = None          # filled in once the tab is assembled
+    else:
+        rows.extend(helper)
+        rows.extend([[]] * (n_chart_rows - len(helper)))
+        helper_row0 = chart_first_row0
     formats.append({'hide_cols': (helper_col0, raw_col0 + n_teams)})
-    formats.append({'chart': {
+    chart_spec = {
         'anchor': (chart_first_row0, 0),
-        'first_row': chart_first_row0,
-        'last_row': chart_first_row0 + 1 + len(periods),
+        'first_row': helper_row0,
+        'last_row': (None if helper_row0 is None
+                     else helper_row0 + 1 + len(periods)),
         'domain_col': helper_col0,
         'series_cols': [helper_col0 + 1 + t for t in range(n_teams)],
         'view_max': flip,
-        'title': f'{season} standings position by period (top = 1st)',
-    }})
+        'domain_label': period_label,
+        'title': (f'{season} standings position by '
+                  f'{period_label.lower()} (top = 1st)'),
+    }
+    formats.append({'chart': chart_spec})
     rows.append([])
 
     # ---- historic finishes matrix (under the chart -- Kyle round 7)
@@ -3814,8 +3944,16 @@ def build_standings_rows(context, arc, finishes, active_franchises,
     # (MLB-230). The medal replaces the rank number here rather than
     # sitting beside it, matching how the trophy has always rendered in
     # this matrix; the glyph IS the rank.
-    finish_note = ('🏆 = Season Champion. 🥈 = 2nd. 🥉 = 3rd. Bright Green '
-                   'Border = Division Champion. Uses most current Team '
+    # Only explain honours this league can actually have awarded. With no
+    # CLOSED season there is no champion, no runner-up and no third place
+    # to mark, so a legend for three medals nobody can hold is noise --
+    # and the division border is explained only where divisions were
+    # measured (MLB-243).
+    _medal_clause = ('🏆 = Season Champion. 🥈 = 2nd. 🥉 = 3rd. '
+                     if seasons else '')
+    _border_clause = ('Bright Green Border = Division Champion. '
+                      if copy['has_divisions'] else '')
+    finish_note = (f'{_medal_clause}{_border_clause}Uses most current Team '
                    'Names; franchises stitched across renames + re-ids.')
     _note(finish_note, width=last_finish_col)
     # The medal glyphs stay upright inside the italic note (Kyle round 12),
@@ -3949,10 +4087,14 @@ def build_standings_rows(context, arc, finishes, active_franchises,
                 formats.append({'range': f'{col}:{col}',
                                 'format': {'backgroundColor': fill,
                                            'textFormat': {'bold': True}}})
-    _note('Div counts division titles (best league finish within the '
-          'division that season); Avg is the mean finish across CLOSED '
+    # Division language only where divisions were actually measured. A
+    # league with none gets no explanation of a title it cannot award.
+    _div_clause = ('Div counts division titles (best league finish within '
+                   'the division that season); ' if copy['has_divisions']
+                   else '')
+    _note(f'{_div_clause}Avg is the mean finish across CLOSED '
           'seasons -- the in-flight column shows current rank and counts '
-          'toward nothing. 2002 ran 15 teams and 2020 ran 12.',
+          f'toward nothing.{copy["finishes_history"]}',
           width=last_finish_col)
     rows.append([])
 
@@ -3991,12 +4133,8 @@ def build_standings_rows(context, arc, finishes, active_franchises,
         # no standard length to quote (MLB-222 C-4).
         _std_len = f' (= {n_std} gameplay days)' if n_std else ''
         _note('All-time cells are paces per standard season'
-              f'{_std_len}; short seasons (2020) and the '
-              'season in flight weigh exactly the days they played. The P '
-              'column spans all years -- started pitching is the P slot '
-              'in every era -- while hitter slots exist only where daily '
-              'lineups are captured (2001-25 logged "active", not the '
-              'slot), matching the Records page.', width=grid_last_col)
+              f'{_std_len}; {copy["slot_capture_note"]}',
+              width=grid_last_col)
         _header(['Team', *season_slots, '', *season_slots],
                 width=grid_last_col)
         grid_first = len(rows) + 1
@@ -4258,9 +4396,8 @@ def build_standings_rows(context, arc, finishes, active_franchises,
                  width=aff_last_col)
         _note("Share of each franchise's active-lineup involvement -- "
               "defined as plate appearances + batters faced -- with each "
-              "MLB club (pure GP would underweight pitchers). 2004-2020 "
-              "is estimated by start share; other years reconstruct from "
-              "the league's own lineup logs (2026 captured live). Bold "
+              f"MLB club (pure GP would underweight pitchers). "
+              f"{copy['affinity_provenance']}Bold "
               "indicates highest value for given MLB team.",
               width=aff_last_col)
         _header(['MLB Team', *abbrevs, '', *abbrevs], width=aff_last_col)
@@ -4390,6 +4527,19 @@ def build_standings_rows(context, arc, finishes, active_franchises,
             row_num = ''.join(c for c in s['range'].split(':')[0]
                               if c.isdigit())
             s['range'] = f'A{row_num}:{band_col}{row_num}'
+
+    if deferred_helper is not None:
+        # The hidden helper lands AFTER every visible section, so the
+        # sections stay compactly adjacent and the chart still has a dense
+        # per-period range to plot. Its rows are hidden as a collapsed
+        # group; its columns were already hidden above.
+        helper_block_row0 = len(rows) + 1        # one blank row of margin
+        rows.append([])
+        rows.extend(deferred_helper(helper_block_row0))
+        formats.append({'hide_rows': (helper_block_row0,
+                                      helper_block_row0 + 1 + len(periods))})
+        chart_spec['first_row'] = helper_block_row0
+        chart_spec['last_row'] = helper_block_row0 + 1 + len(periods)
 
     return rows, formats
 
@@ -5387,7 +5537,10 @@ def _chart_request(sheet_gid, c):
                             'targetAxis': 'LEFT_AXIS'}
                            for col in c['series_cols']],
                 'axis': [
-                    {'position': 'BOTTOM_AXIS', 'title': 'Period'},
+                    {'position': 'BOTTOM_AXIS',
+                     # The domain's own name (MLB-243): a season-points
+                     # book plots scoring days, not periods.
+                     'title': c.get('domain_label', 'Period')},
                     {'position': 'LEFT_AXIS',
                      'title': 'Position (top = 1st)',
                      'viewWindowOptions': {

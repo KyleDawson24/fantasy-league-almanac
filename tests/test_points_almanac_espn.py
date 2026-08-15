@@ -584,7 +584,7 @@ def test_the_points_book_omits_matchup_history(assembled):
     """The tab is a week-by-week MATCHUP archive. This league has none, so
     it is absent rather than rendered as an empty H2H artifact."""
     tabs, _context, _titles = assembled.build_all_tabs(include_trades=False)
-    titles = [title for title, _ in tabs]
+    titles = [t[0] for t in tabs]
     assert TEAM_WEEKS_TAB not in titles, f'Matchup History was built: {titles}'
 
 
@@ -592,15 +592,21 @@ def test_an_in_flight_first_season_still_gets_home_records_and_standings(
         assembled):
     """No completed matchup, no completed season, a full book anyway."""
     tabs, _context, _titles = assembled.build_all_tabs(include_trades=False)
-    by_title = dict(tabs)
+    by_title = {t[0]: t[1] for t in tabs}
     assert 'Home' in by_title and 'Records' in by_title
     assert 'Advanced Standings' in by_title
 
     assert any('Team of the Month' in str(c)
                for row in by_title['Home'] for c in row)
     assert by_title['Records'], 'the Records tab came out empty'
-    standings = [str(c) for row in by_title['Advanced Standings'] for c in row]
-    assert '5361' in standings, 'season totals did not reach Advanced Standings'
+    # The tab comes from the SHARED season-points presenter, so what is
+    # asserted here is that its sections arrived -- the numbers inside them
+    # are pinned by the presenter-level tests above.
+    standings = ' '.join(
+        str(c) for row in by_title['Advanced Standings'] for c in row)
+    for section in ('RANK BY SCORING DAY', 'SEASON FINISHES',
+                    'POINTS BY LINEUP SLOT', 'DETAILED STANDINGS'):
+        assert section in standings, f'{section} missing from Advanced Standings'
 
 
 def test_the_points_record_book_drops_the_matchup_language():
@@ -999,8 +1005,8 @@ def test_the_write_path_routes_each_tab_to_its_own_writer(monkeypatch):
 
     monkeypatch.setattr(points_almanac, '_build', lambda: (
         [('Home', [['H']]), ('Records', [['R']]),
-         ('Advanced Standings', [['A']]), ('Draft Recap', [['D']]),
-         ('HAR', [['T']])],
+         ('Advanced Standings', [['A']], [{'range': 'A1:A1'}]),
+         ('Draft Recap', [['D']]), ('HAR', [['T']])],
         {'season_year': 2026}, ['HAR'], lambda targets: [['HOME', targets]]))
     monkeypatch.setattr(almanac_data, 'get_team_week_stat_specs',
                         lambda: STAT_SPECS)
@@ -1009,12 +1015,14 @@ def test_the_write_path_routes_each_tab_to_its_own_writer(monkeypatch):
     monkeypatch.setattr(almanac_write, '_replace_records_tab',
                         lambda sp, r: _WS('Records'))
     monkeypatch.setattr(almanac_write, '_replace_draft_tab',
-                        lambda sp, r: _WS('Draft Recap'))
+                        lambda sp, r, color_grid=None: _WS('Draft Recap'))
     monkeypatch.setattr(almanac_write, '_replace_team_tab',
                         lambda sp, t, r: _WS(t))
+    import cbs_almanac_sheets
     monkeypatch.setattr(
-        almanac_write, '_replace_advanced_standings_tab',
-        lambda sp, r, specs: calls['standings'].append(specs) or _WS('Advanced Standings'))
+        cbs_almanac_sheets, '_write_tab',
+        lambda sp, t, r, f, **kw: calls['standings'].append((t, f))
+        or _WS(t))
     monkeypatch.setattr(almanac_write, '_replace_home_tab',
                         lambda sp, r: calls['home'].append(r))
     monkeypatch.setattr(almanac_write, '_sort_almanac_tabs',
@@ -1026,10 +1034,320 @@ def test_the_write_path_routes_each_tab_to_its_own_writer(monkeypatch):
 
     points_almanac.write_points_almanac('SHEET', client=_Client())
 
-    assert calls['standings'] == [STAT_SPECS], (
-        'Advanced Standings did not reach the STYLED writer with its specs'
+    assert calls['standings'] == [('Advanced Standings', [{'range': 'A1:A1'}])], (
+        "Advanced Standings did not reach the shared presenter's writer "
+        "with its format specs"
     )
     assert 'Advanced Standings' not in calls['plain'], (
         'Advanced Standings fell back to the unstyled writer'
     )
     assert calls['home'], 'Home was never written'
+
+
+# --------------------------------------------------------------------------
+# The season-points layout contract (MLB-243 corrective pass)
+# --------------------------------------------------------------------------
+
+def _presenter_tab(periods=142, teams=10, compact=True):
+    """Advanced Standings through the SHARED season-points presenter, in the
+    shape a first-year ESPN league produces."""
+    import cbs_almanac_sheets
+
+    ids = list(range(1, teams + 1))
+    names = {t: "Club %02d" % t for t in ids}
+    arc = [{"team_id": t, "team_name": names[t], "period": p,
+            "standings_rank": ((t + p) % teams) + 1,
+            "is_latest_period": p == periods}
+           for p in range(1, periods + 1) for t in ids]
+    fmap = {t: {"canonical_id": t, "abbrev": "C%02d" % t} for t in ids}
+    slots = [{"team_id": t, "season_year": 2026, "lineup_slot": s,
+              "slot_pts": 100.0 + t}
+             for t in ids for s in ("C", "P")]
+    return cbs_almanac_sheets.build_standings_rows(
+        {"season_year": 2026, "latest_period": periods, "first_season": 2026},
+        arc,
+        [{"season_year": 2026, "franchise_id": t, "team_name": names[t],
+          "standings_rank": i + 1, "is_champion": False}
+         for i, t in enumerate(ids)],
+        [{"team_id": t, "team_name": names[t]} for t in ids],
+        slot_rows=slots,
+        alltime_slot_rows=slots,
+        alltime_pitching_rows=[{"team_id": t, "p_pts": 500.0} for t in ids],
+        season_days=[{"season_year": 2026, "days": periods}],
+        franchise_map=fmap,
+        period_label="Scoring Day",
+        compact_chart=compact,
+    )
+
+
+def _hidden_rows(formats):
+    hidden = set()
+    for spec in formats:
+        if "hide_rows" in spec:
+            start, end = spec["hide_rows"]
+            hidden.update(range(start, end))
+    return hidden
+
+
+def _visible(rows, formats):
+    hidden = _hidden_rows(formats)
+    return [i for i in range(len(rows)) if i not in hidden]
+
+
+def test_142_scoring_days_do_not_create_142_visible_rows():
+    """THE CANYON. The helper block is one row per period and was hidden
+    only by COLUMN, so 142 scoring days opened a 142-row blank gap between
+    the chart and the next section."""
+    rows, formats = _presenter_tab(periods=142)
+    visible = _visible(rows, formats)
+    assert len(rows) - len(visible) >= 142, "per-day helper rows are not hidden"
+    assert len(visible) < 140, (
+        "%d visible rows -- the scoring-day helper still consumes display "
+        "rows" % len(visible))
+
+
+def test_visible_sections_stay_compactly_adjacent():
+    """No more than two blank display rows between visible sections."""
+    rows, formats = _presenter_tab(periods=142)
+    visible = set(_visible(rows, formats))
+    labels = [i for i in sorted(visible)
+              if rows[i] and str(rows[i][0]).isupper()
+              and len(str(rows[i][0])) > 4]
+    assert labels, "no section banners found"
+    # The chart's reserved canvas is deliberately blank -- the chart image
+    # floats over it -- so it is a section, not a gap between sections.
+    labels = [i for i in labels if not str(rows[i][0]).startswith("RANK BY")]
+    for a, b in zip(labels, labels[1:]):
+        blanks = sum(1 for i in range(a + 1, b)
+                     if i in visible
+                     and not any(str(c).strip() for c in rows[i]))
+        assert blanks <= 2, (
+            "%d blank display rows between %r and %r"
+            % (blanks, rows[a][0], rows[b][0]))
+
+
+def test_the_chart_area_has_a_fixed_compact_height():
+    """It must not grow with the number of scoring days."""
+    short, _ = _presenter_tab(periods=20)
+    long_, _ = _presenter_tab(periods=142)
+
+    def anchor(rows):
+        return next(i for i, r in enumerate(rows)
+                    if r and str(r[0]).startswith("SEASON FINISHES"))
+
+    assert anchor(short) == anchor(long_), (
+        "the first section after the chart moved when the day count grew, "
+        "so the chart area is not a fixed height")
+    assert anchor(long_) < 40, "the chart area is not compact"
+
+
+def test_no_visible_points_chart_label_says_week_or_matchup():
+    rows, _ = _presenter_tab(periods=142)
+    flat = " ".join(str(c) for r in rows for c in r).lower()
+    for banned in ("rank by period", "by week", "weekly", "matchup"):
+        assert banned not in flat, "%r survived into the points tab" % banned
+    assert "rank by scoring day" in flat
+
+
+def test_team_and_franchise_spines_use_canonical_names():
+    """Never an abbreviation, never an owner."""
+    rows, _ = _presenter_tab(periods=20, teams=4)
+    seen = False
+    for i, row in enumerate(rows):
+        if row and str(row[0]) in ("Team", "Franchise"):
+            for follower in rows[i + 1:i + 5]:
+                if not follower or not str(follower[0]).strip():
+                    break
+                label = str(follower[0])
+                if label.startswith("Club "):
+                    seen = True
+                assert not label.startswith("C0"), (
+                    "an abbreviation reached a %s spine: %r" % (row[0], label))
+    assert seen, "no canonical team name found in any spine"
+
+
+def test_first_year_current_and_alltime_twins_are_both_populated():
+    """All-time equals the current season in year one, and printing both
+    halves is truthful -- dropping one leaves the reader guessing."""
+    rows, _ = _presenter_tab(periods=20, teams=4)
+    flat = " ".join(str(c) for r in rows for c in r)
+    assert "Totals by Deployed Slot, Current Season" in flat
+    assert "Pace per Standard Season, All-Time" in flat
+
+
+def test_the_mature_book_layout_is_unchanged_by_the_compact_option():
+    """compact_chart defaults off, so no established book's anchors move."""
+    _rows, formats = _presenter_tab(periods=20, teams=4, compact=False)
+    assert not any("hide_rows" in f for f in formats), (
+        "the default path grew a hidden row group, which would move an "
+        "existing book")
+
+
+def test_an_inaccessible_owner_falls_back_to_the_canonical_team_name():
+    rows = [{"team_name": "Harbor Otters", "owner_display": "Owner unavailable"},
+            {"team_name": "Granite Owls", "owner_display": "Unknown owner"},
+            {"team_name": "Gale Ridge", "owner_display": "A Real Person"}]
+    out = espn_points_data.with_owner_fallback(rows)
+    assert out[0]["owner_display"] == "Harbor Otters"
+    assert out[1]["owner_display"] == "Granite Owls"
+    assert out[2]["owner_display"] == "A Real Person", (
+        "a real owner name was overwritten")
+
+
+def test_the_owner_fallback_leaves_the_team_name_alone():
+    rows = [{"team_name": "Harbor Otters", "owner_display": "Owner unavailable"}]
+    out = espn_points_data.with_owner_fallback(rows)
+    assert out[0]["team_name"] == "Harbor Otters"
+
+
+def test_the_draft_recap_reuses_the_established_color_grading():
+    """A visible v1.9 regression: the points path called the same writer as
+    the H2H book but without its colour grid."""
+    import almanac_logic
+    board = [{"overall_pick": i, "round_num": 1, "round_pick": i,
+              "team_id": 1, "season_points": 100.0 * i, "value_delta": i,
+              "player_name": "P%d" % i} for i in range(1, 5)]
+    assert points_almanac._draft_color_grid(board) == \
+        almanac_logic.build_draft_board_color_grid(board), (
+        "the points path invented its own scale instead of reusing the "
+        "established one")
+
+
+# --------------------------------------------------------------------------
+# Visual-QA regressions (MLB-243 corrective pass, round 2)
+# --------------------------------------------------------------------------
+
+def _neutral_tab(periods=142, teams=10, finishes=None, duplicate_abbrev=False):
+    """The ESPN season-points tab: neutral copy, scoring days, compact."""
+    import cbs_almanac_sheets
+
+    ids = list(range(1, teams + 1))
+    names = {t: "Club %02d" % t for t in ids}
+    arc = [{"team_id": t, "team_name": names[t], "period": p,
+            "standings_rank": ((t + p) % teams) + 1,
+            "is_latest_period": p == periods}
+           for p in range(1, periods + 1) for t in ids]
+    abbrev = (lambda t: "DUP" if t <= 2 else "C%02d" % t) if duplicate_abbrev \
+        else (lambda t: "C%02d" % t)
+    fmap = {t: {"canonical_id": t, "abbrev": abbrev(t)} for t in ids}
+    slots = [{"team_id": t, "season_year": 2026, "lineup_slot": s,
+              "slot_pts": 100.0 + t} for t in ids for s in ("C", "P")]
+    return cbs_almanac_sheets.build_standings_rows(
+        {"season_year": 2026, "latest_period": periods, "first_season": 2026},
+        arc,
+        finishes if finishes is not None else [],
+        [{"team_id": t, "team_name": names[t]} for t in ids],
+        slot_rows=slots, alltime_slot_rows=slots,
+        alltime_pitching_rows=[{"team_id": t, "p_pts": 500.0} for t in ids],
+        season_days=[{"season_year": 2026, "days": periods}],
+        affinity_rows=[{"team_id": t, "mlb_team_id": 1, "mlb_team_name": "NYY",
+                        "season_wt": 10.0, "alltime_wt": 10.0} for t in ids],
+        franchise_map=fmap,
+        period_label="Scoring Day",
+        compact_chart=True,
+        copy=cbs_almanac_sheets.NEUTRAL_COPY,
+    )
+
+
+def test_an_unfinished_first_year_has_exactly_one_current_season_column():
+    """THE DUPLICATE. The presenter appends the season in flight itself, so
+    an adapter that also returned it produced two 2026 columns -- and the
+    in-flight year, sitting in the finished set, collected a medal, a
+    division title and a closed-season average it had not earned."""
+    rows, _ = _neutral_tab(periods=20, teams=4, finishes=[])
+    header = next(r for r in rows if r and str(r[0]) == "Franchise")
+    assert header.count("2026") == 1, (
+        "expected one 2026 column, got %d: %r" % (header.count("2026"), header))
+
+
+def test_an_unfinished_first_year_carries_no_closed_season_decoration():
+    rows, _ = _neutral_tab(periods=20, teams=4, finishes=[])
+    header = next(i for i, r in enumerate(rows)
+                  if r and str(r[0]) == "Franchise")
+    body = rows[header + 1:header + 5]
+    flat = " ".join(str(c) for r in body for c in r)
+    for glyph in ("\U0001F3C6", "\U0001F948", "\U0001F949"):
+        assert glyph not in flat, "a medal was awarded in an unfinished season"
+    for row in body:
+        # Titles / Div / Avg are columns 1..3 and must all be empty.
+        assert not any(str(c).strip() for c in row[1:4]), (
+            "closed-season honours were credited to an in-flight year: %r"
+            % (row[:5],))
+
+
+def test_the_medal_legend_is_absent_when_nothing_has_closed():
+    rows, _ = _neutral_tab(periods=20, teams=4, finishes=[])
+    flat = " ".join(str(c) for r in rows for c in r)
+    assert "Season Champion" not in flat, (
+        "a legend explains medals no season can have earned")
+    assert "Division Champion" not in flat, (
+        "division language with no measured divisions")
+
+
+def test_the_espn_tab_carries_no_cbs_only_claims():
+    """The layout is shared; its sentences carried one league's history."""
+    rows, _ = _neutral_tab(periods=142)
+    flat = " ".join(str(c) for r in rows for c in r)
+    for claim in ("2002 ran 15", "2020 ran 12", "short seasons (2020)",
+                  "2001-25", "2001\u201325", "2004-2020",
+                  "matching the Records page"):
+        assert claim not in flat, "CBS-only claim on the ESPN tab: %r" % claim
+
+
+def test_the_cbs_caller_keeps_its_own_history():
+    """Parameterising the copy must not delete it from the book it
+    describes."""
+    import cbs_almanac_sheets
+    assert "2002 ran 15" in cbs_almanac_sheets.CBS_COPY["finishes_history"]
+    assert "2004-2020" in cbs_almanac_sheets.CBS_COPY["affinity_provenance"]
+    assert "2001-25" in cbs_almanac_sheets.CBS_COPY["slot_capture_note"]
+    assert cbs_almanac_sheets.CBS_COPY["has_divisions"] is True
+    assert cbs_almanac_sheets.NEUTRAL_COPY["has_divisions"] is False
+
+
+def test_the_chart_bottom_axis_says_scoring_day():
+    _rows, formats = _neutral_tab(periods=142)
+    chart = next(f["chart"] for f in formats if "chart" in f)
+    assert chart["domain_label"] == "Scoring Day"
+    assert "scoring day" in chart["title"].lower()
+
+
+def test_the_default_chart_axis_is_still_period():
+    import cbs_almanac_sheets
+    ids = [1, 2]
+    arc = [{"team_id": t, "team_name": "Club %d" % t, "period": p,
+            "standings_rank": t, "is_latest_period": p == 5}
+           for p in range(1, 6) for t in ids]
+    _rows, formats = cbs_almanac_sheets.build_standings_rows(
+        {"season_year": 2026, "latest_period": 5, "first_season": 2026},
+        arc, [], [{"team_id": t, "team_name": "Club %d" % t} for t in ids],
+        franchise_map={t: {"canonical_id": t, "abbrev": "C%d" % t}
+                       for t in ids})
+    chart = next(f["chart"] for f in formats if "chart" in f)
+    assert chart["domain_label"] == "Period"
+
+
+def test_duplicate_abbreviations_get_distinct_chart_controls():
+    """Two identical checkboxes and two identical legend entries give a
+    reader no way to tell which team is which."""
+    rows, formats = _neutral_tab(periods=20, teams=4, duplicate_abbrev=True)
+    controls = next(r for r in rows if r and str(r[0]) == "Chart teams:")
+    labels = [str(c) for c in controls[1:-1]]        # drop 'Chart teams:'/'ALL'
+    assert len(labels) == len(set(labels)), (
+        "duplicate chart controls: %r" % labels)
+    assert "DUP 1" in labels and "DUP 2" in labels, labels
+    assert "DUP" not in labels, "the bare duplicate abbrev survived"
+    # The same labels must reach the hidden helper header, which is what
+    # names the chart series.
+    helper = [r for r in rows if len(r) > 36 and str(r[36]) == "Scoring Day"]
+    assert helper, "no helper header found"
+    assert "DUP 1" in [str(c) for c in helper[0]]
+
+
+def test_a_unique_abbreviation_is_left_alone():
+    rows, _ = _neutral_tab(periods=20, teams=4, duplicate_abbrev=False)
+    controls = next(r for r in rows if r and str(r[0]) == "Chart teams:")
+    labels = [str(c) for c in controls[1:-1]]
+    assert "C03" in labels, labels
+    assert not any(l.startswith("C03 ") for l in labels), (
+        "a unique abbrev was needlessly suffixed")

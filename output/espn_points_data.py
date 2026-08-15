@@ -598,6 +598,315 @@ def season_finishes():
     """)
 
 
+# ---------------------------------------------------------------------------
+# Inputs for the SHARED season-points standings presenter (MLB-243).
+#
+# The presenter (cbs_almanac_sheets.build_standings_rows) is pure layout and
+# queries nothing. These functions supply its arguments from ESPN's own
+# facts, which is what "same tab, different platform" means here: the CBS
+# models are never touched for an ESPN league, and the ESPN book is not a
+# section-by-section imitation of a head-to-head layout.
+# ---------------------------------------------------------------------------
+
+def presenter_context(context):
+    """The presenter's context: season, the latest unit of the arc, and the
+    first season on file. `latest_period` is a SCORING DAY here."""
+    return {
+        'season_year': context['season_year'],
+        'latest_period': context['last_period'],
+        'first_season': context['first_season'],
+    }
+
+
+def franchise_map():
+    """{team_id: {'canonical_id', 'abbrev'}} for the canonical roll-up.
+
+    ESPN team ids ARE the franchise ids, and `dim_franchise` already
+    resolves the configured-name override, so canonical_id is the
+    franchise's own id unless a lineage seed says otherwise.
+    """
+    rows = query_snowflake(f"""
+        SELECT franchise_id, canonical_franchise_id, canonical_abbrev,
+               canonical_name
+        FROM dim_franchise
+        WHERE {league_predicate()}
+    """)
+    out = {}
+    for row in rows:
+        try:
+            fid = int(row['franchise_id'])
+            cid = int(row['canonical_franchise_id'])
+        except (TypeError, ValueError):
+            continue
+        out[fid] = {'canonical_id': cid,
+                    'abbrev': row['canonical_abbrev'],
+                    'name': row['canonical_name']}
+    return out
+
+
+def dense_rank_arc(season_year):
+    """Team x SCORING DAY cumulative standing, built from first principles.
+
+    FOUR THINGS THIS HAS TO GET RIGHT, and the sparse version got none of
+    them:
+
+    1. DENSE SPINE. Every team gets a row for every scoring day through the
+       latest captured one -- not only the days it happened to score. A
+       cross join against the day list, not a group-by over production.
+    2. CARRY FORWARD. Cumulative totals run over the dense spine, so a day
+       with no production repeats yesterday's total instead of vanishing.
+       A team that goes quiet holds its line; it does not leave a hole in
+       the chart.
+    3. RANK FROM CUMULATIVE TOTALS, on that day -- the standing as it stood,
+       not a re-ranking of that day alone.
+    4. RECONCILIATION. The final day's cumulative total is the team's season
+       total, and the final day's rank is its place in the standings, so the
+       chart and the table below it cannot disagree.
+
+    Rows carry the presenter's arc contract: team_id, team_name, period,
+    standings_rank, is_latest_period.
+    """
+    return query_snowflake(f"""
+        WITH days AS (
+            SELECT DISTINCT scoring_period
+            FROM fct_player_daily_performance
+            WHERE {league_predicate()} AND season_year = {int(season_year)}
+        ),
+        teams AS (
+            SELECT team_id, team_name
+            FROM fct_team_season_performance
+            WHERE {league_predicate()} AND season_year = {int(season_year)}
+        ),
+        -- 1. THE DENSE SPINE.
+        spine AS (
+            SELECT t.team_id, t.team_name, d.scoring_period
+            FROM teams t CROSS JOIN days d
+        ),
+        scored AS (
+            SELECT team_id, scoring_period,
+                   SUM(CAST(COALESCE(total_stat_pts, 0) AS DECIMAL(18, 6)))
+                       AS pts
+            FROM fct_player_daily_performance
+            WHERE {league_predicate()}
+              AND season_year = {int(season_year)}
+              AND team_id IS NOT NULL
+              AND is_active_slot
+            GROUP BY team_id, scoring_period
+        ),
+        -- 2. CARRY FORWARD: the running sum walks the dense spine, so a
+        --    zero-production day inherits the previous total.
+        cume AS (
+            SELECT
+                s.team_id,
+                s.team_name,
+                s.scoring_period,
+                SUM(COALESCE(x.pts, 0)) OVER (
+                    PARTITION BY s.team_id
+                    ORDER BY s.scoring_period
+                    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                ) AS cume_pts
+            FROM spine s
+            LEFT JOIN scored x
+                ON x.team_id = s.team_id
+               AND x.scoring_period = s.scoring_period
+        )
+        -- 3. RANK FROM THE CUMULATIVE TOTAL on each day.
+        SELECT
+            team_id,
+            team_name,
+            scoring_period AS period,
+            ROUND(CAST(cume_pts AS DOUBLE), 1) AS cume_pts,
+            ROW_NUMBER() OVER (
+                PARTITION BY scoring_period
+                ORDER BY cume_pts DESC, team_id) AS standings_rank,
+            scoring_period = (SELECT MAX(scoring_period) FROM days)
+                AS is_latest_period
+        FROM cume
+        ORDER BY period, standings_rank
+    """)
+
+
+def presenter_finishes(season_year):
+    """CLOSED seasons only, in the presenter's shape.
+
+    THE PRESENTER APPENDS THE SEASON IN FLIGHT ITSELF -- its year_labels
+    are the closed seasons plus `str(season)`. Returning the current season
+    here too produced a duplicate 2026 column, and worse: everything in
+    this set counts as finished history, so the in-flight year picked up a
+    medal, a division title and a closed-season average it has not earned.
+
+    Completion is read from `int_league_season_closure`, the project's own
+    closure truth. Being an earlier year than the one requested is not
+    evidence a season finished -- a league can be mid-season in its only
+    year, which is exactly this case.
+    """
+    return query_snowflake(f"""
+        SELECT
+            f.season_year,
+            f.team_id                       AS franchise_id,
+            f.team_name,
+            s.final_rank                    AS standings_rank,
+            s.final_rank = 1                AS is_champion
+        FROM fct_team_season_performance f
+        JOIN int_league_season_closure c
+            ON  c.league_key  = f.league_key
+            AND c.season_year = f.season_year
+            AND c.is_season_complete
+        LEFT JOIN stg_team_standings s
+            ON  s.league_key  = f.league_key
+            AND s.season_year = f.season_year
+            AND s.team_id     = f.team_id
+        WHERE {league_predicate('f')}
+        ORDER BY f.season_year, standings_rank
+    """)
+
+
+def presenter_active_franchises(season_year):
+    return query_snowflake(f"""
+        SELECT team_id, team_name
+        FROM fct_team_season_performance
+        WHERE {league_predicate()} AND season_year = {int(season_year)}
+        ORDER BY calculated_points DESC, team_id
+    """)
+
+
+def presenter_season_days():
+    """{season_year, days} -- the standard-season clock. One scoring day is
+    one gameplay day in this format."""
+    return query_snowflake(f"""
+        SELECT season_year, COUNT(DISTINCT scoring_period) AS days
+        FROM fct_player_daily_performance
+        WHERE {league_predicate()}
+        GROUP BY season_year
+        ORDER BY season_year
+    """)
+
+
+def presenter_slot_rows(season_year=None):
+    """Points by deployed lineup slot. season_year=None sums every season,
+    which is the all-time half of the twin."""
+    scope = (f'AND season_year = {int(season_year)}'
+             if season_year is not None else '')
+    # season_year rides every row: the all-time half weighs each season by
+    # the days it played, so the presenter needs to know which seasons the
+    # capture actually covers.
+    return query_snowflake(f"""
+        SELECT team_id, season_year, lineup_slot,
+               ROUND(SUM(CAST(slot_calculated_points AS DECIMAL(18, 6))), 1)
+                   AS slot_pts
+        FROM mart_team_slot_production
+        WHERE {league_predicate()} {scope}
+        GROUP BY team_id, season_year, lineup_slot
+        ORDER BY team_id, season_year, lineup_slot
+    """)
+
+
+def presenter_alltime_pitching(season_year=None):
+    """The P column of the all-time slot grid, which the presenter takes
+    separately because CBS's pitching slot spans eras its hitter slots do
+    not. ESPN captures every slot in every season, so this is simply the P
+    slot summed over all of them."""
+    return query_snowflake(f"""
+        SELECT team_id,
+               ROUND(SUM(CAST(slot_calculated_points AS DECIMAL(18, 6))), 1)
+                   AS p_pts
+        FROM mart_team_slot_production
+        WHERE {league_predicate()}
+          AND lineup_slot IN ('P', 'SP', 'RP')
+        GROUP BY team_id
+        ORDER BY team_id
+    """)
+
+
+# The presenter's detailed-standings columns, in its own vocabulary. Every
+# one of these is a column on the team season fact.
+_DETAILED_COLUMNS = (
+    'h', 'doubles', 'triples', 'hr', 'xbh', 'tb', 'r', 'rbi', 'sb', 'b_bb',
+    'w', 'qs', 'k', 'sv', 'hld', 'cg', 'outs',
+)
+
+
+def presenter_detailed_alltime():
+    """All-time counting stats per team, the presenter's Detailed Standings
+    substrate. Summed over every season on file; in a first year that is
+    this season, which is truthful rather than empty."""
+    cols = ',\n            '.join(
+        f'ROUND(SUM(CAST({c} AS DECIMAL(18, 6))), 1) AS {c}'
+        for c in _DETAILED_COLUMNS)
+    return query_snowflake(f"""
+        SELECT
+            team_id,
+            {cols},
+            ROUND(SUM(CAST(calculated_hitting_pts AS DECIMAL(18, 6))), 1)
+                AS hit_pts,
+            ROUND(SUM(CAST(calculated_pitching_pts AS DECIMAL(18, 6))), 1)
+                AS pit_pts,
+            ROUND(SUM(CAST(calculated_points AS DECIMAL(18, 6))), 1)
+                AS total_pts
+        FROM fct_team_season_performance
+        WHERE {league_predicate()}
+        GROUP BY team_id
+        ORDER BY team_id
+    """)
+
+
+def presenter_affinity(season_year):
+    """Share of active-lineup games by MLB club, season and all-time on one
+    spine -- the presenter's affinity contract."""
+    # The presenter keys the shared MLB spine on a NUMERIC club id. ESPN
+    # identifies clubs by abbreviation, so one is derived by dense rank over
+    # the abbreviations -- stable for a given set of clubs, and only ever
+    # used to group and order the spine. The abbreviation stays the label.
+    return query_snowflake(f"""
+        SELECT
+            team_id,
+            DENSE_RANK() OVER (ORDER BY pro_team)      AS mlb_team_id,
+            pro_team                                   AS mlb_team_name,
+            ROUND(SUM(CASE WHEN season_year = {int(season_year)}
+                           THEN CAST(games_played AS DECIMAL(18, 6))
+                           ELSE 0 END), 1)             AS season_wt,
+            ROUND(SUM(CAST(games_played AS DECIMAL(18, 6))), 1) AS alltime_wt
+        FROM fct_player_daily_performance
+        WHERE {league_predicate()}
+          AND team_id IS NOT NULL
+          AND is_active_slot
+          AND pro_team IS NOT NULL
+        GROUP BY team_id, pro_team
+        ORDER BY team_id, pro_team
+    """)
+
+
+# Labels dim_owner falls back to when the platform withholds every name
+# field. They are honest, but they are a statement about OUR ACCESS, and a
+# workbook should not foreground that where it holds a perfectly good team
+# identity (MLB-243, Kyle 2026-08-14).
+_OWNER_UNAVAILABLE_LABELS = frozenset({
+    'Owner unavailable', 'Unknown owner', 'Unknown', '',
+})
+
+
+def with_owner_fallback(rows, name_key='team_name', owner_key='owner_display'):
+    """Replace an inaccessible Owner value with the team's canonical name.
+
+    A public ESPN league serves stable member GUIDs and no names at all, so
+    every Owner cell in the book would otherwise read "Owner unavailable" --
+    ten identical rows of our own limitation, in a column that exists to
+    tell teams apart. The canonical team name does tell them apart, and it
+    is true. The GUID-keyed identity underneath is untouched; only the label
+    changes.
+    """
+    out = []
+    for row in rows or ():
+        row = dict(row)
+        owner = (row.get(owner_key) or '').strip()
+        if owner in _OWNER_UNAVAILABLE_LABELS:
+            fallback = (row.get(name_key) or '').strip()
+            if fallback:
+                row[owner_key] = fallback
+        out.append(row)
+    return out
+
+
 def acquisition_channels(season_year):
     """Production by acquisition channel, or None when the transaction log
     was never read (MLB-243).
@@ -610,7 +919,8 @@ def acquisition_channels(season_year):
     if not _transaction_log_was_read(season_year):
         return None
     import almanac_data
-    return almanac_data.get_team_acquisition_channels(season_year)
+    return with_owner_fallback(
+        almanac_data.get_team_acquisition_channels(season_year))
 
 
 def _transaction_log_was_read(season_year):

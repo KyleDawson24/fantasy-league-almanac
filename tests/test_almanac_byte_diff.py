@@ -13,7 +13,14 @@ checkpoints during the refactor:
 To regenerate after an intentional output change (rare during refactor;
 typical when a new matchup_period has been loaded and the fixture should
 track the new state):
-    REGENERATE_BASELINES=1 pytest tests/ -m warehouse -k almanac_byte_diff
+    REGENERATE_BASELINES=1 pytest tests/test_almanac_byte_diff.py -m warehouse
+
+SCOPED BY FILE PATH, NOT BY `-k almanac_byte_diff` (2026-08-16). That
+selector also matches tests/test_cbs_almanac_byte_diff.py, whose harness
+honours the same environment variable -- so the old spelling rewrote the
+CBS corpus alongside this one. Harmless when both were drifting for the
+same reviewed reason, and silent blessing of 21 unreviewed files when
+they were not. Regenerate one corpus at a time, deliberately.
 
 The season/matchup_period anchor is pinned because the entry script
 auto-detects MAX(matchup_period) when run without args; pinning keeps the
@@ -137,6 +144,7 @@ def test_almanac_tsv_matches_baseline(tmp_path):
             msg.append(f"  {name}: {hint}")
         msg.append(
             "If intentional, regenerate with: "
-            "REGENERATE_BASELINES=1 pytest tests/ -m warehouse -k almanac_byte_diff"
+            "REGENERATE_BASELINES=1 pytest tests/test_almanac_byte_diff.py "
+            "-m warehouse"
         )
         pytest.fail("\n".join(msg))

@@ -12,6 +12,16 @@ declines what it does not. Nothing here waits for a completed matchup.
 
 Pure: every builder is fed synthetic rows. No warehouse, no network, no
 Google surface. The team names are invented.
+
+THE PURITY IS ENFORCED, NOT ASSERTED (2026-08-16). The record-book
+builders default `display_map` to `stat_catalog.get_display_map()` and
+always read `get_rate_qualifiers()`, so ten tests in this file were
+opening a real Snowflake connection and passing only because a
+maintainer's `.env` happened to answer. Testing the release ZIP as a
+stranger would -- extracted, no `.env` -- killed them in the connector.
+`_no_warehouse` below applies the shared `stub_stat_catalog` to every
+test here. Scoped to this module rather than made autouse in conftest,
+so warehouse-marked tests keep exercising the real `dim_stat`.
 """
 from __future__ import annotations
 
@@ -24,6 +34,46 @@ import espn_points_data
 import points_almanac
 import sheets_workbook
 from almanac_render import TEAM_WEEKS_TAB
+
+
+@pytest.fixture(autouse=True)
+def _no_warehouse(stub_stat_catalog, stub_slot_catalog, monkeypatch):
+    """Every test in this module reads its vocabulary from a literal.
+
+    Autouse at MODULE scope: the builders reach the warehouse through
+    their own DEFAULTS, so opting in per test is exactly the thing that
+    was forgotten ten times over.
+
+    THREE defaults, and two of them share one shape -- a falsy argument
+    the caller MEANT as "there is none", thrown away by `or`:
+
+        schedule_lookup = schedule_lookup or records.load_schedule_lookup()
+        record_specs    = record_specs    or [... get_scored_record_specs() ...]
+
+    Tests here pass `schedule_lookup={}` and `record_specs=[]` meaning
+    exactly that, and both are falsy, so `or` discarded them and fetched
+    the real thing. The intent was right and the spelling could not
+    express it. `stub_stat_catalog` closes the third,
+    `display_map=stat_catalog.get_display_map()`.
+
+    `stub_slot_catalog` rides along for the same reason: the points
+    caller hands the presenter `slot_catalog.canonical_lineup_slot`, which
+    reads the slot_classification seed. A test that patched only the stat
+    catalog would still connect through the slot one.
+
+    Neutralising the loaders HERE keeps each test's intent without
+    touching a production default that non-test callers genuinely want.
+    The spec builders are patched on `almanac_logic`, which imported them
+    BY NAME, rather than on `almanac_data` -- so a test that calls
+    `almanac_data.get_lineup_slot_record_specs` directly still exercises
+    the real one.
+    """
+    import almanac_logic as _logic
+    import records
+    monkeypatch.setattr(records, 'load_schedule_lookup', dict)
+    monkeypatch.setattr(_logic, 'get_scored_record_specs', list)
+    monkeypatch.setattr(_logic, 'get_lineup_slot_record_specs',
+                        lambda season_long=False: [])
 
 
 # --------------------------------------------------------------------------
@@ -557,6 +607,49 @@ def assembled(monkeypatch):
                         lambda season: False)
     monkeypatch.setattr(espn_points_data, 'late_draft_note',
                         lambda context: None)
+
+    # THE PRESENTER SURFACE (MLB-243). `_build` stopped calling
+    # standings_rows / rank_arc / season_finishes when the tab moved to
+    # the shared season-points presenter, and this fixture kept stubbing
+    # the retired names -- so every `assembled` test has been reaching the
+    # real warehouse ever since, and passing only where credentials
+    # happened to answer. Stub what it calls TODAY.
+    monkeypatch.setattr(espn_points_data, 'presenter_context',
+                        lambda context: {'season_year': 2026,
+                                         'latest_period': 142,
+                                         'first_season': 2026})
+    monkeypatch.setattr(espn_points_data, 'dense_rank_arc', lambda season: [
+        {'team_id': t['team_id'], 'team_name': t['team_name'], 'period': 1,
+         'standings_rank': i + 1, 'is_latest_period': True}
+        for i, t in enumerate(SEASON_TOTALS)])
+    monkeypatch.setattr(espn_points_data, 'presenter_finishes',
+                        lambda season: [])
+    monkeypatch.setattr(espn_points_data, 'presenter_active_franchises',
+                        lambda season: [{'team_id': t['team_id'],
+                                         'team_name': t['team_name']}
+                                        for t in SEASON_TOTALS])
+    monkeypatch.setattr(
+        espn_points_data, 'presenter_slot_rows',
+        lambda season_year=None: [dict(r, season_year=2026) for r in SLOT_ROWS])
+    monkeypatch.setattr(espn_points_data, 'presenter_slot_columns',
+                        lambda: ['C', 'P'])
+    monkeypatch.setattr(
+        espn_points_data, 'presenter_alltime_pitching',
+        lambda season_year=None: [{'team_id': t['team_id'], 'p_pts': 500.0}
+                                  for t in SEASON_TOTALS])
+    monkeypatch.setattr(espn_points_data, 'presenter_season_days',
+                        lambda: [{'season_year': 2026, 'days': 142}])
+    # _DETAILED is defined further down; module-level names resolve when
+    # the lambda RUNS, so the forward reference is fine and keeps one set
+    # of synthetic stats in the file rather than two.
+    monkeypatch.setattr(espn_points_data, 'presenter_detailed_alltime',
+                        lambda: list(_DETAILED))
+    monkeypatch.setattr(espn_points_data, 'presenter_affinity',
+                        lambda season: [])
+    monkeypatch.setattr(espn_points_data, 'franchise_map', lambda: {
+        t['team_id']: {'canonical_id': t['team_id'],
+                       'abbrev': t['team_abbrev'],
+                       'name': t['team_name']} for t in SEASON_TOTALS})
 
     records = [['League Records'], ['Scope', 'Record', 'Holder']]
     monkeypatch.setattr(points_almanac, 'build_records_tab_rows',

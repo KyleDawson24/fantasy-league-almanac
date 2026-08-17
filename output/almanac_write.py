@@ -278,9 +278,10 @@ def write_almanac(sheet_id, season_year=None, matchup_period=None, client=None):
     )
 
 
-_HOME_LEFT_SECTION_LABELS = {
-    'Navigate', 'Points Glossary', 'All-League Team: All-Time',
-}
+# Left-band (cols A-D) section labels. No team board lives on the left
+# any more: the all-time team is a full-width right-band board (Kyle
+# 2026-08-17) and is bolded by the 'All-League Team' title scan below.
+_HOME_LEFT_SECTION_LABELS = {'Navigate', 'Points Glossary'}
 
 
 def _reset_sheet_formats(spreadsheet, worksheet):
@@ -450,17 +451,14 @@ def _replace_home_tab(spreadsheet, rows):
                 'range': 'A3',
                 'format': {'textFormat': {'italic': True, 'fontSize': 10}},
             },
-            # Points number formats. Left all-time Points (C) is whole --
-            # 1-decimal is overkill at the all-time scale; right Points (K)
-            # and deviation total pts (O) stay one decimal. Number format
-            # only touches numeric cells, harmless on the text/hyperlink
-            # cells those columns also contain.
-            {'range': 'C:C', 'format': {'numberFormat': {'type': 'NUMBER', 'pattern': '0'}}},
-            # ppg (D) -- 2 decimals. The value is written as a string but
-            # USER_ENTERED coerces it to a number and would drop a trailing
-            # zero ("4.60" -> 4.6); the format pins it back to 2 places.
-            {'range': 'D:D', 'format': {'numberFormat': {'type': 'NUMBER', 'pattern': '0.00'}}},
-            {'range': 'K:K', 'format': {'numberFormat': {'type': 'NUMBER', 'pattern': '0.0'}}},
+            # Points number formats. Right-band Points (K) and deviation
+            # total pts (O) are one decimal on the week + season boards;
+            # the all-time board below them writes whole-number Points
+            # (1-decimal is overkill at the all-time scale), so K is
+            # split at the all-time title. Number format only touches
+            # numeric cells, harmless on the text/hyperlink cells those
+            # columns also contain.
+            *_home_points_formats(rows),
             {'range': 'O:O', 'format': {'numberFormat': {'type': 'NUMBER', 'pattern': '0.0'}}},
         ]
         formats.extend(_home_label_formats(rows, last_col))
@@ -495,7 +493,9 @@ def _replace_home_tab(spreadsheet, rows):
 def _apply_home_tab_dimensions(spreadsheet, worksheet):
     """Set Home column widths (#23 live polish). Cols A-K + N-O are sized
     to the two-band content; L/M (right Slash / Stat Line) and P+ keep the
-    default. Indices are 0-based: A=0 ... O=14."""
+    default. Indices are 0-based: A=0 ... O=14. N (13) is the deviation
+    player on the in-season boards and Years of Service on the all-time
+    board -- 150px suits both."""
     sheet_id = worksheet.id
     widths = [
         (0, 125), (1, 125), (2, 100), (3, 50), (4, 100), (5, 40), (6, 40),
@@ -507,6 +507,27 @@ def _apply_home_tab_dimensions(spreadsheet, worksheet):
     _sheets_batch_update(spreadsheet, f'home dimensions {worksheet.title}', requests)
 
 
+def _home_points_formats(rows):
+    """Column K (Points) number formats: one decimal down to the all-time
+    board's title row, whole numbers from there. Anchored by scanning for
+    the title (a fixed row would go stale the moment a board grew)."""
+    alltime_row = next(
+        (i for i, row in enumerate(rows, 1)
+         if len(row) > 5 and isinstance(row[5], str)
+         and row[5].startswith('All-League Team: All-Time')),
+        None,
+    )
+    if alltime_row is None:
+        return [{'range': 'K:K',
+                 'format': {'numberFormat': {'type': 'NUMBER', 'pattern': '0.0'}}}]
+    return [
+        {'range': f'K1:K{alltime_row}',
+         'format': {'numberFormat': {'type': 'NUMBER', 'pattern': '0.0'}}},
+        {'range': f'K{alltime_row + 1}:K',
+         'format': {'numberFormat': {'type': 'NUMBER', 'pattern': '0'}}},
+    ]
+
+
 def _home_label_formats(rows, last_col):
     """Bold the two-band Home section labels + table headers. Positions are
     dynamic, so scan by marker (#23). Best-effort: keep these marker
@@ -515,9 +536,7 @@ def _home_label_formats(rows, last_col):
     for row_number, row in enumerate(rows, 1):
         first = row[0] if len(row) > 0 else ''
         right = row[5] if len(row) > 5 else ''
-        if first in _HOME_LEFT_SECTION_LABELS or (
-            first == 'Slot' and len(row) > 1 and row[1] == 'Player'
-        ):
+        if first in _HOME_LEFT_SECTION_LABELS:
             formats.append({
                 'range': f'A{row_number}:D{row_number}',
                 'format': {'textFormat': {'bold': True}},

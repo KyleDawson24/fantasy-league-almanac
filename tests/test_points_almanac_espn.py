@@ -327,8 +327,8 @@ BOARDS = {
     'month_all_rows': [_board_row('C', 'Ada Kessler', 41.0)],
     'season_rows': [_board_row('C', 'Bo Nakamura', 308.0)],
     'season_all_rows': [_board_row('C', 'Bo Nakamura', 308.0)],
-    'alltime_rows': [_board_row('C', 'Bo Nakamura', 308.0)],
-    'alltime_all_rows': [_board_row('C', 'Bo Nakamura', 308.0)],
+    'alltime_rows': [dict(_board_row('C', 'Bo Nakamura', 308.0),
+                          service_years='2026')],
 }
 
 
@@ -340,7 +340,10 @@ def test_home_right_side_carries_the_three_points_boards():
     assert 'Team of the Month - August 2026' in flat
     assert 'rolls over on the 8th' in flat
     assert 'Team of the Season: 2026' in flat
-    assert 'All-Time Team (2026)' in flat
+    # The all-time board wears the shared title + contract (Kyle
+    # 2026-08-17): the same wording the H2H and CBS Homes use, with the
+    # measured era, and Years of Service in place of the deviation pair.
+    assert 'All-League Team: All-Time (2026)' in flat
 
 
 def test_home_is_populated_from_day_one_of_an_in_progress_season():

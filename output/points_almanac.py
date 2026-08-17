@@ -40,6 +40,7 @@ from almanac_logic import (
     build_records_tab_rows,
     build_team_history_tabs,
     build_trades_tab_rows,
+    era_label,
 )
 from almanac_render import (
     ADVANCED_STANDINGS_TAB,
@@ -215,7 +216,7 @@ def _build(nav_targets=None, include_trades=True, context=None):
         trades_rows, trades_note = _trades_section(season_year)
 
     boards = espn_points_data.home_boards(context)
-    era = _era_label(context)
+    era = era_label(context.get('first_season'), season_year)
 
     def _home_builder(targets):
         """Home from the ALREADY-FETCHED boards. The live write needs Home
@@ -263,13 +264,6 @@ def _trades_section(season_year):
         print(f'[almanac] Trades tab skipped -- live ESPN pull failed: {exc}')
         return (None, TRADES_UNAVAILABLE_NOTE)
     return (build_trades_tab_rows(data, season_year), None)
-
-
-def _era_label(context):
-    first, last = context.get('first_season'), context.get('season_year')
-    if first and last and first != last:
-        return f'{first}–{last}'
-    return str(last or '')
 
 
 def write_points_almanac(sheet_id, client=None):

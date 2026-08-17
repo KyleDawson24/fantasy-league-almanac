@@ -16,6 +16,23 @@ _Release notes are built from the commit range at each cut rather than
 accumulated here, so this section staying short is not a sign the
 repository is idle._
 
+### Changed
+
+- **One Home All-Time team contract across formats.** The head-to-head
+  Home stacks its boards vertically -- Team of the Week, Season-to-Date,
+  then the All-Time team at full width beneath them -- instead of keeping
+  a thin `Slot | Player | Points | ppg` all-time table in the left band.
+  Both ESPN books (head-to-head and season-points) now render the all-time
+  board in the row contract the CBS Home established: `Slot | Team |
+  Player | Fantasy Team | Owner | Points | Slash | Stat Line | Years of
+  Service`, titled `All-League Team: All-Time (first–last)` from the
+  measured era. Years of Service is the existing fact-backed definition
+  (distinct seasons with nonzero active production, net-negative seasons
+  included) through the shared `count: year-ranges` formatter -- a
+  first-year player reads `1: 2026`. The in-season boards, the Total-Pts
+  Best deviation columns and the CBS Home are unchanged; the H2H `Home.tsv`
+  golden moves for the layout and is re-anchored on review, not silently.
+
 ### Fixed
 
 - **A season-points league gets the points workbook** (MLB-243). The

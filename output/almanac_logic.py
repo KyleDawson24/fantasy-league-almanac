@@ -98,7 +98,7 @@ from almanac_render import (
     boxscore_formula,
     format_all_league_team_row,
     format_all_league_team_row_with_deviation,
-    format_all_league_thin_row,
+    format_all_league_alltime_row,
     acquisition_half_values,
     _bref_link,
     _draft_player_label,
@@ -547,11 +547,37 @@ def get_optimal_team_selections(candidates, slot_caps):
 
 
 # v1.2 (#23): Home is a two-band dashboard. Left band (cols A-D) is a
-# navigation hub + points glossary + the all-time All-League Team; right
-# band (cols F+) is the All-League Team of the Week and Season-to-Date,
-# each carrying two Total-Pts deviation columns. A blank spacer column (E)
-# separates the bands.
+# navigation hub + team link grid + points glossary -- nothing that is a
+# team board; right band (cols F+) is the vertical stack of All-League
+# boards, each at full width. A blank spacer column (E) separates the
+# bands. (Until 2026-08-17 the H2H book kept the all-time team as a thin
+# Slot | Player | Points | ppg table in the left band; Kyle's ruling moved
+# it under Season-to-Date in the full CBS row contract -- see
+# _home_right_rows / HOME_ALLTIME_HEADER.)
 _HOME_LEFT_WIDTH = 4
+
+# The Home All-Time board title, shared by every format so the two books
+# cannot drift on the wording; the parenthetical is the MEASURED era.
+HOME_ALLTIME_TITLE = 'All-League Team: All-Time'
+
+
+def era_label(first_season, last_season):
+    """The measured era a board spans, e.g. '2001–2026'; a first-year
+    league reads '2026'; '' when either end is unmeasured (no guessed
+    range, and no lone year standing in for one). Derived from data at
+    the call site (first season on file, season in flight), never from a
+    configured league."""
+    if not first_season or not last_season:
+        return ''
+    if int(first_season) != int(last_season):
+        return f'{first_season}–{last_season}'
+    return str(last_season)
+
+
+def home_alltime_title(era):
+    """'All-League Team: All-Time (2001–2026)' -- or without the
+    parenthetical when no era is measured, rather than '()' or a guess."""
+    return f'{HOME_ALLTIME_TITLE} ({era})' if era else HOME_ALLTIME_TITLE
 
 _HOME_SCORING_CALLOUT = (
     'All points use current-season scoring across every timeframe -- '
@@ -588,19 +614,22 @@ def updated_stamp():
 def build_home_tab_rows(weekly_rows, season_rows, weekly_all_rows,
                         season_all_rows, all_time_rows, season_year,
                         matchup_period, team_titles=None, league_id=None,
-                        nav_targets=None):
+                        nav_targets=None, first_season=None):
     """Build the Home tab as a two-band dashboard (#23).
 
     LEFT band (cols A-D): navigation table + per-team link grid + points
-    glossary + the all-time All-League Team. RIGHT band (cols F+):
-    All-League Team of the Week and Season-to-Date, each with two
-    Total-Pts deviation columns. The bands are built independently and
-    zipped row-for-row (the shorter padded) so the spacer + right columns
-    stay aligned.
+    glossary. RIGHT band (cols F+): the boards, stacked vertically at full
+    width -- All-League Team of the Week, Season-to-Date (each with two
+    Total-Pts deviation columns), then the All-Time team in the shared
+    all-time contract (HOME_ALLTIME_HEADER: the standard columns plus
+    Years of Service, Kyle 2026-08-17). The bands are built independently
+    and zipped row-for-row (the shorter padded) so the spacer + right
+    columns stay aligned.
 
     Data params arrive pre-fetched (see almanac_data.get_home_tab_data) so
     the preview path and the live-write path can't drift on what they
-    query.
+    query. first_season is the earliest season on file (measured); with
+    season_year it titles the all-time board's era.
 
     nav_targets: optional {tab_title: gid} map. Provided on the live write
     -> nav cells become in-sheet =HYPERLINK formulas; None on the TSV
@@ -615,14 +644,12 @@ def build_home_tab_rows(weekly_rows, season_rows, weekly_all_rows,
         # byte-identical to the pre-stamp shape ([''] serializes as "").
         [stamp] if stamp else [],
     ]
-    right_rows, season_label_idx = _home_right_rows(
+    right_rows = _home_right_rows(
         weekly_rows, weekly_all_rows, season_rows, season_all_rows,
-        season_year, matchup_period, league_id,
+        all_time_rows, season_year, matchup_period, league_id,
+        era=era_label(first_season, season_year),
     )
-    left_rows = _home_left_rows(
-        all_time_rows, team_titles, nav_targets,
-        align_alltime_to=season_label_idx,
-    )
+    left_rows = _home_left_rows(team_titles, nav_targets)
     right_width = len(HOME_HEADER) + 2
     return [
         *banner,
@@ -645,13 +672,12 @@ def build_points_home_tab_rows(boards, season_year, month_window, era_label,
     RIGHT BAND is the three boards the points product shows (Kyle's lean,
     carried over from the CBS points Home so the two agree): Team of the
     Month -- the one live board, rolling over on the 8th -- then Team of
-    the Season, then the All-Time Team.
-
-    WHY ALL-TIME MOVES RIGHT. In the H2H book the right band holds Week +
-    Season and all-time sits thin on the left. A points league has no
-    week, so the slot that board occupied is where Month goes, and
-    All-Time joins the full-width stack rather than staying in a thin
-    left-hand column it no longer needs to share space with.
+    the Season, then the All-Time team. Month and Season carry the
+    Total-Pts deviation pair; All-Time is the shared all-time contract
+    (HOME_ALLTIME_HEADER -- the standard columns plus Years of Service),
+    the same rows and title the H2H Home stacks under Season-to-Date
+    (Kyle 2026-08-17). A points league has no week, so Month takes the
+    slot the week board occupies in the H2H book.
 
     THE NAV OMITS WHAT DOES NOT EXIST. Matchup History is not built for a
     points league (it is a matchup archive over a league with no
@@ -723,9 +749,9 @@ def _points_home_left_rows(team_titles, nav_targets, trades_note=None):
 
 def _points_home_right_rows(boards, season_year, month_window, era_label,
                             league_id):
-    """Right band for the points shape: Month, Season, All-Time, each in
-    the standard All-League board columns with the Total-Pts deviation
-    pair."""
+    """Right band for the points shape: Month and Season in the standard
+    All-League board columns with the Total-Pts deviation pair, then the
+    All-Time board in the shared all-time contract."""
     header = [*HOME_HEADER, HOME_DEVIATION_LABEL, '']
     lo, hi = month_window if month_window else (None, None)
     if lo is not None:
@@ -741,8 +767,6 @@ def _points_home_right_rows(boards, season_year, month_window, era_label,
          boards.get('month_all_rows') or []),
         (f'Team of the Season: {season_year}', boards.get('season_rows') or [],
          boards.get('season_all_rows') or []),
-        (f'All-Time Team ({era_label})', boards.get('alltime_rows') or [],
-         boards.get('alltime_all_rows') or []),
     ]
 
     rows = []
@@ -762,17 +786,37 @@ def _points_home_right_rows(boards, season_year, month_window, era_label,
             )
             for row in lineup
         )
+    rows.append([])
+    rows.append([])
+    rows.extend(_home_alltime_board_rows(
+        boards.get('alltime_rows') or [], era_label, league_id,
+        empty_note='No qualifying production in this window yet.',
+    ))
     return rows
 
 
-def _home_left_rows(all_time_rows, team_titles, nav_targets, align_alltime_to=None):
-    """Left band (cols A-D): nav hub + per-team grid + glossary + all-time
-    All-League Team. Rows are padded to _HOME_LEFT_WIDTH by the merge.
+def _home_alltime_board_rows(all_time_rows, era, league_id, empty_note=None):
+    """The Home All-Time board, identical in every format (Kyle
+    2026-08-17): title carrying the measured era, HOME_ALLTIME_HEADER, and
+    one format_all_league_alltime_row per pick -- the standard All-League
+    columns plus Years of Service, the CBS Home's all-time shape. No
+    Total-Pts deviation pair here: that stays on the in-season boards."""
+    rows = [[home_alltime_title(era)], list(HOME_ALLTIME_HEADER)]
+    if not all_time_rows and empty_note:
+        rows.append([empty_note])
+        return rows
+    rows.extend(
+        format_all_league_alltime_row(row, league_id=league_id)
+        for row in all_time_rows
+    )
+    return rows
 
-    align_alltime_to: the right band's Season-to-Date label index. The
-    all-time block pads up to it and mirrors the season block's
-    label / blank / header / rows shape, so the two lineups sit inline
-    (#23 QA)."""
+
+def _home_left_rows(team_titles, nav_targets):
+    """Left band (cols A-D): nav hub + per-team grid + glossary. No team
+    board lives here -- the all-time team is a full-width board in the
+    right band (Kyle 2026-08-17). Rows are padded to _HOME_LEFT_WIDTH by
+    the merge."""
     rows = [['Navigate']]
     rows.append([
         home_nav_link('Records', RECORDS_TAB, nav_targets),
@@ -804,17 +848,6 @@ def _home_left_rows(all_time_rows, team_titles, nav_targets, align_alltime_to=No
     rows.append([])
     rows.append(['Points Glossary'])
     rows.extend([term, definition] for term, definition in _HOME_GLOSSARY)
-
-    # Align the all-time block with the right-band Season-to-Date block so
-    # the lineups sit inline: pad up to the season label's row (the pad's
-    # last blank is the spacer above the title), then mirror its
-    # label / header / rows shape -- title directly on header (Kyle 2026-07-15).
-    if align_alltime_to is not None:
-        while len(rows) < align_alltime_to:
-            rows.append([])
-    rows.append(['All-League Team: All-Time'])
-    rows.append(list(HOME_ALLTIME_HEADER))
-    rows.extend(format_all_league_thin_row(row) for row in all_time_rows)
     return rows
 
 
@@ -832,22 +865,20 @@ def _home_team_grid_rows(team_titles, nav_targets, per_row=2):
 
 
 def _home_right_rows(weekly_rows, weekly_all_rows, season_rows,
-                     season_all_rows, season_year, matchup_period, league_id):
-    """Right band (cols F+): week + season All-League Teams, each row
-    carrying the two Total-Pts deviation columns.
-
-    Returns (rows, season_label_index). The index is the row where the
-    Season-to-Date label sits; the left band aligns its all-time block to
-    it so the two lineups sit inline (#23 QA)."""
+                     season_all_rows, all_time_rows, season_year,
+                     matchup_period, league_id, era=''):
+    """Right band (cols F+): the week + season All-League Teams, each row
+    carrying the two Total-Pts deviation columns, then the All-Time team
+    in the shared all-time contract (Kyle 2026-08-17) -- three boards
+    stacked vertically at full width."""
     header = [*HOME_HEADER, HOME_DEVIATION_LABEL, '']
     week_dev = _deviation_by_slot(weekly_rows, weekly_all_rows)
     season_dev = _deviation_by_slot(season_rows, season_all_rows)
 
     # Each board's title sits directly on its header row. The FIRST board is
     # flush with the top of the band (row 4, aligned with the left band's
-    # first row); later boards get a spacer blank above the title (Kyle
-    # 2026-07-16). season_label_idx points at the title row so the left
-    # band's All-Time block still aligns to it.
+    # first row); later boards get a separator blank plus a spacer blank
+    # above the title (Kyle 2026-07-16).
     rows = [
         [f'All-League Team of the Week: {season_year} Week {matchup_period}'],
         header,
@@ -858,9 +889,8 @@ def _home_right_rows(weekly_rows, weekly_all_rows, season_rows,
         )
         for row in weekly_rows
     )
-    rows.append([])          # separator between the two boards
+    rows.append([])          # separator between boards
     rows.append([])          # spacer above the Season-to-Date title
-    season_label_idx = len(rows)
     rows.append([f'All-League Team Season-to-Date: {season_year}'])
     rows.append(header)
     rows.extend(
@@ -869,7 +899,10 @@ def _home_right_rows(weekly_rows, weekly_all_rows, season_rows,
         )
         for row in season_rows
     )
-    return rows, season_label_idx
+    rows.append([])
+    rows.append([])
+    rows.extend(_home_alltime_board_rows(all_time_rows, era, league_id))
+    return rows
 
 
 def _deviation_by_slot(active_rows, all_rows):

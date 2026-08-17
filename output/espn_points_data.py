@@ -342,10 +342,15 @@ def with_unique_team_abbrevs(rows):
 
 def home_boards(context, today=None):
     """The three Home boards a points workbook shows, plus the
-    total-points partner lineup each deviation column is read against.
+    total-points partner lineup each in-season deviation column is read
+    against.
 
     Month is the live one (8th-of-month rollover); Season is the whole
-    captured season to date; All-Time spans every season on file.
+    captured season to date; All-Time spans every season on file and is
+    the SAME lineup the H2H Home shows -- almanac_data.get_home_all_time_team,
+    with each pick's service_years attached for the Years of Service
+    column that replaces the deviation pair on that board (Kyle
+    2026-08-17). No all-time partner lineup is fetched: nothing reads it.
     """
     import almanac_data
 
@@ -358,10 +363,7 @@ def home_boards(context, today=None):
             season_year, points_type='active'),
         'season_all_rows': almanac_data.get_optimal_team(
             season_year, points_type='all'),
-        'alltime_rows': almanac_data.get_optimal_team(
-            season_year=None, points_type='active'),
-        'alltime_all_rows': almanac_data.get_optimal_team(
-            season_year=None, points_type='all'),
+        'alltime_rows': almanac_data.get_home_all_time_team(),
     }
     return {'month_window': (lo, hi),
             **{key: with_unique_team_abbrevs(rows)

@@ -353,13 +353,16 @@ class TestHomeRows:
             {'C': 1},
         )
         season_all = [dict(row, period_label='Season') for row in weekly_all]
-        # All-time team (left band, thin Slot|Player|Pts|ppg).
+        # All-time team: a full-width right-band board under
+        # Season-to-Date in the shared all-time contract (standard columns
+        # + Years of Service), Kyle 2026-08-17.
         all_time = almanac_sheets.select_all_league_team(
             [_candidate(3, 'C', 600.0, 'All-Time Catcher', team_id=8)],
             {'C': 1},
         )
         for row in all_time:
-            row['games_played'] = 200
+            row['period_label'] = 'Season'
+            row['service_years'] = '2025,2026'
 
         rows = almanac_sheets.build_home_tab_rows(
             weekly_rows=weekly,
@@ -371,6 +374,7 @@ class TestHomeRows:
             matchup_period=8,
             team_titles=['TTA', 'TTC'],
             league_id=1234567890,
+            first_season=2025,
         )
 
         # Banner (spans both bands). Row 3 carries the render-time
@@ -400,20 +404,27 @@ class TestHomeRows:
         assert _player_text(week_c[13]) == 'Bench Catcher' and week_c[14] == 30.0
         assert _player_text(season_c[13]) == 'Bench Catcher' and season_c[14] == 30.0
 
-        # Left band (cols A-D): nav labels, per-team grid, glossary, all-time.
+        # Left band (cols A-D): nav labels, per-team grid, glossary -- and
+        # no team board (the thin all-time table is gone).
         left_first = [r[0] if r else '' for r in rows]
         assert 'Navigate' in left_first
         assert 'Points Glossary' in left_first
-        assert 'All-League Team: All-Time' in left_first
+        assert not any(str(cell).startswith('All-League Team') for cell in left_first)
         # Per-team grid is indented (col A blank, teams in B-C).
         grid = next(r for r in rows if len(r) > 2 and r[1] == 'TTA')
         assert grid[2] == 'TTC'
+
+        # All-time board: right band, below Season-to-Date, full contract.
+        season_idx = right_first.index('All-League Team Season-to-Date: 2026')
+        alltime_idx = right_first.index('All-League Team: All-Time (2025–2026)')
+        assert alltime_idx > season_idx
+        assert rows[alltime_idx + 1][5:14] == almanac_sheets.HOME_ALLTIME_HEADER
         alltime_c = next(
             r for r in rows
-            if len(r) > 3 and r[0] == 'C' and _player_text(r[1]) == 'All-Time Catcher'
+            if len(r) > 13 and r[5] == 'C' and _player_text(r[7]) == 'All-Time Catcher'
         )
-        assert alltime_c[2] == 600  # whole number (no decimal at the all-time scale)
-        assert alltime_c[3] == '3.00'  # 600 / 200 games
+        assert alltime_c[10] == 600  # whole number (no decimal at the all-time scale)
+        assert alltime_c[13] == '2: 2025–2026'  # Years of Service
 
 
 class TestTeamWeeksRows:

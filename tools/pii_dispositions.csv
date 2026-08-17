@@ -248,6 +248,7 @@ tests/test_check_pii_strict.py,team-id,5a8c3bf304d6329c,collision,synthetic fixt
 tests/test_check_pii_strict.py,team-id,e99bd9db0b6ffdd8,collision,synthetic fixture value that happens to sit in an identity-shaped position,2026-08-10
 tests/test_extract_season_points.py,owner,af6b959b6c63efeb,collision,MLB-243 synthetic test fixture: invented team names and small integer team_ids authored for these tests; no real league data,2026-08-14
 tests/test_franchise_rivalry.py,team-id,6cb483ce0dd8f5c1,collision,Ordinary non-identity source wording and a synthetic structural fixture value in the rivalry feature,2026-08-12
+tests/test_home_alltime_contract.py,team-id,436a43e426b0e35f,collision,synthetic fixture value that happens to sit in an identity-shaped position,2026-08-17
 tests/test_league_config_templates.py,owner,557213b8c90deaaf,collision,"the ordinary English word, used in its ordinary sense",2026-08-10
 tests/test_league_config_templates.py,owner,58d85cbf6e06d281,collision,"the ordinary English word, used in its ordinary sense",2026-08-10
 tests/test_local_raw_writer.py,team-id,c5d811027fe88200,collision,synthetic fixture value that happens to sit in an identity-shaped position,2026-08-10

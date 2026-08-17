@@ -816,6 +816,73 @@ def get_optimal_team(season_year=None, matchup_period=None,
     return selected
 
 
+def get_service_years(player_ids, team_id=None):
+    """Per player_id, the seasons with qualifying active production as the
+    LISTAGG string "2024,2025,2026" -- the fact-backed Years of Service
+    definition (Kyle 2026-07-15/16, mirrored from the CBS
+    get_years_of_service and the team-history service_seasons CTE): a
+    season counts when the player was actively started and his active
+    calculated points for the season are nonzero at 1dp, net-NEGATIVE
+    seasons INCLUDED (a bad season is still service). League-wide by
+    default; team_id scopes it to one franchise the way the team pages do.
+    Empty dict for no ids; a player with no qualifying season is absent.
+    """
+    player_ids = [pid for pid in (player_ids or []) if pid is not None]
+    if not player_ids:
+        return {}
+    where = [league_predicate(), 'team_id IS NOT NULL',
+             "performance_status = 'active'"]
+    params = []
+    if team_id is not None:
+        where.append('team_id = %s')
+        params.append(team_id)
+    where.append(f"player_id IN ({', '.join(['%s'] * len(player_ids))})")
+    params.extend(player_ids)
+    rows = query_for_presentation(f"""
+        SELECT
+            player_id,
+            {listagg('CAST(season_year AS VARCHAR)', ',', 'season_year')}
+                AS service_years
+        FROM (
+            SELECT player_id, season_year
+            FROM fct_player_season_performance
+            WHERE {' AND '.join(where)}
+            GROUP BY player_id, season_year
+            HAVING ROUND(CAST(SUM(CAST(calculated_points AS DECIMAL(18, 6))) AS DOUBLE), 1) <> 0
+        )
+        GROUP BY player_id
+    """, params)
+    return {r['player_id']: r['service_years'] for r in rows}
+
+
+def get_home_all_time_team():
+    """The Home All-Time board's lineup, one definition for every format:
+    the all-time active All-League Team (get_optimal_team, latest roster
+    shape, most-recent-stint team + canonical owner already attached by
+    _enrich_optimal_team_with_stats) with each pick's fact-backed
+    `service_years` attached for the Years of Service column. Both the
+    H2H get_home_tab_data and the season-points home_boards read this, so
+    the two books cannot disagree on what the all-time team is."""
+    lineup = get_optimal_team(season_year=None, points_type='active')
+    years = get_service_years([row.get('player_id') for row in lineup])
+    for row in lineup:
+        row['service_years'] = years.get(row.get('player_id'), '')
+    return lineup
+
+
+def get_first_season():
+    """The earliest season on file for the league (measured from the team
+    season fact, the same source the season-points context reads), or
+    None when nothing is loaded. Titles the Home All-Time board's era."""
+    rows = query_for_presentation(f"""
+        SELECT MIN(season_year) AS first_season
+        FROM fct_team_season_performance
+        WHERE {league_predicate()}
+    """)
+    value = rows[0]['first_season'] if rows else None
+    return int(value) if value is not None else None
+
+
 def get_home_tab_data(season_year, matchup_period):
     """Fetch every dataset the Home tab needs, in one place (#23).
 
@@ -830,7 +897,11 @@ def get_home_tab_data(season_year, matchup_period):
                                   -- points_type='all' lineups (active +
                                      inactive + FA) driving the Total-Pts
                                      deviation columns
-      all_time_rows               -- all-time active All-League Team (left band)
+      all_time_rows               -- all-time active All-League Team with
+                                     service_years (the full-width board
+                                     under Season-to-Date)
+      first_season                -- earliest season on file, for the
+                                     all-time board's measured era
     """
     return {
         'weekly_rows': get_all_league_team(season_year, matchup_period),
@@ -839,7 +910,8 @@ def get_home_tab_data(season_year, matchup_period):
             season_year, matchup_period, points_type='all',
         ),
         'season_all_rows': get_optimal_team(season_year, points_type='all'),
-        'all_time_rows': get_optimal_team(season_year=None, points_type='active'),
+        'all_time_rows': get_home_all_time_team(),
+        'first_season': get_first_season(),
     }
 
 

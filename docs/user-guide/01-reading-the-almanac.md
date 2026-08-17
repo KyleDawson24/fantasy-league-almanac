@@ -21,6 +21,8 @@ Both league types show "All-League Team Season-to-Date" and All-Time.
 
 "Stat Line" shows each player's active production in descending order of what produced the most points. The Column immediately to the right shows who "would have" made the given team if all points counted instead of just active. To ease readability, that column only populates when there is a divergence in the player selected -- if the only difference is the point totals (eg top active player achieved the title despite sitting 1 game), the column remains blank.
 
+The All-Time board carries **Years of Service** in that position instead: the number of seasons the player logged active production for any team in the league, followed by the seasons themselves as compressed ranges (`1: 2026` for a first-year player, `21: 2001–2019, 2021–2022` for a long career with a gap). A net-negative season still counts -- a bad year is still a year of service. The board's title carries the measured era, e.g. `All-League Team: All-Time (2001–2026)`.
+
 These are computed lineups, not awards -- how they are chosen is explained in [The points
 lenses](02-points-lenses.md).
 

@@ -371,8 +371,17 @@ HOME_HEADER = [
 HOME_DEVIATION_LABEL = 'Total-Pts Best (incl. bench & FA)'
 
 
-# v1.2 (#22/#23): thin left-band All-League Team (all-time) header.
-HOME_ALLTIME_HEADER = ['Slot', 'Player', 'Points', 'ppg']
+# The Home All-Time board's trailing column (Kyle's ruling, 2026-08-17):
+# the all-time board swaps the Total-Pts deviation pair for Years of
+# Service, the CBS contract, in BOTH the H2H and the season-points books.
+HOME_YEARS_OF_SERVICE_LABEL = 'Years of Service'
+
+# The Home All-Time board header: the full All-League row plus Years of
+# Service. One contract for every format -- the H2H book's old thin
+# left-band table (Slot | Player | Points | ppg) is retired, and this name
+# now means the full-width shape so no caller can rebuild the thin one by
+# importing it.
+HOME_ALLTIME_HEADER = [*HOME_HEADER, HOME_YEARS_OF_SERVICE_LABEL]
 
 
 RECORDS_HEADER = [
@@ -807,7 +816,7 @@ def _team_history_display_row(row, label, display_slot=None, active_games=None,
         'points_per_active_game': (
             f"{active_points / active_games:.2f}" if active_games else ''
         ),
-        'years_of_service': _format_years_of_service(row.get('service_years')),
+        'years_of_service': format_years_of_service(row.get('service_years')),
         **stat_line,
     }
 
@@ -833,10 +842,14 @@ def _empty_team_history_display_row():
     }
 
 
-def _format_years_of_service(service_years):
+def format_years_of_service(service_years):
     """The SQL LISTAGG "2024,2025,2026" -> the CBS-style "count: year-ranges"
-    longevity string, e.g. "3: 2024-2026". Empty when the player logged no
-    active (started, nonzero) seasons. En-dash ranges match the CBS almanac."""
+    longevity string, e.g. "3: 2024–2026"; a first-year player reads
+    "1: 2026". Empty when the player logged no active (started, nonzero)
+    seasons -- net-negative seasons still count, the fact-side HAVING keeps
+    them (a bad season is still service, Kyle 2026-07-15). En-dash ranges
+    match the CBS almanac's _years_of_service, which this mirrors character
+    for character; the team pages and both Home All-Time boards read it."""
     if not service_years:
         return ''
     years = sorted({int(y) for y in str(service_years).split(',') if y.strip()})
@@ -1032,26 +1045,25 @@ def format_all_league_team_row(row, league_id=None):
     ]
 
 
-def format_all_league_thin_row(row):
-    """Project one optimal-team pick into the thin left-band shape:
-    Slot | Player | Pts | ppg.
+def format_all_league_alltime_row(row, league_id=None):
+    """The Home All-Time board row, one contract for every format (Kyle
+    2026-08-17): the eight standard All-League columns plus Years of
+    Service -- HOME_ALLTIME_HEADER's shape, and the CBS Home's all-time
+    shape. Fantasy Team / Owner are whatever context the selection already
+    carries (the most-recent-stint team + canonical owner from
+    _enrich_optimal_team_with_stats); nothing platform-specific is decided
+    here.
 
-    Used by the Home all-time All-League Team (#22). ppg = points /
-    games_played; games_played comes from _enrich_optimal_team_with_stats
-    and is active-games when the team was built points_type='active'
-    (the all-time team is), so ppg reads "points per active game" --
-    the same convention as the per-team tabs' points_per_active_game.
+    Points render as a whole number: 1-decimal precision is overkill at
+    the all-time scale (the retired thin table's rule, and the CBS
+    all-time board's). Years of Service comes from the row's fact-backed
+    `service_years` (almanac_data.get_service_years) through the shared
+    formatter, never derived here.
     """
-    slot = row.get('slot_label') or row.get('lineup_slot') or ''
-    player = _bref_player_cell(row)
-    if not player:
-        return [slot, '', '', '']
-    pts_raw = row.get('platform_points') or 0
-    # Whole number -- 1-decimal precision is overkill at the all-time scale.
-    points = _round_half_up(pts_raw)
-    games = int(row.get('games_played') or 0)
-    ppg = f"{(pts_raw / games):.2f}" if games else ''
-    return [slot, player, points, ppg]
+    base = format_all_league_team_row(row, league_id=league_id)
+    if _bref_player_cell(row):
+        base[5] = _round_half_up(float(row.get('platform_points') or 0))
+    return [*base, format_years_of_service(row.get('service_years'))]
 
 
 def format_all_league_team_row_with_deviation(row, deviation_pick, league_id=None):

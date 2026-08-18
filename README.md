@@ -224,7 +224,7 @@ The portability spike that sized the transform-layer port, including the traps i
 
 The current shape of the transform layer: **97 dbt models** (50 views, 44 tables, 3 incremental), **20 seeds**, **720 data tests**, **30 sources**, and **4 declared exposures**. These counts are regenerated from the parsed manifest at each release cut; if you are reading them mid-cycle, `dbt parse` and the manifest are the truth.
 
-Most of that needs a warehouse to exercise, but not all of it: with no account and no credentials, `dbt deps && dbt parse` compiles the project and `pytest tests/` passes. At this cut a fresh clone collects **1719** tracked pure tests, with **27** warehouse-marked goldens deselected by default -- collection counts, not a pass tally, since the tests wanting private regression corpora skip rather than fail. Your own checkout will print different totals: some tests need a POSIX shell and skip on Windows, and any untracked work of your own is collected too. Counts drift between releases; `pytest tests/ -q` on your machine is the truth.
+Most of that needs a warehouse to exercise, but not all of it: with no account and no credentials, `dbt deps && dbt parse` compiles the project and `pytest tests/` passes. At this cut a fresh clone collects **1725** tracked pure tests, with **27** warehouse-marked goldens deselected by default -- collection counts, not a pass tally, since the tests wanting private regression corpora skip rather than fail. Your own checkout will print different totals: some tests need a POSIX shell and skip on Windows, and any untracked work of your own is collected too. Counts drift between releases; `pytest tests/ -q` on your machine is the truth.
 
 - **Modeling that survived a second implementation.** Wide convergence facts at consumer grain; a symmetric active/inactive split ("active is fantasy reality, inactive is MLB reality") that is what makes wasted-production analysis possible at all; a seed-driven UNPIVOT mart where adding a tracked stat is a CSV row rather than a five-file SQL change.
 - **Reproducibility.** Floating-point sums are not associative, and SQL engines do not promise summation order, so rebuilding with no code change could move a rendered cell by one, and oh boy it often did. Sums now run in exact decimal with pinned tie-breaks, and a byte-diff harness pins a known week so any drift fails loudly.
@@ -255,7 +255,15 @@ Most of that needs a warehouse to exercise, but not all of it: with no account a
 
 ## Status
 
-- **v1.9.0** -- current, 2026-08-13. The journey ends in a Google
+- **v1.9.1** -- current, 2026-08-18. ESPN auction drafts now render as
+  purchase ledgers with prices, acquiring teams and explicit unavailable
+  values instead of being assigned fictional snake-pick order, rounds and
+  value grades. Auction completion remains fail-closed: ESPN serves a
+  populated placeholder board during the live draft, so rows are accepted
+  only after the platform marks the draft complete. Snake drafts are
+  unchanged. Full notes:
+  [RELEASE NOTES v1.9.1.md](RELEASE%20NOTES%20v1.9.1.md).
+- **v1.9.0** -- 2026-08-13. The journey ends in a Google
   workbook. One post-configuration command walks every season the
   registry bounds, builds locally, and creates a spreadsheet the app
   owns, renders the almanac into it and returns a link. It asks Google
@@ -273,7 +281,7 @@ Most of that needs a warehouse to exercise, but not all of it: with no account a
   Matrix** lands on Advanced Standings in both books. This is not yet
   guided onboarding (MLB-31/MLB-207), and the untouched-machine
   rehearsal has not run. Full notes:
-  [RELEASE NOTES v1.9.0.md](RELEASE%20NOTES%20v1.9.0.md).
+  [RELEASE NOTES v1.9.0.md](docs/releases/RELEASE%20NOTES%20v1.9.0.md).
 - **v1.8.0** -- 2026-08-10. The engine runs locally, end to
   end: `extract.py --raw-target local` lands RAW as parquet plus a
   manifest, so a fresh clone with league credentials and **no warehouse

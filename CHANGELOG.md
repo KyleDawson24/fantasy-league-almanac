@@ -35,23 +35,6 @@ repository is idle._
 
 ### Fixed
 
-- **ESPN auction drafts no longer masquerade as snake picks.** The pinned
-  `espn-api` wrapper already retained `mDraftDetail.bidAmount` and the
-  nominating team, but the v1.9.0 extractor discarded both and every
-  downstream surface treated the wrapper's served array order as overall
-  pick order. Auction seasons are now detected from captured draft settings
-  or actual bid evidence, prices survive RAW through the reporting mart, and
-  Draft Recap renders an alphabetic purchase ledger instead of rounds,
-  draft slots, “Top Pick,” bust/steal deltas, or color grades. A missing bid
-  says `Unavailable`, never `$0`; auction seasons are kept out of snake
-  all-time slot analysis and listed separately. Snake drafts with no auction
-  evidence retain the existing board and grading path. League 8792's one
-  permitted no-cookie probe returned HTTP 401, so this change makes no claim
-  that ESPN will supply its historical prices; it makes their presence or
-  absence explicit when a future approved extract measures them. This is a
-  v1.9.1 candidate only; the published v1.9.0 tag, release, and ZIP are
-  unchanged.
-
 - **A season-points league gets the points workbook** (MLB-243). The
   renderer chose the head-to-head almanac unless `mart_period_standings`
   had rows -- a CBS-shaped feed standing in for "is this a points
@@ -193,10 +176,32 @@ repository is idle._
   no caption at all, because its golden corpus pins that section byte for
   byte and the same clarification belongs with the unification.
 
+## [1.9.1] - 2026-08-18
+
+ESPN auction drafts get an auction purchase ledger instead of fictional
+snake-pick analysis. Full story in
+[RELEASE NOTES v1.9.1.md](RELEASE%20NOTES%20v1.9.1.md).
+
+Patch rather than minor: one reporting correction, no migration step and no
+change to the snake-draft path.
+
+### Fixed
+
+- **ESPN auction drafts no longer masquerade as snake picks.** Auction
+  evidence and prices now survive RAW through the reporting mart. Draft
+  Recap shows a deterministic team-and-player purchase ledger with the
+  supplied price or explicit `Unavailable`, attributes each purchase to the
+  acquiring team rather than the nominating team, and suppresses rounds,
+  overall-pick meaning, “Top Pick,” slot analysis, bust/steal grades and
+  color grading. A completed 190-purchase live rehearsal reconciled every
+  row and proved that ESPN's `drafted` flag is essential: the active draft
+  had already served a structurally complete 190-row placeholder skeleton.
+  Snake drafts retain their existing presentation unchanged.
+
 ## [1.9.0] - 2026-08-13
 
 The almanac ends in a shareable Google workbook. 29 commits. Full story
-in [RELEASE NOTES v1.9.0.md](RELEASE%20NOTES%20v1.9.0.md).
+in [RELEASE NOTES v1.9.0.md](docs/releases/RELEASE%20NOTES%20v1.9.0.md).
 
 Minor rather than major: substantial additive behaviour, and no existing
 install has a migration step to run.

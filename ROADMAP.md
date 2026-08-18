@@ -15,10 +15,13 @@ reaches rendered preview files on disk). Most recently, v1.9.0
 ESPN, after configuration -- an app-created book under a `drive.file`
 grant, private until sharing is explicitly confirmed -- and retired the
 hand-maintained matchup-schedule seed in favour of weeks and dates read
-from the platform. See CHANGELOG.md for the per-release entries.
+from the platform. v1.9.1 (2026-08-18) followed with a focused auction
+correction: ESPN auction drafts now render as priced purchase ledgers rather
+than being assigned snake-pick order and value grades. See CHANGELOG.md for
+the per-release entries.
 
 **In flight right now:** guided fields-file onboarding (MLB-31/MLB-207),
-which is what still stands between the v1.9.0 command and a stranger
+which is what still stands between the v1.9.1 command and a stranger
 running this cold; the untouched-machine rehearsal of that path; and
 CBS, which remains outside the supported stranger journey and is an
 urgent fast-follow rather than a 2.0 gate.

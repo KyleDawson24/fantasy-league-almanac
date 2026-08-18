@@ -677,7 +677,7 @@ nothing in it should be a reflex.
 pytest tests/
 ```
 
-Fresh-clone collection at this cut: **1719** pure tests, with **27**
+Fresh-clone collection at this cut: **1725** pure tests, with **27**
 warehouse-marked tests deselected by default via `pytest.ini`; no
 credentials are involved and nothing is written. Those are what pytest
 COLLECTS, not a pass tally -- how many pass or skip varies by machine and

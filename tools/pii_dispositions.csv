@@ -246,6 +246,12 @@ tests/test_check_pii_strict.py,team-id,37664d1e8aa5ce5f,collision,synthetic fixt
 tests/test_check_pii_strict.py,team-id,3fd1d3cfc0e0e1b0,collision,synthetic fixture value that happens to sit in an identity-shaped position,2026-08-10
 tests/test_check_pii_strict.py,team-id,5a8c3bf304d6329c,collision,synthetic fixture value that happens to sit in an identity-shaped position,2026-08-10
 tests/test_check_pii_strict.py,team-id,e99bd9db0b6ffdd8,collision,synthetic fixture value that happens to sit in an identity-shaped position,2026-08-10
+tests/test_espn_auction_draft.py,team-id,05580de89ffde90c,collision,Synthetic numeric fixture values in auction regression coverage; not identity data,2026-08-18
+tests/test_espn_auction_draft.py,team-id,0a8adba0679e18ea,collision,Synthetic numeric fixture values in auction regression coverage; not identity data,2026-08-18
+tests/test_espn_auction_draft.py,team-id,27df1fb144b8a2f7,collision,Synthetic numeric fixture values in auction regression coverage; not identity data,2026-08-18
+tests/test_espn_auction_draft.py,team-id,2881e419ed3eb910,collision,Synthetic numeric fixture values in auction regression coverage; not identity data,2026-08-18
+tests/test_espn_auction_draft.py,team-id,a8abd842527b0bbd,collision,Synthetic numeric fixture values in auction regression coverage; not identity data,2026-08-18
+tests/test_espn_auction_draft.py,team-id,ebe920285bb1a363,collision,Synthetic numeric fixture values in auction regression coverage; not identity data,2026-08-18
 tests/test_extract_season_points.py,owner,af6b959b6c63efeb,collision,MLB-243 synthetic test fixture: invented team names and small integer team_ids authored for these tests; no real league data,2026-08-14
 tests/test_franchise_rivalry.py,team-id,6cb483ce0dd8f5c1,collision,Ordinary non-identity source wording and a synthetic structural fixture value in the rivalry feature,2026-08-12
 tests/test_home_alltime_contract.py,team-id,436a43e426b0e35f,collision,synthetic fixture value that happens to sit in an identity-shaped position,2026-08-17

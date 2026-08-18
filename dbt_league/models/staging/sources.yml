@@ -86,7 +86,7 @@ sources:
             warn_after: {count: 210, period: day}
             error_after: {count: 420, period: day}
       - name: draft_settings
-        description: "Raw ESPN draftSettings JSON, append-only. Draft type, date, pick order and keeper count (5 in 2026, 0 in 2025 -- the league became a keeper league between seasons). Distinct from draft_picks, which is the resulting board. No staging model yet; captured because the payload was already being fetched."
+        description: "Raw ESPN draftSettings JSON, append-only. Draft type, date, pick order and keeper count (5 in 2026, 0 in 2025 -- the league became a keeper league between seasons). Distinct from draft_picks, which is the resulting board. stg_draft_settings retains the measured type/date/count so consumers can distinguish auction purchases from ordered picks."
         config:
           loaded_at_field: extracted_at
           freshness:

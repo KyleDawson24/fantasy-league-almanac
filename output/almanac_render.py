@@ -42,6 +42,9 @@ TEAM_WEEKS_TAB = 'Matchup History'
 DRAFT_TAB = 'Draft Recap'
 
 
+DRAFT_AUCTION_HEADER = ['Season', 'Team', 'Player', 'Price', 'Pts']
+
+
 ADVANCED_STANDINGS_TAB = 'Advanced Standings'
 
 
@@ -1174,6 +1177,30 @@ def format_draft_board_cell(pick):
     """Round x team grid cell: the drafted player as a first-initial link,
     keeper-marked. Blank for an unfilled (round, team) slot."""
     return _draft_initial_label(pick) if pick else ''
+
+
+def format_auction_purchase_row(purchase, team_labels=None):
+    """One auction purchase, with no invented pick/round/rank semantics.
+
+    ``bid_amount`` is ESPN's mDraftDetail bidAmount retained by the pinned
+    wrapper. NULL is evidence only that this captured entry supplied no
+    price; it must say Unavailable rather than becoming $0.
+    """
+    bid = purchase.get('bid_amount')
+    if bid is None:
+        price = 'Unavailable'
+    else:
+        numeric = float(bid)
+        price = (f'${int(numeric):,}' if numeric.is_integer()
+                 else f'${numeric:,.2f}'.rstrip('0').rstrip('.'))
+    return [
+        int(purchase['season_year']),
+        (team_labels or {}).get(purchase.get('team_id'))
+        or purchase.get('team_abbrev') or purchase.get('team_name') or '',
+        _draft_player_label(purchase),
+        price,
+        _one_decimal(purchase.get('season_points')),
+    ]
 
 
 def format_standings_row(rank, row, hitting_specs, pitching_specs,

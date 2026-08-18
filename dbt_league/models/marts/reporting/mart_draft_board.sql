@@ -1,7 +1,8 @@
 -- mart_draft_board.sql
 -- v1.2: the draft board joined to season production + drafting-team labels.
--- One wide consumer row per pick: who was drafted, by whom, where, and how
--- much that player produced that season (the draft-value join).
+-- One wide consumer row per draft entry: who was acquired, by whom, the
+-- ordered-pick coordinates when they are meaningful, the auction price when
+-- ESPN supplied one, and how much that player produced that season.
 --
 -- ==========================================================================
 -- GRAIN: one row per (league_key, season_year, overall_pick).
@@ -27,7 +28,16 @@
 {{ config(materialized='view') }}
 
 with picks as (
-    select * from {{ ref('stg_draft') }}
+    select
+        p.*,
+        ds.draft_type,
+        max(case when p.bid_amount is not null then 1 else 0 end) over (
+            partition by p.league_key, p.season_year
+        ) as season_has_bid
+    from {{ ref('stg_draft') }} p
+    left join {{ ref('stg_draft_settings') }} ds
+        on p.league_key = ds.league_key
+        and p.season_year = ds.season_year
 ),
 
 -- (season, team_id) -> latest team labels, same convention as
@@ -68,6 +78,14 @@ select
     p.round_num,
     p.round_pick,
     p.keeper,
+    p.draft_type,
+    case
+        when upper(coalesce(p.draft_type, '')) like '%AUCTION%'
+          or p.season_has_bid = 1
+        then true else false
+    end as is_auction,
+    p.bid_amount,
+    p.nominating_team_id,
 
     p.team_id,
     tl.team_name,

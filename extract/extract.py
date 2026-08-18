@@ -2030,14 +2030,20 @@ def load_team_owners_to_snowflake(conn, team_owners, year, league_key):
 def fetch_draft(year):
     """Return the season's draft board as a list of pick dicts:
     {overall_pick, round_num, round_pick, player_id, player_name,
-     team_id, keeper}.
+     team_id, keeper, bid_amount, nominating_team_id}.
 
     Sourced from the espn-api wrapper's league.draft, which resolves
     player names and the drafting Team for us (the raw mDraftDetail view
     carries only ids). overall_pick is the 1-based position in the draft
-    order -- league.draft is built in ESPN's overallPickNumber sequence,
-    so the enumerate index is the true overall selection number (snake
-    order included).
+    order -- league.draft is built in ESPN's served pick sequence. For a
+    snake draft the enumerate index is the overall selection number. For
+    an auction it is only a stable capture sequence: downstream reads the
+    measured draft type / bid evidence and must never display it as a pick.
+
+    espn-api 0.46.0 retains ESPN's mDraftDetail ``bidAmount`` and
+    ``nominatingTeamId`` as ``bid_amount`` and ``nominatingTeam`` on each
+    BasePick. Preserve them here. v1.9.0 discarded both even though the
+    pinned wrapper had already done the parsing.
 
     keeper flags picks retained from the prior season (this is a keeper
     league): keepers occupy real draft slots but weren't competitively
@@ -2050,6 +2056,7 @@ def fetch_draft(year):
     rows = []
     for overall_pick, pick in enumerate(league.draft, start=1):
         team = getattr(pick, "team", None)
+        nominating_team = getattr(pick, "nominatingTeam", None)
         rows.append({
             "overall_pick": overall_pick,
             "round_num": pick.round_num,
@@ -2058,6 +2065,10 @@ def fetch_draft(year):
             "player_name": pick.playerName,
             "team_id": getattr(team, "team_id", None),
             "keeper": bool(pick.keeper_status),
+            # Missing is not zero: a NULL bid means ESPN did not supply a
+            # price for this captured purchase and renders as unavailable.
+            "bid_amount": getattr(pick, "bid_amount", None),
+            "nominating_team_id": getattr(nominating_team, "team_id", None),
         })
     return rows
 

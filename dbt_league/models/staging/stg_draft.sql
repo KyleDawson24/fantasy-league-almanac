@@ -9,9 +9,11 @@
 --
 -- Sourced from the espn-api wrapper's league.draft (player names + the
 -- drafting team resolved at extract time). overall_pick is the true overall
--- selection number, snake order included. keeper flags picks retained from
--- the prior season (this is a keeper league) -- they occupy real draft slots
--- but weren't competitively drafted, so consumers can label them.
+-- selection number for ordered drafts and only the wrapper's served sequence
+-- for auctions. Auction consumers MUST use draft type / bid evidence and must
+-- not render that sequence as a pick. keeper flags picks retained from the
+-- prior season. bid_amount stays NULL when ESPN did not supply a price; NULL
+-- must never be coerced to a free purchase.
 
 {{ config(materialized='view') }}
 
@@ -42,6 +44,10 @@ select
     {{ json_text('p.value', 'player_id') }}::integer    as player_id,
     {{ json_text('p.value', 'player_name') }}::string   as player_name,
     {{ json_text('p.value', 'team_id') }}::integer      as team_id,
-    {{ json_text('p.value', 'keeper') }}::boolean       as keeper
+    {{ json_text('p.value', 'keeper') }}::boolean       as keeper,
+    {{ json_text('p.value', 'bid_amount') }}::decimal(18, 2)
+                                                            as bid_amount,
+    {{ json_text('p.value', 'nominating_team_id') }}::integer
+                                                            as nominating_team_id
 from latest_extraction le,
     {{ flatten_array('le.raw_json', 'p') }}

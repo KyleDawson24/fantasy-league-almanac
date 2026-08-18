@@ -72,11 +72,11 @@ models:
 
   - name: mart_draft_board
     description: >
-      One wide row per draft pick: the pick (round / overall / keeper), the
-      drafting team's labels, and the player's total season production
-      (SUM of calculated_points, COALESCEd to 0 for never-played picks) --
-      the draft-value join. Thin relational view over stg_draft; consumer
-      surface for the Draft Recap tab.
+      One wide row per draft entry: ordered-pick coordinates where meaningful,
+      measured auction mode + price where supplied, the acquiring team's
+      labels, and the player's total season production (SUM of
+      calculated_points, COALESCEd to 0 for never-played players). Thin
+      relational view over stg_draft; consumer surface for Draft Recap.
       Grain: one row per (league_key, season_year, overall_pick).
     tests:
       - dbt_utils.unique_combination_of_columns:
@@ -95,7 +95,7 @@ models:
         tests:
           - not_null
       - name: overall_pick
-        description: 'True overall selection number; the pick grain.'
+        description: 'Ordered-draft overall selection; internal served sequence for auctions, which consumers must not label as a pick.'
         tests:
           - not_null
       - name: round_num
@@ -104,6 +104,14 @@ models:
         description: 'Pick within the round.'
       - name: keeper
         description: 'True for keeper picks (retained from the prior season).'
+      - name: draft_type
+        description: 'Verbatim ESPN draftSettings.type.'
+      - name: is_auction
+        description: 'True when settings name an auction or any entry in the league-season carries a bid amount.'
+      - name: bid_amount
+        description: 'ESPN-supplied auction price; NULL stays unavailable.'
+      - name: nominating_team_id
+        description: 'ESPN id of the nominating team, when supplied.'
       - name: team_id
         description: 'Drafting fantasy team id.'
       - name: team_name

@@ -636,7 +636,7 @@ def _replace_draft_tab(spreadsheet, rows, color_grid=None):
     try:
         _reset_sheet_formats(spreadsheet, worksheet)
         last_col = _a1_col(width)
-        _apply_draft_tab_dimensions(spreadsheet, worksheet, width)
+        _apply_draft_tab_dimensions(spreadsheet, worksheet, width, rows)
         formats = [
             {'range': 'A1', 'format': {'textFormat': {'bold': True, 'fontSize': 14}}},
         ]
@@ -694,6 +694,19 @@ def _draft_label_formats(rows, last_col):
         if isinstance(first, str) and first.startswith('Team-agnostic'):
             formats.append({'range': f'A{row_number}:{last_col}{row_number}',
                             'format': {'textFormat': explainer_text_format()}})
+        if isinstance(first, str) and (first.startswith('Auction price')
+                                       or first.startswith('Auction seasons')
+                                       or first.startswith('Prices are shown')):
+            formats.append({'range': f'A{row_number}:{last_col}{row_number}',
+                            'format': {'textFormat': explainer_text_format()}})
+        if isinstance(first, str) and (first.startswith('Auction Purchases')
+                                       or first == 'Auction Purchase History'):
+            formats.append({'range': f'A{row_number}:{last_col}{row_number}',
+                            'format': {'textFormat': {'bold': True,
+                                                       'fontSize': 12}}})
+        if first == 'Season' and second == 'Team':
+            formats.append({'range': f'A{row_number}:E{row_number}',
+                            'format': navy_white})
         # Navy 'Top Pick' super-header band (the merge is applied separately).
         if first == '' and second == 'Top Pick':
             formats.append({'range': f'A{row_number}:{last_col}{row_number}',
@@ -754,11 +767,24 @@ def _draft_merge_requests(rows, sheet_id):
     return requests
 
 
-def _apply_draft_tab_dimensions(spreadsheet, worksheet, width):
+def _apply_draft_tab_dimensions(spreadsheet, worksheet, width, rows=None):
     """Kyle's 2026-07-18 house grid: 25 buffer / 40 short / 40 short / 125
     player / 75 longer-number / 40 short, then 100 for every board and
     leaderboard column after."""
     sheet_id = worksheet.id
+    if any(row and row[0] == 'Season' and len(row) > 1 and row[1] == 'Team'
+           for row in rows or ()):
+        requests = [
+            _column_width_request(sheet_id, 0, 1, 75),
+            _column_width_request(sheet_id, 1, 2, 100),
+            _column_width_request(sheet_id, 2, 3, 160),
+            _column_width_request(sheet_id, 3, 4, 90),
+            _column_width_request(sheet_id, 4, max(width, 5), 75),
+        ]
+        _sheets_batch_update(
+            spreadsheet, f'format dimensions {worksheet.title}', requests,
+        )
+        return
     requests = [
         _column_width_request(sheet_id, 0, 1, 25),
         _column_width_request(sheet_id, 1, 3, 40),

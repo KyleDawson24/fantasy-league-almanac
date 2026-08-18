@@ -324,8 +324,9 @@ models:
     description: >
       One row per draft pick, flattened from the append-only RAW.DRAFT_PICKS
       snapshots (latest per season). Sourced from the espn-api wrapper's
-      league.draft. keeper flags picks retained from the prior season (keeper
-      league). Mirrors stg_team_owners over RAW.TEAM_OWNERS.
+      league.draft. keeper flags picks retained from the prior season;
+      bid_amount and nominating_team_id retain the auction fields already
+      parsed by the pinned wrapper. Mirrors stg_team_owners over RAW.TEAM_OWNERS.
       Grain: one row per (league_key, season_year, overall_pick).
     tests:
       - dbt_utils.unique_combination_of_columns:
@@ -344,7 +345,7 @@ models:
         tests:
           - not_null
       - name: overall_pick
-        description: 'True overall selection number (1..N), snake order included.'
+        description: 'True overall selection number for an ordered draft; served capture sequence for an auction, never exposed there as pick semantics.'
         tests:
           - not_null
       - name: round_num
@@ -361,6 +362,10 @@ models:
         description: 'ESPN numeric id of the drafting fantasy team.'
       - name: keeper
         description: 'True when the pick was a keeper retained from the prior season.'
+      - name: bid_amount
+        description: 'ESPN mDraftDetail bidAmount. NULL means no price was supplied and must render as unavailable, not zero.'
+      - name: nominating_team_id
+        description: 'ESPN id of the team that nominated the auction player, when supplied.'
 
   - name: stg_transactions
     description: >
@@ -556,6 +561,10 @@ models:
           When the draft completed. NULL for a season whose draft has not
           happened, which is a real answer -- consumers must not read the
           absence as an on-time draft.
+      - name: draft_type
+        description: 'ESPN draftSettings.type, retained verbatim as measured format evidence.'
+      - name: keeper_count
+        description: 'Configured keeper count, when ESPN supplies it.'
 
   - name: stg_team_standings
     description: >

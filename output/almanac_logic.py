@@ -55,6 +55,7 @@ from almanac_render import (
     HOME_HEADER,
     HOME_TAB,
     DRAFT_ALLTIME_CELLS_LABEL,
+    DRAFT_AUCTION_HEADER,
     DRAFT_TAB,
     DRAFT_VALUE_HEADER,
     RECORDS_HALL_BANNER,
@@ -71,6 +72,7 @@ from almanac_render import (
     RECORDS_TAB,
     format_hall_of_fame_cells,
     format_hall_of_shame_cells,
+    format_auction_purchase_row,
     TEAM_HISTORY_DETAIL_HEADER,
     TEAM_HISTORY_ALLTIME_DETAIL_HEADER,
     TEAM_HISTORY_BEST_SEASON_BANNER,
@@ -970,6 +972,91 @@ def season_pace_factors(clock_by_season, current_season):
     return factors, n
 
 
+def _row_has_auction_evidence(row):
+    """Measured auction evidence, never a platform-name inference."""
+    flag = row.get('is_auction')
+    if flag is True or str(flag).strip().lower() in ('1', 'true'):
+        return True
+    if row.get('bid_amount') is not None:
+        return True
+    return 'AUCTION' in str(row.get('draft_type') or '').upper()
+
+
+def _auction_seasons(rows):
+    """Seasons where any captured row proves auction semantics."""
+    return {
+        row.get('season_year')
+        for row in rows or ()
+        if row.get('season_year') is not None and _row_has_auction_evidence(row)
+    }
+
+
+def _auction_purchase_grid(purchases):
+    """Alphabetic purchase ledger: price never determines row order."""
+    by_season = defaultdict(list)
+    for purchase in purchases:
+        by_season[purchase.get('season_year')].append(purchase)
+    labels = {season: draft_team_labels(rows)
+              for season, rows in by_season.items()}
+    ordered = sorted(
+        purchases,
+        key=lambda row: (
+            -int(row.get('season_year') or 0),
+            str((labels.get(row.get('season_year')) or {}).get(row.get('team_id'))
+                or row.get('team_abbrev') or row.get('team_name') or '').lower(),
+            str(row.get('player_name') or '').lower(),
+            row.get('player_id') or 0,
+        ),
+    )
+    return [DRAFT_AUCTION_HEADER] + [
+        format_auction_purchase_row(
+            row, labels.get(row.get('season_year')),
+        )
+        for row in ordered
+    ]
+
+
+def _build_auction_draft_tab_rows(board_rows, season_year, history_rows):
+    """Truthful auction surface: purchases/prices, never snake grades."""
+    available = sum(row.get('bid_amount') is not None for row in board_rows)
+    if available:
+        price_note = (
+            "Auction prices are ESPN's supplied bid amounts; a missing value "
+            "says Unavailable. No pick, round, slot, or value grade is inferred."
+        )
+    else:
+        price_note = (
+            "Auction price unavailable -- ESPN supplied no bid amount in the "
+            "captured purchases. No price, pick, round, slot, or grade is inferred."
+        )
+    current = [dict(row, season_year=row.get('season_year') or season_year)
+               for row in board_rows]
+    rows = [
+        [f'Draft Recap: {season_year}'],
+        [],
+        [price_note],
+        [],
+        [f'Auction Purchases - {season_year}'],
+        *_auction_purchase_grid(current),
+    ]
+
+    auction_years = _auction_seasons(history_rows)
+    prior = [row for row in history_rows or ()
+             if row.get('season_year') in auction_years
+             and int(row.get('season_year')) != int(season_year)]
+    if prior:
+        rows.extend([
+            [],
+            [],
+            ['Auction Purchase History'],
+            ["Prices are shown exactly where ESPN supplied them; Unavailable "
+             "means the captured purchase carried no bid amount. Rows are "
+             "alphabetic within season, not a draft order."],
+            *_auction_purchase_grid(prior),
+        ])
+    return rows
+
+
 def build_draft_tab_rows(board_rows, season_year, league_id=None,
                          history_rows=None, season_clocks=None):
     """Build the Draft Recap tab (Kyle's 2026-07-18 overhaul): Best Value
@@ -985,6 +1072,17 @@ def build_draft_tab_rows(board_rows, season_year, league_id=None,
     league_id is unused (kept for builder-signature symmetry).
     """
     del league_id
+    history_rows = history_rows or []
+    if any(_row_has_auction_evidence(row) for row in board_rows):
+        return _build_auction_draft_tab_rows(
+            board_rows, season_year, history_rows,
+        )
+
+    auction_years = _auction_seasons(history_rows)
+    auction_history = [row for row in history_rows
+                       if row.get('season_year') in auction_years]
+    ordered_history = [row for row in history_rows
+                       if row.get('season_year') not in auction_years]
     # Row 1 title, row 2 blank, row 3 helper notes (Delta at A, keeper at
     # F -- Kyle 2026-07-18), row 4 blank.
     rows = [
@@ -1023,12 +1121,12 @@ def build_draft_tab_rows(board_rows, season_year, league_id=None,
     rows.append([f'Draft Board - {season_year}'])
     rows.extend(_draft_board_grid(board_rows))
 
-    if history_rows:
+    if ordered_history:
         team_count = len({r.get('team_id') for r in board_rows
                           if r.get('team_id') is not None}) or 1
         factors, _ = season_pace_factors(season_clocks or {}, season_year)
-        seasons = sorted({r['season_year'] for r in history_rows})
-        has_keepers = any(r.get('keeper') for r in history_rows)
+        seasons = sorted({r['season_year'] for r in ordered_history})
+        has_keepers = any(r.get('keeper') for r in ordered_history)
         keeper_note = (" Round K holds keepers, ranked by production (each "
                        "team's best kept, 2nd-best, and so on)." if has_keepers
                        else '')
@@ -1039,7 +1137,17 @@ def build_draft_tab_rows(board_rows, season_year, league_id=None,
                      f'shape. Top Pick = the top-scoring single pick ever made '
                      f'in that round.{keeper_note} '
                      f'Coverage: {", ".join(str(y) for y in seasons)}.'])
-        rows.extend(_alltime_draft_grid(history_rows, team_count, factors))
+        rows.extend(_alltime_draft_grid(ordered_history, team_count, factors))
+    if auction_history:
+        rows.extend([
+            [],
+            [],
+            ['Auction Purchase History'],
+            ["Auction seasons are excluded from pick-slot and value analysis. "
+             "Prices are shown exactly where ESPN supplied them; Unavailable "
+             "means the captured purchase carried no bid amount."],
+            *_auction_purchase_grid(auction_history),
+        ])
     return rows
 
 
@@ -1275,6 +1383,8 @@ def build_draft_board_color_grid(board_rows):
     (same keeper-sort + team order). One list per board slot, each holding
     the teams' season points (None for an empty slot). The write layer maps
     these to the board's red->white->green color scale."""
+    if any(_row_has_auction_evidence(row) for row in board_rows):
+        return []
     team_order, _, sorted_cols = _draft_sorted_columns(board_rows)
     max_slots = max((len(col) for col in sorted_cols.values()), default=0)
     return [

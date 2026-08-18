@@ -35,6 +35,23 @@ repository is idle._
 
 ### Fixed
 
+- **ESPN auction drafts no longer masquerade as snake picks.** The pinned
+  `espn-api` wrapper already retained `mDraftDetail.bidAmount` and the
+  nominating team, but the v1.9.0 extractor discarded both and every
+  downstream surface treated the wrapper's served array order as overall
+  pick order. Auction seasons are now detected from captured draft settings
+  or actual bid evidence, prices survive RAW through the reporting mart, and
+  Draft Recap renders an alphabetic purchase ledger instead of rounds,
+  draft slots, “Top Pick,” bust/steal deltas, or color grades. A missing bid
+  says `Unavailable`, never `$0`; auction seasons are kept out of snake
+  all-time slot analysis and listed separately. Snake drafts with no auction
+  evidence retain the existing board and grading path. League 8792's one
+  permitted no-cookie probe returned HTTP 401, so this change makes no claim
+  that ESPN will supply its historical prices; it makes their presence or
+  absence explicit when a future approved extract measures them. This is a
+  v1.9.1 candidate only; the published v1.9.0 tag, release, and ZIP are
+  unchanged.
+
 - **A season-points league gets the points workbook** (MLB-243). The
   renderer chose the head-to-head almanac unless `mart_period_standings`
   had rows -- a CBS-shaped feed standing in for "is this a points

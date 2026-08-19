@@ -1,0 +1,142 @@
+name: Report a bug
+description: Tell us where a supported Fantasy League Almanac run stopped or produced the wrong result.
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a problem. GitHub issues are public.
+
+        Share only the minimum sanitized evidence needed to understand the failure. Never include ESPN cookies, an `.env` file, Google OAuth tokens or Credential Locker contents, a workbook URL or ledger, raw league data, DuckDB/Parquet files, a league ID, league-member names, or an unsanitized username or file path. Do not attach full logs.
+
+        If the report cannot safely be public, use the private-support route in the issue chooser instead. Even by email, do not send credentials or private data artifacts.
+
+  - type: checkboxes
+    id: existing_issue
+    attributes:
+      label: Existing report
+      description: Please check the existing issues before opening a new one.
+      options:
+        - label: I searched the existing issues and did not find this problem.
+          required: true
+
+  - type: input
+    id: release_version
+    attributes:
+      label: Release version
+      description: Use the version printed in the release name or ZIP filename.
+      placeholder: v1.9.1
+    validations:
+      required: true
+
+  - type: dropdown
+    id: operating_system
+    attributes:
+      label: Operating system
+      options:
+        - Windows 11
+        - Windows 10
+        - macOS
+        - Linux
+        - Other / not sure
+    validations:
+      required: true
+
+  - type: input
+    id: python_version
+    attributes:
+      label: Python version
+      description: Run `python --version` if the setup reached that step.
+      placeholder: Python 3.13.7
+    validations:
+      required: true
+
+  - type: dropdown
+    id: fantasy_platform
+    attributes:
+      label: Fantasy platform
+      options:
+        - ESPN
+        - CBS Sports
+        - Other / not sure
+        - Not applicable
+    validations:
+      required: true
+
+  - type: dropdown
+    id: scoring_format
+    attributes:
+      label: Scoring format
+      options:
+        - Head-to-head points
+        - Season-total points (no head-to-head)
+        - Head-to-head categories
+        - Rotisserie / season-long categories
+        - Other / not sure
+        - Not applicable
+    validations:
+      required: true
+
+  - type: input
+    id: history_span
+    attributes:
+      label: Approximate history span
+      description: Give years and/or a season count, not a league ID.
+      placeholder: 2015-2026 (12 seasons), or Not applicable
+    validations:
+      required: true
+
+  - type: dropdown
+    id: draft_type
+    attributes:
+      label: Draft type
+      options:
+        - Auction / salary cap
+        - Snake / linear
+        - Other / not sure
+        - Not applicable
+    validations:
+      required: true
+
+  - type: textarea
+    id: failed_step
+    attributes:
+      label: Failed step or command
+      description: Describe the Quickstart step and sanitize the command before pasting it. Replace IDs, usernames, names, and private paths with `[redacted]`.
+      placeholder: The run stopped during Quickstart step 8 after I ran ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected_result
+    attributes:
+      label: Expected result
+      description: What did you expect the tool to do?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual_result
+    attributes:
+      label: Actual result
+      description: What happened instead? Use generic team/player descriptions rather than real names.
+    validations:
+      required: true
+
+  - type: textarea
+    id: sanitized_error_tail
+    attributes:
+      label: Sanitized final error lines
+      description: Paste only the final 10-20 useful lines after redacting IDs, names, usernames, and paths. Leave blank if there was no error text. Do not attach or paste a full log.
+      render: shell
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: I checked this report and removed credentials, cookies, tokens, capability URLs, league IDs, member identities, private paths, raw data, database files, and full logs.
+          required: true

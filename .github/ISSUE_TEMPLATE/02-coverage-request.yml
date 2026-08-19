@@ -1,0 +1,91 @@
+name: Request league coverage
+description: Register interest in a platform, scoring format, or league shape that is not supported yet.
+title: "[Coverage request] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping set the post-v2.0 roadmap. One issue represents one voluntary coverage request. These requests are not telemetry, not fantasy-baseball market share, and not a representative survey.
+
+        Do not include a league ID, ESPN cookies, an `.env` file, Google tokens, workbook URLs, league-member names, raw league data, DuckDB/Parquet files, screenshots, or logs. This form needs only the non-sensitive league shape below and does not promise a delivery date.
+
+  - type: checkboxes
+    id: existing_request
+    attributes:
+      label: Existing request
+      description: Similar requests are welcome because they contribute to the count, but please avoid submitting the same league twice.
+      options:
+        - label: I have not already submitted this same league-shape request.
+          required: true
+
+  - type: dropdown
+    id: fantasy_platform
+    attributes:
+      label: Platform
+      options:
+        - ESPN
+        - CBS Sports
+        - Yahoo Fantasy
+        - Fantrax
+        - Ottoneu
+        - Sleeper
+        - Other / not listed
+    validations:
+      required: true
+
+  - type: dropdown
+    id: scoring_format
+    attributes:
+      label: Scoring format
+      options:
+        - Head-to-head points
+        - Season-total points (no head-to-head)
+        - Head-to-head categories
+        - Rotisserie / season-long categories
+        - Best ball
+        - Other / not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: draft_type
+    attributes:
+      label: Draft type
+      options:
+        - Auction / salary cap
+        - Snake / linear
+        - No draft / imported rosters
+        - Other / not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: history_length
+    attributes:
+      label: Approximate league history
+      options:
+        - 1 season
+        - 2-4 seasons
+        - 5-9 seasons
+        - 10-19 seasons
+        - 20+ seasons
+    validations:
+      required: true
+
+  - type: textarea
+    id: other_details
+    attributes:
+      label: Other non-sensitive details
+      description: Optional. Explain an `Other` answer or an unusual rule without including IDs, names, credentials, screenshots, exports, or private league data.
+      placeholder: Our scoring is season-total points with an auction draft and keeper contracts.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: I included only non-sensitive league-shape information and no credentials, IDs, member identities, private links, files, screenshots, or logs.
+          required: true

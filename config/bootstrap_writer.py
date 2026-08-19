@@ -21,7 +21,7 @@ import os
 from pathlib import Path
 import re
 import tempfile
-from typing import Mapping, Optional
+from typing import Callable, Mapping, Optional
 
 import yaml
 from yaml.nodes import MappingNode, ScalarNode
@@ -43,6 +43,9 @@ DEFAULT_LEAGUE_KEY = "espn-main"
 
 _CREDENTIAL_KEYS = ("LEAGUE_ID", "ESPN_S2", "SWID")
 _EXPECTED_CREDENTIAL_ENV = ["ESPN_S2", "SWID", "LEAGUE_ID"]
+_PLATFORM_CREDENTIAL_KEYS = {
+    "espn": ("ESPN_S2", "SWID"),
+}
 _ENV_ASSIGNMENT = re.compile(
     r"^(?P<prefix>\s*(?:export\s+)?)"
     r"(?P<key>[A-Za-z_][A-Za-z0-9_]*)"
@@ -68,6 +71,15 @@ class ConfigurationWriteResult:
     @property
     def changed(self) -> bool:
         return self.env_changed or self.registry_changed
+
+
+@dataclass(frozen=True)
+class CredentialRotationNotice:
+    """Credential-free copy a CLI or future UI must show for rotation."""
+
+    platform: str
+    credential_keys: tuple[str, ...]
+    message: str
 
 
 @dataclass(frozen=True)
@@ -175,6 +187,88 @@ def write_validated_configuration(
     )
 
 
+def credential_rotation_notice(platform: str) -> CredentialRotationNotice:
+    """Return the mandatory shared-scope warning without accepting secrets."""
+
+    normalized = (platform or "").strip().lower()
+    keys = _PLATFORM_CREDENTIAL_KEYS.get(normalized)
+    if keys is None:
+        raise BootstrapValidationError(
+            BootstrapErrorCode.UNSUPPORTED_PLATFORM,
+            "Credential rotation currently supports ESPN only. No local "
+            "credentials were changed.",
+        )
+    label = normalized.upper()
+    return CredentialRotationNotice(
+        platform=normalized,
+        credential_keys=keys,
+        message=(
+            f"{label} credentials are shared by all configured {label} "
+            f"leagues on this computer. Replacing them can affect every "
+            f"configured {label} league."
+        ),
+    )
+
+
+def rotate_validated_credentials(
+    request: BootstrapRequest,
+    profile: LeagueProfile,
+    *,
+    confirm: Callable[[CredentialRotationNotice], bool],
+    league_key: str = DEFAULT_LEAGUE_KEY,
+    env_path: Path = DEFAULT_ENV_PATH,
+    env_template_path: Path = DEFAULT_ENV_TEMPLATE_PATH,
+    registry_path: Path = DEFAULT_REGISTRY_PATH,
+) -> ConfigurationWriteResult:
+    """Explicitly rotate one platform's credentials after live validation.
+
+    The complete replacement plan is built before confirmation, and the
+    callback receives only credential-free scope information. Ordinary setup
+    continues to refuse every nonempty replacement.
+    """
+
+    notice = credential_rotation_notice(request.platform)
+    plan = _build_write_plan(
+        request,
+        profile,
+        league_key=league_key,
+        env_path=Path(env_path),
+        env_template_path=Path(env_template_path),
+        registry_path=Path(registry_path),
+        rotation_platform=notice.platform,
+    )
+    if not plan.env_changed:
+        return ConfigurationWriteResult(
+            env_path=plan.env_path,
+            registry_path=plan.registry_path,
+            env_changed=False,
+            registry_changed=False,
+        )
+
+    try:
+        approved = confirm(notice)
+    except Exception:
+        raise BootstrapValidationError(
+            BootstrapErrorCode.CONFIRMATION_DECLINED,
+            "Credential rotation confirmation could not be completed. The "
+            "existing credentials are unchanged.",
+        ) from None
+    if approved is not True:
+        raise BootstrapValidationError(
+            BootstrapErrorCode.CONFIRMATION_DECLINED,
+            "Credential rotation was declined. The existing credentials are "
+            "unchanged.",
+        )
+
+    _apply_write_plan(plan)
+    return ConfigurationWriteResult(
+        env_path=plan.env_path,
+        registry_path=plan.registry_path,
+        env_changed=plan.env_changed,
+        registry_changed=False,
+    )
+
+
 def _build_write_plan(
     request: BootstrapRequest,
     profile: LeagueProfile,
@@ -183,6 +277,7 @@ def _build_write_plan(
     env_path: Path,
     env_template_path: Path,
     registry_path: Path,
+    rotation_platform: Optional[str] = None,
 ) -> _WritePlan:
     _validate_preflight_pair(request, profile)
     if league_key != DEFAULT_LEAGUE_KEY:
@@ -227,6 +322,12 @@ def _build_write_plan(
 
     env_original = _read_optional_bytes(env_path, "credential file")
     if env_original is None:
+        if rotation_platform is not None:
+            raise BootstrapValidationError(
+                BootstrapErrorCode.CONFIG_CONFLICT,
+                "Credential rotation requires an existing configured .env. "
+                "Run ordinary guided setup first; nothing was written.",
+            )
         env_source = _read_required_bytes(
             env_template_path, "credential template"
         )
@@ -261,8 +362,26 @@ def _build_write_plan(
         "ESPN_S2": request.espn_s2,
         "SWID": request.swid,
     }
-    _refuse_credential_conflicts(existing_values, desired_credentials)
-    env_desired = _render_env(env_document, desired_credentials)
+    if rotation_platform is None:
+        _refuse_credential_conflicts(existing_values, desired_credentials)
+        env_updates = desired_credentials
+    else:
+        rotation_keys = _PLATFORM_CREDENTIAL_KEYS.get(rotation_platform)
+        if rotation_keys is None:
+            raise BootstrapValidationError(
+                BootstrapErrorCode.UNSUPPORTED_PLATFORM,
+                "Credential rotation currently supports ESPN only. Nothing "
+                "was written.",
+            )
+        _validate_rotation_source(
+            existing_values,
+            desired_credentials,
+            rotation_keys=rotation_keys,
+        )
+        env_updates = {
+            key: desired_credentials[key] for key in rotation_keys
+        }
+    env_desired = _render_env(env_document, env_updates)
 
     registry_original = _read_required_bytes(registry_path, "league registry")
     registry_text, registry_bom = _decode_utf8(
@@ -275,15 +394,18 @@ def _build_write_plan(
         existing_league_id=existing_values.get("LEAGUE_ID", ""),
         profile=profile,
     )
-    registry_rendered = _render_registry_profile(
-        registry_text,
-        registry_node,
-        league_key=league_key,
-        current=target,
-        profile=profile,
-    )
-    rendered_data, _ = _load_registry_document(registry_rendered)
-    _assert_rendered_target(rendered_data, league_key, profile)
+    if rotation_platform is None:
+        registry_rendered = _render_registry_profile(
+            registry_text,
+            registry_node,
+            league_key=league_key,
+            current=target,
+            profile=profile,
+        )
+        rendered_data, _ = _load_registry_document(registry_rendered)
+        _assert_rendered_target(rendered_data, league_key, profile)
+    else:
+        registry_rendered = registry_text
 
     for key in ("ESPN_S2", "SWID"):
         value = desired_credentials[key]
@@ -540,6 +662,29 @@ def _refuse_credential_conflicts(
                 f"{label} value. This rung has no approved replacement "
                 "policy, so nothing was written.",
             )
+
+
+def _validate_rotation_source(
+    existing: Mapping[str, str],
+    desired: Mapping[str, str],
+    *,
+    rotation_keys: tuple[str, ...],
+) -> None:
+    current_league_id = existing.get("LEAGUE_ID", "")
+    if not current_league_id or current_league_id != desired["LEAGUE_ID"]:
+        raise BootstrapValidationError(
+            BootstrapErrorCode.CONFIG_CONFLICT,
+            "Credential rotation must validate the league already configured "
+            "in this .env. Check the league ID and use ordinary setup for a "
+            "new league; nothing was written.",
+        )
+    if any(not existing.get(key, "") for key in rotation_keys):
+        raise BootstrapValidationError(
+            BootstrapErrorCode.CONFIG_CONFLICT,
+            "Credential rotation requires existing nonempty ESPN credentials. "
+            "Use ordinary guided setup to fill blank values; nothing was "
+            "written.",
+        )
 
 
 def _render_env(

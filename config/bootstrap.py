@@ -49,6 +49,7 @@ class BootstrapErrorCode(str, Enum):
     UNVALIDATED_PROFILE = "unvalidated_profile"
     CONFIG_CONFLICT = "config_conflict"
     CONFIG_MALFORMED = "config_malformed"
+    CONFIRMATION_DECLINED = "confirmation_declined"
     WRITE_FAILED = "write_failed"
 
 

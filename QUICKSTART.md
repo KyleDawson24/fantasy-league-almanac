@@ -17,7 +17,7 @@ When the two disagree, SETUP.md is right.
 
 **This is guided setup, but it is not a wizard yet.** You will open and edit two supplied text files. After that, one command downloads, builds, and publishes the almanac. A form-driven setup is planned for a future release.
 
-The development branch now has two bounded rungs of that work: [guided setup](docs/setup-preflight.md) validates ESPN access and the requested history, then atomically fills the existing local credential and registry files. It does not start the almanac or replace the manual v1.9.1 release steps below yet.
+The development branch now has three bounded rungs of that work: [guided setup](docs/setup-preflight.md) validates ESPN access and the requested history, atomically fills the existing local credential and registry files, and provides an explicit validated path for rotating expired ESPN cookies. It does not start the almanac or replace the manual v1.9.1 release steps below yet.
 
 ## Even quicker start
 

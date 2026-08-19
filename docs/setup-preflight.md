@@ -26,10 +26,23 @@ restores the first destination to its prior state. A rerun with the same state
 is byte-idempotent.
 
 Setup refuses malformed files, duplicate keys, ambiguous registry metadata, a
-different existing league ID, and any attempt to replace a nonempty cookie
-with a different value. Cookie rotation needs an explicit product policy; this
-rung does not invent one. Failure messages name the repair without displaying
-credential values.
+different existing league ID, and every ordinary attempt to replace a
+nonempty cookie with a different value. Returning users whose ESPN session has
+expired have a separate, explicit action:
+
+```powershell
+python tools/setup_league.py --rotate-credentials
+```
+
+Before accepting replacement values, the CLI explains that ESPN credentials
+are shared by every configured ESPN league and rotation can affect all of
+them. It validates the new cookies against the exact league and season range,
+then requires the user to type `ROTATE` before replacement. A validation
+failure or declined confirmation leaves the old credentials byte-for-byte
+unchanged. Rotation changes only `ESPN_S2` and `SWID`; it preserves the league
+ID, other-platform credentials, unrelated environment structure, and the
+entire registry. The same importable core exposes a credential-free warning
+and confirmation callback for the planned web shell.
 
 Leave the final-season prompt blank for an ongoing league. The preflight checks
 through the current season while the registry writer preserves

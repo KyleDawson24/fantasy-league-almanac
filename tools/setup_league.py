@@ -24,7 +24,12 @@ from config.bootstrap import (  # noqa: E402
     require_supported_python,
     validate_espn_league,
 )
-from config.bootstrap_writer import write_validated_configuration  # noqa: E402
+from config.bootstrap_writer import (  # noqa: E402
+    CredentialRotationNotice,
+    credential_rotation_notice,
+    rotate_validated_credentials,
+    write_validated_configuration,
+)
 
 
 def _prompt_year(label: str, *, default: int | None = None) -> int:
@@ -80,24 +85,56 @@ def collect_request() -> BootstrapRequest:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    return argparse.ArgumentParser(
+    parser = argparse.ArgumentParser(
         description=(
             "Guided ESPN setup. Validates credentials, requested history, "
             "league identity, and format before atomically writing the existing "
             "local credential and registry files."
         )
     )
+    parser.add_argument(
+        "--rotate-credentials",
+        action="store_true",
+        help=(
+            "Explicitly replace the shared ESPN cookie pair after a new "
+            "successful validation and confirmation. Ordinary setup never "
+            "overwrites nonempty credentials."
+        ),
+    )
+    return parser
+
+
+def confirm_credential_rotation(notice: CredentialRotationNotice) -> bool:
+    """Require an unmistakable post-validation confirmation."""
+
+    print("\nValidation succeeded. The existing credentials are unchanged.")
+    print(notice.message)
+    response = input("Type ROTATE to replace the ESPN credentials: ").strip()
+    return response == "ROTATE"
 
 
 def main(argv=None) -> int:
-    build_parser().parse_args(argv)
+    args = build_parser().parse_args(argv)
     print("Fantasy League Almanac guided setup")
     print("Nothing is written unless the complete preflight succeeds.\n")
     try:
         require_supported_python()
+        rotation_notice = None
+        if args.rotate_credentials:
+            rotation_notice = credential_rotation_notice("espn")
+            print("EXPLICIT CREDENTIAL ROTATION")
+            print(rotation_notice.message)
+            print("New values will be validated before replacement.\n")
         request = collect_request()
         profile = validate_espn_league(request)
-        write_result = write_validated_configuration(request, profile)
+        if rotation_notice is None:
+            write_result = write_validated_configuration(request, profile)
+        else:
+            write_result = rotate_validated_credentials(
+                request,
+                profile,
+                confirm=confirm_credential_rotation,
+            )
     except BootstrapValidationError as exc:
         print(f"Setup stopped [{exc.code.value}]: {exc}", file=sys.stderr)
         return 2
@@ -115,7 +152,15 @@ def main(argv=None) -> int:
     print(f"  Teams: {profile.team_count}")
     print(f"  Format: {profile.league_format} ({profile.format_evidence})")
     print(f"  Available seasons: {seasons}")
-    if write_result.changed:
+    if args.rotate_credentials and write_result.changed:
+        print(
+            "\nCredential rotation completed. Only the shared ESPN cookie "
+            "keys changed; league metadata and other local settings were "
+            "preserved."
+        )
+    elif args.rotate_credentials:
+        print("\nThe validated ESPN credentials already matched; no files changed.")
+    elif write_result.changed:
         print(
             "\nLocal setup saved: credentials are in the gitignored .env, "
             "and non-secret league metadata is in config/leagues.yml."

@@ -31,6 +31,7 @@ body:
         - Ottoneu
         - Sleeper
         - Other / not listed
+        - Not sure
     validations:
       required: true
 
@@ -41,10 +42,11 @@ body:
       options:
         - Head-to-head points
         - Season-total points (no head-to-head)
-        - Head-to-head categories
+        - "Head-to-head: Each Category"
+        - "Head-to-head: Most Categories"
         - Rotisserie / season-long categories
-        - Best ball
-        - Other / not sure
+        - Other / not listed
+        - Not sure
     validations:
       required: true
 
@@ -54,9 +56,37 @@ body:
       label: Draft type
       options:
         - Auction / salary cap
-        - Snake / linear
+        - Snake
+        - Linear / fixed order
         - No draft / imported rosters
-        - Other / not sure
+        - Other / not listed
+        - Not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: lineup_selection
+    attributes:
+      label: Lineup selection
+      description: Best Ball describes how scoring lineups are chosen, not how players are drafted.
+      options:
+        - Manager-set lineups
+        - Automatic Best Ball / optimized lineups
+        - Other / not listed
+        - Not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: roster_continuity
+    attributes:
+      label: Roster continuity
+      options:
+        - Redraft
+        - Keeper
+        - Dynasty
+        - Other / not listed
+        - Not sure
     validations:
       required: true
 
@@ -70,6 +100,7 @@ body:
         - 5-9 seasons
         - 10-19 seasons
         - 20+ seasons
+        - Not sure
     validations:
       required: true
 
@@ -77,8 +108,8 @@ body:
     id: other_details
     attributes:
       label: Other non-sensitive details
-      description: Optional. Explain an `Other` answer or an unusual rule without including IDs, names, credentials, screenshots, exports, or private league data.
-      placeholder: Our scoring is season-total points with an auction draft and keeper contracts.
+      description: Optional. Explain an `Other` answer or an unusual lineup, waiver, or acquisition rule without including IDs, names, credentials, screenshots, exports, or private league data.
+      placeholder: Our league uses automatic optimized lineups but allows a limited number of FAAB acquisitions.
     validations:
       required: false
 

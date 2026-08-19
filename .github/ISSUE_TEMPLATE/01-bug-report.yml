@@ -59,7 +59,8 @@ body:
       options:
         - ESPN
         - CBS Sports
-        - Other / not sure
+        - Other / not listed
+        - Not sure
         - Not applicable
     validations:
       required: true
@@ -71,9 +72,11 @@ body:
       options:
         - Head-to-head points
         - Season-total points (no head-to-head)
-        - Head-to-head categories
+        - "Head-to-head: Each Category"
+        - "Head-to-head: Most Categories"
         - Rotisserie / season-long categories
-        - Other / not sure
+        - Other / not listed
+        - Not sure
         - Not applicable
     validations:
       required: true
@@ -93,8 +96,10 @@ body:
       label: Draft type
       options:
         - Auction / salary cap
-        - Snake / linear
-        - Other / not sure
+        - Snake
+        - Linear / fixed order
+        - Other / not listed
+        - Not sure
         - Not applicable
     validations:
       required: true

@@ -11,29 +11,13 @@ body:
         Use the bug form instead if a supported run stopped or produced a materially wrong result. Use the coverage form if the main problem is an unsupported platform or format.
 
   - type: textarea
-    id: what_you_tried
+    id: feedback
     attributes:
-      label: What did you try?
-      description: Describe the part of setup or the workbook you used. Keep league details generic.
-      placeholder: I followed the Windows Quickstart through workbook creation and then opened the all-time standings.
+      label: What would you like to share?
+      description: A sentence is enough. Positive feedback, criticism, a confusing moment, a missing feature, or a small observation are all welcome.
+      placeholder: I really like that the matrices use color grades.
     validations:
       required: true
-
-  - type: textarea
-    id: confusing_or_missing
-    attributes:
-      label: What was confusing or missing?
-      description: Tell us where you hesitated, what you expected to find, or what would have made the result more useful.
-    validations:
-      required: true
-
-  - type: textarea
-    id: what_worked
-    attributes:
-      label: What worked well?
-      description: Optional, but useful for protecting the parts that should not be redesigned away.
-    validations:
-      required: false
 
   - type: dropdown
     id: fantasy_platform
@@ -46,7 +30,8 @@ body:
         - Yahoo Fantasy
         - Fantrax
         - Ottoneu
-        - Other / not sure
+        - Other / not listed
+        - Not sure
         - Not applicable
     validations:
       required: false
@@ -59,9 +44,11 @@ body:
       options:
         - Head-to-head points
         - Season-total points (no head-to-head)
-        - Head-to-head categories
+        - "Head-to-head: Each Category"
+        - "Head-to-head: Most Categories"
         - Rotisserie / season-long categories
-        - Other / not sure
+        - Other / not listed
+        - Not sure
         - Not applicable
     validations:
       required: false

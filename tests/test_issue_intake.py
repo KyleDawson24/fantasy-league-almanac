@@ -120,6 +120,25 @@ def test_bug_form_collects_the_minimum_sanitized_diagnostic_context():
     assert "10-20" in error_tail["attributes"]["description"]
     assert "full log" in error_tail["attributes"]["description"].lower()
 
+    assert _field(bug, "scoring_format")["attributes"]["options"] == [
+        "Head-to-head points",
+        "Season-total points (no head-to-head)",
+        "Head-to-head: Each Category",
+        "Head-to-head: Most Categories",
+        "Rotisserie / season-long categories",
+        "Other / not listed",
+        "Not sure",
+        "Not applicable",
+    ]
+    assert _field(bug, "draft_type")["attributes"]["options"] == [
+        "Auction / salary cap",
+        "Snake",
+        "Linear / fixed order",
+        "Other / not listed",
+        "Not sure",
+        "Not applicable",
+    ]
+
 
 def test_coverage_dimensions_are_stable_for_the_future_counter():
     coverage = _load(FORM_PATHS["coverage"])
@@ -132,20 +151,37 @@ def test_coverage_dimensions_are_stable_for_the_future_counter():
             "Ottoneu",
             "Sleeper",
             "Other / not listed",
+            "Not sure",
         ],
         "scoring_format": [
             "Head-to-head points",
             "Season-total points (no head-to-head)",
-            "Head-to-head categories",
+            "Head-to-head: Each Category",
+            "Head-to-head: Most Categories",
             "Rotisserie / season-long categories",
-            "Best ball",
-            "Other / not sure",
+            "Other / not listed",
+            "Not sure",
         ],
         "draft_type": [
             "Auction / salary cap",
-            "Snake / linear",
+            "Snake",
+            "Linear / fixed order",
             "No draft / imported rosters",
-            "Other / not sure",
+            "Other / not listed",
+            "Not sure",
+        ],
+        "lineup_selection": [
+            "Manager-set lineups",
+            "Automatic Best Ball / optimized lineups",
+            "Other / not listed",
+            "Not sure",
+        ],
+        "roster_continuity": [
+            "Redraft",
+            "Keeper",
+            "Dynasty",
+            "Other / not listed",
+            "Not sure",
         ],
         "history_length": [
             "1 season",
@@ -153,6 +189,7 @@ def test_coverage_dimensions_are_stable_for_the_future_counter():
             "5-9 seasons",
             "10-19 seasons",
             "20+ seasons",
+            "Not sure",
         ],
     }
 
@@ -166,6 +203,28 @@ def test_coverage_dimensions_are_stable_for_the_future_counter():
     assert "not telemetry" in intro
     assert "not fantasy-baseball market share" in intro
     assert "does not promise a delivery date" in intro
+
+    assert all(
+        "best ball" not in option.lower()
+        for field_id in ("scoring_format", "draft_type")
+        for option in _field(coverage, field_id)["attributes"]["options"]
+    )
+
+
+def test_product_feedback_needs_only_one_short_open_ended_comment():
+    feedback = _load(FORM_PATHS["feedback"])
+    narrative_fields = [
+        item for item in feedback["body"] if item.get("type") == "textarea"
+    ]
+
+    assert [item["id"] for item in narrative_fields] == ["feedback"]
+    comment = narrative_fields[0]
+    assert comment["validations"]["required"] is True
+    assert "a sentence is enough" in _flat(comment)
+    assert "positive feedback" in _flat(comment)
+
+    for field_id in ("fantasy_platform", "scoring_format"):
+        assert _field(feedback, field_id)["validations"]["required"] is False
 
 
 def test_chooser_disables_blank_public_issues_and_routes_private_support():

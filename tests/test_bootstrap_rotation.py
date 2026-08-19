@@ -325,9 +325,21 @@ def test_cli_rotation_orders_warning_collection_validation_and_confirmation(
         return type("Result", (), {"changed": True})()
 
     monkeypatch.setattr(setup_cli, "rotate_validated_credentials", rotate)
+    monkeypatch.setattr(
+        setup_cli,
+        "prompt_create_almanac",
+        lambda: events.append("offer") or False,
+    )
 
     assert setup_cli.main(["--rotate-credentials"]) == 0
-    assert events == ["warning", "collect", "validate", "confirm", "replace"]
+    assert events == [
+        "warning",
+        "collect",
+        "validate",
+        "confirm",
+        "replace",
+        "offer",
+    ]
     output = capsys.readouterr().out
     assert "EXPLICIT CREDENTIAL ROTATION" in output
     assert "shared by all configured ESPN leagues" in output

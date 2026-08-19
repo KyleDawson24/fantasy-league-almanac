@@ -50,6 +50,7 @@ class BootstrapErrorCode(str, Enum):
     CONFIG_CONFLICT = "config_conflict"
     CONFIG_MALFORMED = "config_malformed"
     CONFIRMATION_DECLINED = "confirmation_declined"
+    RUN_FAILED = "run_failed"
     WRITE_FAILED = "write_failed"
 
 

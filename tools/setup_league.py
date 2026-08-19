@@ -1,8 +1,9 @@
 """Thin CLI over the UI-agnostic MLB-145 bootstrap core.
 
 The CLI validates access and history before asking the atomic writer to fill
-the existing local ``.env`` and ``config/leagues.yml`` destinations.  It does
-not hand off to extraction or ``create_public_almanac.py`` in this rung.
+the existing local ``.env`` and ``config/leagues.yml`` destinations. After a
+successful setup or credential rotation it offers to start the existing
+``create_public_almanac.py`` orchestration in a fresh local process.
 """
 
 from __future__ import annotations
@@ -30,6 +31,7 @@ from config.bootstrap_writer import (  # noqa: E402
     rotate_validated_credentials,
     write_validated_configuration,
 )
+from config.bootstrap_runner import run_public_almanac  # noqa: E402
 
 
 def _prompt_year(label: str, *, default: int | None = None) -> int:
@@ -113,6 +115,17 @@ def confirm_credential_rotation(notice: CredentialRotationNotice) -> bool:
     return response == "ROTATE"
 
 
+def prompt_create_almanac() -> bool:
+    """Offer the existing complete-history runner in beginner language."""
+
+    print(
+        "\nSetup is complete. Creating the almanac can take a while and may "
+        "open a browser for Google sign-in."
+    )
+    response = input("Create the almanac now? [Y/n]: ").strip().lower()
+    return response in ("", "y", "yes")
+
+
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     print("Fantasy League Almanac guided setup")
@@ -167,7 +180,24 @@ def main(argv=None) -> int:
         )
     else:
         print("\nLocal setup already matched; no files changed.")
-    print("The almanac run was not started in this setup rung.")
+    if not prompt_create_almanac():
+        print(
+            "The almanac was not started. Your setup is saved; later run "
+            "python tools/create_public_almanac.py from this folder."
+        )
+        return 0
+
+    print("\nStarting the existing complete-history almanac runner...")
+    try:
+        run_public_almanac()
+    except BootstrapValidationError as exc:
+        print(
+            f"Setup is saved, but almanac creation stopped "
+            f"[{exc.code.value}]: {exc}",
+            file=sys.stderr,
+        )
+        return 3
+    print("Almanac creation completed successfully.")
     return 0
 
 

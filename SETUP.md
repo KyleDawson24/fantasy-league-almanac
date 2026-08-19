@@ -739,10 +739,11 @@ you are publishing a new workbook or writing into one you already own.
 python tools/create_public_almanac.py
 ```
 
-This is post-configuration orchestration: the `.env` fields and selected
-`config/leagues.yml` entry must already be complete. The guided fields-file
-onboarding remains MLB-31/MLB-207, so this is not yet described as the complete
-stranger onboarding journey.
+This is reusable post-configuration orchestration: the `.env` fields and
+selected `config/leagues.yml` entry must already be complete. It can be run
+directly, and the development guided setup now offers to start this exact
+entrypoint after validated local configuration succeeds. That guided journey
+is not a released stranger workflow until it is packaged and rehearsed.
 
 The command reuses the registry's `first_season` / `final_season` policy and
 runs one complete extraction for every applicable season—verified matchup

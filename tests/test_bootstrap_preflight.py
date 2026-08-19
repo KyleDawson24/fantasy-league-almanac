@@ -266,13 +266,14 @@ def test_cli_is_a_thin_shell_over_validation_then_writer(monkeypatch, capsys):
         )
         or type("Result", (), {"changed": True})(),
     )
+    monkeypatch.setattr(setup_cli, "prompt_create_almanac", lambda: False)
 
     assert setup_cli.main([]) == 0
     output = capsys.readouterr().out
     assert writes == [(request, profile)]
     assert "Validated successfully" in output
     assert "Local setup saved" in output
-    assert "run was not started" in output
+    assert "almanac was not started" in output
     for secret in (S2, SWID, LEAGUE_ID):
         assert secret not in output
 

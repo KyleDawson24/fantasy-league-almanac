@@ -52,12 +52,24 @@ today's year.
 Failure messages use stable categories for bad input, expired authentication,
 denied access, unavailable history, network failures, unexpected ESPN
 responses, unsupported/undetermined formats, malformed local configuration,
-conflicts, and write failures. Validation lives in `config/bootstrap.py`, the
-transaction lives in `config/bootstrap_writer.py`, and this CLI is only one UI
-shell over them.
+conflicts, write failures, declined rotation, and public-runner failures.
+Validation lives in `config/bootstrap.py`, the transaction lives in
+`config/bootstrap_writer.py`, the runner seam lives in
+`config/bootstrap_runner.py`, and this CLI is only one UI shell over them.
 
-This rung does not create a second configuration root, write the separate dbt
-league-override CSVs, download league data, open Google, touch Snowflake, or
-start `tools/create_public_almanac.py`. The v1.9.1 release Quickstart remains
-the supported manual configuration journey until the complete wizard is
-packaged into a later release.
+After setup or rotation succeeds, the beginner flow clearly offers to create
+the almanac. Accepting starts `tools/create_public_almanac.py` in a fresh local
+process, which reuses its existing complete-history extraction, local
+Parquet/DuckDB/dbt build, Google authorization, workbook creation, and explicit
+link-sharing confirmation. No credentials travel in command-line arguments.
+The child process discards inherited ESPN credential variables so the existing
+runner loads the just-saved `.env`; every unrelated environment variable is
+preserved. Declining prints the exact command to run later. A setup failure
+never offers or starts the runner; a runner failure leaves the saved setup
+intact and points back to the runner's actionable message.
+
+This development work does not create a second configuration root, write the
+separate dbt league-override CSVs, or add a new extraction/Google/Snowflake
+implementation. The v1.9.1 release Quickstart remains the supported manual
+configuration journey until the complete wizard is packaged into a later
+release.

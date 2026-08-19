@@ -1,8 +1,7 @@
-"""Post-configuration complete-history build and Google workbook publish.
+"""Reusable complete-history build and Google workbook publish.
 
-This command starts *after* the user has configured the repository fields and
-league registry entry.  It is not the complete stranger onboarding journey;
-that fields-file/setup work remains owned by MLB-31/MLB-207.
+This command starts after local credential and registry configuration. It can
+be run directly or launched by the guided setup after that setup succeeds.
 
 For the selected ESPN registry entry, the default path asks the registry's
 existing ``seasons_to_request`` policy for the exact season range.  It then
@@ -151,11 +150,10 @@ def execute_plan(plan, runner=subprocess.run):
 def build_parser():
     parser = argparse.ArgumentParser(
         description=(
-            'POST-CONFIGURATION orchestration: extract every configured ESPN '
+            'Complete-history orchestration: extract every configured ESPN '
             'season completely to local Parquet/DuckDB, build the almanac, '
-            'then publish one new Google workbook. This does not collect or '
-            'create the fields/configuration files required by MLB-31 and '
-            'MLB-207.'
+            'then publish one new Google workbook. Run tools/setup_league.py '
+            'first when local configuration has not been created yet.'
         )
     )
     parser.add_argument(

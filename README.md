@@ -318,7 +318,8 @@ Most of that needs a warehouse to exercise, but not all of it: with no account a
 
 ## Contact
 
-Email: kpdawson.github@gmail.com
+Public bug reports and feedback: [GitHub issue chooser](https://github.com/KyleDawson24/fantasy-league-almanac/issues/new/choose)
+Private support email: kpdawson.github@gmail.com
 LinkedIn: https://www.linkedin.com/in/kyledawson24/
 Ko-fi: https://ko-fi.com/kpdawson24
 
@@ -326,5 +327,5 @@ Ko-fi: https://ko-fi.com/kpdawson24
 
 This is a personal portfolio project and I'm not accepting code contributions (pull requests) for now -- it keeps the licensing story simple while the project's future shape settles.
 
-Issues, bug reports, and feedback are very welcome.
+[Issues, bug reports, unsupported-league requests, and feedback](https://github.com/KyleDawson24/fantasy-league-almanac/issues/new/choose) are very welcome. Read [Reporting a problem or requesting coverage](docs/reporting-an-issue.md) before including diagnostics; public reports must be sanitized.
 

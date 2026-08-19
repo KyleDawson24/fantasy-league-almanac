@@ -1,0 +1,75 @@
+name: Share product feedback
+description: Tell us what was useful, confusing, or missing in the stranger journey or workbook.
+title: "[Feedback] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for trying the Fantasy League Almanac. GitHub issues are public, so describe the experience without including credentials, league IDs, league-member names, workbook URLs, screenshots of private data, raw exports, DuckDB/Parquet files, or full logs.
+
+        Use the bug form instead if a supported run stopped or produced a materially wrong result. Use the coverage form if the main problem is an unsupported platform or format.
+
+  - type: textarea
+    id: what_you_tried
+    attributes:
+      label: What did you try?
+      description: Describe the part of setup or the workbook you used. Keep league details generic.
+      placeholder: I followed the Windows Quickstart through workbook creation and then opened the all-time standings.
+    validations:
+      required: true
+
+  - type: textarea
+    id: confusing_or_missing
+    attributes:
+      label: What was confusing or missing?
+      description: Tell us where you hesitated, what you expected to find, or what would have made the result more useful.
+    validations:
+      required: true
+
+  - type: textarea
+    id: what_worked
+    attributes:
+      label: What worked well?
+      description: Optional, but useful for protecting the parts that should not be redesigned away.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: fantasy_platform
+    attributes:
+      label: Platform context
+      description: Optional non-sensitive context.
+      options:
+        - ESPN
+        - CBS Sports
+        - Yahoo Fantasy
+        - Fantrax
+        - Ottoneu
+        - Other / not sure
+        - Not applicable
+    validations:
+      required: false
+
+  - type: dropdown
+    id: scoring_format
+    attributes:
+      label: Format context
+      description: Optional non-sensitive context.
+      options:
+        - Head-to-head points
+        - Season-total points (no head-to-head)
+        - Head-to-head categories
+        - Rotisserie / season-long categories
+        - Other / not sure
+        - Not applicable
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: I checked this report and removed credentials, cookies, tokens, private links, league IDs, member identities, private files, screenshots, and logs.
+          required: true

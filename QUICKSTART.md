@@ -347,8 +347,8 @@ has not been walked by many people. A good report is genuinely useful.
   that failed is the useful evidence.
 - **Do not go run other commands at random.** If the error text tells you
   to do something specific, do that. Otherwise stop.
-- **Copy the command you ran and the last chunk of error text** into an
-  email.
+- **Copy the command you ran and the last chunk of error text** into the
+  structured GitHub bug-report form after sanitizing both.
 
 **Before you send anything, take these out:** your ESPN cookies, your
 league id, your league members' names, the Sheet URL, and your Windows
@@ -359,8 +359,11 @@ you have checked it contains none of those.
 contents, the downloaded raw data, the `.duckdb` or `.parquet` files, or
 the workbook ledger. None of them are needed to diagnose anything.
 
-Send it to **kpdawson.github@gmail.com**. A GitHub issue is welcome too,
-but only with sanitized information -- a public issue is public forever.
+Open the [GitHub issue chooser](https://github.com/KyleDawson24/fantasy-league-almanac/issues/new/choose)
+and choose **Report a bug**. If the report cannot safely be public, use
+**kpdawson.github@gmail.com** as the private fallback. Do not send secrets
+or private data files through either route. The complete redaction and
+triage policy is in [Reporting a problem or requesting coverage](docs/reporting-an-issue.md).
 
 ## What you get
 

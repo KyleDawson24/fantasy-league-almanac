@@ -1,9 +1,10 @@
 """UI-agnostic league bootstrap preflight (MLB-145).
 
-This module owns the first, read-only rung of guided setup.  It validates
-user-supplied ESPN access against the exact season range the eventual registry
+This module owns the read-only validation boundary of guided setup.  It
+validates user-supplied ESPN access against the exact season range the registry
 entry will request and returns a small, platform-neutral profile.  It does not
-write ``.env``, ``config/leagues.yml``, local data, or Google state.
+write ``.env``, ``config/leagues.yml``, local data, or Google state;
+``config.bootstrap_writer`` consumes its successful result in the next layer.
 
 The separation is deliberate: a CLI can prompt today and a future web shell
 can call the same functions without moving credential or validation logic.
@@ -15,6 +16,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date
 from enum import Enum
+import hashlib
+import hmac
 import sys
 from typing import Callable, Mapping, Optional, Sequence
 
@@ -27,6 +30,7 @@ ESPN_API_BASE = (
 SUPPORTED_PYTHON = (3, 13)
 _ESPN_VIEWS = ("mSettings", "mTeam", "mMatchupScore")
 _SEASON_POINTS_LEAGUE_TYPE = 5
+_VALIDATED_PROFILE_TOKEN = object()
 
 
 class BootstrapErrorCode(str, Enum):
@@ -42,6 +46,10 @@ class BootstrapErrorCode(str, Enum):
     NETWORK = "network"
     UPSTREAM = "upstream"
     UNSUPPORTED_FORMAT = "unsupported_format"
+    UNVALIDATED_PROFILE = "unvalidated_profile"
+    CONFIG_CONFLICT = "config_conflict"
+    CONFIG_MALFORMED = "config_malformed"
+    WRITE_FAILED = "write_failed"
 
 
 class BootstrapValidationError(RuntimeError):
@@ -62,8 +70,8 @@ class BootstrapRequest:
     """Values supplied by a setup UI.
 
     Credential fields use ``repr=False`` so an exception, debugger, or test
-    failure cannot casually print them.  The eventual writer can consume the
-    same object only after this preflight succeeds.
+    failure cannot casually print them.  The writer consumes the same object
+    only after this preflight succeeds.
     """
 
     platform: str
@@ -86,11 +94,84 @@ class LeagueProfile:
     available_seasons: tuple[int, ...]
     first_season: int
     # ``None`` preserves the registry's meaning: an ongoing league.  The
-    # concrete year validated in this run lives separately so a later writer
+    # concrete year validated in this run lives separately so the writer
     # does not accidentally freeze an ongoing league at today's season.
     final_season: Optional[int]
     validated_through_season: int
     league_id: str = field(repr=False)
+    _request_fingerprint: bytes = field(
+        default=b"", repr=False, compare=False
+    )
+    _validation_token: object = field(
+        default=None, repr=False, compare=False
+    )
+
+
+def is_validated_profile(profile: object) -> bool:
+    """Whether ``profile`` came from this process's successful preflight.
+
+    The writer intentionally refuses a look-alike dataclass assembled by a UI
+    or test.  A CLI and a future web shell must both pass through the same live
+    validation boundary before credentials or registry metadata can land.
+    """
+
+    if not isinstance(profile, LeagueProfile):
+        return False
+    token = profile._validation_token
+    return (
+        isinstance(token, tuple)
+        and len(token) == 2
+        and token[0] is _VALIDATED_PROFILE_TOKEN
+        and token[1] == _profile_fingerprint(profile)
+    )
+
+
+def is_validated_profile_for_request(
+    profile: object, request: BootstrapRequest
+) -> bool:
+    """Whether the sealed profile was validated with these exact values."""
+
+    return (
+        is_validated_profile(profile)
+        and isinstance(profile, LeagueProfile)
+        and hmac.compare_digest(
+            profile._request_fingerprint,
+            _fingerprint_request(request),
+        )
+    )
+
+
+def _fingerprint_request(request: BootstrapRequest) -> bytes:
+    digest = hashlib.sha256()
+    values = (
+        (request.platform or "").strip().lower(),
+        str(request.league_id),
+        str(request.espn_s2),
+        str(request.swid),
+        str(request.first_season),
+        "ongoing" if request.final_season is None else str(request.final_season),
+    )
+    for value in values:
+        encoded = value.encode("utf-8")
+        digest.update(len(encoded).to_bytes(8, "big"))
+        digest.update(encoded)
+    return digest.digest()
+
+
+def _profile_fingerprint(profile: LeagueProfile) -> tuple[object, ...]:
+    return (
+        profile.platform,
+        profile.league_name,
+        profile.team_count,
+        profile.league_format,
+        profile.format_evidence,
+        profile.available_seasons,
+        profile.first_season,
+        profile.final_season,
+        profile.validated_through_season,
+        profile.league_id,
+        profile._request_fingerprint,
+    )
 
 
 def require_supported_python(version: Optional[Sequence[int]] = None) -> None:
@@ -217,7 +298,7 @@ def validate_espn_league(
             "nothing was written.",
         )
 
-    return LeagueProfile(
+    profile = LeagueProfile(
         platform="espn",
         league_name=name,
         team_count=team_count,
@@ -228,7 +309,14 @@ def validate_espn_league(
         final_season=request.final_season,
         validated_through_season=seasons[-1],
         league_id=str(request.league_id).strip(),
+        _request_fingerprint=_fingerprint_request(request),
     )
+    object.__setattr__(
+        profile,
+        "_validation_token",
+        (_VALIDATED_PROFILE_TOKEN, _profile_fingerprint(profile)),
+    )
+    return profile
 
 
 def _request_espn_season(

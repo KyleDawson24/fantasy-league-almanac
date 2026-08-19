@@ -1,8 +1,8 @@
-"""Thin CLI over the read-only MLB-145 bootstrap core.
+"""Thin CLI over the UI-agnostic MLB-145 bootstrap core.
 
-This first rung validates access and history only.  It intentionally writes no
-configuration or credentials; a later rung will commit the validated profile
-to the safe config locations and hand off to ``create_public_almanac.py``.
+The CLI validates access and history before asking the atomic writer to fill
+the existing local ``.env`` and ``config/leagues.yml`` destinations.  It does
+not hand off to extraction or ``create_public_almanac.py`` in this rung.
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ from config.bootstrap import (  # noqa: E402
     require_supported_python,
     validate_espn_league,
 )
+from config.bootstrap_writer import write_validated_configuration  # noqa: E402
 
 
 def _prompt_year(label: str, *, default: int | None = None) -> int:
@@ -81,19 +82,22 @@ def collect_request() -> BootstrapRequest:
 def build_parser() -> argparse.ArgumentParser:
     return argparse.ArgumentParser(
         description=(
-            "Read-only ESPN setup preflight. Validates credentials, requested "
-            "history, league identity, and format before any files are written."
+            "Guided ESPN setup. Validates credentials, requested history, "
+            "league identity, and format before atomically writing the existing "
+            "local credential and registry files."
         )
     )
 
 
 def main(argv=None) -> int:
     build_parser().parse_args(argv)
-    print("Fantasy League Almanac setup preflight")
-    print("No credentials or configuration will be written in this rung.\n")
+    print("Fantasy League Almanac guided setup")
+    print("Nothing is written unless the complete preflight succeeds.\n")
     try:
         require_supported_python()
-        profile = validate_espn_league(collect_request())
+        request = collect_request()
+        profile = validate_espn_league(request)
+        write_result = write_validated_configuration(request, profile)
     except BootstrapValidationError as exc:
         print(f"Setup stopped [{exc.code.value}]: {exc}", file=sys.stderr)
         return 2
@@ -111,10 +115,14 @@ def main(argv=None) -> int:
     print(f"  Teams: {profile.team_count}")
     print(f"  Format: {profile.league_format} ({profile.format_evidence})")
     print(f"  Available seasons: {seasons}")
-    print(
-        "\nNo files were written. The validated profile is ready for the "
-        "next setup rung."
-    )
+    if write_result.changed:
+        print(
+            "\nLocal setup saved: credentials are in the gitignored .env, "
+            "and non-secret league metadata is in config/leagues.yml."
+        )
+    else:
+        print("\nLocal setup already matched; no files changed.")
+    print("The almanac run was not started in this setup rung.")
     return 0
 
 

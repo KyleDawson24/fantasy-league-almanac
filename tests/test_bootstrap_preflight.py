@@ -239,7 +239,7 @@ def test_unexpected_espn_responses_share_one_safe_category(monkeypatch, response
         assert secret not in str(exc.value)
 
 
-def test_cli_is_a_thin_read_only_shell(monkeypatch, capsys):
+def test_cli_is_a_thin_shell_over_validation_then_writer(monkeypatch, capsys):
     request = _request(first_season=2026)
     profile = type(
         "Profile",
@@ -257,11 +257,22 @@ def test_cli_is_a_thin_read_only_shell(monkeypatch, capsys):
     monkeypatch.setattr(setup_cli, "require_supported_python", lambda: None)
     monkeypatch.setattr(setup_cli, "collect_request", lambda: request)
     monkeypatch.setattr(setup_cli, "validate_espn_league", lambda value: profile)
+    writes = []
+    monkeypatch.setattr(
+        setup_cli,
+        "write_validated_configuration",
+        lambda supplied_request, supplied_profile: writes.append(
+            (supplied_request, supplied_profile)
+        )
+        or type("Result", (), {"changed": True})(),
+    )
 
     assert setup_cli.main([]) == 0
     output = capsys.readouterr().out
+    assert writes == [(request, profile)]
     assert "Validated successfully" in output
-    assert "No files were written" in output
+    assert "Local setup saved" in output
+    assert "run was not started" in output
     for secret in (S2, SWID, LEAGUE_ID):
         assert secret not in output
 

@@ -278,6 +278,27 @@ def zip_census(zip_path):
     return found
 
 
+def write_checksum(zip_path, digest):
+    """Write the standard SHA-256 sidecar shipped beside the ZIP.
+
+    A checksum printed only to the maintainer's terminal cannot be verified
+    by a stranger after download. The sidecar is a second release asset and
+    carries only the digest plus the public artifact name.
+    """
+    checksum_path = zip_path.with_suffix(zip_path.suffix + '.sha256')
+    try:
+        checksum_path.write_text(
+            f'{digest}  {zip_path.name}\n', encoding='ascii', newline='\n')
+    except OSError as exc:
+        # A release bundle without its promised public checksum is not a
+        # complete build. Do not leave the ZIP looking upload-ready.
+        zip_path.unlink(missing_ok=True)
+        checksum_path.unlink(missing_ok=True)
+        raise BuildError(
+            f'could not write checksum sidecar: {exc}') from None
+    return checksum_path
+
+
 def build(client_json, version, ref='HEAD', out_dir=None):
     out_dir = Path(out_dir or REPO_ROOT / 'dist')
     prefix = f'fantasy-league-almanac-{version}'
@@ -341,10 +362,12 @@ def build(client_json, version, ref='HEAD', out_dir=None):
         shutil.rmtree(tree, ignore_errors=True)
 
     digest = hashlib.sha256(zip_path.read_bytes()).hexdigest()
+    checksum_path = write_checksum(zip_path, digest)
     print()
     print(f'bundle                 : {zip_path}')
     print(f'size                   : {zip_path.stat().st_size:,} bytes')
     print(f'sha256                 : {digest}')
+    print(f'checksum asset         : {checksum_path}')
     print(f'temp tree removed      : {not tree.exists()}')
     return zip_path
 

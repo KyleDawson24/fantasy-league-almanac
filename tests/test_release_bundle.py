@@ -23,6 +23,7 @@ real repository are never touched.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import subprocess
@@ -167,6 +168,33 @@ def test_a_build_produces_one_credential_in_one_expected_place(
         'fantasy-league-almanac-9.9.9/output/public_oauth_client.py': 1}
 
 
+def test_a_build_writes_a_verifiable_public_checksum_asset(
+        fake_repo, tmp_path):
+    zip_path = brb.build(client_json(tmp_path), '9.9.9',
+                         out_dir=tmp_path / 'dist')
+    checksum_path = zip_path.with_suffix('.zip.sha256')
+    expected = hashlib.sha256(zip_path.read_bytes()).hexdigest()
+
+    assert checksum_path.read_bytes() == (
+        f'{expected}  {zip_path.name}\n'.encode('ascii'))
+
+
+def test_a_checksum_failure_leaves_no_upload_ready_zip(tmp_path, monkeypatch):
+    zip_path = tmp_path / 'candidate.zip'
+    zip_path.write_bytes(b'synthetic archive')
+
+    def _refuse(*args, **kwargs):
+        raise OSError('synthetic checksum write failure')
+
+    monkeypatch.setattr(Path, 'write_text', _refuse)
+
+    with pytest.raises(brb.BuildError, match='checksum sidecar'):
+        brb.write_checksum(zip_path, '0' * 64)
+
+    assert not zip_path.exists()
+    assert not zip_path.with_suffix('.zip.sha256').exists()
+
+
 def test_the_bundled_descriptor_is_the_working_one(fake_repo, tmp_path):
     """Not just present -- actually wired into BUNDLED_PUBLIC_CLIENT and
     passing the shipped validator."""
@@ -277,6 +305,8 @@ def test_the_build_is_deterministic(fake_repo, tmp_path):
     second = brb.build(client_json(tmp_path), '9.9.9', out_dir=tmp_path / 'b')
 
     assert first.read_bytes() == second.read_bytes()
+    assert first.with_suffix('.zip.sha256').read_bytes() == (
+        second.with_suffix('.zip.sha256').read_bytes())
 
 
 # ---------------------------------------------------------------------------

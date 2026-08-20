@@ -63,3 +63,16 @@ def test_quickstart_is_launcher_first_and_manual_second():
     )
     assert "you do not open a terminal or edit `.env`" in quickstart
     assert "configuration is still manual" not in quickstart
+
+
+def test_release_checklist_gates_publication_and_ships_the_checksum():
+    releasing = _read("RELEASING.md")
+
+    assert "local** `vX.Y.Z` tag" in releasing
+    assert "clean-machine rehearsal" in releasing
+    assert releasing.index("clean-machine rehearsal") < releasing.index(
+        "push `main` and the exact tag"
+    )
+    assert "fantasy-league-almanac-X.Y.Z.zip.sha256" in releasing
+    assert "gh release create vX.Y.Z" in releasing
+    assert "--notes-file \"RELEASE NOTES vX.Y.Z.md\"" in releasing

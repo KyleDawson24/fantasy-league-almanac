@@ -18,6 +18,7 @@ def test_reddit_launch_waits_for_the_real_release_gate():
 
     assert "actual release zip has passed" in text
     assert "final zip and sha-256 are visible" in text
+    assert "fantasy-league-almanac-2.0.0.zip.sha256" in text
     assert "open the release link signed out" in text
     assert "issue chooser" in text
     assert "signed out" in text

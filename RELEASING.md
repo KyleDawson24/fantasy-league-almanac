@@ -67,20 +67,9 @@ lands), not on a calendar. Hard backstop: if `[Unreleased]` exceeds
       carries exactly one notes file -- the current release.** Build it
       from the commit range, not from `[Unreleased]`: that section only
       holds what each session remembered to add.
-- [ ] Commit (first-person message, no AI attribution), then
-      `git tag vX.Y.Z`.
-- [ ] **Ask before pushing** (standing rule), then push `main` + tags
-      to `origin` (the public portfolio repo).
-- [ ] **Publish the GitHub Release** --
-      `gh release create vX.Y.Z --notes-file "RELEASE NOTES vX.Y.Z.md"`.
-      This step is not optional and it is easy to lose: v1.6.0 was tagged
-      and published on GitHub while no notes file ever landed in the
-      repo, because neither this document nor the maintainer's local
-      house-rules file carried the step and each assumed the other did.
-      The tag, the notes file and the GitHub Release are one action in
-      three places; if you do two of them, the third is a bug someone
-      finds months later.
-- [ ] **Build and attach the release bundle** (MLB-209). The tag alone is
+- [ ] Commit (first-person message, no AI attribution), then create the
+      **local** `vX.Y.Z` tag. Do not push it yet.
+- [ ] **Build the release bundle** (MLB-209). The tag alone is
       the developer path; a consumer needs the archive that carries the
       public Google OAuth identity, because that credential is
       deliberately NOT in tracked source:
@@ -97,8 +86,26 @@ lands), not on a calendar. Hard backstop: if `[Unreleased]` exceeds
       can remove it and GitHub's partner scanning will report it to
       Google).
 
-      Then attach it: `gh release upload vX.Y.Z dist\fantasy-league-almanac-X.Y.Z.zip`.
-      `dist/` is gitignored; never commit the archive.
+      A successful build also writes
+      `dist\fantasy-league-almanac-X.Y.Z.zip.sha256`. The sidecar carries
+      the standard digest-and-filename line so a stranger can verify the
+      public download without trusting terminal output copied by the
+      maintainer. `dist/` is gitignored; never commit either artifact.
+- [ ] Run [the clean-machine rehearsal](docs/v2.0-clean-machine-rehearsal.md)
+      from that exact tag-built ZIP. A failure means fix, commit, move the
+      local tag to the reviewed replacement commit, rebuild and start the
+      rehearsal from a new extraction. Do not push, publish or announce a
+      failed candidate.
+- [ ] **Ask before pushing** (standing rule). Only after the rehearsal
+      passes, push `main` and the exact tag to `origin`.
+- [ ] **Publish the GitHub Release and both assets together** --
+      `gh release create vX.Y.Z dist\fantasy-league-almanac-X.Y.Z.zip dist\fantasy-league-almanac-X.Y.Z.zip.sha256 --notes-file "RELEASE NOTES vX.Y.Z.md"`.
+      This step is not optional and it is easy to lose: v1.6.0 was tagged
+      and published on GitHub while no notes file ever landed in the
+      repo, because neither this document nor the maintainer's local
+      house-rules file carried the step and each assumed the other did.
+      The tag, notes file, GitHub Release, ZIP and checksum are one release
+      action; omitting any one is a publication bug.
 
 ## Post-cut
 

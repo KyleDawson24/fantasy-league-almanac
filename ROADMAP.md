@@ -17,18 +17,18 @@ grant, private until sharing is explicitly confirmed -- and retired the
 hand-maintained matchup-schedule seed in favour of weeks and dates read
 from the platform. v1.9.1 (2026-08-18) followed with a focused auction
 correction: ESPN auction drafts now render as priced purchase ledgers rather
-than being assigned snake-pick order and value grades. See CHANGELOG.md for
-the per-release entries.
+than being assigned snake-pick order and value grades. v2.0.0 (2026-08-21)
+then made the release ZIP a guided Windows journey: double-click setup,
+illustrated manual cookie acquisition, validate-before-write local config and
+the existing complete-history runner ending in a shareable Google workbook.
+See CHANGELOG.md for the per-release entries.
 
-**In flight right now:** the guided ESPN onboarding candidate now has a
-double-click Windows front door, private-environment preparation, illustrated
-manual cookie guidance, validate-before-write configuration, explicit cookie
-rotation and a handoff to the existing public workbook runner. What remains
-before v2.0 is the actual candidate-ZIP cut and Kyle's untouched-machine
-rehearsal of that complete path. CBS guided onboarding remains outside the
-supported stranger journey and is an urgent fast-follow rather than a 2.0
-gate; packaged sample mode is also an explicit post-2.0 follow rather than a
-silent acceptance gap.
+**In flight right now:** v2.0's Reddit launch is the first broad stranger
+validation event. Its 48–72 hour triage window turns setup, correctness,
+unsupported-shape and UX reports into owned work and seeks the first credible
+non-Kyle completion before LinkedIn. CBS guided onboarding remains an urgent
+fast-follow; packaged sample mode and automated cookie acquisition are
+explicitly deferred rather than hidden acceptance gaps.
 
 The items below are what's still on deck, organized by
 priority and ambition. v1.x = incremental polish on the current
@@ -43,7 +43,7 @@ a single afternoon.
 
 > **Overtaken by events (noted 2026-07-31, refreshed 2026-08-11).** This
 > block was written when v1.1.0 was the current release; the project is
-> now at v1.9.0 and the engine port has shipped. The items below are
+> now at v2.0.0 and the engine port has shipped. The items below are
 > still wanted, but "the next release" no longer describes any of them.
 > Re-prioritizing this section is its own pass.
 

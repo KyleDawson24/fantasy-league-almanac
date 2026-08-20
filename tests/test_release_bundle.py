@@ -48,6 +48,13 @@ def synthetic_secret(tag='SYNTHETIC'):
 
 
 SYNTHETIC_ID = '000000000000-synthetic.apps.googleusercontent.com'
+PUBLIC_FRONT_DOOR = (
+    'START_ALMANAC.cmd',
+    'ROTATE_ESPN_CREDENTIALS.cmd',
+    'tools/windows_launcher.py',
+    'docs/espn-cookie-guide.html',
+    'QUICKSTART.md',
+)
 
 
 def client_json(tmp_path, **overrides):
@@ -77,6 +84,11 @@ def fake_repo(tmp_path, monkeypatch):
     (root / 'output' / 'public_oauth_client.py').write_text(
         descriptor.read_text(encoding='utf-8'), encoding='utf-8')
     (root / 'README.md').write_text('synthetic\n', encoding='utf-8')
+    for relative in PUBLIC_FRONT_DOOR:
+        source = REPO_ROOT / relative
+        destination = root / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(source.read_bytes())
 
     for args in (('init', '-q'), ('add', '-A'),
                  ('-c', 'user.email=t@t', '-c', 'user.name=t',
@@ -168,6 +180,25 @@ def test_the_bundled_descriptor_is_the_working_one(fake_repo, tmp_path):
     assert f"'client_secret': '{synthetic_secret()}'" in text
     assert f"'client_id': '{SYNTHETIC_ID}'" in text
     assert "'client_secret': ''" not in text
+
+
+def test_ref_built_bundle_carries_the_complete_guided_front_door(
+        fake_repo, tmp_path):
+    zip_path = brb.build(client_json(tmp_path), '9.9.9',
+                         out_dir=tmp_path / 'dist')
+    prefix = 'fantasy-league-almanac-9.9.9/'
+
+    with zipfile.ZipFile(zip_path) as archive:
+        names = set(archive.namelist())
+        launcher = archive.read(prefix + 'START_ALMANAC.cmd').decode('utf-8')
+        guide = archive.read(
+            prefix + 'docs/espn-cookie-guide.html').decode('utf-8')
+
+    for relative in PUBLIC_FRONT_DOOR:
+        assert prefix + relative in names
+    assert 'tools\\windows_launcher.py' in launcher
+    assert guide.count('<svg') >= 2
+    assert '<script' not in guide.lower()
 
 
 def test_the_build_reads_the_ref_and_not_the_working_tree(

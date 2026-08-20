@@ -178,20 +178,14 @@ def test_live_h2h_is_not_smuggled_into_the_season_points_fix():
 
 
 def test_the_quickstart_does_not_claim_the_espn_half_is_simply_done():
-    """It said "The ESPN half is done and walked." MLB-209's Google
-    delivery has since shipped, but MLB-31/MLB-207's guided onboarding has
-    not, so the flat claim would still over-promise.
-
-    This used to prove the point by asserting the words "no single
-    bootstrap command" were present. v1.9 ships exactly such a command,
-    so that phrasing had to go -- the guard now asks for the limitation
-    that is still real instead of the one that stopped being."""
+    """Guided onboarding exists, but broad stranger proof starts on Reddit."""
     text = _text(QUICKSTART)
     lowered = _flat(QUICKSTART)
 
     assert "The ESPN half is done and walked." not in text
-    assert "guided setup, but it is not a wizard yet" in lowered
-    assert "form-driven setup is planned" in lowered
+    assert "start_almanac.cmd" in lowered
+    assert "reddit is the first broad stranger-validation event" in lowered
+    assert "future graphical shell" in lowered
 
 
 # ---------------------------------------------------------------------------
@@ -505,24 +499,22 @@ def test_no_live_doc_promises_production_readiness(path):
         assert claim not in lowered, f"{path.name}: {claim!r}"
 
 
-def test_the_quickstart_scopes_its_one_command_to_post_configuration():
-    """v1.9 DOES chain extract -> parquet -> DuckDB -> dbt -> workbook in
-    one invocation, so the old form of this guard -- asserting the words
-    "no single bootstrap command" and "still five commands" were present --
-    now enforces a retired claim. What must still not be claimed is that
-    the INPUTS are handled: `.env` and the registry are hand-edited, and
-    MLB-31/MLB-207 own fixing that."""
+def test_the_quickstart_makes_guided_configuration_the_primary_path():
+    """v2.0 collects, validates and writes inputs before the existing run."""
     lowered = _commands(QUICKSTART)
 
     assert PUBLIC_ENTRYPOINT in lowered
-    assert "edit two supplied text files" in lowered
-    assert "configuration is still manual" in lowered
+    assert "start_almanac.cmd" in lowered
+    assert "you do not edit either file" in lowered
+    assert lowered.index("start_almanac.cmd") < lowered.index("manual 5. fill")
 
     for claim in (
         "no configuration required",
         "nothing to configure",
         "zero configuration",
         "no setup required",
+        "configuration is still manual",
+        "edit two supplied text files",
     ):
         assert claim not in lowered, f"QUICKSTART.md: {claim!r}"
 
@@ -533,6 +525,15 @@ def test_the_quickstart_still_does_not_claim_cbs_stranger_support():
     assert "espn leagues only" in lowered
     assert "no scripted setup" in lowered
     assert "not part of this journey" in lowered
+
+
+def test_quickstart_explicitly_defers_sample_and_automated_cookie_capture():
+    lowered = _flat(QUICKSTART)
+
+    assert "no packaged sample mode in v2.0" in lowered
+    assert "explicitly deferred" in lowered
+    assert "no automated espn-cookie acquisition in v2.0" in lowered
+    assert "never reads a normal browser profile" in lowered
 
 
 def test_the_roadmap_records_the_automation_as_landed_with_its_scope():

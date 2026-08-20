@@ -255,14 +255,24 @@ Most of that needs a warehouse to exercise, but not all of it: with no account a
 
 ## Status
 
-- **v1.9.1** -- current, 2026-08-18. ESPN auction drafts now render as
+- **v2.0.0** -- current, 2026-08-21. The release ZIP now starts with a
+  double-click Windows launcher that prepares its private Python environment,
+  opens illustrated ESPN-cookie guidance, validates the exact league and
+  requested history before atomically saving local configuration, and hands
+  the successful setup to the existing Parquet/DuckDB/dbt/Google runner. No
+  terminal or manual `.env`/YAML edit is part of the supported journey.
+  Expired ESPN cookies use a separate validated and explicitly confirmed
+  rotation launcher. ESPN is the stranger path; CBS onboarding and packaged
+  sample mode are explicit fast-follows. Full notes:
+  [RELEASE NOTES v2.0.0.md](RELEASE%20NOTES%20v2.0.0.md).
+- **v1.9.1** -- 2026-08-18. ESPN auction drafts now render as
   purchase ledgers with prices, acquiring teams and explicit unavailable
   values instead of being assigned fictional snake-pick order, rounds and
   value grades. Auction completion remains fail-closed: ESPN serves a
   populated placeholder board during the live draft, so rows are accepted
   only after the platform marks the draft complete. Snake drafts are
   unchanged. Full notes:
-  [RELEASE NOTES v1.9.1.md](RELEASE%20NOTES%20v1.9.1.md).
+  [RELEASE NOTES v1.9.1.md](docs/releases/RELEASE%20NOTES%20v1.9.1.md).
 - **v1.9.0** -- 2026-08-13. The journey ends in a Google
   workbook. One post-configuration command walks every season the
   registry bounds, builds locally, and creates a spreadsheet the app

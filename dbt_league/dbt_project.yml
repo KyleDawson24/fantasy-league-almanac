@@ -3,7 +3,7 @@
 # this file; the hosted catalog is linked from there.
 
 name: 'dbt_league'
-version: '1.9.1'
+version: '2.0.0'
 profile: 'dbt_league'
 
 model-paths: ["models"]

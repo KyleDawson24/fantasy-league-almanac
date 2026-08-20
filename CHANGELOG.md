@@ -16,6 +16,15 @@ _Release notes are built from the commit range at each cut rather than
 accumulated here, so this section staying short is not a sign the
 repository is idle._
 
+## [2.0.0] - 2026-08-21
+
+The release ZIP now owns the supported ESPN stranger journey from a
+double-click Windows launcher through a shareable Google workbook. Full story
+in [RELEASE NOTES v2.0.0.md](RELEASE%20NOTES%20v2.0.0.md).
+
+Major rather than minor: this is the promised guided-onboarding platform
+milestone. Existing developer and advanced Snowflake paths remain available.
+
 ### Added
 
 - **A double-clickable, illustrated ESPN setup candidate for Windows.**
@@ -126,7 +135,7 @@ repository is idle._
   have -- ESPN reports `keeper` and `draft` separately -- so Opening
   printed 0.0 while the Total beside it carried the whole season. The two
   vocabularies now meet in one shared normalization at the adapter seam
-  rather than in a renderer branch. **This is a v1.9 compatibility bridge,
+  rather than in a renderer branch. **This remains a compatibility bridge,
   not warehouse convergence:** there is no shared acquisition contract to
   converge on yet -- `mart_team_acquisition_channels` carries ESPN rows
   only, and the CBS book builds its channels from its own Python query.
@@ -180,10 +189,11 @@ repository is idle._
   out of position. The ruling is that position-eligible active points is
   the lens for Home, Records and ordinary by-position leaderboards, and
   deployed slot belongs only to explicitly slot-based analysis; unifying
-  the data path is **required for 2.0**
+  the data path remains **required before warehouse convergence can be called
+  complete**
   ([POSITION_ELIGIBLE_LENS.md](docs/decisions/POSITION_ELIGIBLE_LENS.md)).
 
-  For v1.9 the points book states the distinction in one caption between
+  In v2.0 the points book states the distinction in one caption between
   the section heading and its column header. The section keeps its normal
   name and bare slot labels in both books; the head-to-head book carries
   no caption at all, because its golden corpus pins that section byte for
@@ -193,7 +203,7 @@ repository is idle._
 
 ESPN auction drafts get an auction purchase ledger instead of fictional
 snake-pick analysis. Full story in
-[RELEASE NOTES v1.9.1.md](RELEASE%20NOTES%20v1.9.1.md).
+[RELEASE NOTES v1.9.1.md](docs/releases/RELEASE%20NOTES%20v1.9.1.md).
 
 Patch rather than minor: one reporting correction, no migration step and no
 change to the snake-draft path.

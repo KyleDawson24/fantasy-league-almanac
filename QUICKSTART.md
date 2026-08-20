@@ -1,10 +1,10 @@
 # Quickstart
 
-Turn your ESPN fantasy baseball league into a browsable almanac in a Google Sheet your league can open. Install one program, edit two files, run one command.
+Turn your ESPN fantasy baseball league into a browsable almanac in a Google Sheet your league can open. For the supported v2.0 journey, unzip one release and double-click one file. You do not open a terminal or edit `.env`, YAML, or any other configuration file.
 
-**This guide assumes you have never used a terminal.** Every required command is written out to be copied exactly.
+**This guide assumes you have never used a terminal or browser Developer Tools.** The launcher explains each required action when it becomes relevant, and the cookie step opens an illustrated local guide.
 
-**Windows is required if you want the Google Sheet output in v1.9.** This release protects your Google sign-in with Windows Credential Locker. The downloading, local database, and preview-file parts can run on macOS or Linux, but publishing the finished workbook from those systems is not supported yet. A comparable secure sign-in path for other operating systems is planned, but it does not have a promised release date.
+**Windows is required for the guided v2.0 journey and Google Sheet output.** This release protects your Google sign-in with Windows Credential Locker. Wider local, non-Google functionality is not thereby declared Windows-only, but it is not the stranger journey documented here.
 
 [SETUP.md](SETUP.md) is the detailed reference behind every step here.
 When the two disagree, SETUP.md is right.
@@ -15,35 +15,37 @@ When the two disagree, SETUP.md is right.
 
 `git clone` is the developer path. A source-code clone deliberately does not contain the Google sign-in configuration packaged into a release, so its Google step will refuse to run unless a developer supplies a client separately. If you are simply building your league's almanac, use the release ZIP.
 
-**This is guided setup, but it is not a wizard yet.** You will open and edit two supplied text files. After that, one command downloads, builds, and publishes the almanac. A form-driven setup is planned for a future release.
+## The whole guided journey
 
-The development branch now has a bounded candidate of that work: the root-level `START_ALMANAC.cmd` front door prepares a private Python environment, installs or resumes the pinned dependencies, opens a bundled illustrated ESPN-cookie guide, runs [guided setup](docs/setup-preflight.md), validates ESPN access and the requested history, atomically fills the existing local credential and registry files, provides an explicit validated path for rotating expired ESPN cookies, and offers to start the existing public almanac runner. It uses root-relative argument-vector handoffs so extracted folders containing spaces or living under OneDrive do not corrupt commands. It does not replace the manual v1.9.1 release steps below until that candidate is committed, packaged, and successfully rehearsed from the actual ZIP on a clean Windows machine.
+1. Download `fantasy-league-almanac-<version>.zip` from the [Releases page](https://github.com/KyleDawson24/fantasy-league-almanac/releases).
+2. Right-click the ZIP, choose **Extract All**, and open the extracted folder. Do not run it from inside Windows' compressed-folder view.
+3. Double-click **`START_ALMANAC.cmd`**. The almanac commands do not need administrator access.
+4. Keep the black window open. It detects Python 3.13, creates a private `.venv`, and installs the pinned packages. The first install can take several minutes. If the internet connection breaks, double-click the same launcher again; an incomplete install is safe to resume.
+5. Press Enter when the launcher offers to open the illustrated ESPN guide. Sign in to ESPN yourself in Edge or Chrome. The application never asks for or observes your ESPN username, password, 2FA entry, CAPTCHA, or identity-provider login.
+6. Follow the guide to copy the ESPN league ID plus the session cookies named `espn_s2` and `SWID`. Paste the cookies only into the hidden prompts. They stay in the gitignored local `.env` file and are not sent to Kyle or any hosted project service.
+7. Enter the first season in this league's history. Leave the final season blank for an ongoing league. The wizard validates the exact league, access, supported format, and every requested year before writing anything. On success it safely fills `.env` and `config/leagues.yml`; you do not edit either file.
+8. Confirm that the displayed league name, team count, format, and available seasons are correct. At `Create the almanac now? [Y/n]`, press Enter for Yes.
+9. Leave the window open while it downloads, builds the local Parquet/DuckDB/dbt history, and creates the workbook. A long-history league can take a long time. If it stops, read the final message and rerun the launcher after correcting the named problem; saved setup and safely completed work are retained where the runner's contract allows.
+10. Complete Google consent, then explicitly type `YES` only if you want anyone holding the link to be a viewer. Success ends with `Your almanac: <link> -- share-ready.` Open that link signed out or in a private browser window before sharing it.
 
-## Even quicker start
-
-The full walkthrough below explains every click. The technical outline is:
-
-1. Unzip the release on a Windows PC and install Python 3.13.
-2. Open PowerShell inside the extracted folder.
-3. Create `.venv` and install `requirements.txt` with the two commands in step 4.
-4. Copy `.env.example` to `.env`; add your ESPN league id and two browser cookies.
-5. In `config\leagues.yml`, change the display label and the first/final season values.
-6. Run `tools\create_public_almanac.py`; choose a Google account and approve link sharing when asked.
-
-If any phrase in that summary is unfamiliar, keep reading from step 1. Nothing in the summary is an extra step.
+Returning later with expired ESPN cookies? Close ordinary setup and double-click **`ROTATE_ESPN_CREDENTIALS.cmd`**. Rotation is deliberately separate: it explains that ESPN credentials are shared by every configured ESPN league, validates the replacement against the exact request, and requires `ROTATE` before either saved cookie changes.
 
 ## What you need
 
 - **A Windows PC**, assuming you want the Google Sheet output.
-- **Python 3.13** -- step 1 below gets it installed.
-- **An ESPN fantasy baseball league that you can sign into.** Private leagues are the proven path. The v1.9 command also requires sign-in cookies for a public league; step 5 shows how to collect them.
+- **Python 3.13.** If it is missing, the launcher gives the official download location and tells you to select **Add python.exe to PATH**. Close the launcher, install Python, and double-click it again.
+- **An ESPN fantasy baseball league that you can sign into.** Private leagues are the proven path. The supported guided path uses ESPN session cookies even when the league itself is public.
 - **A Google account**, for the finished Sheet.
 - **No Snowflake account.** Your league's data lands as files on your own
   disk. Snowflake is an advanced option, reached only by deliberately
   passing `--advanced-snowflake`.
-- **No Google Cloud project or personal OAuth client**, as long as you are using the release ZIP. The tool handles that setup.
+- **No Google Cloud project or OAuth client of your own**, as long as you are using the release ZIP. The release handles the Google sign-in setup for you.
 
-## 1. Install Python 3.13
+## Advanced: manual setup fallback
+
+The supported v2.0 path is the double-click launcher above. The commands and file shapes below remain for developers and for targeted troubleshooting. A normal release user should not need them.
+
+### Manual 1. Install Python 3.13
 
 Download it from the official [Python releases for Windows](https://www.python.org/downloads/windows/) page. Choose the newest available **Python 3.13.x** and its **Windows installer (64-bit)**. Do not choose 3.14; this project does not support it yet.
 
@@ -52,20 +54,20 @@ PATH"**, tick it before clicking Install. It makes step 3 work.
 
 Step 3 opens the terminal and checks that this worked. If Windows itself blocks the installer because of system policy, use **Run as administrator** only if you own or administer that PC. The almanac commands later in this guide should run from an ordinary PowerShell window and do not need administrator access.
 
-## 2. Unzip the download
+### Manual 2. Unzip the download
 
-`fantasy-league-almanac-1.9.0.zip` is a **compressed** folder. This is the almanac ZIP, not the Python installer you just downloaded. Windows will happily show you what is inside it without ever unpacking it, and the commands below will not work in that view.
+`fantasy-league-almanac-<version>.zip` is a **compressed** folder. This is the almanac ZIP, not the Python installer you just downloaded. Windows will happily show you what is inside it without ever unpacking it, and the commands below will not work in that view.
 
 Right-click the ZIP file → **Extract All…** → **Extract**. That produces a
-normal folder named something like `fantasy-league-almanac-1.9.0`. Work
+normal folder named something like `fantasy-league-almanac-2.0.0`. Work
 inside **that** folder from here on.
 
-## 3. Open PowerShell in that folder
+### Manual 3. Open PowerShell in that folder
 
 PowerShell is Windows' command terminal. The trick below opens it already
 pointed at the right folder, so you never have to navigate:
 
-1. Open the extracted `fantasy-league-almanac-1.9.0` folder in File Explorer, so its contents -- including `QUICKSTART.md` and `requirements.txt` -- are displayed.
+1. Open the extracted `fantasy-league-almanac-2.0.0` folder in File Explorer, so its contents -- including `QUICKSTART.md` and `requirements.txt` -- are displayed.
 2. Left-click once on the **address bar** at the top (the strip showing the folder path). The path becomes editable and highlighted.
 3. With the folder's contents still displayed below it, type `powershell` into that address bar and press **Enter**.
 
@@ -86,9 +88,9 @@ python --version
 
 The answer must begin with `Python 3.13`. If it says `Python 3.14`, you installed an unsupported version. If Windows says something like *"python is not recognized"*, close PowerShell, open a fresh one using the same address-bar steps, and try again. If it still fails, re-run the Python installer and make sure the "Add python.exe to PATH" box is ticked.
 
-## 4. Create the environment and install the parts
+### Manual 4. Create the environment and install the parts
 
-Your prompt should look roughly like `PS C:\Users\YourName\...\fantasy-league-almanac-1.9.0>`. The exact folders before the almanac name will differ, and that is fine.
+Your prompt should look roughly like `PS C:\Users\YourName\...\fantasy-league-almanac-2.0.0>`. The exact folders before the almanac name will differ, and that is fine.
 
 Run these two commands **one at a time**. The first makes a private Python environment inside the almanac folder:
 
@@ -106,7 +108,7 @@ This downloads and installs the Python tools used to read ESPN data, build the l
 
 > **Optional context:** the `.\.venv\Scripts\python.exe` prefix in later commands points directly at the private environment you just created. That avoids asking you to "activate" it with a script that Windows commonly blocks. You do not need to remember this explanation; copy the commands as written.
 
-## 5. Fill in your `.env` file
+### Manual 5. Fill in your `.env` file
 
 This file holds your ESPN sign-in. Two commands: the first creates it from
 the supplied template, the second opens it in Notepad.
@@ -134,7 +136,7 @@ Leave every other value alone. The Snowflake section is an advanced alternative 
 
 If any of the three values is hard to find, [SETUP.md section 3](SETUP.md#3-espn-credentials) is the detailed reference for this exact step.
 
-### Where those three values come from
+#### Where those three values come from
 
 Sign in to ESPN Fantasy in **Chrome or Edge** and open your league.
 
@@ -148,7 +150,8 @@ your league id is the `123456` part -- the number right after
 1. Press **F12**. A developer panel opens beside or below the page.
 2. Click the **Application** tab. (You may need the `»` arrow to find it.)
 3. In the left sidebar, under **Storage**, expand **Cookies** and click
-   the ESPN Fantasy entry (`https://fantasy.espn.com`).
+   the ESPN entry -- usually `https://www.espn.com`. Use the ESPN store
+   that contains the two cookie names below.
 4. A table of cookies appears. Find the rows named **`espn_s2`** and
    **`SWID`**.
 5. Click each one and copy its **Value** exactly -- the whole thing.
@@ -170,7 +173,7 @@ still `espn_s2` and `SWID` and the Value column is still what you want.
 > or post them. Nothing in this guide asks you to send them to anyone,
 > including the author.
 
-## 6. Describe your league in `config\leagues.yml`
+### Manual 6. Describe your league in `config\leagues.yml`
 
 This tells the tool which league to build and how far back its history
 goes.
@@ -239,7 +242,7 @@ than weekly opponents. The tool recognizes the measured ESPN format and reads
 its day-specific rosters, so an active first-year league does not have to wait
 until the season ends before it can produce an almanac.
 
-## 7. Run it
+### Manual 7. Run it
 
 Run this from the same PowerShell window, still inside the extracted almanac folder. If you closed it, reopen that folder in File Explorer, type `powershell` in the address bar as in step 3, and press Enter.
 
@@ -265,7 +268,7 @@ builds the almanac on your own machine, then creates the Google Sheet.
   before any Sheet is created -- deliberately, so you never get an almanac
   with a silent hole in it.
 
-## 8. The Google prompts, in order
+### Manual 8. The Google prompts, in order
 
 1. A browser window opens asking you to **choose a Google account**. Pick
    the one that should own the finished Sheet.
@@ -311,7 +314,7 @@ permission at
 [myaccount.google.com](https://myaccount.google.com/permissions) --
 whenever you choose, since nothing here expires it for you.
 
-### The caveat: branding review is still pending
+## Google branding status
 
 The app's Google sign-in configuration is **In Production**. It
 is not restricted to a test-user list, and the week-long grant expiry that
@@ -451,18 +454,29 @@ The Snowflake equivalent of the stages above, for maintainers, is in
 
 Said plainly, because finding out later is worse:
 
-- **Configuration is still manual.** Steps 5 and 6 are files you edit.
-  There is no installer that asks you questions and no `.exe` yet; a
-  form-driven setup is planned for a future release.
-- **The first untouched-machine, new-league rehearsal is in progress.** It
-  has reached real extraction and already exposed issues that were fixed,
-  but it has not yet produced the final workbook. This guide is therefore
-  still careful rather than fully proven.
+- **The release is deliberately a guided terminal window, not a full GUI.**
+  The double-click launcher removes terminal commands and configuration-file
+  edits, while the illustrated browser guide handles the unavoidable ESPN
+  cookie step. A future graphical shell can reuse the same validation and
+  writer core.
+- **Reddit is the first broad stranger-validation event.** The release gate
+  is Kyle's clean-machine run from the actual ZIP. Reports from the public
+  feedback launch will determine the next onboarding fixes rather than being
+  represented here as already solved.
 - **ESPN leagues only.** The CBS side of this project is real and ships
   in the almanac, but its ingestion runs on browser-extracted
   credentials behind a reCAPTCHA login, so there is no scripted setup for
   a CBS league and it is not part of this journey. Tracked publicly on
   the roadmap.
+- **No packaged sample mode in v2.0.** The controlled offline sample remains
+  useful for a future credential-free demonstration and end-to-end smoke,
+  but it is explicitly deferred rather than represented as part of this
+  release.
+- **No automated ESPN-cookie acquisition in v2.0.** The application-owned
+  browser-window idea remains a bounded future feasibility question. The
+  supported release uses the illustrated manual guide and hidden paste; it
+  never reads a normal browser profile or automates login, 2FA, CAPTCHA, or
+  credential entry.
 - **Private leagues only, in practice.** The supported entry requires the
   ESPN cookies from step 5. A public league is not proven through this
   command.
@@ -491,7 +505,7 @@ Said plainly, because finding out later is worse:
   wins and losses. **Rotisserie remains unproven** and still refuses rather
   than guessing.
 - **A league that drafted late still counts the whole MLB season.** This is
-  the one number-affecting limitation in v1.9, so it is spelled out rather
+  the one number-affecting limitation in v2.0, so it is spelled out rather
   than left to be discovered.
 
   The extractor walks every scoring day of the baseball season. If your

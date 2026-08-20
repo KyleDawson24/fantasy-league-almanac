@@ -325,8 +325,13 @@ def test_existing_different_league_identity_is_refused(tmp_path):
         _write(request, profile, paths)
 
     assert error.value.code == BootstrapErrorCode.CONFIG_CONFLICT
-    assert other_id not in str(error.value)
-    assert profile.league_id not in str(error.value)
+    message = str(error.value)
+    assert "one league per extracted folder" in message
+    assert "fresh copy into a different folder" in message
+    assert "START_ALMANAC.cmd" in message
+    assert "ROTATE_ESPN_CREDENTIALS.cmd" not in message
+    assert other_id not in message
+    assert profile.league_id not in message
     assert paths[0].read_bytes() == env_before
     assert paths[2].read_bytes() == registry_before
 

@@ -655,6 +655,15 @@ def _refuse_credential_conflicts(
     for key, requested in desired.items():
         current = existing.get(key, "")
         if current and current != requested:
+            if key == "LEAGUE_ID":
+                raise BootstrapValidationError(
+                    BootstrapErrorCode.CONFIG_CONFLICT,
+                    "This extracted folder is already configured for a "
+                    "different ESPN league. Guided v2.0 supports one league "
+                    "per extracted folder. Extract a fresh copy into a "
+                    "different folder and double-click START_ALMANAC.cmd "
+                    "there; nothing was written.",
+                )
             label = "league identity" if key == "LEAGUE_ID" else key
             raise BootstrapValidationError(
                 BootstrapErrorCode.CONFIG_CONFLICT,
@@ -677,9 +686,11 @@ def _validate_rotation_source(
     if not current_league_id or current_league_id != desired["LEAGUE_ID"]:
         raise BootstrapValidationError(
             BootstrapErrorCode.CONFIG_CONFLICT,
-            "Credential rotation must validate the league already configured "
-            "in this .env. Check the league ID and use ordinary setup for a "
-            "new league; nothing was written.",
+            "Credential rotation can update cookies only for the ESPN league "
+            "already configured in this extracted folder. Guided v2.0 "
+            "supports one league per extracted folder. To configure another "
+            "league, extract a fresh copy into a different folder and "
+            "double-click START_ALMANAC.cmd there; nothing was written.",
         )
     if any(not existing.get(key, "") for key in rotation_keys):
         raise BootstrapValidationError(

@@ -34,6 +34,8 @@ def test_reddit_body_preserves_the_supported_boundary():
         "rotisserie is not proven and fails closed",
         "cbs guided onboarding is not part of v2.0",
         "packaged sample mode and automatic cookie capture",
+        "one league per extracted folder",
+        "separate fresh extraction for another league",
         "there is no almanac-hosted account, telemetry, analytics, payment, or maintainer database",
     ):
         assert claim in text

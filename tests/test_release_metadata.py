@@ -51,6 +51,8 @@ def test_release_notes_preserve_scope_and_publication_gates():
         "pending branding alone is not the safety boundary",
         "actual oauth-bearing candidate zip",
         "reddit is intentionally the first broad stranger-validation event",
+        "one league per extracted folder",
+        "fresh release extraction in a different folder",
         "48–72 hour triage window",
     ):
         assert claim in lowered
@@ -64,6 +66,8 @@ def test_quickstart_is_launcher_first_and_manual_second():
     )
     assert "you do not open a terminal or edit `.env`" in quickstart
     assert "configuration is still manual" not in quickstart
+    assert "one league per extracted folder" in quickstart
+    assert "fresh copy of the release zip into a different folder" in quickstart
 
 
 def test_release_checklist_gates_publication_and_ships_the_checksum():

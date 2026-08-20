@@ -24,6 +24,8 @@ After setup, Enter means Yes at `Create the almanac now? [Y/n]`. The shell start
 
 Ordinary setup never overwrites a nonempty credential. `ROTATE_ESPN_CREDENTIALS.cmd` is a separate double-click action for an expired ESPN session. It explains that the two ESPN cookies are shared by every configured ESPN league, validates replacements against the exact league and season range, then requires the user to type `ROTATE`. Only `ESPN_S2` and `SWID` change; a declined confirmation, malformed input, failed validation or failed write preserves the prior credentials byte-for-byte.
 
+Guided v2.0 configures one league per extracted folder. Another league uses a fresh release extraction in a different folder. Ordinary setup and credential rotation both refuse to change a configured folder to a different league and direct the user to that safe recovery path before writing anything.
+
 The launcher also makes dependency recovery explicit. A connection failure during installation is handled by rerunning the same file. A second run with a healthy matching environment skips installation after `pip check`. The workbook publisher retains its existing local-ledger resume contract so a failed render does not create an uncontrolled pile of replacement workbooks.
 
 ## Credential and Google custody

@@ -235,6 +235,44 @@ def test_invalid_existing_state_refuses_before_confirmation(tmp_path, source):
     assert paths[2].read_bytes() == registry_before
 
 
+def test_wrong_league_rotation_names_fresh_folder_recovery_without_leaks(
+    tmp_path, capsys
+):
+    request, profile = _validated_pair()
+    other_id = "13572468"
+    env_before = _existing_env(league_id=other_id)
+    paths = _workspace(tmp_path, env_bytes=env_before)
+    registry_before = paths[2].read_bytes()
+    confirmations = []
+
+    with pytest.raises(BootstrapValidationError) as error:
+        _rotate(
+            request,
+            profile,
+            paths,
+            confirm=lambda notice: confirmations.append(notice) or True,
+        )
+
+    message = str(error.value)
+    assert error.value.code == BootstrapErrorCode.CONFIG_CONFLICT
+    assert "one league per extracted folder" in message
+    assert "fresh copy into a different folder" in message
+    assert "START_ALMANAC.cmd" in message
+    for private_value in (
+        other_id,
+        request.league_id,
+        request.espn_s2,
+        request.swid,
+    ):
+        assert private_value not in message
+    captured = capsys.readouterr()
+    assert request.espn_s2 not in captured.out + captured.err
+    assert request.swid not in captured.out + captured.err
+    assert confirmations == []
+    assert paths[0].read_bytes() == env_before
+    assert paths[2].read_bytes() == registry_before
+
+
 def test_rotation_write_failure_preserves_old_credentials(tmp_path, monkeypatch):
     request, profile = _validated_pair()
     env_before = _existing_env()

@@ -30,6 +30,8 @@ When the two disagree, SETUP.md is right.
 
 Returning later with expired ESPN cookies? Close ordinary setup and double-click **`ROTATE_ESPN_CREDENTIALS.cmd`**. Rotation is deliberately separate: it explains that ESPN credentials are shared by every configured ESPN league, validates the replacement against the exact request, and requires `ROTATE` before either saved cookie changes.
 
+Guided v2.0 supports **one league per extracted folder**. To build an almanac for another league, extract a fresh copy of the release ZIP into a different folder and run `START_ALMANAC.cmd` there. Credential rotation updates only the cookies for the league already configured in its folder; it never changes that league's identity.
+
 ## What you need
 
 - **A Windows PC**, assuming you want the Google Sheet output.

@@ -23,6 +23,11 @@ from typing import Callable, Mapping, Optional, Sequence
 
 import requests
 
+from extract.matchup_membership import (
+    MatchupMembershipError,
+    parse_matchup_membership,
+)
+
 
 ESPN_API_BASE = (
     "https://lm-api-reads.fantasy.espn.com/apis/v3/games/flb/seasons"
@@ -299,6 +304,8 @@ def validate_espn_league(
             "workbook cannot be selected safely before the long run, so "
             "nothing was written.",
         )
+    if league_format == "h2h":
+        _require_reportable_h2h_history(snapshots, seasons)
 
     profile = LeagueProfile(
         platform="espn",
@@ -319,6 +326,45 @@ def validate_espn_league(
         (_VALIDATED_PROFILE_TOKEN, _profile_fingerprint(profile)),
     )
     return profile
+
+
+def _require_reportable_h2h_history(
+    snapshots: Sequence[Mapping[str, object]],
+    seasons: Sequence[int],
+) -> None:
+    """Prove each requested H2H season can reach the existing runner.
+
+    Preflight already requests ``mMatchupScore`` for every year.  Reusing the
+    extractor's exact membership parser here keeps setup from saving a league
+    that the next step will immediately refuse.  A brand-new or late-start
+    league is not treated as malformed and no empty workbook is invented; it
+    gets a specific, local-only recovery message before either config file is
+    touched.
+    """
+
+    for season, snapshot in zip(seasons, snapshots):
+        try:
+            parsed = parse_matchup_membership(
+                dict(snapshot),
+                league_key="preflight",
+                season_year=season,
+            )
+        except MatchupMembershipError:
+            raise BootstrapValidationError(
+                BootstrapErrorCode.HISTORY_UNAVAILABLE,
+                f"ESPN served season {season}, but its completed head-to-head "
+                "matchup history could not be derived safely. If this is a "
+                "new or late-start league, retry after its first matchup has "
+                "finished. If matchups have already finished, report this as "
+                "a bug with sanitized evidence. Nothing was written.",
+            ) from None
+        if not parsed.closed:
+            raise BootstrapValidationError(
+                BootstrapErrorCode.HISTORY_UNAVAILABLE,
+                f"ESPN served season {season}, but this head-to-head league "
+                "does not have a completed matchup yet. Retry after its first "
+                "matchup has finished; nothing was written.",
+            )
 
 
 def _request_espn_season(

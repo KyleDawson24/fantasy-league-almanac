@@ -47,6 +47,7 @@ def test_release_notes_preserve_scope_and_publication_gates():
         "cbs guided onboarding is an urgent follow",
         "packaged sample mode is explicitly deferred",
         "automated cookie acquisition",
+        "an h2h league needs at least one completed matchup",
         "pending branding alone is not the safety boundary",
         "actual oauth-bearing candidate zip",
         "reddit is intentionally the first broad stranger-validation event",

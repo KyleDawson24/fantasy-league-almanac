@@ -35,6 +35,11 @@ Returning later with expired ESPN cookies? Close ordinary setup and double-click
 - **A Windows PC**, assuming you want the Google Sheet output.
 - **Python 3.13.** If it is missing, the launcher gives the official download location and tells you to select **Add python.exe to PATH**. Close the launcher, install Python, and double-click it again.
 - **An ESPN fantasy baseball league that you can sign into.** Private leagues are the proven path. The supported guided path uses ESPN session cookies even when the league itself is public.
+- **For a head-to-head league, at least one completed matchup.** A brand-new
+  or late-start H2H league has no history to turn into an almanac yet. Setup
+  now detects that before saving configuration and tells you to retry after
+  the first matchup finishes. Season-long points uses its separate measured
+  daily path.
 - **A Google account**, for the finished Sheet.
 - **No Snowflake account.** Your league's data lands as files on your own
   disk. Snowflake is an advanced option, reached only by deliberately

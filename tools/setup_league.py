@@ -36,9 +36,14 @@ from config.bootstrap_writer import (  # noqa: E402
 from config.bootstrap_runner import run_public_almanac  # noqa: E402
 
 
-def _prompt_year(label: str, *, default: int | None = None) -> int:
+def _prompt_year(
+    label: str,
+    *,
+    prompt: str | None = None,
+    default: int | None = None,
+) -> int:
     suffix = f" [{default}]" if default is not None else ""
-    value = input(f"{label}{suffix}: ").strip()
+    value = input(f"{prompt or label}{suffix}: ").strip()
     if not value and default is not None:
         return default
     try:
@@ -51,7 +56,9 @@ def _prompt_year(label: str, *, default: int | None = None) -> int:
 
 
 def _prompt_final_year() -> int | None:
-    value = input("Final season [ongoing]: ").strip()
+    value = input(
+        "Final season (press Enter if ongoing; otherwise enter a 4-digit year): "
+    ).strip()
     if not value or value.lower() == "ongoing":
         return None
     try:
@@ -105,18 +112,34 @@ def collect_request() -> BootstrapRequest:
     """Collect secrets without echoing or accepting them on the command line."""
 
     offer_illustrated_guide()
-    platform = input("Platform [ESPN]: ").strip() or "espn"
+    platform = input("Platform (press Enter for ESPN): ").strip() or "espn"
     if platform.strip().lower() != "espn":
         raise BootstrapValidationError(
             BootstrapErrorCode.UNSUPPORTED_PLATFORM,
             "Guided setup currently supports ESPN only. CBS remains an "
             "immediate follow and does not delay the ESPN journey.",
         )
-    league_id = input("ESPN league ID: ").strip()
-    first = _prompt_year("First season")
+    league_id = input(
+        "ESPN league ID (the number after leagueId= in the league URL): "
+    ).strip()
+    first = _prompt_year(
+        "First season",
+        prompt=(
+            "First season this ESPN league existed "
+            "(4-digit year, for example 2015)"
+        ),
+    )
     final = _prompt_final_year()
-    espn_s2 = getpass("ESPN_S2 (hidden): ")
-    swid = getpass("SWID (hidden): ")
+    print(
+        "The next two entries are hidden. Paste each value and press Enter; "
+        "nothing will appear on screen."
+    )
+    espn_s2 = getpass(
+        "espn_s2 cookie value (input hidden; nothing will appear): "
+    )
+    swid = getpass(
+        "SWID cookie value, including { and } (input hidden; nothing will appear): "
+    )
     return BootstrapRequest(
         platform=platform,
         league_id=league_id,

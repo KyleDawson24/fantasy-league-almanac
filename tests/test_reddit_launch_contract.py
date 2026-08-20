@@ -30,6 +30,7 @@ def test_reddit_body_preserves_the_supported_boundary():
     for claim in (
         "windows + espn",
         "head-to-head points and season-long points",
+        "head-to-head league needs at least one completed matchup",
         "rotisserie is not proven and fails closed",
         "cbs guided onboarding is not part of v2.0",
         "packaged sample mode and automatic cookie capture",

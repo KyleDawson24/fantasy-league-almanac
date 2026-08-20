@@ -141,17 +141,73 @@ def test_ongoing_request_preserves_null_final_season(monkeypatch):
 
 def test_paired_matchups_are_h2h_evidence(monkeypatch):
     monkeypatch.setattr("config.bootstrap.require_supported_python", lambda: None)
-    schedule = [{"home": {"teamId": 1}, "away": {"teamId": 2}}]
+    schedule = [
+        {
+            "matchupPeriodId": 1,
+            "home": {
+                "teamId": 1,
+                "pointsByScoringPeriod": {"1": 10.0},
+            },
+            "away": {
+                "teamId": 2,
+                "pointsByScoringPeriod": {"1": 8.0},
+            },
+        }
+    ]
 
     profile = validate_espn_league(
         _request(first_season=2026),
         http_get=lambda *a, **k: _Response(
-            payload=_payload(league_type=0, schedule=schedule)
+            payload={
+                **_payload(league_type=0, schedule=schedule),
+                "status": {
+                    "currentLeagueType": 0,
+                    "currentMatchupPeriod": 2,
+                    "latestScoringPeriod": 2,
+                    "finalScoringPeriod": 180,
+                },
+            }
         ),
     )
 
     assert profile.league_format == "h2h"
     assert "paired" in profile.format_evidence
+
+
+def test_new_h2h_league_stops_before_configuration_is_validated(monkeypatch):
+    """Candidate-1 evidence: scheduled pairs are not completed history."""
+    monkeypatch.setattr("config.bootstrap.require_supported_python", lambda: None)
+    schedule = [
+        {
+            "matchupPeriodId": period,
+            "home": {"teamId": 1},
+            "away": {"teamId": 2},
+        }
+        for period in range(1, 22)
+    ]
+    payload = {
+        **_payload(league_type=0, schedule=schedule),
+        "status": {
+            "currentLeagueType": 0,
+            "currentMatchupPeriod": 20,
+            "latestScoringPeriod": 140,
+            "finalScoringPeriod": 187,
+        },
+    }
+
+    with pytest.raises(BootstrapValidationError) as exc:
+        validate_espn_league(
+            _request(first_season=2026),
+            http_get=lambda *a, **k: _Response(payload=payload),
+        )
+
+    assert exc.value.code == BootstrapErrorCode.HISTORY_UNAVAILABLE
+    message = str(exc.value).lower()
+    assert "new or late-start league" in message
+    assert "first matchup has finished" in message
+    assert "nothing was written" in message
+    for private_value in (S2, SWID, LEAGUE_ID):
+        assert private_value not in str(exc.value)
 
 
 @pytest.mark.parametrize(

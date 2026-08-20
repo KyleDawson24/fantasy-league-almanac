@@ -78,6 +78,47 @@ def test_guide_is_fully_offline_illustrated_and_privacy_safe():
     assert "href=\"http" not in lowered
 
 
+def test_request_prompts_explain_defaults_years_and_hidden_cookie_input(
+    monkeypatch, capsys
+):
+    prompts = []
+    answers = iter(["", "24681357", "2015", ""])
+
+    def answer(prompt):
+        prompts.append(prompt)
+        return next(answers)
+
+    secret_prompts = []
+    secrets = iter(["synthetic-s2", "{SYNTHETIC-SWID}"])
+
+    def hidden(prompt):
+        secret_prompts.append(prompt)
+        return next(secrets)
+
+    monkeypatch.setattr(setup_cli, "offer_illustrated_guide", lambda: True)
+    monkeypatch.setattr("builtins.input", answer)
+    monkeypatch.setattr(setup_cli, "getpass", hidden)
+
+    request = setup_cli.collect_request()
+
+    assert request.platform == "espn"
+    assert request.first_season == 2015
+    assert request.final_season is None
+    rendered = " ".join(prompts).lower()
+    assert "press enter for espn" in rendered
+    assert "number after leagueid=" in rendered
+    assert "first season this espn league existed" in rendered
+    assert "for example 2015" in rendered
+    assert "press enter if ongoing" in rendered
+    hidden_rendered = " ".join(secret_prompts)
+    assert "espn_s2" in hidden_rendered
+    assert "including { and }" in hidden_rendered
+    assert hidden_rendered.lower().count("nothing will appear") == 2
+    output = capsys.readouterr().out.lower()
+    assert "next two entries are hidden" in output
+    assert "nothing will appear on screen" in output
+
+
 def test_clean_machine_gate_is_zip_first_and_requires_no_manual_config():
     lowered = REHEARSAL.read_text(encoding="utf-8").lower()
 

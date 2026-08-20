@@ -20,11 +20,15 @@ correction: ESPN auction drafts now render as priced purchase ledgers rather
 than being assigned snake-pick order and value grades. See CHANGELOG.md for
 the per-release entries.
 
-**In flight right now:** guided fields-file onboarding (MLB-31/MLB-207),
-which is what still stands between the v1.9.1 command and a stranger
-running this cold; the untouched-machine rehearsal of that path; and
-CBS, which remains outside the supported stranger journey and is an
-urgent fast-follow rather than a 2.0 gate.
+**In flight right now:** the guided ESPN onboarding candidate now has a
+double-click Windows front door, private-environment preparation, illustrated
+manual cookie guidance, validate-before-write configuration, explicit cookie
+rotation and a handoff to the existing public workbook runner. What remains
+before v2.0 is the actual candidate-ZIP cut and Kyle's untouched-machine
+rehearsal of that complete path. CBS guided onboarding remains outside the
+supported stranger journey and is an urgent fast-follow rather than a 2.0
+gate; packaged sample mode is also an explicit post-2.0 follow rather than a
+silent acceptance gap.
 
 The items below are what's still on deck, organized by
 priority and ambition. v1.x = incremental polish on the current

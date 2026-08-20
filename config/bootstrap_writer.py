@@ -659,8 +659,11 @@ def _refuse_credential_conflicts(
             raise BootstrapValidationError(
                 BootstrapErrorCode.CONFIG_CONFLICT,
                 f"The local credential file already has a different nonempty "
-                f"{label} value. This rung has no approved replacement "
-                "policy, so nothing was written.",
+                f"{label} value. Ordinary setup never replaces saved "
+                "credentials, so nothing was written. For an expired ESPN "
+                "session, close this window and double-click "
+                "ROTATE_ESPN_CREDENTIALS.cmd; the replacement is validated "
+                "and explicitly confirmed before either value changes.",
             )
 
 

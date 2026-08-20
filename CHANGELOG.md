@@ -16,6 +16,19 @@ _Release notes are built from the commit range at each cut rather than
 accumulated here, so this section staying short is not a sign the
 repository is idle._
 
+### Added
+
+- **A double-clickable, illustrated ESPN setup candidate for Windows.**
+  `START_ALMANAC.cmd` detects Python 3.13, creates or repairs a private
+  virtual environment, safely resumes the pinned dependency install, and
+  hands off to the UI-agnostic validated setup core without requiring a
+  terminal or manual edits to `.env` and `config/leagues.yml`. The cookie
+  step opens a bundled offline illustrated guide; real values remain hidden
+  and local. `ROTATE_ESPN_CREDENTIALS.cmd` is a separate, validated and
+  explicitly confirmed action for an expired shared ESPN session. Argument
+  vectors and root-relative paths cover extracted folders with spaces and
+  OneDrive-style locations; interrupted setup is rerun-safe.
+
 ### Changed
 
 - **One Home All-Time team contract across formats.** The head-to-head

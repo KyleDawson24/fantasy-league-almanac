@@ -17,7 +17,7 @@ When the two disagree, SETUP.md is right.
 
 **This is guided setup, but it is not a wizard yet.** You will open and edit two supplied text files. After that, one command downloads, builds, and publishes the almanac. A form-driven setup is planned for a future release.
 
-The development branch now has four bounded rungs of that work: [guided setup](docs/setup-preflight.md) validates ESPN access and the requested history, atomically fills the existing local credential and registry files, provides an explicit validated path for rotating expired ESPN cookies, and offers to start the existing public almanac runner. It does not replace the manual v1.9.1 release steps below until that wizard is packaged and rehearsed as a release candidate.
+The development branch now has a bounded candidate of that work: the root-level `START_ALMANAC.cmd` front door prepares a private Python environment, installs or resumes the pinned dependencies, opens a bundled illustrated ESPN-cookie guide, runs [guided setup](docs/setup-preflight.md), validates ESPN access and the requested history, atomically fills the existing local credential and registry files, provides an explicit validated path for rotating expired ESPN cookies, and offers to start the existing public almanac runner. It uses root-relative argument-vector handoffs so extracted folders containing spaces or living under OneDrive do not corrupt commands. It does not replace the manual v1.9.1 release steps below until that candidate is committed, packaged, and successfully rehearsed from the actual ZIP on a clean Windows machine.
 
 ## Even quicker start
 

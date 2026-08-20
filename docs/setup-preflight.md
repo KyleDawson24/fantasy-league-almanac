@@ -6,7 +6,29 @@ validates the league ID, both private-league cookies, every requested season,
 the served league name and team count, and enough platform evidence to choose
 a supported points workbook format before any file changes.
 
-Run it from an activated Python 3.13 environment:
+In a release ZIP on Windows, double-click the root-level launcher:
+
+```text
+START_ALMANAC.cmd
+```
+
+It detects Python 3.13, creates or repairs the private `.venv`, installs the
+pinned requirements, and starts this thin setup shell without requiring an
+activated terminal. Its argument-vector handoffs and root-relative paths are
+safe when the extracted folder contains spaces or lives under OneDrive. An
+interrupted dependency install leaves no completion stamp and is safely
+retried by double-clicking the launcher again. An interrupted almanac run uses
+the existing runner's local idempotence and workbook-resume contracts on the
+next run.
+
+The launcher opens the bundled offline illustrated guide at the cookie step.
+That guide explains how to find the league ID and copy only `espn_s2` and
+`SWID` from Edge or Chrome after the user signs in themselves. It contains no
+remote scripts, real league identifiers, or credential values. Manual hidden
+paste remains the supported 2.0 path; automated browser-cookie acquisition is
+not part of this rung.
+
+Developers may still run the shell directly from a Python 3.13 environment:
 
 ```powershell
 python tools/setup_league.py
@@ -29,6 +51,12 @@ Setup refuses malformed files, duplicate keys, ambiguous registry metadata, a
 different existing league ID, and every ordinary attempt to replace a
 nonempty cookie with a different value. Returning users whose ESPN session has
 expired have a separate, explicit action:
+
+```text
+ROTATE_ESPN_CREDENTIALS.cmd
+```
+
+The developer equivalent is:
 
 ```powershell
 python tools/setup_league.py --rotate-credentials

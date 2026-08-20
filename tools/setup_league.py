@@ -12,9 +12,11 @@ import argparse
 from getpass import getpass
 from pathlib import Path
 import sys
+import webbrowser
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+ESPN_GUIDE = REPO_ROOT / "docs" / "espn-cookie-guide.html"
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
@@ -61,9 +63,48 @@ def _prompt_final_year() -> int | None:
         ) from exc
 
 
+def offer_illustrated_guide(
+    *,
+    input_fn=input,
+    opener=webbrowser.open,
+    guide_path: Path = ESPN_GUIDE,
+) -> bool:
+    """Offer the bundled offline guide without making setup depend on a GUI."""
+
+    print(
+        "You will need the ESPN league ID plus the espn_s2 and SWID session "
+        "cookies from a browser where you signed in yourself."
+    )
+    print(
+        "The Almanac never asks for your ESPN password or 2FA code. The two "
+        "cookie values are pasted into hidden prompts and remain local."
+    )
+    response = input_fn("Open the illustrated ESPN setup guide now? [Y/n]: ")
+    if response.strip().lower() not in ("", "y", "yes"):
+        print("Guide skipped. You can open docs\\espn-cookie-guide.html later.\n")
+        return False
+    resolved = guide_path.resolve()
+    if not resolved.is_file():
+        print(
+            "The illustrated guide is missing. Extract the complete release "
+            "ZIP into one folder, then start again."
+        )
+        return False
+    try:
+        opened = bool(opener(resolved.as_uri()))
+    except (OSError, ValueError):
+        opened = False
+    if opened:
+        print("The local guide opened in your browser. Return here when ready.\n")
+        return True
+    print(f"Open this local file in your browser, then return here:\n{resolved}\n")
+    return False
+
+
 def collect_request() -> BootstrapRequest:
     """Collect secrets without echoing or accepting them on the command line."""
 
+    offer_illustrated_guide()
     platform = input("Platform [ESPN]: ").strip() or "espn"
     if platform.strip().lower() != "espn":
         raise BootstrapValidationError(

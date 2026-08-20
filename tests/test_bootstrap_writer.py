@@ -331,7 +331,7 @@ def test_existing_different_league_identity_is_refused(tmp_path):
     assert paths[2].read_bytes() == registry_before
 
 
-def test_same_league_cookie_rotation_is_refused_until_policy_exists(tmp_path):
+def test_ordinary_setup_refuses_rotation_and_names_explicit_action(tmp_path):
     request, profile = _validated_pair()
     paths = _workspace(tmp_path)
     _write(request, profile, paths)
@@ -347,6 +347,8 @@ def test_same_league_cookie_rotation_is_refused_until_policy_exists(tmp_path):
         _write(rotated_request, rotated_profile, paths)
 
     assert error.value.code == BootstrapErrorCode.CONFIG_CONFLICT
+    assert "ROTATE_ESPN_CREDENTIALS.cmd" in str(error.value)
+    assert "explicitly confirmed" in str(error.value)
     assert paths[0].read_bytes() == env_before
     assert paths[2].read_bytes() == registry_before
 

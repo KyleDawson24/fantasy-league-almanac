@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fantasy League Almanac — ESPN setup guide</title>
+  <style>
+    :root { color-scheme: light; --ink:#172033; --muted:#526078; --blue:#1d4ed8; --pale:#eff6ff; --line:#cbd5e1; --safe:#166534; --warn:#9a3412; }
+    * { box-sizing: border-box; }
+    body { margin:0; background:#f8fafc; color:var(--ink); font:18px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif; }
+    main { width:min(920px,calc(100% - 32px)); margin:32px auto 72px; }
+    h1 { font-size:clamp(2rem,5vw,3.2rem); line-height:1.05; margin:0 0 14px; }
+    h2 { margin-top:48px; font-size:1.55rem; }
+    h3 { margin-bottom:6px; }
+    p, li { max-width:76ch; }
+    .lede { font-size:1.15rem; color:var(--muted); }
+    .card { background:white; border:1px solid var(--line); border-radius:18px; padding:24px; margin:22px 0; box-shadow:0 8px 24px #0f172a0d; }
+    .safe { border-left:7px solid #22c55e; background:#f0fdf4; }
+    .warn { border-left:7px solid #fb923c; background:#fff7ed; }
+    .step { display:inline-grid; place-items:center; width:34px; height:34px; margin-right:8px; border-radius:50%; background:var(--blue); color:white; font-weight:750; }
+    kbd { border:1px solid #94a3b8; border-bottom-width:3px; border-radius:6px; padding:1px 7px; background:white; font:0.9em ui-monospace,monospace; }
+    code { background:#e2e8f0; border-radius:5px; padding:2px 6px; overflow-wrap:anywhere; }
+    svg { width:100%; height:auto; border:1px solid var(--line); border-radius:12px; background:white; margin-top:14px; }
+    .checklist li { margin:10px 0; }
+    .small { color:var(--muted); font-size:0.93rem; }
+    @media print { body{background:white;font-size:12pt} main{width:100%;margin:0} .card{box-shadow:none;break-inside:avoid} }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Get the three ESPN values the Almanac needs</h1>
+  <p class="lede">Keep this page open beside the black Almanac window. You will copy one league number and two browser-cookie values. The cookie values stay hidden when pasted.</p>
+
+  <section class="card safe">
+    <h2 style="margin-top:0">What the application does—and does not do</h2>
+    <p>You sign in to ESPN yourself in Edge or Chrome. Fantasy League Almanac never asks for, observes, or automates your ESPN username, password, two-factor code, CAPTCHA, or identity-provider login.</p>
+    <p>It asks you to copy only the ESPN session cookies named <code>espn_s2</code> and <code>SWID</code>. They are stored in the gitignored local <code>.env</code> file, used locally to read the fantasy league you request, and are not sent to Kyle or any project service.</p>
+  </section>
+
+  <h2><span class="step">1</span>Sign in and open your league</h2>
+  <ol class="checklist">
+    <li>Open a normal Edge or Chrome window.</li>
+    <li>Sign in at ESPN yourself, then open the fantasy-baseball league you want to use.</li>
+    <li>Leave that league page open through the remaining steps.</li>
+  </ol>
+
+  <h2><span class="step">2</span>Copy the ESPN league ID</h2>
+  <p>Look in the browser address. Copy only the digits immediately after <code>leagueId=</code>. If the address contains other numbers, do not include them.</p>
+  <svg viewBox="0 0 900 180" role="img" aria-label="Illustration of a browser address with the league ID highlighted">
+    <rect x="24" y="24" width="852" height="132" rx="16" fill="#e2e8f0"/>
+    <circle cx="62" cy="56" r="9" fill="#ef4444"/><circle cx="91" cy="56" r="9" fill="#f59e0b"/><circle cx="120" cy="56" r="9" fill="#22c55e"/>
+    <rect x="48" y="84" width="804" height="45" rx="22" fill="white"/>
+    <text x="72" y="113" font-family="Consolas,monospace" font-size="18" fill="#334155">fantasy.espn.com/baseball/league?leagueId=</text>
+    <rect x="589" y="91" width="107" height="31" rx="5" fill="#fde68a"/>
+    <text x="597" y="113" font-family="Consolas,monospace" font-size="18" font-weight="700" fill="#713f12">12345678</text>
+    <text x="702" y="113" font-family="Consolas,monospace" font-size="18" fill="#334155">&amp;seasonId=2026</text>
+  </svg>
+  <p class="small">The number above is invented for this illustration. Do not send your real league ID in a public issue.</p>
+
+  <h2><span class="step">3</span>Open the browser’s cookie table</h2>
+  <ol class="checklist">
+    <li>On the open ESPN league page, press <kbd>F12</kbd>. On some laptops use <kbd>Fn</kbd> + <kbd>F12</kbd>. You can also press <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>I</kbd>.</li>
+    <li>Select <strong>Application</strong> along the top of Developer Tools. If it is hidden, select the <strong>»</strong> menu first.</li>
+    <li>In the left column, expand <strong>Cookies</strong>, then select the ESPN address—usually <code>https://www.espn.com</code>.</li>
+  </ol>
+  <svg viewBox="0 0 900 470" role="img" aria-label="Illustration of Edge or Chrome Developer Tools showing the ESPN cookie table">
+    <rect x="18" y="18" width="864" height="434" rx="14" fill="#f8fafc" stroke="#94a3b8"/>
+    <rect x="18" y="18" width="864" height="54" rx="14" fill="#1e293b"/>
+    <text x="42" y="52" font-family="Segoe UI,sans-serif" font-size="18" fill="#cbd5e1">Elements   Console   Sources   Network</text>
+    <rect x="424" y="28" width="126" height="34" rx="6" fill="#1d4ed8"/>
+    <text x="442" y="51" font-family="Segoe UI,sans-serif" font-size="18" font-weight="700" fill="white">Application</text>
+    <text x="566" y="52" font-family="Segoe UI,sans-serif" font-size="18" fill="#cbd5e1">»</text>
+    <rect x="18" y="72" width="270" height="380" fill="#f1f5f9"/>
+    <text x="40" y="112" font-family="Segoe UI,sans-serif" font-size="18" font-weight="700" fill="#172033">Storage</text>
+    <text x="52" y="152" font-family="Segoe UI,sans-serif" font-size="18" fill="#172033">▼ Cookies</text>
+    <rect x="42" y="169" width="232" height="38" rx="5" fill="#dbeafe"/>
+    <text x="62" y="194" font-family="Segoe UI,sans-serif" font-size="16" fill="#1e3a8a">https://www.espn.com</text>
+    <rect x="288" y="72" width="594" height="55" fill="white"/>
+    <text x="312" y="106" font-family="Segoe UI,sans-serif" font-size="17" fill="#64748b">Filter cookies by name</text>
+    <rect x="288" y="127" width="594" height="42" fill="#e2e8f0"/>
+    <text x="310" y="154" font-family="Segoe UI,sans-serif" font-size="17" font-weight="700" fill="#334155">Name</text>
+    <text x="510" y="154" font-family="Segoe UI,sans-serif" font-size="17" font-weight="700" fill="#334155">Value</text>
+    <rect x="300" y="182" width="570" height="55" rx="6" fill="#fef3c7"/>
+    <text x="316" y="216" font-family="Consolas,monospace" font-size="18" font-weight="700" fill="#172033">espn_s2</text>
+    <text x="510" y="216" font-family="Consolas,monospace" font-size="18" fill="#64748b">••••••••••••••••••••••••••••</text>
+    <rect x="300" y="247" width="570" height="55" rx="6" fill="#fef3c7"/>
+    <text x="316" y="281" font-family="Consolas,monospace" font-size="18" font-weight="700" fill="#172033">SWID</text>
+    <text x="510" y="281" font-family="Consolas,monospace" font-size="18" fill="#64748b">{••••••••-••••-••••-••••-••••••••••••}</text>
+    <text x="316" y="342" font-family="Segoe UI,sans-serif" font-size="17" fill="#475569">Double-click the Value cell, then copy the complete value.</text>
+    <text x="316" y="374" font-family="Segoe UI,sans-serif" font-size="17" fill="#475569">Keep the opening and closing braces around SWID.</text>
+  </svg>
+
+  <h2><span class="step">4</span>Paste only into the hidden Almanac prompts</h2>
+  <ol class="checklist">
+    <li>Find the row named <code>espn_s2</code>. Double-click its <strong>Value</strong> cell and copy the entire value.</li>
+    <li>Return to the black Almanac window and paste it at <strong>ESPN_S2 (hidden)</strong>. Nothing will appear while you paste. Press Enter once.</li>
+    <li>Return to the cookie table. Copy the complete <code>SWID</code> Value, including its opening and closing braces.</li>
+    <li>Paste it at <strong>SWID (hidden)</strong> and press Enter.</li>
+  </ol>
+  <section class="card warn">
+    <h3>If a cookie row is missing</h3>
+    <p>Confirm you are signed in, refresh the ESPN league page, and select the cookie store for <code>www.espn.com</code>. Do not copy cookies from another website. If ESPN asks you to sign in or complete a security check, complete it yourself in the normal browser; the Almanac does not bypass it.</p>
+  </section>
+
+  <section class="card">
+    <h3>Returning later with an expired ESPN session?</h3>
+    <p>Close the ordinary setup window and double-click <code>ROTATE_ESPN_CREDENTIALS.cmd</code> in the extracted Almanac folder. Rotation is deliberately separate: it explains that the ESPN cookies are shared by every configured ESPN league, validates the replacement against your exact league and seasons, and asks you to type <code>ROTATE</code> before changing either saved value.</p>
+  </section>
+
+  <section class="card">
+    <h2 style="margin-top:0">Safe reporting reminder</h2>
+    <p>Never place either cookie, your league ID, a workbook URL, an <code>.env</code> file, or full logs in GitHub, Reddit, Discord, screenshots, or email. A public bug report needs only sanitized symptoms. Use the private-support option when the problem cannot be described safely.</p>
+  </section>
+</main>
+</body>
+</html>

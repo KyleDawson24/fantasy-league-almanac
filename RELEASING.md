@@ -116,6 +116,8 @@ lands), not on a calendar. Hard backstop: if `[Unreleased]` exceeds
 ## Announce (only when the release warrants it)
 
 - [ ] League-facing: share/refresh the relevant Sheet or board post.
-- [ ] Public-facing (2.0+): LinkedIn / Reddit per the launch checklist
-      in the maintainer's local `RELEASE PLAN.md` (untracked -- see the
-      note in "The cut" above).
+- [ ] Public-facing (2.0+): use the tracked
+      [v2.0 Reddit launch kit](docs/v2.0-reddit-launch.md) for the first
+      stranger-feedback post. LinkedIn remains gated by the resulting
+      48–72-hour evidence and the maintainer's local `RELEASE PLAN.md`
+      (untracked -- see the note in "The cut" above).

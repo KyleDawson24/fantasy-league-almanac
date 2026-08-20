@@ -455,6 +455,12 @@ merge things. On a fresh clone every file there is a **blank template** --
 a header row and nothing else. That is deliberate. You are not meant to
 inherit anybody else's league.
 
+The guided ESPN wizard does not ask for or populate these advanced tables.
+It writes only `.env` and `config/leagues.yml`; the ordinary ESPN journey
+derives identity and schedule facts from the platform. Use a CSV only when
+you deliberately need one of the CBS historian inputs or sparse corrections
+described below. The next `dbt seed` loads it automatically.
+
 **[`dbt_league/league_config/README.md`](dbt_league/league_config/README.md)
 documents every file with a worked example.** Read that one, not this
 section, when you are actually filling them in.
@@ -677,7 +683,7 @@ nothing in it should be a reflex.
 pytest tests/
 ```
 
-Fresh-clone collection at this cut: **1826** pure tests, with **27**
+Fresh-clone collection at this cut: **1823** pure tests, with **27**
 warehouse-marked tests deselected by default via `pytest.ini`; no
 credentials are involved and nothing is written. Those are what pytest
 COLLECTS, not a pass tally -- how many pass or skip varies by machine and

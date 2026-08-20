@@ -192,10 +192,11 @@ ruling taken on 90 sites that were never enumerated, so a brand-new
 occurrence arriving tomorrow would be greeted by the same reassuring
 sentence. A green exit cannot mean both "reviewed" and "never reviewed".
 
-So every reviewable hit is now matched against a LEDGER, one row per
-OCCURRENCE:
+So every reviewable hit is now matched against a private local LEDGER,
+one row per OCCURRENCE:
 
-    tools/pii_dispositions.csv    path,category,digest,disposition,reason,recorded
+    archives/anonymization/pii_dispositions.csv
+        path,category,digest,disposition,reason,recorded
 
 Per occurrence, not per token-in-a-file, and the difference is a hole
 rather than a nicety. The matcher used to stop at the first match of a
@@ -209,15 +210,15 @@ around the match -- with an ordinal only where surroundings are truly
 identical. Reflowing a paragraph keeps a decision; rewriting the
 sentence invalidates it and asks again, which is the safe direction.
 
-The ledger is COMMITTED -- it is the durable record, and a count in a
-handoff document is not one. It carries no real-side value: the identity
-is represented by `digest`, an HMAC of the token under a secret that
-lives beside the map at archives/anonymization/pii_salt.txt and is
-gitignored with it. A plain hash would not do. An attacker who knows the
-category and suspects a four-letter label can hash all 456,976 of them
-and read the ledger straight off, so publishing an unsalted digest of a
-short token publishes the token. Under an HMAC with a 32-byte secret the
-row is inert.
+The ledger lives beside the private map and salt and is gitignored with
+them. It carries no real-side value: the identity is represented by
+`digest`, an HMAC of the token under the private salt. A plain hash would
+not do. An attacker who knows the category and suspects a four-letter
+label can hash all 456,976 of them and read an unsalted ledger straight
+off. Under an HMAC with a 32-byte secret the row is inert, but the review
+record is still maintainer process rather than product source, so it stays
+under the same private custody and backup policy as the inventory it
+describes.
 
 That secret is REQUIRED, not optional: a sweep that cannot open it
 cannot tell a reviewed hit from an unreviewed one, so it refuses to
@@ -256,9 +257,11 @@ import tempfile
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MAP = os.path.join(REPO, "archives", "anonymization", "name_map.csv")
-# The disposition ledger is COMMITTED; the secret that makes its digests
-# meaningless to a reader is not, and lives beside the map.
-LEDGER = os.path.join(REPO, "tools", "pii_dispositions.csv")
+# The disposition ledger is private local process state beside the map and
+# salt. A public clone lacks all three and the strict guard refuses to vouch;
+# the maintainer checkout preserves all three under one backup policy.
+LEDGER = os.path.join(REPO, "archives", "anonymization",
+                      "pii_dispositions.csv")
 SALT = os.path.join(REPO, "archives", "anonymization", "pii_salt.txt")
 # The map's missing category column, kept beside it and gitignored with it.
 # Provenance cannot be inferred from four characters -- see _map_categories.
@@ -1502,9 +1505,10 @@ def main(argv=None):
     # runs.
     if unreviewed and not args.allow_unreviewed:
         print("\n  These have never been reviewed, so this push is blocked. "
-              "Record a decision with --record-dispositions (and commit the "
-              "ledger), or re-run with --allow-unreviewed for a non-blocking "
-              "census while you work.", file=sys.stderr)
+              "Record a decision with --record-dispositions and preserve "
+              "the private ledger with the PII inventory, or re-run with "
+              "--allow-unreviewed for a non-blocking census while you work.",
+              file=sys.stderr)
         return 1
     if unreviewed:
         print("  --allow-unreviewed: not blocking on the above.",

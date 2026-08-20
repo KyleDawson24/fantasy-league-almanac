@@ -26,7 +26,7 @@ regenerated it, so it sat at 78 models and 573 tests against a tree
 holding 92 and 702 -- a sentence that documented its own freshness and
 was wrong about it.
 
-Run it as a release-ceremony step (see RELEASING.md). It is deliberately
+Run it as a release-cut step. It is deliberately
 NOT a CI test, a pytest case, or a pre-commit hook: docs are allowed to
 lag mid-cycle, and a check that goes red between releases is a check
 people learn to ignore.

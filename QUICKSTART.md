@@ -66,7 +66,7 @@ Step 3 opens the terminal and checks that this worked. If Windows itself blocks 
 `fantasy-league-almanac-<version>.zip` is a **compressed** folder. This is the almanac ZIP, not the Python installer you just downloaded. Windows will happily show you what is inside it without ever unpacking it, and the commands below will not work in that view.
 
 Right-click the ZIP file → **Extract All…** → **Extract**. That produces a
-normal folder named something like `fantasy-league-almanac-2.0.0`. Work
+normal folder named something like `fantasy-league-almanac-2.0.1`. Work
 inside **that** folder from here on.
 
 ### Manual 3. Open PowerShell in that folder
@@ -74,7 +74,7 @@ inside **that** folder from here on.
 PowerShell is Windows' command terminal. The trick below opens it already
 pointed at the right folder, so you never have to navigate:
 
-1. Open the extracted `fantasy-league-almanac-2.0.0` folder in File Explorer, so its contents -- including `QUICKSTART.md` and `requirements.txt` -- are displayed.
+1. Open the extracted `fantasy-league-almanac-2.0.1` folder in File Explorer, so its contents -- including `QUICKSTART.md` and `requirements.txt` -- are displayed.
 2. Left-click once on the **address bar** at the top (the strip showing the folder path). The path becomes editable and highlighted.
 3. With the folder's contents still displayed below it, type `powershell` into that address bar and press **Enter**.
 
@@ -97,7 +97,7 @@ The answer must begin with `Python 3.13`. If it says `Python 3.14`, you installe
 
 ### Manual 4. Create the environment and install the parts
 
-Your prompt should look roughly like `PS C:\Users\YourName\...\fantasy-league-almanac-2.0.0>`. The exact folders before the almanac name will differ, and that is fine.
+Your prompt should look roughly like `PS C:\Users\YourName\...\fantasy-league-almanac-2.0.1>`. The exact folders before the almanac name will differ, and that is fine.
 
 Run these two commands **one at a time**. The first makes a private Python environment inside the almanac folder:
 

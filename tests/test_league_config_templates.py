@@ -83,6 +83,10 @@ def test_templates_are_tracked():
         f"*.csv -- a seed directory has to be allowlisted there or it ships as "
         f"nothing at all."
     )
+    assert len(TEMPLATES) == 14, (
+        f"league_config has {len(TEMPLATES)} tracked templates; documentation "
+        "and the typed blank-template contract require exactly 14"
+    )
 
 
 @pytest.mark.parametrize("path", TEMPLATES, ids=lambda p: os.path.basename(p))

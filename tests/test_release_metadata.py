@@ -1,4 +1,4 @@
-"""The local v2.0 cut stays aligned before the tag is created."""
+"""The local v2.0.1 cut stays aligned before the tag is created."""
 
 from __future__ import annotations
 
@@ -16,7 +16,8 @@ def _read(relative: str) -> str:
 def test_root_carries_exactly_the_current_release_notes():
     notes = sorted(path.name for path in ROOT.glob("RELEASE NOTES v*.md"))
 
-    assert notes == ["RELEASE NOTES v2.0.0.md"]
+    assert notes == ["RELEASE NOTES v2.0.1.md"]
+    assert (ROOT / "docs" / "releases" / "RELEASE NOTES v2.0.0.md").is_file()
     assert (ROOT / "docs" / "releases" / "RELEASE NOTES v1.9.1.md").is_file()
 
 
@@ -24,36 +25,35 @@ def test_dbt_and_changelog_versions_match_the_cut():
     project = _read("dbt_league/dbt_project.yml")
     changelog = _read("CHANGELOG.md")
 
-    assert re.search(r"^version: ['\"]2\.0\.0['\"]$", project, re.MULTILINE)
+    assert re.search(r"^version: ['\"]2\.0\.1['\"]$", project, re.MULTILINE)
+    assert "## [2.0.1] - 2026-08-20" in changelog
+    assert "[RELEASE NOTES v2.0.1.md](RELEASE%20NOTES%20v2.0.1.md)" in changelog
     assert "## [2.0.0] - 2026-08-20" in changelog
-    assert "[RELEASE NOTES v2.0.0.md](RELEASE%20NOTES%20v2.0.0.md)" in changelog
+    assert "docs/releases/RELEASE%20NOTES%20v2.0.0.md" in changelog
     assert "docs/releases/RELEASE%20NOTES%20v1.9.1.md" in changelog
 
 
-def test_readme_names_v2_as_current_before_prior_releases():
+def test_readme_names_v2_patch_as_current_before_prior_releases():
     readme = _read("README.md")
 
-    assert "**v2.0.0** -- current, 2026-08-20" in readme
-    assert readme.index("**v2.0.0**") < readme.index("**v1.9.1**")
-    assert "[RELEASE NOTES v2.0.0.md](RELEASE%20NOTES%20v2.0.0.md)" in readme
+    assert "**v2.0.1** -- current, 2026-08-20" in readme
+    assert readme.index("**v2.0.1**") < readme.index("**v2.0.0**")
+    assert "[RELEASE NOTES v2.0.1.md](RELEASE%20NOTES%20v2.0.1.md)" in readme
+    assert "docs/releases/RELEASE%20NOTES%20v2.0.0.md" in readme
     assert "docs/releases/RELEASE%20NOTES%20v1.9.1.md" in readme
 
 
-def test_release_notes_preserve_scope_and_publication_gates():
-    lowered = _read("RELEASE NOTES v2.0.0.md").lower()
+def test_patch_notes_preserve_runtime_and_private_process_boundaries():
+    lowered = _read("RELEASE NOTES v2.0.1.md").lower()
 
     for claim in (
-        "espn-first and windows-first",
-        "cbs guided onboarding is an urgent follow",
-        "packaged sample mode is explicitly deferred",
-        "automated cookie acquisition",
-        "an h2h league needs at least one completed matchup",
-        "pending branding alone is not the safety boundary",
-        "actual oauth-bearing candidate zip",
-        "reddit is intentionally the first broad stranger-validation event",
-        "one league per extracted folder",
-        "fresh release extraction in a different folder",
-        "48–72 hour triage window",
+        "release-hygiene and documentation patch",
+        "guided espn-to-google-workbook journey",
+        "strict pre-push guard still refuses",
+        "v2.0.0 tag and git history are intentionally not rewritten",
+        "14 csv templates",
+        "no model reads it today",
+        "no extraction, transform, workbook, credential, oauth, sharing",
     ):
         assert claim in lowered
 
@@ -70,14 +70,8 @@ def test_quickstart_is_launcher_first_and_manual_second():
     assert "fresh copy of the release zip into a different folder" in quickstart
 
 
-def test_release_checklist_gates_publication_and_ships_the_checksum():
-    releasing = _read("RELEASING.md")
+def test_quickstart_examples_name_the_current_patch_folder():
+    quickstart = _read("QUICKSTART.md")
 
-    assert "local** `vX.Y.Z` tag" in releasing
-    assert "clean-machine rehearsal" in releasing
-    assert releasing.index("clean-machine rehearsal") < releasing.index(
-        "push `main` and the exact tag"
-    )
-    assert "fantasy-league-almanac-X.Y.Z.zip.sha256" in releasing
-    assert "gh release create vX.Y.Z" in releasing
-    assert "--notes-file \"RELEASE NOTES vX.Y.Z.md\"" in releasing
+    assert "fantasy-league-almanac-2.0.1" in quickstart
+    assert "fantasy-league-almanac-2.0.0" not in quickstart

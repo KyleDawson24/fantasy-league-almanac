@@ -36,8 +36,8 @@ exposures (4)            the Python output scripts, declared in
 ```
 
 97 models in all. Counts here are regenerated at each release cut from
-the parsed manifest (see [RELEASING.md](../RELEASING.md)); if you are
-reading them mid-cycle, `dbt parse` and the manifest are the truth.
+the parsed manifest; if you are reading them mid-cycle, `dbt parse` and
+the manifest are the truth.
 
 Layer conventions:
 
@@ -144,7 +144,7 @@ The 18 seeds live in two directories, and `seed-paths` reads both:
 seeds/          5   reference vocabulary -- stat maps, MLB team abbrevs,
                     record rules. Same for every league on a platform, so
                     it ships as real content.
-league_config/ 13   user config -- calendar, franchise/owner registries,
+league_config/ 14   user config -- calendar, franchise/owner registries,
                     naming overrides. Tracked content is BLANK templates;
                     per-file documentation is in league_config/README.md.
 ```

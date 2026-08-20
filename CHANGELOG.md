@@ -16,11 +16,19 @@ _Release notes are built from the commit range at each cut rather than
 accumulated here, so this section staying short is not a sign the
 repository is idle._
 
+## [2.0.1] - 2026-08-20
+
+The first post-launch patch removes maintainer-only launch/release working
+files from the current public tree and latest consumer ZIP while preserving
+the release and PII controls locally. It also reconciles the 14 advanced
+league-configuration CSVs and documents which are active. Full story in
+[RELEASE NOTES v2.0.1.md](RELEASE%20NOTES%20v2.0.1.md).
+
 ## [2.0.0] - 2026-08-20
 
 The release ZIP now owns the supported ESPN stranger journey from a
 double-click Windows launcher through a shareable Google workbook. Full story
-in [RELEASE NOTES v2.0.0.md](RELEASE%20NOTES%20v2.0.0.md).
+in [RELEASE NOTES v2.0.0.md](docs/releases/RELEASE%20NOTES%20v2.0.0.md).
 
 Major rather than minor: this is the promised guided-onboarding platform
 milestone. Existing developer and advanced Snowflake paths remain available.

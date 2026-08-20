@@ -1,9 +1,11 @@
 # league_config/ -- whose league this is
 
-Every file here is **your** configuration. On a fresh clone they are blank
-templates: a header row and nothing else. Fill in the ones your league
-needs, run `dbt seed`, and the pipeline starts describing your league
-instead of nobody's.
+Every file here is **your** advanced configuration. On a fresh clone they
+are blank templates: a header row and nothing else. Guided ESPN setup does
+not ask for or populate them; ESPN supplies the normal stranger journey's
+identity and schedule facts directly. If a platform omits a fact or a
+league historian wants to correct one, fill in the relevant row and run
+`dbt seed` before rebuilding.
 
 > **Once filled in, these files hold your league's private data** -- real
 > names, and the platform's own member ids -- so do not `git add` them; a
@@ -22,10 +24,10 @@ they ship as real content and you should not have to touch them.
 The distinction matters more than it looks, because it decides what
 happens when you leave a file blank.
 
-**REQUIRED -- blank means the surfaces that need it come out empty.**
-These carry the facts nothing else can supply: who your franchises and
-owners are. A model reads them directly, so an empty file is not a
-neutral default, it is an absence.
+**DIRECT INPUTS -- blank means the advanced CBS surfaces that need them
+come out empty.** These carry facts the current CBS capture does not fully
+supply. A model reads them directly, so an empty file is an absence for
+those CBS surfaces. ESPN's guided path leaves them blank.
 
 `matchup_schedule.csv` **used to head this table and no longer does**
 (MLB-235). An ESPN league's weeks come from ESPN's own `mMatchupScore`
@@ -42,11 +44,11 @@ surface, listed below with the other optional ones.
 | `cbs_team_owners.csv` | CBS franchise -> current owner | no CBS current-owner display |
 | `team_owner_by_year.csv` | who owned which franchise, per season | no CBS owner history |
 | `draft_assembly_plan.csv` | which draft recording to trust per season | no draft recap |
-| `cbs_early_anchors_backfill.csv` | hand-entered early-season anchors | nothing -- see note below |
+| `cbs_early_anchors_backfill.csv` | hand-entered early-season worklist | nothing; no model reads it today |
 
-**OPTIONAL -- blank means identity.** These only ever rename, merge, or
-repoint something. Every consumer reaches them through a `left join` and a
-`coalesce`, so an empty file means "change nothing", and the pipeline runs
+**OPTIONAL OVERRIDES -- blank means use observed/derived values.** These
+rename, merge, repoint, correct or label something. Consumers join them
+sparsely, so an empty file means "change nothing", and the pipeline runs
 correctly with all of them empty. That is verified, not assumed: see
 `tests/test_league_config_templates.py`.
 
@@ -59,6 +61,8 @@ correctly with all of them empty. That is verified, not assumed: see
 | `player_alias.csv` | a name form -> a specific MLB player | normal matching |
 | `player_identity_overrides.csv` | force a name form to an MLB id | normal matching |
 | `player_identity_context_overrides.csv` | same, scoped to one team-season | normal matching |
+| `matchup_schedule.csv` | correct dates or add human period labels | platform-derived schedule |
+| `matchup_period_overrides.csv` | force one period's abnormal/normal verdict | derived verdict |
 
 ## Worked examples
 

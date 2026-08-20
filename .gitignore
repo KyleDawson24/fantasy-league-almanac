@@ -111,12 +111,6 @@ data/cbs_raw/
 !dbt_league/seeds/*.csv
 !dbt_league/league_config/*.csv
 !demo/league_config/*.csv
-# The PII guard's disposition ledger (MLB-234), for the same reason: it is
-# the DURABLE record of which review hits have been looked at, so a copy
-# that only exists on one machine is not a record at all -- the next sweep
-# would report every reviewed site as new. It carries no real-side value;
-# each identity is an HMAC under a secret kept with the private map.
-!tools/pii_dispositions.csv
 output/leagueNoteHeader.txt
 output/leagueNoteFooter.txt
 
@@ -176,21 +170,18 @@ league-tactical-research/
 /*HANDOFF*.md
 /*Handoff*.md
 /REVIEW.md
-# The release PLAN is the maintainer's internal strategy doc (offline
-# decisions, launch checklist, monetization thinking) -- deliberately local,
-# NOT the tracked RELEASING.md ceremony. RELEASING.md used to point the
-# announce step straight at it; that pointer now says it is untracked
-# instead, so a fresh clone is not sent looking for a file it cannot have.
+# Release planning and ceremony are maintainer working material: offline
+# decisions, launch copy, monetization thinking and publication commands.
+# Both stay local rather than riding in a consumer download.
 /RELEASE PLAN.md
+/RELEASING.md
 /DOCUMENTATION_GUIDE.md
 /DBT EXPLORATORY SWEEP.md
 /v*.* Refactor Brief.md
 # CLAUDE.md is the maintainer's working agreement with his Claude Code
 # sessions -- house rules, standing corrections, the false alarms worth
-# not re-raising. Internal-facing AND personal, which is what separates it
-# from RELEASING.md: a release checklist is project process a stranger can
-# read as discipline, this is a record of how one person works with a
-# tool. Untracked at the 1.7.0 cut.
+# not re-raising. Internal-facing and personal, like the local release
+# checklist. Untracked at the 1.7.0 cut.
 #
 # The file STAYS ON DISK and keeps working: Claude Code reads it from the
 # checkout, not from git, so nothing about the house rules changes.

@@ -21,6 +21,8 @@ than being assigned snake-pick order and value grades. v2.0.0 (2026-08-20)
 then made the release ZIP a guided Windows journey: double-click setup,
 illustrated manual cookie acquisition, validate-before-write local config and
 the existing complete-history runner ending in a shareable Google workbook.
+v2.0.1 (2026-08-20) followed as a release-hygiene patch with no runtime
+almanac change.
 See CHANGELOG.md for the per-release entries.
 
 **In flight right now:** v2.0's Reddit launch is the first broad stranger
@@ -43,7 +45,7 @@ a single afternoon.
 
 > **Overtaken by events (noted 2026-07-31, refreshed 2026-08-11).** This
 > block was written when v1.1.0 was the current release; the project is
-> now at v2.0.0 and the engine port has shipped. The items below are
+> now at v2.0.1 and the engine port has shipped. The items below are
 > still wanted, but "the next release" no longer describes any of them.
 > Re-prioritizing this section is its own pass.
 

@@ -17,7 +17,7 @@ grant, private until sharing is explicitly confirmed -- and retired the
 hand-maintained matchup-schedule seed in favour of weeks and dates read
 from the platform. v1.9.1 (2026-08-18) followed with a focused auction
 correction: ESPN auction drafts now render as priced purchase ledgers rather
-than being assigned snake-pick order and value grades. v2.0.0 (2026-08-21)
+than being assigned snake-pick order and value grades. v2.0.0 (2026-08-20)
 then made the release ZIP a guided Windows journey: double-click setup,
 illustrated manual cookie acquisition, validate-before-write local config and
 the existing complete-history runner ending in a shareable Google workbook.

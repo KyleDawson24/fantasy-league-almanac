@@ -255,7 +255,7 @@ Most of that needs a warehouse to exercise, but not all of it: with no account a
 
 ## Status
 
-- **v2.0.0** -- current, 2026-08-21. The release ZIP now starts with a
+- **v2.0.0** -- current, 2026-08-20. The release ZIP now starts with a
   double-click Windows launcher that prepares its private Python environment,
   opens illustrated ESPN-cookie guidance, validates the exact league and
   requested history before atomically saving local configuration, and hands

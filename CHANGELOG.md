@@ -16,7 +16,7 @@ _Release notes are built from the commit range at each cut rather than
 accumulated here, so this section staying short is not a sign the
 repository is idle._
 
-## [2.0.0] - 2026-08-21
+## [2.0.0] - 2026-08-20
 
 The release ZIP now owns the supported ESPN stranger journey from a
 double-click Windows launcher through a shareable Google workbook. Full story

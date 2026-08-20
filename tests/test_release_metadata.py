@@ -25,7 +25,7 @@ def test_dbt_and_changelog_versions_match_the_cut():
     changelog = _read("CHANGELOG.md")
 
     assert re.search(r"^version: ['\"]2\.0\.0['\"]$", project, re.MULTILINE)
-    assert "## [2.0.0] - 2026-08-21" in changelog
+    assert "## [2.0.0] - 2026-08-20" in changelog
     assert "[RELEASE NOTES v2.0.0.md](RELEASE%20NOTES%20v2.0.0.md)" in changelog
     assert "docs/releases/RELEASE%20NOTES%20v1.9.1.md" in changelog
 
@@ -33,7 +33,7 @@ def test_dbt_and_changelog_versions_match_the_cut():
 def test_readme_names_v2_as_current_before_prior_releases():
     readme = _read("README.md")
 
-    assert "**v2.0.0** -- current, 2026-08-21" in readme
+    assert "**v2.0.0** -- current, 2026-08-20" in readme
     assert readme.index("**v2.0.0**") < readme.index("**v1.9.1**")
     assert "[RELEASE NOTES v2.0.0.md](RELEASE%20NOTES%20v2.0.0.md)" in readme
     assert "docs/releases/RELEASE%20NOTES%20v1.9.1.md" in readme

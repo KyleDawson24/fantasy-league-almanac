@@ -26,6 +26,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 QUICKSTART = REPO_ROOT / "QUICKSTART.md"
 SETUP = REPO_ROOT / "SETUP.md"
+README = REPO_ROOT / "README.md"
 SEED_README = REPO_ROOT / "dbt_league" / "league_config" / "README.md"
 ROADMAP = REPO_ROOT / "ROADMAP.md"
 ENV_EXAMPLE = REPO_ROOT / ".env.example"
@@ -186,6 +187,20 @@ def test_the_quickstart_does_not_claim_the_espn_half_is_simply_done():
     assert "start_almanac.cmd" in lowered
     assert "reddit is the first broad stranger-validation event" in lowered
     assert "future graphical shell" in lowered
+
+
+def test_current_docs_do_not_describe_guided_onboarding_as_still_missing():
+    """The v2 release must not ship beside its own pre-wizard roadmap copy."""
+    readme = _flat(README)
+    setup = _flat(SETUP)
+
+    assert "guided fields-file onboarding remains" not in readme
+    assert "2.0 is closer, not done" not in readme
+    assert "opening powershell in the right folder, the two files to fill in" not in readme
+    assert "onboarding that needs no `.env` edit and no flags" not in readme
+    assert "not a released stranger workflow" not in setup
+    assert "double-click launcher" in readme
+    assert "supported stranger workflow" in setup
 
 
 # ---------------------------------------------------------------------------

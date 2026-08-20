@@ -677,7 +677,7 @@ nothing in it should be a reflex.
 pytest tests/
 ```
 
-Fresh-clone collection at this cut: **1822** pure tests, with **27**
+Fresh-clone collection at this cut: **1823** pure tests, with **27**
 warehouse-marked tests deselected by default via `pytest.ini`; no
 credentials are involved and nothing is written. Those are what pytest
 COLLECTS, not a pass tally -- how many pass or skip varies by machine and
@@ -741,9 +741,10 @@ python tools/create_public_almanac.py
 
 This is reusable post-configuration orchestration: the `.env` fields and
 selected `config/leagues.yml` entry must already be complete. It can be run
-directly, and the development guided setup now offers to start this exact
-entrypoint after validated local configuration succeeds. That guided journey
-is not a released stranger workflow until it is packaged and rehearsed.
+directly, and the release's guided setup offers to start this exact entrypoint
+after validated local configuration succeeds. That is the supported stranger
+workflow in the OAuth-bearing release ZIP; a source clone deliberately lacks
+the packaged Google identity and remains the developer route.
 
 The command reuses the registry's `first_season` / `final_season` policy and
 runs one complete extraction for every applicable season—verified matchup

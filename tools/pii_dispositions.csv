@@ -221,7 +221,11 @@ tests/test_almanac_sheets.py,team-id,f02e16393bc7352b,collision,synthetic fixtur
 tests/test_almanac_sheets.py,team-id,f4c603383d6d4255,collision,synthetic fixture value that happens to sit in an identity-shaped position,2026-08-10
 tests/test_almanac_sheets.py,team-id,f94e0c2a8ce33f66,collision,synthetic fixture value that happens to sit in an identity-shaped position,2026-08-10
 tests/test_bootstrap_preflight.py,team-id,3ea9231be2401eab,collision,Synthetic matchup team identifiers in bootstrap preflight test,2026-08-20
+tests/test_bootstrap_preflight.py,team-id,63c5a56aa08508c2,collision,Synthetic matchup team identifiers in Candidate 2 bootstrap tests,2026-08-20
+tests/test_bootstrap_preflight.py,team-id,72b2d8fdec208f92,collision,Synthetic matchup team identifiers in Candidate 2 bootstrap tests,2026-08-20
+tests/test_bootstrap_preflight.py,team-id,90a9c55e9ba41657,collision,Synthetic matchup team identifiers in Candidate 2 bootstrap tests,2026-08-20
 tests/test_bootstrap_preflight.py,team-id,e96bb0af1102801c,collision,Synthetic matchup team identifiers in bootstrap preflight test,2026-08-20
+tests/test_bootstrap_preflight.py,team-id,f627fa16bec58610,collision,Synthetic matchup team identifiers in Candidate 2 bootstrap tests,2026-08-20
 tests/test_cbs_almanac_first_year_league.py,team-id,2c10d18965bd519f,collision,synthetic fixture value that happens to sit in an identity-shaped position,2026-08-10
 tests/test_cbs_almanac_first_year_league.py,team-id,b68e54daa7b77045,collision,synthetic fixture value that happens to sit in an identity-shaped position,2026-08-10
 tests/test_cbs_standings_tab.py,team-id,1bd8672235f33344,collision,synthetic fixture value that happens to sit in an identity-shaped position,2026-08-10

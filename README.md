@@ -93,7 +93,7 @@ ESPN + CBS extract  ->  RAW (append-only, platform-native shape) --
                     ->  weekly recap · records report · Google Sheets almanac
 ```
 
-Built on dbt + Python over Snowflake or DuckDB: extract scripts land raw JSON, dbt owns everything from staging through marts, and the Python output layer reads the marts to produce the recap, the records report, and the almanac. Four of those consumers are formally declared as dbt exposures, so the lineage graph runs source → deliverable; the declared set is hand-maintained and currently incomplete, which is stated plainly in [dbt_league/README.md](dbt_league/README.md#exposures). A full lineage/DAG image is coming once the current model-renaming refactor settles; drawing one today would be stale within weeks. The [hosted dbt catalog](https://kyledawson24.github.io/fantasy-league-almanac/catalog/) has the real, current lineage and column-level docs if you want that today; it's regenerated manually and regularly, so treat it as approximate rather than live (as we approach final state, I will update this doc accordingly).
+Built on dbt + Python over Snowflake or DuckDB: extract scripts land raw JSON, dbt owns everything from staging through marts, and the Python output layer reads the marts to produce the recap, the records report, and the almanac. Four of those consumers are formally declared as dbt exposures, so the lineage graph runs source → deliverable; the declared set is hand-maintained and currently incomplete, which is stated plainly in [dbt_league/README.md](dbt_league/README.md#exposures). A full lineage/DAG image is coming once the current model-renaming refactor settles; drawing one today would be stale within weeks. The [hosted dbt catalog](https://kpdawson.com/fantasy-league-almanac/catalog/) has the real, current lineage and column-level docs if you want that today; it's regenerated manually and regularly, so treat it as approximate rather than live (as we approach final state, I will update this doc accordingly).
 
 ---
 
@@ -206,7 +206,7 @@ Beyond that: the platform half -- Yahoo and Sleeper adapters, to prove the platf
 
 ## Quick start
 
-**Just here to look?** The screenshots above and the [hosted dbt catalog](https://kyledawson24.github.io/fantasy-league-almanac/catalog/) cover the design; [docs/user-guide/](docs/user-guide/) covers how to read the almanac itself.
+**Just here to look?** The screenshots above and the [hosted dbt catalog](https://kpdawson.com/fantasy-league-almanac/catalog/) cover the design; [docs/user-guide/](docs/user-guide/) covers how to read the almanac itself.
 
 **Want to run it?** Open [QUICKSTART.md](QUICKSTART.md) first -- and if you downloaded the release ZIP, it is the only guide you need. It is the complete Windows runbook for the double-click launcher, written for someone who has never used a terminal: installing Python if it is missing, unzipping, following the illustrated ESPN-cookie guide, validating the league, and producing a shareable Google Sheet without manually editing configuration. (The ZIP also carries a `START_HERE.txt` that points there and nowhere else.) The notes below are context for people reading the source; they are not prerequisites for running it.
 
@@ -249,7 +249,7 @@ Most of that needs a warehouse to exercise, but not all of it: with no account a
 - **[CHANGELOG.md](CHANGELOG.md)** · **[ROADMAP.md](ROADMAP.md)** -- version history, and what is Now / Next / Later / Decided Against.
 - **[docs/archive/](docs/archive/)** -- the phase documentation (`Phase X.Y Documentation.md`), session handoffs and progress journals, each phase doc with an "options considered → chosen → rationale" section. These were all pre-release/exploratory; their only real purpose is archival.
 - **[docs/decisions/](docs/decisions/)** -- the short list of design documents still in force.
-- **[Hosted dbt catalog](https://kyledawson24.github.io/fantasy-league-almanac/catalog/)** -- model lineage and column-level docs, regenerated manually (may lag a release or two behind local `main`).
+- **[Hosted dbt catalog](https://kpdawson.com/fantasy-league-almanac/catalog/)** -- model lineage and column-level docs, regenerated manually (may lag a release or two behind local `main`).
 
 ---
 

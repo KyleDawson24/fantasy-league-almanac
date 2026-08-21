@@ -10,7 +10,7 @@ output, and engineering-decision log live in the
 itself: the layers, the conventions, and how to run and test it.
 
 Browse the compiled catalog (lineage + column-level docs) at the
-[hosted dbt docs site](https://kyledawson24.github.io/fantasy-league-almanac/catalog/).
+[hosted dbt docs site](https://kpdawson.com/fantasy-league-almanac/catalog/).
 
 ## The DAG, top to bottom
 

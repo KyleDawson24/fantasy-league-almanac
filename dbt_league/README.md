@@ -10,7 +10,7 @@ output, and engineering-decision log live in the
 itself: the layers, the conventions, and how to run and test it.
 
 Browse the compiled catalog (lineage + column-level docs) at the
-[hosted dbt docs site](https://kyledawson24.github.io/fantasy-league-almanac/).
+[hosted dbt docs site](https://kyledawson24.github.io/fantasy-league-almanac/catalog/).
 
 ## The DAG, top to bottom
 
@@ -245,6 +245,10 @@ dbt source freshness    # settings-snapshot staleness check
 dbt docs generate       # compiled catalog; --static for the hosted site
 dbt ls                  # resolve node selection without running it
 ```
+
+The public homepage owns `docs/index.html`. After `dbt docs generate
+--static`, publish the regenerated technical catalog by copying
+`target/static_index.html` to `docs/catalog/index.html`.
 
 **Tier 3 -- mutation.** Writes to the warehouse. Deliberate ceremony, not
 a dev-loop reflex:

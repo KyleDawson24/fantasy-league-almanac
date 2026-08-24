@@ -28,10 +28,9 @@ and section 5 entirely.
 
 - **Python 3.13.x** -- not 3.14, which the pinned stack currently crashes
   under (mashumaro, via dbt). Earlier 3.x versions haven't been tested.
-- **An ESPN Fantasy Baseball league**. Private leagues are supported and
-  are what the release path expects (requires cookies -- see step 3).
-  Public leagues should need less, but that has not been proven through
-  the `create_public_almanac.py` entrypoint.
+- **An ESPN Fantasy Baseball league**. Private and public leagues are
+  both supported. The release path requires cookies either way -- see
+  step 3.
 - **Git**, only for the developer/source path. The release ZIP does not
   need it.
 - **Windows**, only for the public Google workbook flow -- v1.9 stores
@@ -808,18 +807,18 @@ and `.gitignore`. Revoke the grant at
 expired refresh token triggers fresh consent on the next run; nothing here
 expires on your behalf.
 
-**Branding review is still pending.** The shipped identity's publishing
+**Branding verification is approved.** The shipped identity's publishing
 status is **In Production**: it is not restricted to a test-user list,
 and the roughly week-long grant expiry that applies in Google's testing
 mode does not apply to it. The homepage, Privacy Policy and Terms are
 live at [kpdawson.com](https://kpdawson.com), and `drive.file` is
 non-sensitive -- Google reports that data-access verification is not
-required for it. What remains is branding verification, which has been
-submitted and not yet reviewed. Until it is approved Google may withhold
-the configured branding and may show an unverified-app warning on the
-consent screen. That is a statement about branding review, not about
-reach: `drive.file` is still the only scope the public path requests, so
-it can see the workbook it creates and nothing else in your Drive.
+required for it. Branding verification has also been reviewed and
+approved, so the consent screen shows the configured Fantasy League
+Almanac branding -- users see Google's standard permission screen, not
+an unverified-app warning. None of that changes reach: `drive.file` is
+still the only scope the public path requests, so it can see the
+workbook it creates and nothing else in your Drive.
 
 ### 10b. Advanced: bring your own OAuth client
 

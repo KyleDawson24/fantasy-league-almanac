@@ -36,7 +36,7 @@ Guided v2.0 supports **one league per extracted folder**. To build an almanac fo
 
 - **A Windows PC**, assuming you want the Google Sheet output.
 - **Python 3.13.** If it is missing, the launcher gives the official download location and tells you to select **Add python.exe to PATH**. Close the launcher, install Python, and double-click it again.
-- **An ESPN fantasy baseball league that you can sign into.** Private leagues are the proven path. The supported guided path uses ESPN session cookies even when the league itself is public.
+- **An ESPN fantasy baseball league that you can sign into.** Private and public leagues are both supported. The supported guided path uses ESPN session cookies even when the league itself is public.
 - **For a head-to-head league, at least one completed matchup.** A brand-new
   or late-start H2H league has no history to turn into an almanac yet. Setup
   now detects that before saving configuration and tells you to retry after
@@ -282,11 +282,12 @@ builds the almanac on your own machine, then creates the Google Sheet.
 2. It asks you to allow **one** permission, `drive.file`. That permission
    only lets the app see files it created itself -- it cannot list, open,
    or read anything else in your Drive.
-3. **You may see a warning that the app is not verified** while Google's
-   branding review is pending (see the note below). This guide will not
-   tell you how to click past a security warning. If it makes you
-   uncomfortable, stopping and waiting for approval is a perfectly
-   reasonable choice.
+3. The permission screen identifies **Fantasy League Almanac** -- Google
+   has approved the app's branding (see the note below), so you should
+   see Google's standard permission screen, not an unverified-app
+   warning. If you ever do see a security warning, stop and report it
+   rather than clicking past it -- this guide will never tell you how to
+   click past a security warning.
 4. The Sheet is created **private** and the almanac is written into it.
    Nothing is shared yet.
 5. Back in PowerShell, just before anything is shared, the tool describes
@@ -331,16 +332,16 @@ homepage, Privacy Policy and Terms are live at
 scope, and Google reports that data-access verification is not required
 for it.
 
-What is still outstanding is **branding verification**. It has been
-submitted and Google's review of it has not come back. Until that is
-approved, Google may withhold the configured branding and may show an
-unverified-app warning on the consent screen.
+**Branding verification is approved.** Google has reviewed and approved
+the app's branding, so the consent screen shows the configured Fantasy
+League Almanac identity and you should see Google's normal permission
+screen -- no unverified-app warning.
 
-That warning is about branding review, not about what the app can reach:
-it still requests only `drive.file`, so it can see the workbook it creates
-and nothing else in your Drive. If the warning makes you uncomfortable,
-waiting for branding approval is a perfectly reasonable choice, and this
-guide is not going to walk you around it.
+Whatever the screen looks like, what the app can reach does not change:
+it requests only `drive.file`, so it can see the workbook it creates
+and nothing else in your Drive. If you ever do see an unverified-app
+warning, that is unexpected -- stop and report it rather than clicking
+past it.
 
 If you would rather use your own OAuth client -- maintainers, and anyone
 working from a clone or testing against a different Google project --
@@ -484,9 +485,9 @@ Said plainly, because finding out later is worse:
   supported release uses the illustrated manual guide and hidden paste; it
   never reads a normal browser profile or automates login, 2FA, CAPTCHA, or
   credential entry.
-- **Private leagues only, in practice.** The supported entry requires the
-  ESPN cookies from step 5. A public league is not proven through this
-  command.
+- **Cookies are required even for public leagues.** The supported entry
+  requires the ESPN cookies from step 5 whether your league is private
+  or public.
 - **Recent seasons come through at full fidelity.** Older ones depend on
   what your platform still serves. This repo reconstructs a
   quarter-century for its own two leagues, and the honesty notes about

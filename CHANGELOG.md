@@ -16,6 +16,13 @@ _Release notes are built from the commit range at each cut rather than
 accumulated here, so this section staying short is not a sign the
 repository is idle._
 
+### Changed
+
+- Docs truth-up (MLB-259): QUICKSTART, SETUP and `.env.example` now state
+  that Google branding verification is approved (standard permission
+  screen, no unverified-app warning) and that private and public ESPN
+  leagues are both supported, matching the live site.
+
 ## [2.0.1] - 2026-08-20
 
 The first post-launch patch removes maintainer-only launch/release working

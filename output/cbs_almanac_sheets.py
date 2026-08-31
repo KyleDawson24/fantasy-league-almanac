@@ -968,7 +968,8 @@ def get_position_eligibility(season_year=None):
     would blank the grid on any earlier-year render.
     """
     return query_for_presentation(f"""
-        SELECT team_id, lineup_slot,
+        SELECT team_id,
+               display_slot AS lineup_slot,
                eligible_player_count AS slot_pts,
                sort_order
         FROM mart_team_position_eligibility
@@ -4288,6 +4289,18 @@ def build_standings_rows(context, arc, finishes, active_franchises,
             rows.append([canon_label.get(cid, f'#{cid}'),
                          *[elig_by.get((cid, c), '') for c in elig_cols]])
         elig_last = len(rows)
+        # PER-COLUMN gradients, not one scale across the grid (Kyle,
+        # 2026-08-31). The columns are not comparable to each other: a
+        # roster carries a couple of catchers and a dozen pitchers, so a
+        # single scale would paint every C cell red and every P cell green
+        # and say nothing. Column-by-column, 3 catchers reads as deep for a
+        # catcher and 3 pitchers reads as thin for a pitcher -- which is
+        # the comparison a manager actually makes, and what the ESPN grid
+        # already does by inheriting the slot grid's treatment.
+        for ci in range(1, 1 + len(elig_cols)):
+            col = _col(ci + 1)
+            formats.append({'range': f'{col}{elig_first}:{col}{elig_last}',
+                            'gradient': _points_gradient()})
         formats.append({'range': f'B{elig_first}:{elig_width}{elig_last}',
                         'format': {'numberFormat':
                                    {'type': 'NUMBER', 'pattern': '0'}}})

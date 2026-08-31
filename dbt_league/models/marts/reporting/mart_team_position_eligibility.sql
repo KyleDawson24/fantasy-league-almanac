@@ -62,8 +62,8 @@
 -- dim_lineup_slot.is_position_slot decides, so UTIL / BE / IL / FA / RS /
 -- ACT / EST drop out by their seeded classification and never by a literal
 -- list here. ESPN is additionally scoped to the slots THIS league-season
--- actually configured (dim_roster_slot_counts, read from rosterSettings) --
--- the league's own settings, not an assumption about what ESPN offers. CBS
+-- actually FIELDS -- settings rows with seats, not merely settings rows;
+-- see espn_configured below for why the difference bites. CBS
 -- serves no roster-settings feed, so its seeded position vocabulary rides
 -- whole; that asymmetry is the data's, not a shortcut.
 --
@@ -76,7 +76,8 @@ with slots as (
         platform,
         lineup_slot,
         canonical_slot_key,
-        sort_order
+        sort_order,
+        display_slot
     from {{ ref('dim_lineup_slot') }}
     where is_position_slot
 ),
@@ -140,15 +141,29 @@ espn_exploded as (
         {{ flatten_array('r.eligible_slots', 'slot') }}
 ),
 
--- The league's own configured slots. Restricting here rather than in the
--- consumer means a league that does not field a slot never renders a
--- column of zeroes for it.
+-- The league's own configured slots, and SEATS ARE WHAT COUNTS -- not the
+-- mere presence of a settings row (Kyle, 2026-08-31).
+--
+-- ESPN's rosterSettings enumerate every slot the PLATFORM offers and give
+-- the ones this league does not field a starter_count of 0. Reading the
+-- rows without reading the count therefore renders columns for positions
+-- the league cannot deploy anyone at: espn-main 2026 carries 2B/SS, 1B/3B
+-- and P at zero seats, and all three appeared in the first render of this
+-- grid beside the eleven real ones. The Points by Lineup Slot grid never
+-- showed them, which is how the mismatch was spotted.
+--
+-- The predicate is the one get_slot_capacities already uses, so the
+-- eligibility columns and the deployment columns are chosen by the same
+-- rule and the two grids stay comparable -- which is the whole reason
+-- they sit one above the other.
 espn_configured as (
     select distinct
         league_key,
         season_year,
         lineup_slot
     from {{ ref('dim_roster_slot_counts') }}
+    where is_active_lineup_slot
+      and starter_count > 0
 ),
 
 espn_final as (
@@ -267,6 +282,7 @@ select
     u.team_abbrev,
     u.snapshot_key,
     u.lineup_slot,
+    s.display_slot,
     s.canonical_slot_key,
     s.sort_order,
     count(distinct u.player_key)                                     as eligible_player_count,
@@ -280,6 +296,7 @@ join slots s
     and s.lineup_slot = u.lineup_slot
 group by
     u.league_key, u.platform, u.season_year, u.team_id, u.team_abbrev,
-    u.snapshot_key, u.lineup_slot, s.canonical_slot_key, s.sort_order
+    u.snapshot_key, u.lineup_slot, s.display_slot, s.canonical_slot_key,
+    s.sort_order
 order by
     u.league_key, u.season_year, u.team_id, s.sort_order, u.lineup_slot

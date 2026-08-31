@@ -1416,6 +1416,7 @@ def _replace_advanced_standings_tab(spreadsheet, rows, stat_specs):
         # banding when a title is reworded -- no error, and banner
         # formatting never reaches the goldens, so nothing else catches it.
         section_title_prefixes = ('Detailed Standings',
+                                  'Eligible per Position',
                                   'Points by Lineup Slot',
                                   'Production by Acquisition Channel',
                                   'Roster Affinity by MLB Team',
@@ -1469,7 +1470,8 @@ def _replace_advanced_standings_tab(spreadsheet, rows, stat_specs):
                     'range': f'A{i}:{last_col}{i}',
                     'format': {'textFormat': explainer_text_format()},
                 })
-            if title in ('Production by Acquisition Channel',
+            if title in ('Eligible per Position -- Current Roster',
+                         'Production by Acquisition Channel',
                          'Roster Affinity by MLB Team',
                          'Rivalry Matrix'):
                 # The explainer-style caption directly underneath. Was a
@@ -1547,10 +1549,37 @@ def _replace_advanced_standings_tab(spreadsheet, rows, stat_specs):
                                                 'pattern': pattern}},
                 })
 
+        # WHICH SLOT GRID IS THE ELIGIBILITY ONE. _slot_grid_bounds locates
+        # grids by GEOMETRY (indented header, 'Team' in column 1), which is
+        # what let the eligibility grid inherit the slot grids' gradients
+        # for free -- but it also means the two are indistinguishable there,
+        # and they must not share a number format. Anchored on the banner
+        # above each grid, the same way the acquisition captions anchor.
+        elig_grid_hdrs = set()
+        for i, row in enumerate(rows):
+            if (row and isinstance(row[0], str)
+                    and row[0].startswith('Eligible per Position')):
+                nxt = next((h for h, _ in slot_grids if h > i), None)
+                if nxt is not None:
+                    elig_grid_hdrs.add(nxt)
+
         for hdr, end in a_tables:
             _decimal_rule(hdr, end, 4)
         for hdr, end in slot_grids:
-            _decimal_rule(hdr, end, 3)
+            if hdr in elig_grid_hdrs:
+                # COUNTS, NEVER FRACTIONS. _decimal_rule picks '0.0' for any
+                # column averaging under 10, which is right for points and
+                # wrong here: a roster holds 3 catchers, not 3.0, and every
+                # eligibility column is small enough to trip that rule.
+                for col in range(3, len(rows[hdr])):
+                    a1 = _a1_col(col + 1)
+                    formats.append({
+                        'range': f'{a1}{hdr + 2}:{a1}{end}',
+                        'format': {'numberFormat': {'type': 'NUMBER',
+                                                    'pattern': '0'}},
+                    })
+            else:
+                _decimal_rule(hdr, end, 3)
         # Acquisition totals stay whole-point (all columns are large).
         for hdr, end in _acquisition_table_bounds(rows):
             formats.append({

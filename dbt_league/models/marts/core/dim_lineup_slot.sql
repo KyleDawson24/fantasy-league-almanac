@@ -98,5 +98,24 @@ select
         false
     )                                       as is_position_slot,
 
+    -- HOW THE SLOT IS LABELLED TO A READER, which is not always how the
+    -- platform spells it (Kyle, 2026-08-31). ESPN writes the two
+    -- two-position flexes as '2B/SS' and '1B/3B'; the league calls them MI
+    -- and CI, and so does every other fantasy surface.
+    --
+    -- A SEPARATE COLUMN rather than a renamed lineup_slot, deliberately.
+    -- lineup_slot is a JOIN KEY -- box-score rows, dim_roster_slot_counts
+    -- and the eligibility mart all match on the platform's own string --
+    -- so renaming it in the seed would not relabel a column, it would
+    -- silently stop matching and drop the slot out of every consumer.
+    --
+    -- Keyed off canonical_slot_key, so a platform that spells the same
+    -- flex differently gets the same reader-facing label for free.
+    case coalesce(canonical_key, '')
+         when 'middle_infield' then 'MI'
+         when 'corner_infield' then 'CI'
+         else lineup_slot
+    end::varchar                            as display_slot,
+
     notes::varchar                          as notes
 from {{ ref('slot_classification') }}

@@ -1170,7 +1170,11 @@ def get_team_position_eligibility(season_year=None):
     return query_for_presentation(f"""
         SELECT
             CAST(team_id AS INTEGER) AS team_id,
-            lineup_slot,
+            -- The reader-facing label (ESPN's '2B/SS' -> 'MI'), not the
+            -- platform string. The grid uses this only as a column header
+            -- and an internal dict key, so the join-safe lineup_slot stays
+            -- where joins need it -- in the mart.
+            display_slot             AS lineup_slot,
             eligible_player_count    AS slot_pts,
             sort_order
         FROM mart_team_position_eligibility

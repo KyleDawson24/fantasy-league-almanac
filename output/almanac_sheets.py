@@ -38,6 +38,7 @@ from almanac_data import (
     get_draft_history_boards,
     get_season_scoring_periods,
     get_team_standings,
+    get_team_position_eligibility,
     get_team_slot_points,
     get_team_slot_points_alltime,
     get_team_acquisition_channels,

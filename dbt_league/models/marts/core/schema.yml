@@ -2121,10 +2121,19 @@ models:
       - name: is_position_slot
         description: >
           Whether this slot is a real fielding position, as opposed to
-          roster machinery or a flex. True for the atomic positions and for
-          ESPN's flex slots (2B/SS, 1B/3B, IF, OF), which are genuine
-          entries in a player's eligibleSlots and are how ESPN expresses
-          eligibility. False for UTIL/U, BE/RS, IL, FA, ACT and EST.
+          roster machinery. True for the atomic positions AND for ESPN's
+          flex slots (2B/SS, 1B/3B, IF, OF). False for UTIL/U, BE/RS, IL,
+          FA, ACT and EST.
+
+          The flex slots are kept because they carry INDEPENDENT
+          eligibility, not a composite of the atomic positions (Kyle,
+          2026-08-31). Eligibility is earned per position by games played
+          -- 20 in the prior season or 10 in this one -- and a flex slot
+          earns separately on the combined total, so a player with 10
+          games in each outfield spot is eligible at OF and at none of
+          LF/CF/RF. The flex column cannot be reconstructed from the
+          atomic ones: they are all zero in precisely the case it exists
+          to describe.
         tests:
           - not_null
       - name: notes

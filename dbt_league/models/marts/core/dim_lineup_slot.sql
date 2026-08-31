@@ -49,13 +49,22 @@
 -- Keeping them separate is what stops a league's settings from editing the
 -- meaning of a slot.
 --
--- FLEX SLOTS RIDE AS POSITIONS. ESPN's 2B/SS, 1B/3B, IF and OF are real
--- entries in a player's eligibleSlots and are how ESPN itself expresses
--- eligibility, so they are positions here. They are partly redundant with
--- the atomic positions they compose (an outfielder is eligible at both LF
--- and OF), which is a presentation question for a consumer that wants a
--- tighter grid -- not a reason for this dimension to decide the player's
--- eligibility is not real.
+-- FLEX SLOTS RIDE AS POSITIONS, and they are NOT a redundant composite of
+-- the atomic positions they appear to sum (Kyle's ruling, 2026-08-31 --
+-- recorded here because the tempting simplification is wrong and will be
+-- proposed again).
+--
+-- The reason is the eligibility RULE, not the label. Eligibility is earned
+-- per position by games played -- 20 in the prior season or 10 in this one
+-- -- and the flex slot earns SEPARATELY on the combined total. A player
+-- with 10 games in left, 10 in center and 10 in right qualifies at OF and
+-- at NONE of LF, CF or RF. Dropping the flex column would delete a
+-- deployment the manager genuinely has, and reconstructing it from the
+-- atomic columns is impossible: they are all zero in exactly the case the
+-- flex column exists to describe.
+--
+-- So 2B/SS, 1B/3B, IF and OF are independent information, they are how
+-- ESPN itself expresses eligibility in eligibleSlots, and they stay.
 --
 -- Materialization: view. Nine bytes of seed reshaped; it changes only when
 -- the seed does.

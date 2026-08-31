@@ -952,6 +952,31 @@ def get_slot_points(season_year):
     """)
 
 
+def get_position_eligibility(season_year=None):
+    """Current-roster POSITION ELIGIBILITY per franchise (MLB-265).
+
+    The eligibility twin of get_slot_points, and the same row shape so the
+    standings builder lays it out the same way. `slot_pts` carries a COUNT,
+    matching the grid's contract rather than describing the unit.
+
+    Serves BOTH points books: this builder renders CBS's Advanced Standings
+    and the ESPN season-points one, so the single accessor follows whichever
+    league db is pointed at, exactly as league_predicate() intends.
+
+    No season filter -- mart_team_position_eligibility is a current-snapshot
+    mart carrying one season per league, and filtering by a rendered season
+    would blank the grid on any earlier-year render.
+    """
+    return query_for_presentation(f"""
+        SELECT team_id, lineup_slot,
+               eligible_player_count AS slot_pts,
+               sort_order
+        FROM mart_team_position_eligibility
+        WHERE {league_predicate()}
+        ORDER BY sort_order, lineup_slot
+    """)
+
+
 def get_slot_points_alltime():
     """Capture-era points by DEPLOYED slot, per (franchise, slot, season).
     Real slots exist only where daily lineups are captured (2026 onward)
@@ -3617,7 +3642,8 @@ def build_standings_rows(context, arc, finishes, active_franchises,
                          rivalry_axes=None, rivalry_pairs=None,
                          franchise_map=None, period_label='Period',
                          compact_chart=False, subtitle=None, copy=None,
-                         slot_columns=None, slot_key=None):
+                         slot_columns=None, slot_key=None,
+                         eligibility_rows=None):
     """Advanced Standings: the rank-by-period arc with its toggleable
     line chart, the points-by-slot grids (season totals by deployed slot
     left; all-time PACES PER STANDARD SEASON right -- P era-complete,
@@ -4218,6 +4244,51 @@ def build_standings_rows(context, arc, finishes, active_franchises,
         # Whole-point display (Kyle 2026-07-17 round 5): the underlying
         # values keep their precision for the gradients.
         formats.append({'range': f'B{grid_first}:{grid_last_col}{grid_last}',
+                        'format': {'numberFormat':
+                                   {'type': 'NUMBER', 'pattern': '0'}}})
+        rows.append([])
+
+    # ---- position eligibility (MLB-265). Sits directly under Points by
+    # Lineup Slot and mirrors its shape on purpose: that grid says what a
+    # manager DID with his slots, this one says what he COULD do with his
+    # roster, and reading them against each other is the point.
+    #
+    # ONE HALF ONLY, where the slot grid has two. There is no all-time
+    # twin because there is no all-time eligibility: this is a snapshot of
+    # who is rostered right now, and a "pace per standard season" of a
+    # roster count would not mean anything.
+    #
+    # Columns come from the rows' own sort_order (the slot seed's), so a
+    # league's positions arrive in field order without this builder
+    # holding a list of them -- the same rule the slot grid follows.
+    if eligibility_rows:
+        elig_order = {}
+        for r in eligibility_rows:
+            label = str(r.get('lineup_slot') or '')
+            if label:
+                elig_order.setdefault(label, r.get('sort_order') or 999)
+        elig_cols = sorted(elig_order, key=lambda c: (elig_order[c], c))
+        elig_by = {}
+        for r in eligibility_rows:
+            label = str(r.get('lineup_slot') or '')
+            if not label:
+                continue
+            key = (_canon(int(r['team_id'])), label)
+            elig_by[key] = elig_by.get(key, 0) + int(r['slot_pts'] or 0)
+
+        elig_width = _col(1 + len(elig_cols))
+        _section('ELIGIBLE PER POSITION',
+                 scopes=[(1, 'Current Roster')], width=elig_width)
+        _note('Players on the current roster eligible at each position. A '
+              'player counts at every position he is eligible for, so a row '
+              'totals to more than the roster holds.', width=elig_width)
+        _header(['Team', *elig_cols], width=elig_width)
+        elig_first = len(rows) + 1
+        for cid in ranked_canon:
+            rows.append([canon_label.get(cid, f'#{cid}'),
+                         *[elig_by.get((cid, c), '') for c in elig_cols]])
+        elig_last = len(rows)
+        formats.append({'range': f'B{elig_first}:{elig_width}{elig_last}',
                         'format': {'numberFormat':
                                    {'type': 'NUMBER', 'pattern': '0'}}})
         rows.append([])
@@ -5476,6 +5547,7 @@ def build_all_tabs(nav_targets=None):
     standings = build_standings_rows(
         context, arc, finishes, franchises,
         slot_rows=get_slot_points(season),
+        eligibility_rows=get_position_eligibility(season),
         alltime_slot_rows=get_slot_points_alltime(),
         alltime_pitching_rows=get_pitching_points_alltime(),
         season_days=get_season_gameplay_days(),

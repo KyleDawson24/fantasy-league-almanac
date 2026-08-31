@@ -1141,6 +1141,44 @@ def get_team_slot_points(season_year):
     """, (season_year,))
 
 
+def get_team_position_eligibility(season_year=None):
+    """Current-roster POSITION ELIGIBILITY per team -- how many players a
+    team could deploy at each position right now (MLB-265).
+
+    The counterpart to get_team_slot_points, and deliberately the same row
+    shape (team_id / lineup_slot / slot_pts / sort_order) so the Advanced
+    Standings grid builder renders it with no new layout code. `slot_pts`
+    carries a COUNT rather than points here; the name is the grid's
+    contract, not a claim about the unit.
+
+    A player counts at every position he is eligible for, so a team's row
+    sums to more than its roster size -- that is the measure, not double
+    counting.
+
+    NO season_year FILTER, and the argument is accepted only so callers can
+    pass one uniformly: mart_team_position_eligibility is a CURRENT-SNAPSHOT
+    mart holding exactly one season per league, so filtering by a season the
+    caller happens to be rendering would blank the grid the moment a book is
+    rendered for an earlier year.
+
+    team_id is cast back to INTEGER because the mart stores it as text (it
+    unions ESPN's numeric ids with CBS's string ones), while every ESPN
+    consumer -- including the grid, which matches on the standings rows'
+    team_id as a dict key -- carries it as an int. A silent type mismatch
+    here renders an empty grid rather than an error.
+    """
+    return query_for_presentation(f"""
+        SELECT
+            CAST(team_id AS INTEGER) AS team_id,
+            lineup_slot,
+            eligible_player_count    AS slot_pts,
+            sort_order
+        FROM mart_team_position_eligibility
+        WHERE {league_predicate()}
+        ORDER BY sort_order, lineup_slot
+    """)
+
+
 def get_team_slot_points_alltime():
     """All-time points at each ACTIVE lineup slot per team, as the
     per-standard-matchup average: slot production summed across every

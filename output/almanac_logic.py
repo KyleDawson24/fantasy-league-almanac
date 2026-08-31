@@ -1417,7 +1417,8 @@ def build_advanced_standings_tab_rows(standings_rows, slot_rows, stat_specs,
                                       rivalry_pairs=None,
                                       season_long=False,
                                       acquisition_unavailable=None,
-                                      caveat=None):
+                                      caveat=None,
+                                      eligibility_rows=None):
     """Build the Advanced Standings tab: the per-stat weekly-average
     standings (Table A) stacked over a team x active-lineup-slot points
     grid (Table B), an all-time twin of Table B shown as per-matchup
@@ -1720,7 +1721,7 @@ def build_advanced_standings_tab_rows(standings_rows, slot_rows, stat_specs,
                                      season_long=season_long)
             )
 
-    def _append_slot_grid(title, grid_rows, scope=None):
+    def _append_slot_grid(title, grid_rows, scope=None, note=None):
         # Slot columns in dim_roster_slot_counts.sort_order, carried on
         # every slot row -- no hardcoded slot list. Indented one cell with
         # Owner added so the grid's Team / Owner columns sit directly
@@ -1738,6 +1739,13 @@ def build_advanced_standings_tab_rows(standings_rows, slot_rows, stat_specs,
 
         rows.append([])
         rows.append([title, '', '', scope] if scope else [title])
+        # Caption sits between the banner and the header, at column A --
+        # this tab's own convention (the acquisition block does the same),
+        # and the placement the CBS builder's _note() already uses. A
+        # caption trailing the data rows reads as a footnote and made the
+        # two books disagree about where a table explains itself.
+        if note:
+            rows.append([note])
         rows.append(['', 'Team', 'Owner', *slot_cols])
         for team in standings_rows:
             team_slots = by_team.get(team['team_id'], {})
@@ -1800,6 +1808,23 @@ def build_advanced_standings_tab_rows(standings_rows, slot_rows, stat_specs,
     else:
         _append_slot_grid('Points by Lineup Slot', slot_rows,
                           scope='Season Totals')
+
+    # Position eligibility (MLB-265). Deliberately the grid directly under
+    # Points by Lineup Slot, and deliberately the same shape: the two
+    # answer adjacent questions -- what a manager DID with his slots, and
+    # what he COULD do with his roster -- and reading them against each
+    # other is the point. They will disagree constantly.
+    #
+    # The row total exceeds roster size because a player is counted at
+    # every position he is eligible for, so the caption says so rather
+    # than leaving a reader to total a row and conclude the data is wrong.
+    if eligibility_rows:
+        _append_slot_grid(
+            'Eligible per Position -- Current Roster', eligibility_rows,
+            scope='Current Roster',
+            note='Players on the current roster eligible at each position. A '
+                 'player counts at every position he is eligible for, so a '
+                 'row totals to more than the roster holds.')
 
     # Acquisition-channel blocks (MLB-17): production by how each player was
     # acquired, and the production forfeited when they left, under two lenses.

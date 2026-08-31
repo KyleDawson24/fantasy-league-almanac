@@ -198,6 +198,8 @@ def _generate(args, parser):
             almanac_sheets.get_team_acquisition_channels_alltime()),
         rivalry_axes=almanac_sheets.get_rivalry_axes(),
         rivalry_pairs=almanac_sheets.get_rivalry_matrix(),
+        eligibility_rows=almanac_sheets.get_team_position_eligibility(
+            season_year),
     )
     trades_rows = None
     if args.include_trades:

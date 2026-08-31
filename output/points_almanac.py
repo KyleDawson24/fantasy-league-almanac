@@ -150,6 +150,9 @@ def _build(nav_targets=None, include_trades=True, context=None):
         espn_points_data.presenter_finishes(season_year),
         espn_points_data.presenter_active_franchises(season_year),
         slot_rows=slot_rows,
+        # MLB-265. Same mart, same shape, resolved through whichever
+        # league db is pointed at.
+        eligibility_rows=cbs_almanac_sheets.get_position_eligibility(),
         # FIRST-YEAR TWINS ARE STILL BOTH RENDERED. All-time equals the
         # current season here, and printing both halves is truthful --
         # dropping one because it is redundant leaves the reader wondering

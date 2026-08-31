@@ -30,6 +30,7 @@ from almanac_data import (
     get_draft_history_boards,
     get_season_scoring_periods,
     get_team_standings,
+    get_team_position_eligibility,
     get_team_slot_points,
     get_team_slot_points_alltime,
     get_team_acquisition_channels,
@@ -197,6 +198,8 @@ def write_almanac(sheet_id, season_year=None, matchup_period=None, client=None):
         # tab has already had once.
         rivalry_axes=get_rivalry_axes(),
         rivalry_pairs=get_rivalry_matrix(),
+        # MLB-265, and on BOTH paths for the reason stated just above.
+        eligibility_rows=get_team_position_eligibility(season_year),
     )
     # Trades is the one live-API tab; an ESPN hiccup shouldn't sink the
     # whole publish. On failure the previous tab content stands, its

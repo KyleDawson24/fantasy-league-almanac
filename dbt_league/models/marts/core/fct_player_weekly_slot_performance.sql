@@ -74,6 +74,41 @@ weekly as (
         performance_status,
         wasted_bucket,
 
+        -- The stint's LAST DAY, and it exists to order two stints inside a
+        -- single matchup period.
+        --
+        -- A player traded mid-period produces one row per team at this
+        -- grain, and nothing else here ranks them: season_year and
+        -- matchup_period tie by construction, and team_id is an IDENTIFIER,
+        -- not a clock. A consumer that must resolve such a player to ONE
+        -- fantasy team therefore has no chronological term to sort on
+        -- unless this column supplies it.
+        --
+        -- It is not hypothetical. `almanac_data._enrich_optimal_team_with_
+        -- stats` built its recency key as
+        --     (season_year * 100 + matchup_period) * 100 + team_id
+        -- and broke the same-period tie on team_id, which resolves to
+        -- whichever team's id is numerically larger -- correct only when a
+        -- trade happens to run low-id to high-id. Measured over both ESPN
+        -- seasons at the point of the fix, against roster chronology: 94 of
+        -- 241 player-weeks mislabeled, ~half in each season. The coin flip
+        -- IS the proof -- a tiebreak correlated with anything real cannot
+        -- land on 50%. Surfaced as a traded player still listed on his old
+        -- team in the All-League Team of the Week.
+        --
+        -- SCOPE OF THE FIX, stated because the residual is a DIFFERENT
+        -- question and should not be read as this one still being broken.
+        -- Of those player-weeks, 145 actually performed for both teams;
+        -- this column resolves all 145 correctly. The other 91 were
+        -- rostered by two teams but appeared for only one, so they produce
+        -- no row here for the team they never played for and no
+        -- aggregation over this fact can name it. For 17 of them that
+        -- means the label is the team whose points they actually are,
+        -- which may or may not be the desired reading -- "whose points are
+        -- these" vs "who owns him now" is a product call, open as of this
+        -- writing, and NOT something a chronology term can settle.
+        max(scoring_period) as last_scoring_period,
+
         -- Hitting counting stats
         sum(h)       as h,
         sum(ab)      as ab,

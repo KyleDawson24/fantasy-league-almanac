@@ -738,11 +738,58 @@ def _enrich_optimal_team_with_stats(selected_rows, season_year, matchup_period,
             SELECT
                 *,
                 -- One monotonic recency key per row: latest season, then
-                -- matchup_period, then team_id to break a same-period trade
-                -- (the data does carry intra-period two-team rows). Lets the
-                -- MAX_BY calls above all resolve to the SAME latest stint.
-                (season_year * 100 + matchup_period) * 100 + team_id
-                    AS recency_key
+                -- matchup_period, then the stint's LAST DAY to break a
+                -- same-period trade (the data does carry intra-period
+                -- two-team rows). Lets the MAX_BY calls above all resolve to
+                -- the SAME latest stint.
+                --
+                -- The last term was `team_id` until this fix, described in
+                -- its own comment as breaking the trade tie. It does not: a
+                -- team id is an IDENTIFIER, so it resolved to whichever
+                -- team's id was numerically larger and was right only when a
+                -- trade ran low-id to high-id. Measured over both ESPN
+                -- seasons: 94 of 241 player-weeks mislabeled, ~half in each
+                -- season -- a coin flip, which is exactly what an identifier
+                -- used as a sort key produces, and why nobody reported it
+                -- for two seasons: half the trades came out right by luck.
+                --
+                -- Resolves all 145 player-weeks that actually performed for
+                -- both teams. A player rostered by two teams who appeared
+                -- for only one has no row for the other, so this cannot name
+                -- it -- see the column's own comment in
+                -- fct_player_weekly_slot_performance for why that residual
+                -- is a product question rather than a tiebreak defect.
+                --
+                -- NOTE the prior fix recorded above (co-varying fields via a
+                -- shared MAX_BY) was real and is retained. It made every
+                -- field resolve from ONE stint; it did not make that stint
+                -- the LATEST one. The two bugs look alike and only the
+                -- second one is about chronology.
+                --
+                -- Only bites when team_id is None (all-league scope). A
+                -- team-scoped query filters to a single team, so its MAX_BY
+                -- is unambiguous either way.
+                -- ROSTERED ROWS ONLY, and this is deliberate where it
+                -- used to be accidental. A player dropped to free agency
+                -- mid-period carries a trailing row with team_id NULL and
+                -- the period's highest last_scoring_period, so ranking on
+                -- chronology alone resolves him to NULL and the surface
+                -- prints no team at all. The old key hid this by arithmetic
+                -- rather than intent -- `... * 100 + team_id` is NULL when
+                -- team_id is NULL, and a NULL key drops out of MAX_BY -- so
+                -- replacing it with a well-defined chronological term
+                -- removed the accident along with the defect. A regression
+                -- sweep over every multi-team player-week caught the two
+                -- cases; they are the reason this CASE exists.
+                --
+                -- The label a reader wants for such a player is the last
+                -- fantasy team that actually rostered him, which is what
+                -- excluding the FA row returns.
+                CASE
+                    WHEN team_id IS NULL THEN NULL
+                    ELSE (season_year * 100 + matchup_period) * 1000
+                         + last_scoring_period
+                END AS recency_key
             FROM fct_player_weekly_slot_performance
             WHERE {where_sql}
         )

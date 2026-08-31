@@ -177,7 +177,20 @@ def window_lineup(first_period, last_period, points_type='active'):
             SELECT
                 player_key, player_id, player_name, display_name, pro_team,
                 {slot} AS position,
-                CASE WHEN {slot} = 'P'
+                -- MLB-249 X-1. This tested `= 'P'` alone, so a pitcher
+                -- reached the board through his SP or RP eligibility --
+                -- which is how ESPN spells most pitchers -- and fell into
+                -- the ELSE, priced on total_hitting_stat_pts. That is 0
+                -- for a pitcher, so every SP/RP row scored zero and the
+                -- Team-of-the-Month board simply had no pitchers in the
+                -- slots pitchers actually occupy. Only a league using the
+                -- generic P slot was unaffected, which is why it survived.
+                --
+                -- The three-slot set is not a new rule: it is the same
+                -- CASE fct_player_position_pts.sql already applies at the
+                -- season/matchup grain. The daily-window path was the one
+                -- copy that never got it.
+                CASE WHEN {slot} IN ('SP', 'RP', 'P')
                      THEN total_pitching_stat_pts
                      ELSE total_hitting_stat_pts END
                     * {weight} AS pos_pts

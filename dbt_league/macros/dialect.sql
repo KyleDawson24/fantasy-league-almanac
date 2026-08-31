@@ -1090,3 +1090,46 @@ case when {{ expr }} is null then null else coalesce(list_aggregate(
         'string_agg', ''
     ), '') end
 {%- endmacro %}
+
+
+-- Delimited-string reshape -----------------------------------------------
+
+{% macro split_to_rows(expr, delimiter, alias) -%}
+{#- One row per element of a DELIMITED STRING, handed back in the same
+    shape flatten_array produces -- so the element is read with
+    json_unwrap_text on both engines and call sites look identical.
+
+    WHY IT IS NOT string_split ON ONE SIDE AND split ON THE OTHER. The
+    naive pair diverges in the ELEMENT TYPE, not the row count: Snowflake's
+    split() yields VARIANT strings (json_unwrap_text -> `::string`, bare
+    text), while DuckDB's string_split() yields plain VARCHAR, which
+    `->>'$'` then tries to parse AS JSON -- and a bare `2B` is not valid
+    JSON. Routing DuckDB through to_json() makes both sides hand back JSON
+    strings, which is what lets one macro serve both and keeps the
+    quotes-vs-text trap documented on json_unwrap_text from reappearing
+    here in a new spelling.
+
+    VERIFIED ON BOTH ENGINES before it was written down, per the house
+    rule at the top of this file. On '2B,SS' both yield the same two
+    values. The two edge cases also agree exactly:
+
+      NULL input   -> ZERO rows on both (so a player with no eligibility
+                      string contributes nothing, rather than one NULL).
+      ''    input  -> ONE row holding '' on both. That is a real row and
+                      callers MUST filter it; the macro deliberately does
+                      not, because silently dropping an element is how a
+                      reshape starts lying about cardinality.
+
+    ELEMENT ORDER IS NOT GUARANTEED and is not the same on the two engines
+    (DuckDB returned SS,2B for '2B,SS'). Anything order-sensitive must sort
+    for itself -- this is a set, not a sequence. -#}
+    {{ return(adapter.dispatch('split_to_rows', 'dbt_league')(expr, delimiter, alias)) }}
+{%- endmacro %}
+
+{% macro default__split_to_rows(expr, delimiter, alias) -%}
+lateral flatten(input => split({{ expr }}, '{{ delimiter }}')) {{ alias }}
+{%- endmacro %}
+
+{% macro duckdb__split_to_rows(expr, delimiter, alias) -%}
+unnest(cast(to_json(string_split({{ expr }}, '{{ delimiter }}')) as json[])) as {{ alias }}(value)
+{%- endmacro %}

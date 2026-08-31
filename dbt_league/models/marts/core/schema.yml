@@ -2062,3 +2062,70 @@ models:
           - accepted_values:
               arguments:
                 values: ['points', 'h2h', 'unknown']
+
+  - name: dim_lineup_slot
+    description: >
+      PLATFORM-GENERAL lineup-slot vocabulary (MLB-263, opening MLB-6's
+      move #1): one row per (platform, lineup_slot), projecting each
+      platform's label onto the canonical_slot_key it shares with the other
+      platform's spelling of the same slot -- ESPN 'UTIL' and CBS 'U' are
+      both 'utility'. This is the canonical_slots dimension
+      slot_classification.canonical_key was seeded for and deliberately left
+      unread until something needed it; the cross-platform eligibility grid
+      is that something.
+
+      Its one derived column, is_position_slot, answers "is this a real
+      fielding position or roster machinery?" from the seed's own columns --
+      is_starting_slot excludes BE/IL/FA/RS/EST, a non-null slot_category
+      excludes CBS ACT (a generic active slot carrying both disciplines),
+      and canonical_slot_key excludes utility on both platforms at once.
+      Consumers that used to carry their own literal slot lists
+      (almanac_logic's _PITCHING_SLOTS, espn_points_data's
+      _NON_POSITION_SLOTS, `not in ('BE','IL')`) can read this instead.
+
+      VOCABULARY, NOT SETTINGS: it says what a slot means on a platform,
+      never which slots a given league configured. That is
+      dim_roster_slot_counts' question; consumers needing "the positions
+      THIS league fields" join the two.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - platform
+              - lineup_slot
+    columns:
+      - name: platform
+        description: '''espn'' | ''cbs''. Part of the key: the same label can mean different things on the two platforms.'
+        tests:
+          - not_null
+      - name: lineup_slot
+        description: 'The slot label as it appears in lineup_slot across staging and the facts. With platform, the primary key.'
+        tests:
+          - not_null
+      - name: lineup_slot_id
+        description: 'ESPN lineupSlotId. NULL for CBS (label-keyed) and for ESPN''s synthetic FA row.'
+      - name: canonical_slot_key
+        description: 'Platform-independent identity for the slot -- what it IS rather than what a platform calls it. The join key for cross-platform parity.'
+        tests:
+          - not_null
+      - name: sort_order
+        description: 'Display order within a platform. NULL where the slot is not a deployed position (CBS ACT/EST).'
+      - name: position_limit_id
+        description: 'ESPN defaultPositionId for the rosterSettings.positionLimits join. NULL for flex and roster-management slots.'
+      - name: slot_category
+        description: '''hitting'' | ''pitching'' | ''inactive'', or NULL where the slot cannot be classified from the slot alone (CBS ACT).'
+      - name: is_starting_slot
+        description: 'Whether a player in this slot is deployed. Seed NULL (CBS EST) is floored to false here so consumers get a boolean.'
+        tests:
+          - not_null
+      - name: is_position_slot
+        description: >
+          Whether this slot is a real fielding position, as opposed to
+          roster machinery or a flex. True for the atomic positions and for
+          ESPN's flex slots (2B/SS, 1B/3B, IF, OF), which are genuine
+          entries in a player's eligibleSlots and are how ESPN expresses
+          eligibility. False for UTIL/U, BE/RS, IL, FA, ACT and EST.
+        tests:
+          - not_null
+      - name: notes
+        description: 'Seed free text for the things a reader would otherwise file as a bug.'

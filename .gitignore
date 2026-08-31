@@ -129,6 +129,7 @@ Study Material.MD
 data/
 tests/fixtures/almanac_v1_1_0/
 tests/fixtures/cbs_almanac/
+tests/fixtures/points_almanac_v2_1/
 tests/fixtures/baseline_summary_current.txt
 tests/fixtures/baseline_records_report.txt
 Trade Intel API Handoff.md

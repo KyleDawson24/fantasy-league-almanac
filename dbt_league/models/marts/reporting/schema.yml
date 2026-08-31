@@ -1591,3 +1591,110 @@ models:
         description: 'Stable 1..N draw order within a league, by display name then identity_key. A consumer wanting standings order joins its own.'
         tests:
           - not_null
+
+  - name: mart_team_position_eligibility
+    description: >
+      How many players on a team's CURRENT roster are eligible at each
+      position (MLB-265). One row per (league_key, season_year, team_id,
+      lineup_slot); feeds the Advanced Standings eligibility grid on both
+      books.
+
+      A PLAYER COUNTS AT EVERY POSITION HE IS ELIGIBLE FOR, so a team's row
+      total exceeds its roster size by design -- a 2B/SS adds one to each.
+      "Players available here" is the correct reading of a cell; "players
+      rostered" is not the correct reading of the sum.
+
+      CURRENT SNAPSHOT ONLY -- no history, no as-of. One snapshot per
+      LEAGUE (latest season, then latest capture within it), not one per
+      season, and snapshot_key rides on every row because the two platforms
+      do not land in step.
+
+      Its sibling mart_team_slot_production counts points produced while
+      DEPLOYED in a slot -- what a manager did. This counts who COULD be
+      deployed there -- what a manager may do. The two grids sit together
+      on Advanced Standings and are expected to disagree.
+
+      SOURCES DIFFER BY PLATFORM. ESPN reads mart_daily_roster_snapshot
+      (which keeps zero-stat rostered players, unlike the performance
+      fact) and is scoped to the slots the league's own rosterSettings
+      configure. CBS reads its CAPTURED eligible_positions string, falling
+      back to the DERIVED int_cbs__eligibility_windows for any player the
+      capture carried no list for (Kyle, 2026-08-31); that fallback
+      resolved 0 rows on the 2026-08-30 capture and exists for the capture
+      gap that arrives unannounced. The two are not equivalent -- derived
+      eligibility rests on an estimated primary position graded ~93%
+      against these captures -- so n_captured / n_derived carry the split
+      per cell instead of a label.
+
+      Which slots become columns is dim_lineup_slot.is_position_slot's
+      call, never a literal list here.
+
+      Materialization: table -- it feeds a byte-diff golden.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - season_year
+              - team_id
+              - lineup_slot
+    columns:
+      - name: league_key
+        description: 'League registry key.'
+        tests:
+          - not_null
+      - name: platform
+        description: '''espn'' | ''cbs'' -- which arm produced the row, and therefore which eligibility feed answered.'
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['espn', 'cbs']
+      - name: season_year
+        description: 'The latest season the league has roster data for. Only one season is ever present per league.'
+        tests:
+          - not_null
+      - name: team_id
+        description: >
+          Fantasy team id as TEXT. Cast deliberately: ESPN team ids are
+          numeric and CBS team ids are strings, and a union has to pick one
+          type. Consumers joining a platform-specific standings shape cast
+          back on their own side.
+        tests:
+          - not_null
+      - name: team_abbrev
+        description: 'Team abbreviation as the platform serves it, for consumers that do not join a standings shape.'
+      - name: snapshot_key
+        description: >
+          WHICH capture this row describes, as text: ESPN''s scoring_period
+          (e.g. ''159'') or CBS''s roster_date (e.g. ''2026-08-30''). Rides
+          on every row so a reader can never mistake one platform''s "now"
+          for the other''s.
+        tests:
+          - not_null
+      - name: lineup_slot
+        description: 'The position, in the platform''s own label. Restricted to is_position_slot slots.'
+        tests:
+          - not_null
+      - name: canonical_slot_key
+        description: 'Platform-independent identity of the position, from dim_lineup_slot -- what a cross-platform consumer groups on.'
+        tests:
+          - not_null
+      - name: sort_order
+        description: 'Display order from the slot seed, so a consumer lays out position columns without a hardcoded list.'
+      - name: eligible_player_count
+        description: 'Distinct current-roster players eligible at this position for this team. Always n_captured + n_derived.'
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 1
+                inclusive: true
+      - name: n_captured
+        description: 'Of eligible_player_count, how many resolved from the platform''s SERVED eligibility list.'
+        tests:
+          - not_null
+      - name: n_derived
+        description: 'Of eligible_player_count, how many resolved from the derived CBS eligibility windows (estimated primary position). 0 on ESPN by construction.'
+        tests:
+          - not_null

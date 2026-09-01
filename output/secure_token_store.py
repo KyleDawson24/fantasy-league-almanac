@@ -27,7 +27,7 @@ class SecureTokenStoreError(RuntimeError):
 def _backend():
     if sys.platform != 'win32':
         raise SecureTokenStoreError(
-            'The v1.9 public Google workbook flow supports secure OAuth '
+            'The public Google workbook flow supports secure OAuth '
             'storage on Windows only. Windows Credential Locker is required; '
             'this app will not fall back to a plaintext token file. Run the '
             'released ZIP on Windows, or wait for a release that explicitly '

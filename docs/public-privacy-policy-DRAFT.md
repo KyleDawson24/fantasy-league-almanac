@@ -31,7 +31,7 @@ app does not use this permission to list or read other files in the user's
 Drive, and it does not accept an existing workbook as the public-flow target.
 
 The app stores the public Google authorization grant in Windows Credential
-Locker, encrypted at rest by Windows. The v1.9 public Google workflow is
+Locker, encrypted at rest by Windows. The public Google workflow is
 supported on Windows only and stops if Credential Locker cannot be used; it
 does not fall back to a plaintext token file. If an older plaintext public
 token cache exists, the app writes and verifies the secure copy before

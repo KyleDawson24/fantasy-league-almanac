@@ -8,7 +8,7 @@ your own Drive, writes the almanac, and asks before setting that workbook to
 “Anyone with the link — Viewer.” It cannot use that permission to browse or
 read other files in your Drive.
 
-The v1.9 public Google workflow supports Windows because it stores the Google
+The public Google workflow supports Windows because it stores the Google
 grant in Windows Credential Locker and refuses plaintext fallback. Fantasy
 League Almanac has no hosted user accounts, analytics, advertising, or
 maintainer backend, and it does not automatically send Kyle your cookies,

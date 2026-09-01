@@ -26,7 +26,7 @@ body:
     attributes:
       label: Release version
       description: Use the version printed in the release name or ZIP filename.
-      placeholder: v1.9.1
+      placeholder: v2.0.1
     validations:
       required: true
 

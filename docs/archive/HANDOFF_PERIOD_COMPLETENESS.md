@@ -292,12 +292,12 @@ and are not from this session.
 - `pytest` -- **1803 passed, 2 failed, 20 skipped, 27 deselected.** Both
   failures are in `tests/test_records_report.py`, the untracked WIP CLAUDE.md
   designates as ignorable. No regressions.
-- ESPN dev sheet -- `1J07wsX8rtX0owoV4foS2QUyH31TiuvHGES47x3uEdow`, rendered
+- ESPN dev sheet -- `1J07wsX8rtX0...`, rendered
   **`for 2026 MP19`**: 22 weekly + 22 season-to-date all-league rows, 124
   records rows, 682 team-week rows, 14 roster tabs. (All-league sections read
   22 because the union layer picks up CBS's period count; not an ESPN
   inconsistency.) Three Sheets quota hits, each recovered on a 70s backoff.
-- CBS dev sheet -- `1itf9U4Wbi_4xEaSkHYR1Mo-TKcFEChs0EmZ01LRKwGw`, 21 tabs.
+- CBS dev sheet -- `1itf9U4Wbi_4...`, 21 tabs.
   One quota hit, recovered.
 - Recap -- generated **week 19**, not 20, exactly as the mart state predicted.
   Written to `scratchpad/week19-recap-espn_REGENERATED-2026-08-24.txt` rather

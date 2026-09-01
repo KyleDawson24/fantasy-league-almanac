@@ -33,8 +33,8 @@ and section 5 entirely.
   step 3.
 - **Git**, only for the developer/source path. The release ZIP does not
   need it.
-- **Windows**, only for the public Google workbook flow -- v2.0 stores
-  that grant in Windows Credential Locker. The local pipeline (extract,
+- **Windows**, only for the public Google workbook flow -- the app
+  stores that grant in Windows Credential Locker. The local pipeline (extract,
   DuckDB, dbt, preview files, BBCode) has no such requirement.
 - *(Optional, advanced)* **A Snowflake account**, if you want the
   maintainer's warehouse path instead of local DuckDB. It is **not a
@@ -796,7 +796,7 @@ and prints the workbook URL with a plain explanation. The workbook is never
 deleted to clean up after a failure.
 
 Local state stays local. The public Google grant is encrypted at rest by
-Windows Credential Locker; v2.0 supports this public flow on Windows only and
+Windows Credential Locker; the app supports this public flow on Windows only and
 fails closed if that backend cannot be used. It never falls back to a
 plaintext cache. An older `output/.sheets_public_oauth_token.json` is migrated
 only after the secure write succeeds and is verified, then removed. The

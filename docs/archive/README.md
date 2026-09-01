@@ -41,6 +41,15 @@ Useful for "why was this done this way", unreliable for "what is true now".
 - `HANDOFF_BSB_JULY20_SHARE.md`
 - `HANDOFF_CBS_DRAFT_RECAP.md`
 - `HANDOFF_DRAFT_RECAP_SESSION.md`
+- `HANDOFF_PERIOD_COMPLETENESS.md` — the week-20 session (2026-08-24) that
+  turned into a design session. Records the four claims overturned that night
+  (a "dead" CBS token that wasn't, a positional-period override that does not
+  exist, period 20 measured complete, and `mlb_load --force` truncating
+  2001-2026). **Exception to "nothing here is canonical":** its §1 is Kyle's
+  live design target — *run all available data and determine what timeframes
+  should and should not be considered complete* — and the work it describes is
+  still open. The direction lives in `../matchup-period-lifecycle-DRAFT.md`;
+  read that for what to build, this for why.
 - `HANDOFF_IDENTITY_DIM_AND_TEAM_PAGES.md`
 - `CBS Almanac Handoff.md`
 - `Two-Way Split Bug Handoff.md`

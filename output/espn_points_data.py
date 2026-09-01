@@ -620,44 +620,6 @@ def rank_arc(season_year):
     """)
 
 
-def season_finishes():
-    """Season finishes for a points league.
-
-    `almanac_data.get_espn_season_finishes` reads the empty H2H standings
-    mart. The platform's own seed and final rank are on `stg_team_standings`,
-    which IS populated, so the finishes table renders from there instead.
-
-    `is_champion` stays False while nothing has finished -- the H2H version
-    derives it from sweeping the playoff weeks, and this format has none.
-    Crowning the points leader mid-season would invent a title.
-    """
-    return query_for_presentation(f"""
-        SELECT
-            s.season_year,
-            s.team_id,
-            COALESCE(f.team_abbrev, s.team_abbrev) AS team_abbrev,
-            f.owner_display,
-            CAST(NULL AS INTEGER) AS wins,
-            CAST(NULL AS INTEGER) AS losses,
-            CAST(NULL AS INTEGER) AS ties,
-            COALESCE(
-                s.playoff_seed,
-                ROW_NUMBER() OVER (
-                    PARTITION BY s.season_year
-                    ORDER BY f.calculated_points DESC NULLS LAST, s.team_id)
-            ) AS finish,
-            s.final_rank,
-            FALSE AS is_champion
-        FROM stg_team_standings s
-        LEFT JOIN fct_team_season_performance f
-            ON  f.league_key  = s.league_key
-            AND f.season_year = s.season_year
-            AND f.team_id     = s.team_id
-        WHERE {league_predicate('s')}
-        ORDER BY s.season_year DESC, finish
-    """)
-
-
 # ---------------------------------------------------------------------------
 # Inputs for the SHARED season-points standings presenter (MLB-243).
 #

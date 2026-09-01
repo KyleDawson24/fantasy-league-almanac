@@ -11,7 +11,8 @@
 -- to know the format, and this is where it asks.
 --
 -- NEVER BY PLATFORM NAME. The house rule (int_franchise_registry,
--- fct_team_season_performance, output/cbs_almanac_sheets.is_points_league):
+-- fct_team_season_performance, and the renderer's own former format dispatch
+-- -- deleted in MLB-263 once this model had replaced it):
 -- format follows what the data DOES, not what the platform is called. A CBS
 -- H2H league and an ESPN points league both exist and both would be misfiled
 -- by a platform check. A platform's explicit FORMAT field is data, however,

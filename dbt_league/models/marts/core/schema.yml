@@ -2020,8 +2020,9 @@ models:
 
       NEVER BY PLATFORM NAME, per the house rule. A CBS H2H league and an ESPN
       points league both exist and both would be misfiled by a platform check.
-      The signal is the one output/cbs_almanac_sheets.is_points_league already
-      used: delivered period standings exist only where there are no matchups
+      The signal is the one the renderer's own format dispatch used before
+      this model replaced it (that function was deleted in MLB-263):
+      delivered period standings exist only where there are no matchups
       to be scored on. Matchup presence rides alongside as the positive
       evidence for the other side, so a league with neither reads `unknown`
       rather than being quietly filed as H2H.

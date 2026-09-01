@@ -590,7 +590,6 @@ def assembled(monkeypatch):
     monkeypatch.setattr(espn_points_data, 'standings_rows',
                         lambda season, specs: SEASON_TOTALS)
     monkeypatch.setattr(espn_points_data, 'rank_arc', lambda season: [])
-    monkeypatch.setattr(espn_points_data, 'season_finishes', lambda: [])
     monkeypatch.setattr(espn_points_data, 'acquisition_channels',
                         lambda season: None)
     monkeypatch.setattr(almanac_data, 'get_team_week_stat_specs',

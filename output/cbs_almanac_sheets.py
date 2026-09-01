@@ -570,16 +570,6 @@ def _person_name_sql(col):
 # Data
 # ---------------------------------------------------------------------------
 
-def is_points_league():
-    """Format dispatch by data presence: delivered period standings exist
-    only for non-H2H leagues (F7). Zero rows -> not a points league."""
-    rows = query_for_presentation(
-        f"SELECT COUNT(*) AS n FROM mart_period_standings"
-        f" WHERE {league_predicate()}"
-    )
-    return rows[0]['n'] > 0
-
-
 def get_season_context():
     """The almanac's data horizon: active season, latest closed period,
     latest captured roster date, historic era span. All from the data --

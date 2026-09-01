@@ -142,7 +142,7 @@ models:
         tests:
           - not_null
       - name: game_date
-        description: 'Real calendar date of the day''s production. NULL on ESPN rows (their day identity is the platform scoring_period); always set on CBS rows.'
+        description: 'Real calendar date of the day''s production. Served by CBS; derived on ESPN rows as season_opener + (scoring_period - 1) against stg_mlb__season_calendar (MLB-263). Set on both branches -- the contract has one date vocabulary.'
       - name: active_weight
         description: 'The day''s scoring weight: 1/0 where the active state is known (ESPN slots, CBS captured/reconstructed days), the start-share estimator on CBS 2004-2020 estimated days, NULL where membership is confirmed but activity unknown.'
       - name: provenance

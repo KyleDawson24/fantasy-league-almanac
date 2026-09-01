@@ -644,7 +644,7 @@ models:
       - name: is_active_slot
         description: 'Boolean equivalent of performance_status = ''active''. NULL on CBS estimated-era rows. Retained for backward compatibility.'
       - name: game_date
-        description: 'Real calendar date (CBS rows); NULL on ESPN rows whose day identity is scoring_period.'
+        description: 'Real calendar date. Served by CBS; derived on ESPN rows from the season opener plus the scoring_period ordinal (MLB-263). Set on both branches.'
       - name: active_weight
         description: 'The day''s scoring weight: 1/0 where state is known, the start-share estimator on CBS estimated days, NULL where activity is unknowable.'
       - name: provenance

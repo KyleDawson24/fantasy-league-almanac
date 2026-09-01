@@ -11,8 +11,10 @@
 --   player_key    the grain identity as VARCHAR (ESPN: player_id stringified;
 --                 CBS: the platform id, including 'ui-only-' synthetics that
 --                 have no numeric form). player_id stays for ESPN consumers.
---   game_date     the real calendar date (NULL on ESPN rows -- their day
---                 identity is the platform scoring_period).
+--   game_date     the real calendar date. CBS serves it; ESPN does not, so
+--                 the ESPN branch derives it from the season opener plus its
+--                 scoring_period ordinal (MLB-263). Both branches now fill
+--                 it, so the contract has ONE date vocabulary.
 --   active_weight the day's scoring weight: ESPN 1/0 by slot; CBS 1/0 where
 --                 the state is known, the start-share estimator (or NULL)
 --                 where 2004-2020 history is estimated.
@@ -354,10 +356,45 @@ final as (
         -- Union-layer columns (see the header). ESPN state is always
         -- platform-served, hence 'captured' / binary weight.
         {{ to_varchar('w.player_id') }} as player_key,
-        cast(null as date)      as game_date,
+        -- ONE TIME SPINE (MLB-263, ledger S-36). ESPN serves no ISO date --
+        -- its day identity is the scoring_period ordinal -- so this column
+        -- was NULL on every ESPN row and `espn_points_data` reconstructed
+        -- the calendar in Python (season_context/period_to_date/
+        -- month_window) from exactly the rule applied here. Deriving it once
+        -- in the contract means the daily fact has a single date vocabulary
+        -- and no renderer has to rebuild one.
+        --
+        -- The anchor is MLB's own published regular-season start, not a
+        -- typed value, and it joins on season_year ALONE: the season starts
+        -- when it starts, so it is not league-scoped -- the same reasoning
+        -- dim_matchup_period's derived_dates uses. stg_mlb__season_calendar
+        -- is one row per season, so this cannot fan out.
+        --
+        -- WRAPPED IN to_date_of FOR THE SAME REASON dim_matchup_period wraps
+        -- its arithmetic: Snowflake's DATEADD(day, n, <date>) returns a DATE
+        -- and DuckDB's `<date> + to_days(n)` returns a TIMESTAMP, and left
+        -- alone the two engines would disagree silently -- CBS rows carry a
+        -- real DATE here, so an unwrapped ESPN branch would also make the
+        -- union's own column type engine-dependent.
+        -- The day offset is CAST TO INTEGER, and that cast is load-bearing
+        -- rather than decorative. scoring_period is a NUMBER, so
+        -- `scoring_period - 1` is DECIMAL(38,0); Snowflake's DATEADD accepts
+        -- it, but DuckDB expands date_add_unit to `<date> + to_days(n)` and
+        -- to_days() takes an INTEGER, failing with a Binder Error. The twin
+        -- derivation in dim_matchup_period never hit this only because its
+        -- evidence model had already cast its bounds to integer. Measured on
+        -- the DuckDB lane (tests/test_weekly_chain_without_seed.py), not
+        -- theorised.
+        {{ to_date_of(date_add_unit('day',
+                                    'cast(w.scoring_period as integer) - 1',
+                                    'cal.season_opener')) }} as game_date,
         {{ iff("w.lineup_slot_category != 'inactive'", '1.0', '0.0') }} as active_weight,
         'captured'              as provenance
     from daily_wide w
+    -- The season anchor for game_date above. LEFT so a season with no
+    -- captured calendar row yields NULL rather than dropping the day.
+    left join {{ ref('stg_mlb__season_calendar') }} cal
+        on w.season_year = cal.season_year
     left join {{ ref('stg_box_scores') }} b
         on w.league_key = b.league_key
         and w.season_year = b.season_year

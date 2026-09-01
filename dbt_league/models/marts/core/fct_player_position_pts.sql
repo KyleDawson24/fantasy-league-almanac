@@ -158,14 +158,19 @@ aggregated as (
         -- was on at the end of the window, matching the display-field
         -- convention fct_player_season_performance already documents.
         --
-        -- scoring_period is the ordering key rather than game_date
-        -- because game_date is NULL on every ESPN row by construction
-        -- (int_player_daily stamps `cast(null as date)` -- ESPN's day
-        -- is a period index, not a calendar date). scoring_period is
-        -- non-null on BOTH books and chronological within a season:
-        -- ESPN numbers days 1..195, CBS carries the date itself as
-        -- YYYYMMDD. Ordering by game_date here would have returned
-        -- NULL for all 34,738 ESPN groups.
+        -- scoring_period is the ordering key rather than game_date.
+        -- It originally had to be: game_date was NULL on every ESPN row
+        -- by construction, and ordering by it would have returned NULL
+        -- for all 34,738 ESPN groups. MLB-263 removed that hazard --
+        -- int_player_daily now derives the ESPN date from the season
+        -- opener, so both branches carry a real game_date.
+        --
+        -- The key stays scoring_period anyway, and deliberately: it is
+        -- non-null and chronological on BOTH books (ESPN numbers days
+        -- 1..195; CBS carries the date itself as YYYYMMDD), it is the
+        -- grain key, and because the ESPN date is now a monotonic
+        -- function of it the two orderings are equivalent. Switching
+        -- would churn a golden-feeding table to buy nothing.
         {{ latest_by('pro_team', 'scoring_period') }} as pro_team,
 
         -- Two point lenses (active / inactive). Consumers wanting an

@@ -2053,11 +2053,29 @@ models:
           not a platform-name inference.
         tests:
           - not_null
+      - name: settings_league_format
+        description: >
+          The format the PLATFORM ITSELF states, or NULL where it states
+          none (MLB-263, ledger S-34). ESPN speaks via currentLeagueType = 5;
+          CBS via the scoring_system label on its rules feed
+          (stg_cbs__league_settings). NULL is the ordinary state for a league
+          whose settings were never captured, and it is what lets the verdict
+          fall back to the data-shape inference instead of inheriting a
+          guess.
+      - name: presence_league_format
+        description: >
+          The data-shape inference, published in its own right so the
+          settings statement has something to be checked against.
+          assert_league_format_settings_match_presence fails the build if the
+          two ever contradict each other.
+        tests:
+          - not_null
       - name: league_format
         description: >
-          points | h2h | unknown. `unknown` is a real answer for an install
-          that has captured neither signal yet, and renders no matrix rather
-          than guessing at one.
+          points | h2h | unknown -- THE VERDICT: the platform's own statement
+          where it makes one, the presence inference otherwise. `unknown` is
+          a real answer for an install that has captured neither signal yet,
+          and renders no matrix rather than guessing at one.
         tests:
           - not_null
           - accepted_values:

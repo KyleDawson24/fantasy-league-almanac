@@ -463,7 +463,7 @@ def _create_inputs(con):
             league_key varchar, season_year integer, team_id integer,
             platform_points double, final_rank integer)
     """)
-    # dim_league_format's two signals. mart_period_standings exists only where
+    # dim_league_format's signals. mart_period_standings exists only where
     # a league has no matchups to be scored on, which is the points-format
     # tell; stg_matchup_pairs is the positive evidence for the other side.
     con.execute("""
@@ -475,6 +475,14 @@ def _create_inputs(con):
         create or replace table ANALYTICS.stg_matchup_pairs (
             league_key varchar, season_year integer, matchup_period integer,
             home_team_id integer, away_team_id integer)
+    """)
+    # The platform's own format STATEMENT (MLB-263), present and empty. These
+    # leagues are format-judged by data shape, which is what this file is
+    # about; leaving the relation empty is what keeps them on that path,
+    # because dim_league_format only prefers a statement when one exists.
+    con.execute("""
+        create or replace table ANALYTICS.stg_cbs__league_settings (
+            league_key varchar, settings_league_format varchar)
     """)
     # The CBS arms, present and empty: this league is served by the derived /
     # delivered branches, and an absent relation would fail the build rather

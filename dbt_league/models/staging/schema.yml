@@ -1218,6 +1218,54 @@ models:
               arguments:
                 values: ['hitting', 'pitching']
 
+  - name: stg_cbs__league_settings
+    description: >
+      CBS league-level settings -- the platform's OWN statement of what kind
+      of league this is (MLB-263, ledger S-34). dim_league_format decided
+      format by feed presence, which is sound for the pioneer league and
+      wrong in general: a CBS head-to-head league would be misfiled. The
+      contract calls format a SETTING, and this reads it.
+
+      Source: raw.cbs_config, config_kind 'league_rules' (the scoring_system
+      object) and 'details' (league type, scoring periods). Captured for the
+      current season only, which matches dim_league_format's league_key
+      grain.
+
+      The label vocabulary is OBSERVED, not enumerated -- only one league has
+      a captured config -- so the derived verdict tests head-to-head first,
+      falls through to points, and returns NULL for anything it does not
+      recognise rather than guessing.
+
+      Grain: one row per league_key.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+    columns:
+      - name: league_key
+        description: 'League registry key. The whole grain.'
+        tests:
+          - not_null
+      - name: settings_season
+        description: 'Season the settings snapshot was captured for.'
+      - name: scoring_system_label
+        description: >
+          The platform's scoring-system label verbatim (e.g. 'Ranked,
+          Points'). Carried unparsed so a future reader can re-derive the
+          verdict without going back to RAW.
+      - name: scoring_system_type
+        description: 'The scoring_system.type token (e.g. ''ranked'').'
+      - name: league_detail_type
+        description: 'league_details.type from the details feed (e.g. ''mgmt'').'
+      - name: scoring_periods
+        description: 'Scoring periods the league declares for the season.'
+      - name: settings_league_format
+        description: >
+          points | h2h | NULL -- the format DERIVED from the label above.
+          NULL means the label was not recognised, which lets
+          dim_league_format fall back to data-shape inference.
+
   - name: stg_cbs__scoring_settings
     description: >
       CBS adapter (#2) scoring rules -- the F4 weights that price the

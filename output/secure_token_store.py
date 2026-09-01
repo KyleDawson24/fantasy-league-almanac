@@ -1,6 +1,6 @@
 """Windows Credential Locker storage for the public Google OAuth grant.
 
-The v1.9 stranger release is supported on Windows.  ``keyring`` is used only
+The stranger release is supported on Windows.  ``keyring`` is used only
 as the adapter to Windows Credential Locker; accepting whatever backend the
 package happens to discover would permit plaintext or otherwise unsuitable
 fallbacks.  Every operation therefore verifies the concrete Windows backend

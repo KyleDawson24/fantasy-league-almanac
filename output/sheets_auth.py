@@ -23,7 +23,7 @@ Two profiles exist, and they are deliberately not interchangeable:
 
 The separation is enforced by construction rather than by care: distinct
 scopes, distinct client-config env vars, and distinct credential stores.
-The maintainer retains its private local-file cache. The v1.9 public profile
+The maintainer retains its private local-file cache. The public profile
 uses Windows Credential Locker and names its former file only as a one-time
 migration source.
 

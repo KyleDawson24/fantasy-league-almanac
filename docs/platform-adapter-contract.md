@@ -95,6 +95,38 @@ Fantasy teams per season: platform team id, name, abbreviation, owner
 identity (stable owner key where the platform has one; display name
 otherwise). Owner keys power franchise continuity.
 
+#### F8a. Abbreviation disambiguation (display rule)
+
+Team abbreviations are user-chosen free text and nothing stops two of
+them colliding, so a book has to be able to make a collision legible
+without disturbing the leagues where none exists.
+
+**The rule.** The display name is the platform's short name as given. A
+unique abbreviation is rendered untouched. Where two entities collide
+within one surface, each colliding label -- and only those -- gains an
+**id-derived suffix**. The suffix is identity, not position, so it is
+stable across renders and identical in every book.
+
+An id suffix rather than an era suffix is deliberate. An era (`{ab}
+({lo}-{hi})`) is derived from the rows currently in the surface, so it
+moves when the window moves and can differ between two surfaces
+describing the same franchise; an id cannot. This is the one rule for
+both books, replacing the two that grew up per book rather than per
+format -- the book is not the platform.
+
+Disambiguation is DISPLAY ONLY. Two franchises sharing an abbreviation
+are still two franchises: a shared abbrev never merges their records,
+and the suffix must never be read as lineage.
+
+**Not yet applied in code** (MLB-279). Adopting one rule moves rendered
+bytes for whichever book changes, so it rides v2.1's single declared
+golden pass rather than landing piecemeal. Measured blast radius at the
+time of writing: the ESPN standing book has **no** abbreviation
+collisions at any grain (per-season, all-time, or canonical-franchise),
+so the id rule never fires there and moves no ESPN byte; the CBS book has
+exactly **two** colliding canonical pairs, whose career-record labels
+would move off their era suffixes onto id suffixes.
+
 ### F9. Draft results (optional)
 
 Picks with round/overall/keeper flags where the platform exposes them --

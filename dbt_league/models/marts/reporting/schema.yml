@@ -939,6 +939,14 @@ models:
         description: 'Active points scored for the team by players kept from the prior season.'
       - name: draft_active_pts
         description: 'Active points scored for the team by players it drafted.'
+      - name: opening_active_pts
+        description: >
+          Active points from the roster the team OPENED the season with
+          (keeper + draft). ESPN reports the two channels separately and the
+          H2H book shows them separately; the season-points Advanced
+          Standings wants them collapsed, and this is that collapse (MLB-263,
+          ledger S-01). Deliberately unrounded, unlike acquired_active_pts:
+          it must equal the plain double sum its Python predecessor computed.
       - name: trade_active_pts
         description: 'Active points scored for the team by players acquired via trade.'
       - name: fa_add_active_pts
@@ -959,6 +967,11 @@ models:
         description: 'All points (active + bench/IL) kept players produced while on the roster.'
       - name: draft_rostered_pts
         description: 'All points drafted players produced while on the roster.'
+      - name: opening_rostered_pts
+        description: >
+          All points (active + bench/IL) from the roster the team OPENED the
+          season with (keeper + draft). Rostered-lens twin of
+          opening_active_pts; same unrounded rule.
       - name: trade_rostered_pts
         description: 'All points trade-acquired players produced while on the roster.'
       - name: fa_add_rostered_pts

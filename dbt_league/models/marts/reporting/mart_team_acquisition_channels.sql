@@ -176,6 +176,21 @@ select
     -- ACTIVE lens ---------------------------------------------------------
     coalesce(p.keeper_active_pts,      0) as keeper_active_pts,
     coalesce(p.draft_active_pts,       0) as draft_active_pts,
+    -- OPENING = what the team started the season holding (MLB-263, S-01).
+    -- ESPN reports keeper and draft separately and the H2H book shows them
+    -- as separate columns; the season-points Advanced Standings wants the
+    -- pair collapsed. That collapse lived in a Python bridge
+    -- (almanac_render.with_standard_acquisition_channels), which is the one
+    -- place the ESPN mart vocabulary met the CBS Python vocabulary. Emitting
+    -- it here is what lets that bridge go.
+    --
+    -- DELIBERATELY NOT round(..., 1), unlike acquired_/lost_ below. The
+    -- bridge computes `sum(float(part or 0) for part in parts)` -- a plain
+    -- double sum of the same two operands in the same order. Rounding here
+    -- would shift the last decimal against the bridge and make the
+    -- reader-side re-point a byte-moving change instead of a neutral one.
+    coalesce(p.keeper_active_pts, 0) + coalesce(p.draft_active_pts, 0)
+                                          as opening_active_pts,
     coalesce(p.trade_active_pts,       0) as trade_active_pts,
     coalesce(p.fa_add_active_pts,      0) as fa_add_active_pts,
     round(coalesce(p.keeper_active_pts, 0) + coalesce(p.draft_active_pts, 0)
@@ -193,6 +208,9 @@ select
     -- ROSTERED lens -------------------------------------------------------
     coalesce(p.keeper_rostered_pts,      0) as keeper_rostered_pts,
     coalesce(p.draft_rostered_pts,       0) as draft_rostered_pts,
+    -- Same rule as opening_active_pts above: unrounded, to match the bridge.
+    coalesce(p.keeper_rostered_pts, 0) + coalesce(p.draft_rostered_pts, 0)
+                                            as opening_rostered_pts,
     coalesce(p.trade_rostered_pts,       0) as trade_rostered_pts,
     coalesce(p.fa_add_rostered_pts,      0) as fa_add_rostered_pts,
     round(coalesce(p.keeper_rostered_pts, 0) + coalesce(p.draft_rostered_pts, 0)

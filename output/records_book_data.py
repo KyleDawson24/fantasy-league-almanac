@@ -33,16 +33,15 @@ import records
 from almanac_render import _boxscore_url, disambiguated_abbrev_map
 from records_book_logic import (
     AB_FLOOR, OUTS_FLOOR, CandidatePool, Context, Pool, POINTS_METRICS,
-    RATE_METRICS, WASTED_METRICS, add_rates, add_wasted, aggregate,
-    counting_metrics, derive_tabs, order_slots, stat_line, SUM_COLS,
+    RATE_METRICS, SENTINEL_TEAM, WASTED_METRICS, add_rates, add_wasted, aggregate,
+    counting_metrics, derive_tabs, is_sentinel, order_slots, per_matchup_rows,
+    stat_line, SUM_COLS,
 )
 
 COUNT_COLS = ['h', 'ab', 'b_bb', 'b_so', 'hbp', 'sf', 'hr', 'r', 'rbi', 'sb', 'cs',
               'tb', 'singles', 'doubles', 'triples', 'xbh', 'gdp', 'b_ibb', 'cyc',
               'w', 'l', 'k', 'er', 'outs', 'qs', 'sv', 'hld', 'p_h', 'p_bb', 'p_hr',
               'p_r', 'cg', 'blk', 'wp', 'hbp_p', 'blsv', 'nh', 'pg', 'pk', 'sho']
-
-SENTINEL_TEAM = '9999'
 
 
 # ---------------------------------------------------------------------------
@@ -162,8 +161,7 @@ def _fence_teams(rows):
     """The holding-pen sentinel ('####', id 9999 -- or a platform id wearing
     that name for an unmanned season) never holds a TEAM record; its players
     still count in player records."""
-    return [r for r in rows
-            if r.get('team_id') != SENTINEL_TEAM and (r.get('abbrev') or '') != '####']
+    return [r for r in rows if not is_sentinel(r)]
 
 
 def _seasons_from(rows):
@@ -794,9 +792,23 @@ def load_book(league_key=None):
     _flag(slot_season, current_season, standard)
     team_slot_season = _fence_teams(_team_slot_rows(slot_season, season_key))
 
+    # Section 2.17 (09-09): where the matchup is shorter than the season,
+    # team season figures are per standard matchup -- divided by the
+    # season fact's periods played (the regular season). A season-long
+    # league's season IS its matchup, so its totals stand. Players stay raw.
+    per_matchup = fmt != 'points'
+    team_season_units = team_season
+    derived_cols = [c['key'] for c in catalog if c.get('derivation_expr')]
+    if per_matchup:
+        units_of = {(r['season'], r['team_id']): r.get('periods_played') for r in team_season}
+        units_fn = lambda r: units_of.get((r['season'], r['team_id']))
+        team_season_units = per_matchup_rows(team_season, units_fn, derived_cols)
+        team_season_wasted = per_matchup_rows(team_season_wasted, units_fn, derived_cols)
+        team_slot_season = per_matchup_rows(team_slot_season, units_fn, derived_cols)
+
     pools = {}
     for key in ('season_cur', 'season_all'):
-        pools[('team', key)] = Pool(team_season)
+        pools[('team', key)] = Pool(team_season_units)
         pools[('player', key)] = Pool(player_season)
         pools[('team_wasted', key)] = Pool(team_season_wasted)
         pools[('player_wasted', key)] = Pool(player_season_wasted)
@@ -863,6 +875,8 @@ def load_book(league_key=None):
         pools[('player_slot', 'day_all')] = Pool(slot_day)
         counts = {'team_week': len(team_week), 'player_week': len(player_week),
                   'team_day': len(team_day), 'player_day': len(player_day)}
+        period_counts = {'week': len({(r['season'], r['unit']) for r in team_week}),
+                         'day': len({(r['season'], r['date']) for r in team_day})}
     else:
         week_key = lambda r: (r['season'], r['unit'], r['team_id'])
         team_week = _fence_teams(_finish(raw['team_week'], owners, latest_owner, catalog))
@@ -897,6 +911,7 @@ def load_book(league_key=None):
         player_lookup = _CbsPlayerLookup(player_lookup, contributors_index['week'])
         counts = {'team_week': len(team_week), 'player_week_candidates': sum(
             len(v) for v in raw['player_week_pool'].cands.values())}
+        period_counts = {'week': len({(r['season'], r['unit']) for r in team_week})}
 
     # ---- lifetime ----
     active_teams = {r['team_id'] for r in team_season if r['season'] == current_season}
@@ -904,7 +919,12 @@ def load_book(league_key=None):
         r['team_labels'] = canon_labels
     lifetime = _lifetime(player_season, inactive_season, team_season, slot_season, canon_of,
                          canon_names, canon_labels, latest_owner, active_teams, current_season,
-                         seasons, catalog)
+                         seasons, catalog, per_matchup)
+    # Section 2.9 (09-09): the mass-tie limit is the number of periods
+    # played at the band's grain, every season (so on a two-season league
+    # every two-way tie at season grain is left off, and that self-corrects
+    # as seasons accrue).
+    period_counts['season'] = len(seasons)
     if platform == 'cbs':
         lifetime['legend_extra'] = ('2004-2020 lineups are start-share estimates; hitter lineup '
                                     'slots are logged from the 2026 daily capture only, pitchers '
@@ -944,7 +964,7 @@ def load_book(league_key=None):
         return ', '.join(f'{n}: {v:,.1f}' for n, v in players[:3])
 
     ctx = Context(current_season, latest_unit, team_count, ppu, raw['period_label'],
-                  raw['period_link'], contributors, slot_details)
+                  raw['period_link'], contributors, slot_details, period_counts=period_counts)
     return {'ctx': ctx, 'tabs': tabs, 'pools': pools, 'lifetime': lifetime,
             'catalog': catalog, 'slots': slots, 'platform': platform, 'format': fmt,
             'seasons': seasons, 'counts': counts, 'current_season': current_season,
@@ -1023,9 +1043,12 @@ class _CbsPlayerLookup(dict):
 
 
 def _lifetime(player_season, inactive_season, team_season, slot_season, canon_of, canon_names,
-              canon_labels, latest_owner, active_teams, current_season, seasons, catalog):
+              canon_labels, latest_owner, active_teams, current_season, seasons, catalog,
+              per_matchup=False):
     """Section 5's data: the two player lenses, the Halls, the shame rows,
-    the team block (lifetime totals + per-completed-season averages)."""
+    the team block (lifetime totals + per-matchup averages: per closed week
+    for a weekly league, per completed season where the season is the
+    matchup -- section 2.17)."""
     canon = lambda t: canon_of.get(t, t)
     cid_of = lambda r: r.get('cid') or canon(r.get('team_id'))
     for rows in (player_season, inactive_season, team_season, slot_season):
@@ -1130,6 +1153,18 @@ def _lifetime(player_season, inactive_season, team_season, slot_season, canon_of
                             for c, d in top_players[cid].items()}
         add_wasted(a)
     avg_rows = []
+    if per_matchup:
+        # Every loaded week is closed, so the divisor is every regular-
+        # season matchup the franchise has played, current season included.
+        units_by_cid = defaultdict(int)
+        for r in team_rows:
+            units_by_cid[cid_of(r)] += int(r.get('periods_played') or 0)
+        avg_rows = per_matchup_rows(list(totals.values()),
+                                    lambda r: units_by_cid.get(r['team_id']),
+                                    [c['key'] for c in catalog if c.get('derivation_expr')])
+        for row in avg_rows:
+            row['completed_seasons'] = sorted(row['seasons'])
+        avgs = {}
     for cid, a in avgs.items():
         n = len(a['seasons'])
         if not n:
@@ -1151,7 +1186,8 @@ def _lifetime(player_season, inactive_season, team_season, slot_season, canon_of
     _apply_derived(avg_rows, catalog)
     return {'player_franchise': by_fr, 'player_league': by_pl, 'player_season': ps_rows,
             'shame': shame, 'team_total': list(totals.values()), 'team_avg': avg_rows,
-            'slot_franchise': slot_fr, 'slot_league': slot_pl, 'slot_season': slot_season}
+            'slot_franchise': slot_fr, 'slot_league': slot_pl, 'slot_season': slot_season,
+            'per_matchup': per_matchup}
 
 
 def _merge_by_canon(by_team, canon):

@@ -6,8 +6,9 @@
 Default target is the league's DEV sheet (sheets_target's safe default);
 --prod is deliberately not offered here -- this is the eyeball-render
 entry point and the standing books stay untouched until the 2.2 pass.
-The three tabs land beside the existing Records tab under their own
-names; nothing else in the workbook is written.
+The three tabs take the standing Records tab's place on the dev book
+(Lifetime · Season · Matchup) and that tab is hidden, not deleted;
+nothing else in the workbook is written.
 """
 
 import argparse
@@ -31,12 +32,19 @@ def build_tabs(book):
                                        book['catalog'], book['slots'])
         else:
             extra = ''
+            caption = None
             if book['format'] == 'points' and tab['key'] == 'season':
                 extra = ('This is a season-long league: the season IS the matchup, so '
                          'there is no separate Matchup Records tab; the third band '
                          'drills down to Monday-Sunday scoring weeks.')
+            elif tab['key'] == 'season':
+                # Spec 2.17 (09-09): team season figures per standard matchup.
+                caption = ('Team records here are per standard matchup (week): Value is '
+                           'the per-week figure over the regular-season matchups played, '
+                           'Details lead with the raw season total and the matchup count. '
+                           'Player records are raw season figures.')
             sheet = build_period_tab(tab, book['pools'], book['ctx'], book['catalog'],
-                                     book['slots'], legend_extra=extra)
+                                     book['slots'], legend_extra=extra, team_caption=caption)
         out.append((tab['title'], sheet))
     return out
 

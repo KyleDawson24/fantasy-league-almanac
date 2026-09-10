@@ -270,3 +270,190 @@ def test_period_tab_has_the_required_sections_in_order():
         idx = labels.index(label, idx + 1)
     assert 'Home Runs' in labels and 'Strikeouts' in labels
     assert sheet.jump_targets['m-tscore'] == labels.index('Score Records') + 1
+
+
+# ---- section 2.12 (09-09): stat lines and hybrid placement ------------------
+
+OHTANI = dict(hit_pts=3000.0, pit_pts=1000.0, ab=2000, h=600, b_bb=200, hbp=10, sf=20,
+              tb=1200, hr=412, rbi=380, r=300, outs=630, k=300, er=100, p_bb=60, p_h=150, w=30)
+PPU = {'hr': 4.0, 'outs': 0.67, 'rbi': 1.0, 'r': 1.0, 'k': 1.0, 'w': 3.0}
+
+
+def test_stat_line_leads_with_the_dominant_rates_then_ranks_both_disciplines_by_points():
+    assert L.stat_line(dict(OHTANI), PPU) == '.300/.363/.600 · 412 HR, 210.0 IP, 380 RBI'
+
+
+def test_pitcher_dominant_line_leads_with_ip_era_whip_and_does_not_repeat_ip():
+    row = dict(OHTANI, hit_pts=100.0, pit_pts=900.0)
+    assert L.dominant_role(row) == 'pitching'
+    lead, counts = L.stat_line(row, PPU).split(' · ', 1)
+    assert lead == '210.0 IP / 4.29 ERA / 1.00 WHIP'
+    assert 'IP' not in counts and counts.startswith('412 HR')
+
+
+def test_nothing_defaults_to_hitting():
+    assert L.dominant_role({'hit_pts': 0, 'pit_pts': 0, 'ab': 0, 'outs': 30}) == 'pitching'
+    assert L.dominant_role({'hit_pts': 0, 'pit_pts': 0}) is None
+    assert L.stat_line({'hit_pts': 0, 'pit_pts': 0}, PPU) == ''
+
+
+def test_hybrid_lands_on_one_discipline_board_and_once_on_overall():
+    rows = [{'pid': 'sho', 'pts': 190, 'hit_pts': 100, 'pit_pts': 90},
+            {'pid': 'h', 'pts': 80, 'hit_pts': 80, 'pit_pts': 0},
+            {'pid': 'p', 'pts': 70, 'hit_pts': 0, 'pit_pts': 70}]
+    overall, hitters, pitchers = L.hall_boards(rows)
+    assert [r['pid'] for r, _, _ in overall] == ['sho', 'h', 'p']
+    assert [r['pid'] for r, _, _ in hitters] == ['sho', 'h']
+    assert [r['pid'] for r, _, _ in pitchers] == ['p']
+
+
+# ---- section 2.7 / 5.1 (09-09): years of service, franchises column ---------
+
+def test_years_of_service_counts_then_lists_hyphenated_runs():
+    assert L.years_of_service_text([2019, 2007, 2005, 2006, 2001]) == '5: 2001, 2005–2007, 2019'
+    assert L.years_of_service_text({2026}) == '1: 2026'
+    assert L.years_of_service_text([]) == ''
+
+
+def test_franchises_column_is_abbreviations_only():
+    row = {'by_team': {'1': 1993.0, '2': 1308.0, '3': 1263.0, '4': 0.2},
+           'team_labels': {'1': 'SED', '2': 'CSC', '3': 'FULT'}}
+    assert L.franchises_text(row) == 'SED, CSC, FULT'
+
+
+# ---- section 2.9 (09-09): mass ties ------------------------------------------
+
+def test_mass_tie_is_omitted_for_the_band():
+    rows = [_row(team_id=str(i), abbrev=f'T{i}', unit=i, hld=1) for i in range(1, 4)]
+    m = L.Metric('hld', 'Holds', 'count', 'pitching', 'desc', 'int')
+    assert L.record_cell(L.Pool(rows), m, 'desc', _band(), 2026, mass_tie_limit=3) is None
+    assert L.record_cell(L.Pool(rows), m, 'desc', _band(), 2026, mass_tie_limit=4) is not None
+    # A lone holder is never a mass tie, even on a one-period band.
+    solo = [_row(team_id='1', hld=2)]
+    assert L.record_cell(L.Pool(solo), m, 'desc', _band(), 2026, mass_tie_limit=1) is not None
+
+
+def test_context_supplies_period_counts_per_band():
+    ctx = L.Context(2026, None, 12, {}, lambda r, b: '', period_counts={'week': 40})
+    assert ctx.period_count(_band()) == 40
+    assert ctx.period_count(_band('level_cur', 'week', 'current')) == 40     # grain-wide
+    assert ctx.period_count(_band('season_all', 'season', 'all', 'Season')) is None
+
+
+# ---- section 2.17 (09-09): team figures per standard matchup ----------------
+
+def test_per_matchup_rows_divide_counts_and_keep_raw_for_floors():
+    rows = L.per_matchup_rows([_row(pts=220.0, hr=44, ab=300, pa=352, periods_played=22)],
+                              lambda r: r['periods_played'], extra_cols=['pa'])
+    row = rows[0]
+    assert row['pts'] == 10.0 and row['hr'] == 2.0 and row['units'] == 22
+    assert row['pa'] == 16.0 and row['raw']['pa'] == 352      # derived stats divide too
+    assert row['raw']['ab'] == 300 and row['avg'] == pytest.approx(90 / 300)
+    assert L.Pool(rows).top('b_so', 'asc', 1, floor='ab')      # 300 raw AB clear the floor
+    hr = L.Metric('hr', 'Home Runs', 'count', 'hitting', 'desc', 'int')
+    assert L.value_cell(hr, row['hr'], per_unit=True) == 2.0
+    assert L.per_matchup_rows([_row()], lambda r: None) == []
+
+
+def test_per_matchup_details_lead_with_raw_total_and_matchup_count():
+    row = L.per_matchup_rows([_row(hr=44, periods_played=22)], lambda r: r['periods_played'])[0]
+    m = L.Metric('hr', 'Home Runs', 'count', 'hitting', 'desc', 'int')
+    ctx = L.Context(2026, None, 12, {}, lambda r, b: '', contributors=lambda r, mm: [('Judge', 20)])
+    assert L._details_for(row, m, 'team', ctx) == '44 over 22 matchups · Judge: 20'
+
+
+# ---- section 2.15 (Kyle, 09-09): recency marks ------------------------------
+
+def _marks(sheet, n):
+    hl = it = False
+    for spec in sheet.formats:
+        if 'format' in spec and spec['range'].endswith(f':F{n}'):
+            hl |= spec['format'].get('backgroundColor') == L._HL
+            it |= bool(spec['format'].get('textFormat', {}).get('italic'))
+    return hl, it
+
+
+def _rec(band, row, latest=(2026, 22)):
+    sheet = L.Sheet()
+    sheet.add(['x'])
+    ctx = L.Context(2026, latest, 12, {}, lambda r, b: '')
+    L._recency(sheet, 1, 0, L.RecordCell(1.0, [row], 1), band, ctx)
+    return _marks(sheet, 1)
+
+
+def test_this_season_band_marks_only_the_last_matchup_with_both():
+    cur = _band('level_cur', 'week', 'current')
+    assert _rec(cur, _row(season=2026, unit=22)) == (True, True)
+    assert _rec(cur, _row(season=2026, unit=5)) == (False, False)
+
+
+def test_all_time_band_highlights_this_season_and_italicizes_the_last_matchup():
+    allt = _band('level_all', 'week', 'all')
+    assert _rec(allt, _row(season=2026, unit=22)) == (True, True)
+    assert _rec(allt, _row(season=2026, unit=5)) == (True, False)
+    assert _rec(allt, _row(season=2024, unit=22)) == (False, False)
+    day = _band('day_all', 'day', 'all')
+    assert _rec(day, _row(season=2026, unit=150, mp=22)) == (True, True)
+    assert _rec(day, _row(season=2026, unit=30, mp=5)) == (True, False)
+
+
+def test_season_grain_boards_highlight_the_most_recent_season_only():
+    anyb = _band('season_all', 'season', 'all', 'Season')
+    assert _rec(anyb, _row(season=2026, unit=None)) == (True, False)
+    assert _rec(anyb, _row(season=2025, unit=None)) == (False, False)
+    cur = _band('season_cur', 'season', 'current', 'Runner-up')
+    assert _rec(cur, _row(season=2026, unit=None)) == (False, False)
+
+
+# ---- section 5 (09-09): the Lifetime tab's shape ----------------------------
+
+def _lifetime_data():
+    labels = {'1': 'ONE', '9999': '####'}
+
+    def pl(pid, team, abbrev, pts, seasons=(2025, 2026), **kw):
+        base = dict(_row(pid=pid, pname=pid, dname=pid, team_id=team, cid=team, abbrev=abbrev,
+                         pts=pts, hit_pts=pts, pit_pts=0.0, hr=10, games=100),
+                    seasons=set(seasons), by_team={team: pts}, team_labels=labels,
+                    benched_hit=0, benched_pit=0, unrostered_hit=0, unrostered_pit=0,
+                    neg_hit=0, neg_pit=0, **kw)
+        return L.add_wasted(base)
+
+    fr = {('a', '1'): pl('a', '1', 'ONE', 500.0), ('b', '9999'): pl('b', '9999', '####', 900.0)}
+    league = {'a': pl('a', '1', 'ONE', 500.0), 'b': pl('b', '9999', '####', 900.0)}
+    ps = [pl('a', '1', 'ONE', 300.0, seasons=(2026,), season=2026),
+          pl('b', '9999', '####', 400.0, seasons=(2025,), season=2025)]
+    team = [L.add_wasted(dict(_row(team_id='1', cid='1', abbrev='ONE', team_name='Team One',
+                                   pts=5000.0, seasons={2025, 2026}), top_players={}))]
+    avg = L.per_matchup_rows([dict(t) for t in team], lambda r: 44)
+    return {'player_franchise': fr, 'player_league': league, 'player_season': ps,
+            'shame': list(league.values()), 'team_total': team, 'team_avg': avg,
+            'slot_franchise': {}, 'slot_league': {}, 'slot_season': [], 'per_matchup': True}
+
+
+def test_lifetime_tab_drops_the_score_section_and_fences_the_sentinel_by_franchise():
+    tab = L.derive_tabs('h2h', seasons_count=2)[-1]
+    ctx = L.Context(2026, (2026, 22), 12, {'hr': 4.0}, lambda r, b: '')
+    catalog = [{'key': 'hr', 'display_name': 'Home Runs', 'stat_category': 'hitting',
+                'polarity': 'positive'}]
+    sheet = L.build_lifetime_tab(tab, _lifetime_data(), ctx, catalog, [])
+    labels = [r[0] for r in sheet.rows]
+    assert 'Score Records' not in labels
+    order = ['LEAGUE HALL OF FAME', 'FRANCHISE HALL OF FAME', 'Jump to:', 'PLAYER RECORDS',
+             'Hitting Records', 'Pitching Records', 'Lineup Slot Records',
+             'WASTED HALL OF SHAME', 'TEAM RECORDS', 'Team Score Records']
+    idx = -1
+    for label in order:
+        idx = labels.index(label, idx + 1)
+    league_hof = sheet.rows[labels.index('LEAGUE HALL OF FAME'):labels.index('FRANCHISE HALL OF FAME')]
+    franchise_hof = sheet.rows[labels.index('FRANCHISE HALL OF FAME'):labels.index('Jump to:')]
+    assert any('####' in str(c) for r in league_hof for c in r)
+    assert not any('####' in str(c) for r in franchise_hof for c in r)
+    text = '\n'.join('\t'.join(str(c) for c in r) for r in sheet.rows)
+    assert "League's Top Point Producers -- All Teams, active-slots only" in text
+    assert 'top 25 careers with given franchise' in text
+    assert 'Years of Service' in text and 'Span' not in text and '2: 2025–2026' in text
+    assert 'Average per Matchup' in text and '5,000.0 over 44 matchups' in text
+    hdr = next(r for r in sheet.rows if r[0] == 'Rank' and r[2] == 'Franchises')
+    assert hdr[5] == 'Years of Service'
+    jump = next(spec['jump'] for spec in sheet.formats if 'jump' in spec)
+    assert [k for _, k in jump['items']] == ['l-hof', 'l-hit', 'l-pit', 'l-slot', 'l-hos', 'l-team']

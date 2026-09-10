@@ -7,15 +7,18 @@ parse), paints the presenter's format spec, adds the collapsible row
 groups, freezes the title band, and resolves the jump index into in-sheet
 links once the tab's gid exists.
 
-The standing Records tab is NOT touched: the redesign lands beside it
-under its own tab names, so the dev book keeps the old page for
-comparison until Kyle rules.
+Tab placement (spec section 1, 09-09): on the DEV book the three tabs
+take the standing Records tab's position, ordered Lifetime · Season ·
+Matchup, and the standing tab is hidden -- never deleted, so the dev
+book keeps the old page for comparison. Prod never comes through here.
 """
 
 import gspread
 
 from almanac_write import _is_quota_error, _sheets_call
-from records_book_logic import WIDTH, _col
+from records_book_logic import TITLES, WIDTH, _col
+
+PLACEMENT_ORDER = (TITLES['lifetime'], TITLES['season'], TITLES['matchup'])
 from sheets_writer import _get_authorized_client
 
 # Pixel widths per column, the mockup's: A label, then Holder / Owner /
@@ -145,14 +148,45 @@ def write_tab(spreadsheet, title, sheet):
     return worksheet
 
 
-def write_records_book(sheet_id, tabs, client=None):
-    """tabs: [(title, Sheet)]. Returns {title: gid}."""
+def place_tabs(spreadsheet, gids_in_order, replace_title):
+    """Move the new tabs into the standing tab's slot, in order, and hide
+    the standing tab. Idempotent: the slot is the lowest index among the
+    standing tab and the new tabs, so a re-render never shuffles them
+    (the API reads a target index in before-the-move positions, which
+    only behaves for moves toward the front)."""
+    meta = _sheets_call('meta', lambda: spreadsheet.fetch_sheet_metadata(
+        {'fields': 'sheets(properties(sheetId,title,index,hidden))'}))
+    props = {s['properties']['title']: s['properties'] for s in meta.get('sheets', [])}
+    old = props.get(replace_title)
+    if old is None:
+        print(f"[records-book] no '{replace_title}' tab to replace; tabs left where created")
+        return
+    indexes = [old['index']] + [props[t]['index'] for t in props if props[t]['sheetId'] in gids_in_order]
+    base = min(indexes)
+    requests = []
+    for i, gid in enumerate(gids_in_order):
+        requests.append({'updateSheetProperties': {
+            'properties': {'sheetId': gid, 'index': base + i}, 'fields': 'index'}})
+    if not old.get('hidden'):
+        requests.append({'updateSheetProperties': {
+            'properties': {'sheetId': old['sheetId'], 'hidden': True}, 'fields': 'hidden'}})
+    _sheets_call('place tabs', lambda: spreadsheet.batch_update({'requests': requests}))
+    print(f"[records-book] placed {len(gids_in_order)} tabs at index {base}; "
+          f"'{replace_title}' hidden")
+
+
+def write_records_book(sheet_id, tabs, client=None, replace_tab='Records'):
+    """tabs: [(title, Sheet)]. Returns {title: gid}. With replace_tab, the
+    written tabs take that tab's place (Lifetime · Season · Matchup) and
+    it is hidden."""
     client = client or _get_authorized_client()
     spreadsheet = _sheets_call('open', lambda: client.open_by_key(sheet_id))
     gids = {}
     for title, sheet in tabs:
         ws = write_tab(spreadsheet, title, sheet)
         gids[title] = ws.id
+    if replace_tab:
+        place_tabs(spreadsheet, [gids[t] for t in PLACEMENT_ORDER if t in gids], replace_tab)
     return gids
 
 

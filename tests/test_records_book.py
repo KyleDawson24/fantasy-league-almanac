@@ -283,12 +283,14 @@ def test_stat_line_leads_with_the_dominant_rates_then_ranks_both_disciplines_by_
     assert L.stat_line(dict(OHTANI), PPU) == '.300/.363/.600 · 412 HR, 210.0 IP, 380 RBI'
 
 
-def test_pitcher_dominant_line_leads_with_ip_era_whip_and_does_not_repeat_ip():
-    row = dict(OHTANI, hit_pts=100.0, pit_pts=900.0)
+def test_pitcher_dominant_line_leads_with_the_home_tab_slash_and_keeps_ip_as_a_stat():
+    row = dict(OHTANI, hit_pts=100.0, pit_pts=900.0, l=4, sv=2)
     assert L.dominant_role(row) == 'pitching'
     lead, counts = L.stat_line(row, PPU).split(' · ', 1)
-    assert lead == '210.0 IP / 4.29 ERA / 1.00 WHIP'
-    assert 'IP' not in counts and counts.startswith('412 HR')
+    assert lead == '30-4-2/4.29/1.00'                  # W-L-Sv/ERA/WHIP, no labels
+    assert counts == '412 HR, 210.0 IP, 380 RBI'
+    assert L.stat_cell_format(row)['horizontalAlignment'] == 'LEFT'
+    assert L.stat_cell_format(dict(OHTANI))['horizontalAlignment'] == 'RIGHT'
 
 
 def test_nothing_defaults_to_hitting():
@@ -323,14 +325,26 @@ def test_franchises_column_is_abbreviations_only():
 
 # ---- section 2.9 (09-09): mass ties ------------------------------------------
 
-def test_mass_tie_is_omitted_for_the_band():
+def test_mass_tie_reads_no_record_beside_a_real_band_and_never_alone():
     rows = [_row(team_id=str(i), abbrev=f'T{i}', unit=i, hld=1) for i in range(1, 4)]
     m = L.Metric('hld', 'Holds', 'count', 'pitching', 'desc', 'int')
-    assert L.record_cell(L.Pool(rows), m, 'desc', _band(), 2026, mass_tie_limit=3) is None
-    assert L.record_cell(L.Pool(rows), m, 'desc', _band(), 2026, mass_tie_limit=4) is not None
+    cell = L.record_cell(L.Pool(rows), m, 'desc', _band(), 2026, mass_tie_limit=3)
+    assert cell.mass_tie and cell.tie_n == 3
+    assert not L.record_cell(L.Pool(rows), m, 'desc', _band(), 2026, mass_tie_limit=4).mass_tie
     # A lone holder is never a mass tie, even on a one-period band.
     solo = [_row(team_id='1', hld=2)]
-    assert L.record_cell(L.Pool(solo), m, 'desc', _band(), 2026, mass_tie_limit=1) is not None
+    assert not L.record_cell(L.Pool(solo), m, 'desc', _band(), 2026, mass_tie_limit=1).mass_tie
+    ctx = L.Context(2026, None, 12, {}, lambda r, b: 'Week', period_counts={'week': 3, 'day': 99})
+    week, day = _band(), _band('day_all', 'day', 'all')
+    sheet = L.Sheet()
+    # Every band a mass tie -> no row at all.
+    assert L.record_row(sheet, 'Holds', m, 'desc', 'team', [week], {('team', 'level_all'): L.Pool(rows)}, ctx) is False
+    # One real band -> the tied band says so instead of going blank.
+    pools = {('team', 'level_all'): L.Pool(rows), ('team', 'day_all'): L.Pool(rows)}
+    assert L.record_row(sheet, 'Holds', m, 'desc', 'team', [week, day], pools, ctx) is True
+    out = sheet.rows[-1]
+    assert out[1] == 'no record' and out[4] == 'done 3 times at this grain'
+    assert out[7] == 'T3, T2, T1'                        # team holders are abbreviations
 
 
 def test_context_supplies_period_counts_per_band():

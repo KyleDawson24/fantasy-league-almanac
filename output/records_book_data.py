@@ -875,7 +875,11 @@ def load_book(league_key=None):
         pools[('player_slot', 'day_all')] = Pool(slot_day)
         counts = {'team_week': len(team_week), 'player_week': len(player_week),
                   'team_day': len(team_day), 'player_day': len(player_day)}
-        period_counts = {'week': len({(r['season'], r['unit']) for r in team_week}),
+        # 2.9 limits (Kyle 09-10): regular-season matchups played league-wide
+        # (22 + 23 = 45 today; playoff periods stay eligible for records but
+        # do not raise the bar) and days played.
+        period_counts = {'week': len({(r['season'], r['unit']) for r in team_week
+                                      if not r.get('is_playoff')}),
                          'day': len({(r['season'], r['date']) for r in team_day})}
     else:
         week_key = lambda r: (r['season'], r['unit'], r['team_id'])
@@ -920,11 +924,11 @@ def load_book(league_key=None):
     lifetime = _lifetime(player_season, inactive_season, team_season, slot_season, canon_of,
                          canon_names, canon_labels, latest_owner, active_teams, current_season,
                          seasons, catalog, per_matchup)
-    # Section 2.9 (09-09): the mass-tie limit is the number of periods
-    # played at the band's grain, every season (so on a two-season league
-    # every two-way tie at season grain is left off, and that self-corrects
-    # as seasons accrue).
-    period_counts['season'] = len(seasons)
+    # Season grain (proposed to Kyle 09-10): a mark shared by one season's
+    # worth of teams is no record -- the limit is the team count, so a
+    # two-season league keeps its two-way ties and still drops the
+    # every-team-at-zero fewest rows.
+    period_counts['season'] = team_count
     if platform == 'cbs':
         lifetime['legend_extra'] = ('2004-2020 lineups are start-share estimates; hitter lineup '
                                     'slots are logged from the 2026 daily capture only, pitchers '

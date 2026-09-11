@@ -26,7 +26,8 @@ place.
 from collections import defaultdict
 from dataclasses import dataclass, field
 
-from almanac_render import _bref_link, draft_initial_text, format_years_of_service
+from almanac_render import (_all_league_slash_line, _bref_link, draft_initial_text,
+                            format_years_of_service)
 from formatters import fmt_avg, fmt_ip
 
 
@@ -352,6 +353,7 @@ class RecordCell:
     tie_n: int
     runner_up: tuple = None  # (row, value) or None
     in_flight: bool = False
+    mass_tie: bool = False   # 2.9: tied as often as the grain was played
 
 
 def record_cell(pool, metric, direction, band, current_season,
@@ -392,9 +394,11 @@ def record_cell(pool, metric, direction, band, current_season,
     if not low_side and metric.kind in ('count', 'slot', 'wasted') and best <= 0:
         return None
     tie_n = cands[0].tie_n
-    if mass_tie_limit and tie_n > 1 and tie_n >= mass_tie_limit:
-        return None
     holders = [c.row for c in cands if c.value == best]
+    if mass_tie_limit and tie_n > 1 and tie_n >= mass_tie_limit:
+        # Kyle 09-10: not blank -- the band says so, if any other band on
+        # the row holds a real record (record_row decides).
+        return RecordCell(best, holders, tie_n, None, False, True)
     runner = None
     if want_runner_up:
         for c in cands:
@@ -476,28 +480,19 @@ def dominant_role(row):
 
 
 def rate_line(row, role=None):
-    """The dominant role's rate line: AVG/OBP/SLG for a hitter, IP / ERA /
-    WHIP for a pitcher (section 2.12, re-ruled 09-09)."""
+    """The dominant role's slash line, through the Home tab's All-League
+    formatter so every points league reads the same (Kyle 09-10): hitters
+    AVG/OBP/SLG (.283/.389/.588), pitchers W-L-Sv/ERA/WHIP (6-4-2/3.00/0.82),
+    no labels."""
     role = role or dominant_role(row)
     src = raw_of(row)
-    ab = float(src.get('ab') or 0)
-    outs = float(src.get('outs') or 0)
-    if role == 'pitching':
-        if outs <= 0:
-            return ''
-        era = float(src.get('er') or 0) * 27 / outs
-        whip = (float(src.get('p_bb') or 0) + float(src.get('p_h') or 0)) * 3 / outs
-        return f"{fmt_ip(round(outs))} IP / {era:.2f} ERA / {whip:.2f} WHIP"
-    if role == 'hitting':
-        if ab <= 0:
-            return ''
-        h = float(src.get('h') or 0)
-        bb = float(src.get('b_bb') or 0)
-        hbp = float(src.get('hbp') or 0)
-        denom = ab + bb + hbp + float(src.get('sf') or 0)
-        obp = (h + bb + hbp) / denom if denom else 0
-        return f"{fmt_avg(h / ab)}/{fmt_avg(obp)}/{fmt_avg(float(src.get('tb') or 0) / ab)}"
-    return ''
+    if role == 'pitching' and float(src.get('outs') or 0) <= 0:
+        return ''
+    if role == 'hitting' and float(src.get('ab') or 0) <= 0:
+        return ''
+    if role not in ('hitting', 'pitching'):
+        return ''
+    return _all_league_slash_line({**src, 'slot_label': 'SP' if role == 'pitching' else 'DH'})
 
 
 def stat_line(row, ppu, top_n=3, category=None, role=None, rates=True):
@@ -515,8 +510,6 @@ def stat_line(row, ppu, top_n=3, category=None, role=None, rates=True):
     for col, (abbrev, cat) in STAT_LINE_COLS.items():
         if category and cat != category:
             continue
-        if lead and col == 'outs' and role == 'pitching':
-            continue              # IP already leads the line
         count = _num(src.get(col))
         if not count:
             continue
@@ -620,6 +613,25 @@ def _link_cell(text, url):
     return f'=HYPERLINK("{url}", "{safe}")'
 
 
+STAT_LINE_FONT = 9
+
+
+def stat_cell_format(row, align=True):
+    """Kyle 09-10: full stat-line cells in a smaller font; hitters' lines
+    right-aligned, pitchers' left, a two-way player per his dominant role."""
+    fmt = {'textFormat': {'fontSize': STAT_LINE_FONT}}
+    if align:
+        fmt['horizontalAlignment'] = 'LEFT' if dominant_role(row) == 'pitching' else 'RIGHT'
+    return fmt
+
+
+def mass_tie_cells(cell, metric):
+    """2.9 (Kyle 09-10): a band tied as often as its grain was played
+    reads 'no record' instead of going blank, so the row lines up."""
+    return ['no record', '', value_cell(metric, cell.value),
+            f'done {cell.tie_n:,} times at this grain', '']
+
+
 def _details_for(row, metric, grain, ctx, cell=None):
     floored = metric.kind == 'rate' or (metric.kind == 'count' and metric.good_dir == 'asc')
     if grain == 'team':
@@ -652,6 +664,8 @@ def side_cells(cell, metric, grain, band, ctx):
     Returns (cells, marks) where marks is a dict of format hints."""
     if cell is None:
         return [''] * BAND_COLS, {}
+    if cell.mass_tie:
+        return mass_tie_cells(cell, metric), {'mass_tie': True}
     marks = {}
     holders = cell.holders
     # Section 4: the This-Season band is the in-flight leaderboard by
@@ -684,7 +698,9 @@ def side_cells(cell, metric, grain, band, ctx):
         return [holder, owner, value_cell(metric, cell.value, mark, per_unit), details, period], marks
 
     row = holders[0]
-    holder = player_cell(row) if grain == 'player' else (row.get('team_name') or row.get('abbrev') or '')
+    # Team holder = abbreviation (Kyle 09-10, readability; supersedes 2.8's
+    # full name on the record rows -- the Lifetime team boards keep it).
+    holder = player_cell(row) if grain == 'player' else (row.get('abbrev') or row.get('team_name') or '')
     return [holder, owner_cell(row), value_cell(metric, cell.value, mark, bool(row.get('units'))),
             _details_for(row, metric, grain, ctx, cell),
             _period_col(row, band, cell, ctx, grain)], marks
@@ -732,6 +748,7 @@ _NAVY = {'red': 0.118, 'green': 0.2, 'blue': 0.298}          # #1e334c
 _WHITE = {'red': 1, 'green': 1, 'blue': 1}
 _HL = {'red': 1.0, 'green': 0.949, 'blue': 0.8}              # #fff2cc
 _JUMP = {'red': 0.91, 'green': 0.941, 'blue': 0.996}          # #e8f0fe
+_GREY = {'red': 0.55, 'green': 0.55, 'blue': 0.55}
 
 
 class Sheet:
@@ -876,7 +893,7 @@ def _recency(sheet, n, band_idx, cell, band, ctx):
     all-time band: set this season -> highlight; set last matchup -> both.
     Season-grain boards (Any Season, single season by franchise) highlight
     a record set in the most recent season and never italicize."""
-    if cell is None or cell.tie_n > MAX_LISTED_TIE:
+    if cell is None or cell.mass_tie or cell.tie_n > MAX_LISTED_TIE:
         return
     row = cell.holders[0]
     this_season = row.get('season') == ctx.current_season
@@ -923,16 +940,28 @@ def record_row(sheet, label, metric, direction, grain, bands, pools, ctx):
             if cell is not None:
                 cell.metric = metric
         cells.append(cell)
-    if all(c is None for c in cells):
+    # Never an empty row (2.5): a row needs one band with a real holder;
+    # mass-tie bands then read 'no record' beside it (Kyle 09-10).
+    if all(c is None or c.mass_tie for c in cells):
         return False
     out = [label]
     for i, (band, cell) in enumerate(zip(bands, cells)):
         side, _ = side_cells(cell, metric, grain, band, ctx)
         out += [''] * (BAND_STARTS[i] - len(out)) + side
     n = sheet.add(out)
-    per_unit = any(c is not None and c.holders[0].get('units') for c in cells)
+    per_unit = any(c is not None and not c.mass_tie and c.holders[0].get('units') for c in cells)
     _value_format(sheet, n, metric, per_unit)
     for i, (band, cell) in enumerate(zip(bands, cells)):
+        if cell is None:
+            continue
+        s = BAND_STARTS[i]
+        if cell.mass_tie:
+            sheet.fmt(f'{_col(s)}{n}:{_col(s + BAND_COLS - 1)}{n}',
+                      {'textFormat': {'italic': True, 'foregroundColor': _GREY}})
+            continue
+        # Details: smaller font; a player's stat line aligns by his role.
+        sheet.fmt(f'{_col(s + 3)}{n}', stat_cell_format(
+            cell.holders[0], align=(grain == 'player' and cell.tie_n == 1)))
         _recency(sheet, n, i, cell, band, ctx)
     return True
 
@@ -1040,6 +1069,7 @@ def top_block(sheet, bands, pools, ctx, title, key):
             sheet.fmt(f'A{rn}', {'horizontalAlignment': 'CENTER'})
             for i, (band, cands) in enumerate(zip(bands, lists)):
                 if r < len(cands):
+                    sheet.fmt(f'{_col(BAND_STARTS[i] + 3)}{rn}', stat_cell_format(cands[r].row))
                     _recency(sheet, rn, i, RecordCell(cands[r].value, [cands[r].row], 1), band, ctx)
     sheet.group(start + 1, sheet.n)
 
@@ -1070,12 +1100,14 @@ def build_period_tab(tab, pools, ctx, catalog, slots, legend_extra='',
         "Every figure on this tab is points scored in a lineup (active points) "
         "unless its label says otherwise. Counting stats only look at "
         "standard-length periods. " + LEGEND_POLARITY + " " + floors +
-        " Ties list team abbreviations; beyond three holders the count is shown, "
-        "and a record tied by as many holders as there are periods at that grain "
-        "is left off. Lineup slots are lumped by type (any SP slot). Team record "
-        "details list the top contributors. Stat lines lead with the player's "
-        "dominant role's rates, then the stats that scored the most points. "
-        + legend_extra)
+        " Team holders are abbreviations; owners are named beside them. Ties list "
+        "abbreviations; beyond three holders the count is shown, and a mark tied "
+        "as often as its grain has been played (days played, regular-season "
+        "matchups, or one season's worth of teams) reads 'no record'. Lineup "
+        "slots are lumped by type (any SP slot). Team record details list the "
+        "top contributors. Stat lines lead with the player's slash line "
+        "(AVG/OBP/SLG or W-L-Sv/ERA/WHIP), then the stats that scored the most "
+        "points; hitters' lines sit right, pitchers' left. " + legend_extra)
     if is_season:
         sheet.legend(
             "* This Season is in progress: its figures are season-to-date, and its "
@@ -1251,6 +1283,7 @@ def leaderboard(sheet, label, metric, band_rows, ctx, depth, key=None,
     for r in range(depth_seen):
         out = [r + 1]
         recent = []
+        detail_fmts = []
         for i, cands in enumerate(lists):
             out += [''] * (BAND_STARTS[i] - len(out))
             if r < len(cands):
@@ -1267,11 +1300,15 @@ def leaderboard(sheet, label, metric, band_rows, ctx, depth, key=None,
                         details, last]
                 if i == 2 and row.get('season') == ctx.current_season:
                     recent.append(i)
+                if details:
+                    detail_fmts.append((i, row))
             else:
                 out += [''] * BAND_COLS
         n = sheet.add(out)
         _value_format(sheet, n, metric)
         sheet.fmt(f'A{n}', {'horizontalAlignment': 'CENTER'})
+        for i, row in detail_fmts:
+            sheet.fmt(f'{_col(BAND_STARTS[i] + 3)}{n}', stat_cell_format(row, align=bool(row.get('pid'))))
         # 2.15 (09-09): the single-season band highlights the most recent season.
         for i in recent:
             _highlight(sheet, n, i)
@@ -1311,6 +1348,7 @@ def hall(sheet, banner, caption, boards, ctx, key, franchise_mode, details_fn):
     m = Metric('pts', 'Points', 'points', 'total', 'desc', 'pts')
     for r in range(depth):
         out = [r + 1]
+        stat_fmts = []
         for i, board in enumerate(boards):
             out += [''] * (BAND_STARTS[i] - len(out))
             if r < len(board):
@@ -1318,11 +1356,14 @@ def hall(sheet, banner, caption, boards, ctx, key, franchise_mode, details_fn):
                 fr = row.get('abbrev') or '' if franchise_mode else franchises_text(row)
                 out += [player_cell(row), fr, value_cell(m, value), details_fn(row, disc),
                         years_of_service_text(row.get('seasons') or [])]
+                stat_fmts.append((i, row))
             else:
                 out += [''] * BAND_COLS
         n = sheet.add(out)
         _value_format(sheet, n, m)
         sheet.fmt(f'A{n}', {'horizontalAlignment': 'CENTER'})
+        for i, row in stat_fmts:
+            sheet.fmt(f'{_col(BAND_STARTS[i] + 3)}{n}', stat_cell_format(row))
     sheet.group(start, sheet.n)
 
 
@@ -1398,8 +1439,9 @@ def build_lifetime_tab(tab, data, ctx, catalog, slots):
         "asterisk after a value marks an in-progress season -- it counts toward "
         "'most' boards and never toward 'fewest'. Years of Service lists the "
         "seasons active in that view (with that franchise, or anywhere). Stat "
-        "lines lead with the player's dominant role's rates, then the stats that "
-        "scored the most points across both disciplines. Sections and boards are "
+        "lines lead with the player's slash line (AVG/OBP/SLG or W-L-Sv/ERA/WHIP), "
+        "then the stats that scored the most points across both disciplines; "
+        "hitters' lines sit right, pitchers' left. Sections and boards are "
         "collapsible (the +/- in the margin); the Halls open expanded.")
 
     def hall_details(row, disc):
@@ -1494,7 +1536,8 @@ def build_lifetime_tab(tab, data, ctx, catalog, slots):
         for s in BAND_STARTS[:2]:
             sheet.fmt(f'{_col(s + 2)}{n}', {'numberFormat': {'type': 'NUMBER', 'pattern': '#,##0.0'},
                                             'horizontalAlignment': 'RIGHT'})
-            sheet.fmt(f'{_col(s + 3)}{n}', {'textFormat': {'fontSize': 8}})
+            sheet.fmt(f'{_col(s + 3)}{n}', {'textFormat': {'fontSize': 8},
+                                            'horizontalAlignment': 'CENTER'})
             sheet.merge(f'{_col(s + 3)}{n}:{_col(s + 4)}{n}')
     sheet.group(start, sheet.n)
 

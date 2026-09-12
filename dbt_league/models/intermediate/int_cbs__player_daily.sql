@@ -150,6 +150,11 @@ day_base as (
         max(a.mlbam_id)                    as mlbam_id,
         max(a.team_name)                   as captured_team_name,
         max(a.provenance)                  as provenance,
+        -- MLB Stats API club id of the day's game(s), off the engine
+        -- row the gamelog spine stamped (MLB-263, S-41). A day is one
+        -- club: a doubleheader is the same club twice, and a same-day
+        -- trade is not a thing the spine records.
+        max(e.team_id)                     as mlb_team_id,
         max(a.active_weight)               as active_weight,
         {{ boolor_agg('coalesce(a.is_active, false)') }} as is_active_known_true,
         max({{ iff('a.is_active is null', '1', '0') }})      as is_active_unknown,
@@ -257,6 +262,7 @@ select
     coalesce(dp.position,
              {{ iff("x.stat_group_scope = 'pitching'", "'P'", "'DH'") }}) as position,
     d.pro_team,
+    d.mlb_team_id,
     coalesce(el.eligible_slots,
              {{ iff("x.stat_group_scope = 'pitching'", array_of(["'P'"]), array_of(["'DH'"])) }}) as eligible_slots,
     d.lineup_slot,

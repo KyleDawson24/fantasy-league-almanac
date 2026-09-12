@@ -520,6 +520,31 @@ models:
               arguments:
                 values: [true, false]
 
+  - name: dim_mlb_team
+    description: >
+      The MLB club spine (MLB-263, ledger S-41): one row per MLB Stats API
+      team id, so a consumer can key a club on one numeric id whichever
+      platform the roster row came from. Ids come from the
+      mlb_team_abbrevs seed; the latest-era club name comes from the
+      gamelog spine (stg_mlb__player_game) by the same rule the CBS
+      book's affinity query applies, and is NULL in a clone without
+      MLB gamelogs. `abbrevs` lists every spelling the seed maps to the
+      club -- a lookup aid, not a display label: the canonical display
+      spelling is a vocabulary decision the seed does not carry yet.
+      Materialized as view.
+    columns:
+      - name: mlb_team_id
+        description: 'MLB Stats API team id; the spine key.'
+        tests:
+          - not_null
+          - unique
+      - name: mlb_team_name
+        description: 'Latest-era club name from the gamelog spine (max_by game_date). NULL without gamelogs.'
+      - name: abbrevs
+        description: 'Comma-joined, sorted spellings from mlb_team_abbrevs.csv for this id.'
+        tests:
+          - not_null
+
   - name: dim_owner
     description: >
       Owner dimension. One row per (league_key, owner_id), spined off
@@ -1560,6 +1585,14 @@ models:
           string maximum over the period's days (MLB-168), and not the club his
           ESPN person record names today (MLB-159 Exit 1). Days he did not appear
           carry no club and are skipped rather than winning the pick.
+      - name: mlb_team_id
+        description: >
+          The MLB Stats API team id behind pro_team, on BOTH platforms
+          (MLB-263, ledger S-41): ESPN via the mlb_team_abbrevs seed on the
+          case-folded spelling, CBS off the gamelog spine the day already
+          joins. NULL only where pro_team is NULL. Look it up in
+          dim_mlb_team. This is the one club key a consumer should group
+          or join on; pro_team stays the platform's own display spelling.
       - name: active_pts
         description: >
           SUM of position-category-appropriate CALCULATED points on days the

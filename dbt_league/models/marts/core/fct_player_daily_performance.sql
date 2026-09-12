@@ -54,6 +54,7 @@ select
     display_name,
     position,
     pro_team,
+    mlb_team_id,
     eligible_slots,
     lineup_slot,
     lineup_slot_category,

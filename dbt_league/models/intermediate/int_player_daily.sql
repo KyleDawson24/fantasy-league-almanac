@@ -273,6 +273,14 @@ final as (
         coalesce(b.display_name, w.player_name) as display_name,
         b.position,
         b.pro_team,
+        -- The MLB Stats API id behind that spelling (MLB-263, S-41):
+        -- ESPN writes `Ari` / `ChC` / `Wsh`, the seed lists the
+        -- upper-case spellings, and the join is case-folded. NULL only
+        -- when pro_team is NULL (no appearance) or the seed does not
+        -- know the spelling -- and the singular test
+        -- assert_espn_pro_team_resolves_to_mlb_team makes the second
+        -- case loud rather than silent.
+        ab.team_id              as mlb_team_id,
         b.eligible_slots,
         w.lineup_slot,
         w.lineup_slot_category,
@@ -402,6 +410,10 @@ final as (
         and w.team_id is not distinct from b.team_id
         and w.player_id = b.player_id
         and w.lineup_slot = b.lineup_slot
+    -- Club spelling -> MLB Stats API id. The seed's spellings are unique
+    -- (one id per spelling), so this cannot fan out.
+    left join {{ ref('mlb_team_abbrevs') }} ab
+        on ab.cbs_abbrev = upper(b.pro_team)
     -- Unfiltered per-category basis for the platform hitting/pitching split.
     -- Always matches a daily_wide row 1:1 (same breakdown source, looser
     -- filter), so the LEFT JOIN never drops or fans out rows.
@@ -424,7 +436,8 @@ union all
 select
     league_key, season_year, matchup_period, scoring_period, team_id,
     team_name, team_abbrev, owner_name, player_id, player_name, display_name,
-    position, pro_team, eligible_slots, lineup_slot, lineup_slot_category,
+    position, pro_team, mlb_team_id, eligible_slots, lineup_slot,
+    lineup_slot_category,
     is_active_slot, games_played, platform_points, platform_hitting_pts,
     platform_pitching_pts,
     h, ab, b_bb, b_so, hbp, sf, hr, r, rbi, sb, cs, tb, singles, doubles,

@@ -121,7 +121,8 @@ def test_small_tie_lists_abbreviations_and_counts_in_details():
     cells, _ = L.side_cells(cell, m, 'team', band, ctx)
     assert cells[0] == 'TWO, ONE'          # most recent instance first
     assert cells[1] == 'B, A'
-    assert cells[3] == '20 recorded by 2 teams'
+    assert cells[2] == 20
+    assert cells[3] == '2 times; first Week 3, last Week 7'
     assert cells[4].startswith('TWO Week 7; ONE Week 3')
 
 
@@ -132,7 +133,7 @@ def test_big_tie_collapses_to_a_count():
     cells, _ = L.side_cells(cell, m, 'team', _band(),
                             L.Context(2026, None, 12, {}, lambda r, b: 'Week 5'))
     assert cells[0] == '6 teams tied' and cells[1] == ''
-    assert cells[3] == '5 recorded by 6 teams'
+    assert cells[3] == '6 times; first Week 5, last Week 5'
 
 
 def test_a_team_tied_with_itself_lists_once():
@@ -288,6 +289,8 @@ def test_period_tab_has_the_required_sections_in_order():
     # Kyle 09-11: team sections close at the bad end; players do not.
     assert labels.count('Fewest Home Runs') == 1 and labels.count('Lowest AVG') == 1
     assert labels.index('Fewest Home Runs') < labels.index('PLAYER RECORDS')
+    worst = next(r for r in sheet.rows if r[0] == 'Worst')
+    assert worst[1] == 'Worst Weeks This Season' and worst[7] == 'Worst Weeks All-Time'
     assert labels.count('Best Performances') == 2 and 'Total' in labels
     assert all(collapsed for _, _, collapsed in sheet.groups)
     assert not any('\u2014' in str(c) for r in sheet.rows for c in r)
@@ -365,7 +368,7 @@ def test_mass_tie_reads_no_record_beside_a_real_band_and_never_alone():
     assert L.record_row(sheet, 'Holds', m, 'desc', 'team', [week, day], pools, ctx) is True
     out = sheet.rows[-1]
     assert out[1] == 'no record' and out[3] == 1
-    assert out[4] == '1 done 3 times -- first Week, last Week'
+    assert out[4] == '3 times'
     assert out[7] == 'T3, T2, T1'                        # team holders are abbreviations
     span = L.Pool(rows).top('hld', 'desc', 1)[0]
     assert span.tie_first['unit'] == 1 and span.tie_last['unit'] == 3

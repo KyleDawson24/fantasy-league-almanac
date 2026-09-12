@@ -417,7 +417,8 @@ def record_cell(pool, metric, direction, band, current_season,
                 runner = (c.row, c.value)
                 break
     in_flight = (not low_side) and any(not h.get('complete', True) for h in holders)
-    return RecordCell(best, holders, tie_n, runner, in_flight)
+    return RecordCell(best, holders, tie_n, runner, in_flight, False,
+                      cands[0].tie_first, cands[0].tie_last)
 
 
 # ---------------------------------------------------------------------------
@@ -636,20 +637,27 @@ def stat_cell_format(row, align=True):
     return fmt
 
 
-def mass_tie_cells(cell, metric, band, ctx):
-    """2.9 (Kyle 09-10/11): a band tied as often as its grain was played
-    reads 'no record', keeps the value, and says how often and when --
-    'N done M times -- first Week 3, 2025, last Week 22, 2026'."""
+def tie_details(cell, band, ctx, span=True):
+    """Ties (Kyle 09-11): the Value cell holds the value, so Details count
+    the occurrences and, unless it is a mass tie, bracket them --
+    '17 times; first Week 3, 2025, last Week 22, 2026'."""
     def when(row):
         if row is None:
             return ''
         if band.grain == 'season':
             return str(row.get('season') or '')
         return ctx.period_label(row, band)
-    first, last = when(cell.tie_first), when(cell.tie_last)
-    span = f' -- first {first}, last {last}' if first and last else ''
-    return ['no record', '', value_cell(metric, cell.value),
-            f'{fmt_value(metric, cell.value)} done {cell.tie_n:,} times{span}', '']
+    text = f'{cell.tie_n:,} times'
+    first, last = (when(cell.tie_first), when(cell.tie_last)) if span else ('', '')
+    if first and last:
+        text += f'; first {first}, last {last}'
+    return text
+
+
+def mass_tie_cells(cell, metric, band, ctx):
+    """2.9 (Kyle 09-10/11): a band tied as often as its grain was played
+    reads 'no record', keeps the value, and counts the occurrences."""
+    return ['no record', '', value_cell(metric, cell.value), tie_details(cell, band, ctx, span=False), '']
 
 
 def _details_for(row, metric, grain, ctx, cell=None):
@@ -693,15 +701,11 @@ def side_cells(cell, metric, grain, band, ctx):
     mark = cell.in_flight and band.grain == 'season' and band.scope == 'all'
     if cell.tie_n > 1:
         unit_word = 'players' if grain == 'player' else 'teams'
-        details = f'{fmt_value(metric, cell.value)} recorded by {cell.tie_n} {unit_word}'
+        details = tie_details(cell, band, ctx)
         if cell.tie_n <= MAX_LISTED_TIE and len(holders) >= cell.tie_n:
             abbrevs = _unique(h.get('abbrev') or '' for h in holders)
             holder = ', '.join(abbrevs)
             owner = ', '.join(_unique(owner_cell(h) for h in holders))
-            if len(abbrevs) < cell.tie_n:
-                one = unit_word[:-1]
-                details = (f'{fmt_value(metric, cell.value)} recorded {cell.tie_n} times by '
-                           f'{len(abbrevs)} {one if len(abbrevs) == 1 else unit_word}')
             if band.last_col == 'Period':
                 period = '; '.join(f"{h.get('abbrev') or ''} {ctx.period_label(h, band)}".strip()
                                    for h in holders)
@@ -864,6 +868,21 @@ class Sheet:
             cells += [''] * (BAND_STARTS[i] - len(cells)) + list(hdr)
         n = self.add(cells, shaded=True)
         self.row_fmt(n, {'textFormat': {'bold': True}, 'backgroundColor': _POWDER})
+        return n
+
+    def subheader(self, label, band_titles):
+        """A shaded row of band titles inside a section (the team sections'
+        'Worst ...' block, Kyle 09-11)."""
+        self.blank()
+        cells = [label]
+        for i, bt in enumerate(band_titles):
+            cells += [''] * (BAND_STARTS[i] - len(cells)) + [bt]
+        n = self.add(cells, shaded=True)
+        self.row_fmt(n, {'textFormat': {'bold': True}, 'backgroundColor': _POWDER})
+        for i in range(len(band_titles)):
+            s = BAND_STARTS[i]
+            self.merge(f'{_col(s)}{n}:{_col(s + BAND_COLS - 1)}{n}')
+            self.fmt(f'{_col(s)}{n}', {'horizontalAlignment': 'CENTER', 'textFormat': {'bold': True}})
         return n
 
     def block_header(self, label, key=None):
@@ -1045,7 +1064,7 @@ def stat_rows(sheet, grain, category, bands, pools, ctx, catalog,
         for m in RATE_METRICS[category]:
             record_row(sheet, m.label, m, m.good_dir, grain, bands, pools, ctx)
     if worst:
-        sheet.blank()
+        sheet.subheader('Worst', [b.title.replace('Best', 'Worst') for b in bands])
         for m in counting_metrics(catalog, category) + RATE_METRICS[category]:
             bad = worst_metric(m, category)
             record_row(sheet, worst_label(m), bad, bad.good_dir, grain, bands, pools, ctx)

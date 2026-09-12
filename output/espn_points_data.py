@@ -60,12 +60,20 @@ def season_context():
     Returns season_year, the scoring-period span actually captured, the
     MLB season opener that anchors periods to dates, and the latest date
     the capture reaches.
+
+    `latest_date` is the fact's own `game_date` (MLB-263, S-36): the
+    warehouse derives the calendar for ESPN rows from the season opener
+    and the scoring-period ordinal, and the singular tests on that
+    derivation are what keep it honest. This used to be recomputed here
+    through `period_to_date`, which stays below as the pure helper the
+    unit tests exercise.
     """
     row = query_for_presentation(f"""
         SELECT
             MAX(season_year)     AS season_year,
             MIN(scoring_period)  AS first_period,
-            MAX(scoring_period)  AS last_period
+            MAX(scoring_period)  AS last_period,
+            MAX(game_date)       AS latest_date
         FROM fct_player_daily_performance
         WHERE {league_predicate()}
     """)[0]
@@ -97,7 +105,7 @@ def season_context():
         'first_period': first_period,
         'last_period': last_period,
         'season_opener': opener,
-        'latest_date': period_to_date(last_period, opener),
+        'latest_date': row['latest_date'],
         'first_season': int(first_season) if first_season else season_year,
     }
 

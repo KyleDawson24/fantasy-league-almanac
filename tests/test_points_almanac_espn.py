@@ -443,13 +443,56 @@ def test_no_date_anchor_yields_no_window_rather_than_a_guess():
 
 
 def test_scoring_periods_map_to_dates_through_the_season_opener():
-    """ESPN numbers scoring periods as contiguous days from the opener;
-    `game_date` is NULL on every ESPN row, so this is the anchor."""
+    """ESPN numbers scoring periods as contiguous days from the opener.
+    The warehouse now derives `game_date` for ESPN rows from exactly this
+    rule (MLB-263, S-36); this helper is the test-side twin the month
+    window tests lean on, and the singular dbt tests keep the two honest."""
     opener = date(2026, 3, 25)
     assert espn_points_data.period_to_date(1, opener) == opener
     assert espn_points_data.period_to_date(142, opener) == date(2026, 8, 13)
     assert espn_points_data.date_to_period(date(2026, 8, 1), opener) == 130
     assert espn_points_data.period_to_date(5, None) is None
+
+
+def test_the_latest_date_is_the_facts_own_game_date(monkeypatch):
+    """`latest_date` comes off the daily fact's `game_date` (MLB-263,
+    S-36), not from re-deriving opener + period here. The two agreed
+    340/340 when the column landed; this pins WHICH one the context
+    reports, so a drift in the warehouse derivation shows up in the
+    month window rather than being masked by a Python twin."""
+    answers = iter([
+        [{'season_year': 2026, 'first_period': 1, 'last_period': 142,
+          'latest_date': date(2026, 8, 13)}],
+        [{'season_opener': date(2026, 3, 25)}],
+        [{'lo': 2026}],
+    ])
+    monkeypatch.setattr(espn_points_data, 'query_for_presentation',
+                        lambda sql, params=None: next(answers))
+    monkeypatch.setattr(espn_points_data, 'league_predicate',
+                        lambda alias=None: "league_key = 'x'")
+    ctx = espn_points_data.season_context()
+    assert ctx['latest_date'] == date(2026, 8, 13)
+    assert ctx['season_opener'] == date(2026, 3, 25)
+    assert (ctx['first_period'], ctx['last_period']) == (1, 142)
+
+
+def test_a_season_without_a_calendar_reports_no_latest_date(monkeypatch):
+    """The fact's game_date is NULL when no season calendar was captured
+    (the join is LEFT), and the context passes that through as None --
+    the same honest answer the old opener-less derivation gave."""
+    answers = iter([
+        [{'season_year': 2026, 'first_period': 1, 'last_period': 9,
+          'latest_date': None}],
+        [],
+        [{'lo': 2026}],
+    ])
+    monkeypatch.setattr(espn_points_data, 'query_for_presentation',
+                        lambda sql, params=None: next(answers))
+    monkeypatch.setattr(espn_points_data, 'league_predicate',
+                        lambda alias=None: "league_key = 'x'")
+    ctx = espn_points_data.season_context()
+    assert ctx['latest_date'] is None
+    assert ctx['season_opener'] is None
 
 
 # --------------------------------------------------------------------------

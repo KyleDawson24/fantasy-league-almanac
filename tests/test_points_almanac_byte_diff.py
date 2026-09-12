@@ -44,6 +44,18 @@ render: the same anchor over different data is a different corpus.
                     -> scratchpad/points_corpus/ESPN_FANTASY.duckdb
   rebuilt           dbt seed + dbt run at current model code, 97/97 PASS
                     (--target duckdb --profiles-dir dbt_league/profiles)
+  re-minted         2026-09-12, at repo HEAD da0a2f4 (MLB-263 session 4),
+                    `dbt run` only (100/100 PASS) over the same RAW and the
+                    same seeds (unchanged since 08-31): the 08-31 build
+                    predates the ESPN game_date derivation (5aebc70), so
+                    the daily fact carried NULL dates and the 2.4 reader
+                    re-point needed the column. Proven byte-still against
+                    this golden at HEAD code BEFORE the reader moved.
+                    NOT `dbt seed`: dbt-duckdb's sniffer rejects the real
+                    on-disk owner_nicknames.csv (6 columns vs the 4
+                    declared column_types) and leaves the table EMPTY --
+                    which the 08-31 mint had already suffered; the corpus
+                    has always rendered with owner_nicknames empty.
   RAW adjustment    RAW.TRANSACTION_COVERAGE created EMPTY (see above)
   league            espn-main, format 'points' (dim_league_format)
   season            2026; matchup_period max 1; scoring_period max 142

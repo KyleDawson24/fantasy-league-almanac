@@ -23,6 +23,7 @@ in a comment, so a tweak Kyle asks for after the dev render lands in one
 place.
 """
 
+import re
 from collections import defaultdict
 from dataclasses import dataclass, field, replace
 
@@ -73,6 +74,18 @@ def raw_of(row):
 # Slot display order (MLB-278) as a fallback when a slot has no sort_order.
 _SLOT_FALLBACK_ORDER = ['C', '1B', '2B', '3B', 'SS', 'MI', 'CI', 'IF', 'LF',
                         'CF', 'RF', 'OF', 'DH', 'U', 'UTIL', 'SP', 'RP', 'P']
+
+
+_DURATION_LOOKALIKE = re.compile(r'^\d+: \d{4}$')
+
+
+def sheet_safe(cell):
+    """USER_ENTERED lets Sheets guess a type: '1: 2026' (a one-season Years
+    of Service) parses as a duration of 1 hour and 2026 minutes and renders
+    1.4486 (Kyle 09-11, AAA on Buns). A leading apostrophe pins it as text."""
+    if isinstance(cell, str) and _DURATION_LOOKALIKE.match(cell):
+        return "'" + cell
+    return cell
 
 
 def _col(idx0):
@@ -1726,9 +1739,12 @@ def build_lifetime_tab(tab, data, ctx, catalog, slots):
                 if r < len(cands):
                     row = cands[r].row
                     last = years_of_service_text(row.get('seasons') or [])
-                    out += [row.get('team_name') or '', owner_cell(row),
+                    # Abbreviation here too (Kyle 09-11); the owner sits beside it.
+                    out += [row.get('abbrev') or row.get('team_name') or '', owner_cell(row),
                             value_cell(metric, cands[r].value, per_unit=bool(row.get('units'))),
                             details_fn(row, metric), last]
+                    sheet.fmt(f'{_col(BAND_STARTS[i] + 3)}{sheet.n + 1}',
+                              {'textFormat': {'fontSize': STAT_LINE_FONT}})
                 else:
                     out += [''] * BAND_COLS
             n = sheet.add(out)

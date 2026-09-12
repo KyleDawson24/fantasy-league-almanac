@@ -16,7 +16,7 @@ book keeps the old page for comparison. Prod never comes through here.
 import gspread
 
 from almanac_write import _is_quota_error, _sheets_call
-from records_book_logic import TITLES, WIDTH, _col
+from records_book_logic import BAND_COLS, BAND_STARTS, TITLES, WIDTH, _col, sheet_safe
 
 PLACEMENT_ORDER = (TITLES['lifetime'], TITLES['season'], TITLES['matchup'])
 from sheets_writer import _get_authorized_client
@@ -53,6 +53,15 @@ def _style_requests(sheet_id, sheet, n_rows):
             'range': {'sheetId': sheet_id, 'dimension': 'COLUMNS',
                       'startIndex': i, 'endIndex': i + 1},
             'properties': {'pixelSize': px}, 'fields': 'pixelSize'}})
+    # The Period columns clip (Kyle 09-11): no overflow into the spacer,
+    # no wrap -- the link text is the label, the cell is the width.
+    for s in BAND_STARTS:
+        c = s + BAND_COLS - 1
+        requests.append({'repeatCell': {
+            'range': {'sheetId': sheet_id, 'startRowIndex': 4, 'endRowIndex': n_rows,
+                      'startColumnIndex': c, 'endColumnIndex': c + 1},
+            'cell': {'userEnteredFormat': {'wrapStrategy': 'CLIP'}},
+            'fields': 'userEnteredFormat.wrapStrategy'}})
     merges, jumps = [], []
     for spec in sheet.formats:
         if 'merge' in spec:
@@ -145,8 +154,9 @@ def write_tab(spreadsheet, title, sheet):
     pre = _stale_state_requests(spreadsheet, worksheet)
     _sheets_call(f'reset {title}', lambda: spreadsheet.batch_update({'requests': pre}))
     _sheets_call(f'clear {title}', worksheet.clear)
+    safe_rows = [[sheet_safe(c) for c in row] for row in rows]
     _sheets_call(f'update {title}', lambda: worksheet.update(
-        rows, 'A1', value_input_option='USER_ENTERED'))
+        safe_rows, 'A1', value_input_option='USER_ENTERED'))
     requests = _style_requests(worksheet.id, sheet, len(rows))
     # The Sheets API caps a single batch comfortably above this, but keep
     # the groups (which are order-sensitive) in one request each.

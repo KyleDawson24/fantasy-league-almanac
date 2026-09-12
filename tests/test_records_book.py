@@ -335,6 +335,12 @@ def test_hybrid_lands_on_one_discipline_board_and_once_on_overall():
 
 # ---- section 2.7 / 5.1 (09-09): years of service, franchises column ---------
 
+def test_one_season_years_of_service_is_pinned_as_text_for_sheets():
+    assert L.sheet_safe('1: 2026') == "'1: 2026"           # else Sheets reads a duration
+    assert L.sheet_safe('2: 2025–2026') == '2: 2025–2026'
+    assert L.sheet_safe(2026) == 2026 and L.sheet_safe('Week 3, 2025') == 'Week 3, 2025'
+
+
 def test_years_of_service_counts_then_lists_hyphenated_runs():
     assert L.years_of_service_text([2019, 2007, 2005, 2006, 2001]) == '5: 2001, 2005–2007, 2019'
     assert L.years_of_service_text({2026}) == '1: 2026'
@@ -497,5 +503,7 @@ def test_lifetime_tab_drops_the_score_section_and_fences_the_sentinel_by_franchi
     assert 'Average per Matchup' in text and '5,000.0 over 44 matchups' in text
     hdr = next(r for r in sheet.rows if r[0] == 'Rank' and r[2] == 'Franchises')
     assert hdr[5] == 'Years of Service'
+    team_row = next(r for r in sheet.rows if r[1] == 'ONE' and r[2] == 'Owner One')
+    assert team_row[5] == '2: 2025–2026'                   # Lifetime team boards: abbreviations
     jump = next(spec['jump'] for spec in sheet.formats if 'jump' in spec)
     assert [k for _, k in jump['items']] == ['l-hof', 'l-hit', 'l-pit', 'l-slot', 'l-hos', 'l-team']

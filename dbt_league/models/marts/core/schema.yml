@@ -582,6 +582,45 @@ models:
         tests:
           - not_null
 
+  - name: dim_league_scoring_rule
+    description: >
+      Which stats a league scores, and at what weight -- one model for both
+      platforms (MLB-263, ledger S-30). One row per (league_key, stat_name)
+      over the WHOLE dim_stat vocabulary, scored or not: ESPN rules from
+      stg_scoring_settings, CBS rules from stg_cbs__scoring_settings (resolved
+      to stat_name through the seeds). points_per_unit is NULL and is_scored
+      FALSE where the league does not score the stat. Keyed on stat_name, not
+      canonical_key: the vocabulary carries no canonical key for every stat
+      (ESPN's cycle stat has none). Both feeds are the league's current
+      settings, so there is no season grain; settings_season records which
+      capture the rule came from. Materialized as view.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - stat_name
+    columns:
+      - name: league_key
+        tests:
+          - not_null
+      - name: stat_name
+        description: 'dim_stat primary key; the rule key.'
+        tests:
+          - not_null
+      - name: canonical_key
+        description: 'The cross-platform stat key from dim_stat, where the vocabulary has one. An attribute, not the key.'
+      - name: stat_category
+      - name: settings_season
+        description: 'The captured season the platform rule came from; NULL when unscored.'
+      - name: platform_stat_key
+        description: 'The platform''s own rule identifier (ESPN numeric stat id / CBS feed key), for tracing.'
+      - name: points_per_unit
+        description: 'Fantasy points per unit of the stat under this league''s rules; NULL when unscored.'
+      - name: is_scored
+        description: 'TRUE when the league scores this stat (a platform rule exists).'
+        tests:
+          - not_null
   - name: dim_team_owner
     description: >
       (league, season, team) -> owner_display label. Collapses co-owned

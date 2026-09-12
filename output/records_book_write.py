@@ -93,14 +93,23 @@ def _style_requests(sheet_id, sheet, n_rows):
             'rows': [{'values': [{'userEnteredValue': {'stringValue': ''.join(text_parts)},
                                   'textFormatRuns': runs}]}],
             'fields': 'userEnteredValue,textFormatRuns'}})
-    # Collapsible groups (native row groups); collapsed ones hide their rows.
+    # Collapsible groups (native row groups). Collapse through the group
+    # itself (updateDimensionGroup, which needs the group's depth) rather
+    # than by hiding rows: hidden rows alone leave the group's collapsed
+    # flag unset, so the gutter control reads wrong (found 09-11).
+    def rng_of(start_n, end_n):
+        return {'sheetId': sheet_id, 'dimension': 'ROWS',
+                'startIndex': start_n - 1, 'endIndex': end_n}
+    for start_n, end_n, _ in sheet.groups:
+        requests.append({'addDimensionGroup': {'range': rng_of(start_n, end_n)}})
     for start_n, end_n, collapsed in sheet.groups:
-        rng = {'sheetId': sheet_id, 'dimension': 'ROWS',
-               'startIndex': start_n - 1, 'endIndex': end_n}
-        requests.append({'addDimensionGroup': {'range': rng}})
-        if collapsed:
-            requests.append({'updateDimensionProperties': {
-                'range': rng, 'properties': {'hiddenByUser': True}, 'fields': 'hiddenByUser'}})
+        if not collapsed:
+            continue
+        depth = 1 + sum(1 for s2, e2, _ in sheet.groups
+                        if s2 <= start_n and end_n <= e2 and (s2, e2) != (start_n, end_n))
+        requests.append({'updateDimensionGroup': {
+            'dimensionGroup': {'range': rng_of(start_n, end_n), 'depth': depth, 'collapsed': True},
+            'fields': 'collapsed'}})
     return requests
 
 

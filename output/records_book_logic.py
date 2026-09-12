@@ -24,7 +24,7 @@ place.
 """
 
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from almanac_render import (_all_league_slash_line, _bref_link, draft_initial_text,
                             format_years_of_service)
@@ -884,7 +884,9 @@ class Sheet:
         self._shaded_run = 0
         return n
 
-    def group(self, start_n, end_n, collapsed=False):
+    def group(self, start_n, end_n, collapsed=True):
+        # Kyle 09-11: every section and board ships collapsed; the reader
+        # opens what they want (gutter right-click: expand all row groups).
         if end_n > start_n:
             self.groups.append((start_n, end_n, collapsed))
 
@@ -960,6 +962,11 @@ def record_row(sheet, label, metric, direction, grain, bands, pools, ctx):
             if cell is not None:
                 cell.metric = metric
         cells.append(cell)
+    return emit_record_row(sheet, label, metric, grain, bands, cells, ctx)
+
+
+def emit_record_row(sheet, label, metric, grain, bands, cells, ctx):
+    """Lay out one computed record row (a RecordCell or None per band)."""
     # Never an empty row (2.5): a row needs one band with a real holder;
     # mass-tie bands then read 'no record' beside it (Kyle 09-10).
     if all(c is None or c.mass_tie for c in cells):
@@ -1003,11 +1010,32 @@ def score_rows(sheet, grain, bands, pools, ctx, with_wasted=True):
     return any_rows
 
 
+def worst_metric(m, category):
+    """The polarity-flipped twin of a metric (Kyle 09-11: team records at
+    the stat's BAD end too). Fewest-of a positive stat carries the
+    category floor (2.4); most-of a negative stat needs none; a rate keeps
+    its floor and flips its good end."""
+    floor = 'ab' if category == 'hitting' else 'outs'
+    if m.kind == 'rate':
+        return replace(m, good_dir='asc' if m.good_dir == 'desc' else 'desc')
+    if m.good_dir == 'desc':
+        return replace(m, good_dir='asc', floor=floor, polarity='negative')
+    return replace(m, good_dir='desc', floor=None, polarity='positive')
+
+
+def worst_label(m):
+    if m.kind == 'rate':
+        return f"{'Lowest' if m.good_dir == 'desc' else 'Highest'} {m.label}"
+    return f"{'Fewest' if m.good_dir == 'desc' else 'Most'} {m.label}"
+
+
 def stat_rows(sheet, grain, category, bands, pools, ctx, catalog,
-              player_negatives=True, rates=True):
+              player_negatives=True, rates=True, worst=False):
     """Hitting / Pitching Records: counting stats at their good end, then a
-    buffer, then the rates. Section 2.4: players have no week/day floor, so
-    the caller drops their negative-stat and rate rows on the Matchup tab."""
+    buffer, then the rates; with `worst`, a buffer and the same stats at
+    their bad end (teams only, Kyle 09-11). Section 2.4: players have no
+    week/day floor, so the caller drops their negative-stat and rate rows
+    on the Matchup tab."""
     for m in counting_metrics(catalog, category):
         if m.good_dir == 'asc' and grain == 'player' and not player_negatives:
             continue
@@ -1016,10 +1044,18 @@ def stat_rows(sheet, grain, category, bands, pools, ctx, catalog,
         sheet.blank()
         for m in RATE_METRICS[category]:
             record_row(sheet, m.label, m, m.good_dir, grain, bands, pools, ctx)
+    if worst:
+        sheet.blank()
+        for m in counting_metrics(catalog, category) + RATE_METRICS[category]:
+            bad = worst_metric(m, category)
+            record_row(sheet, worst_label(m), bad, bad.good_dir, grain, bands, pools, ctx)
 
 
 def slot_rows(sheet, grain, bands, pools, ctx, slots):
-    """Lineup Slot Records: one row per slot TYPE, lumped (section 2.11)."""
+    """Lineup Slot Records. Teams: one row per slot TYPE, lumped (2.11).
+    Players (Kyle 09-11): the league's starting lineup exactly -- a slot
+    fielded k times gets k rows ('SP 1'..'SP 5'), the k-th best unit at
+    that slot in each band."""
     spools = {(grain, band.key): pools.get((grain + '_slot', band.key)) for band in bands}
     for slot in slots:
         m = Metric('pts', slot['label'], 'slot', slot.get('category', 'total'),
@@ -1030,11 +1066,31 @@ def slot_rows(sheet, grain, bands, pools, ctx, slots):
             if pool is None:
                 continue
             filtered[key] = Pool([r for r in pool.rows if r.get('slot') == slot['label']])
-        record_row(sheet, slot['label'], m, 'desc', grain, bands, filtered, ctx)
+        if grain == 'team':
+            record_row(sheet, slot['label'], m, 'desc', grain, bands, filtered, ctx)
+            continue
+        k = max(int(slot.get('count') or 1), 1)
+        ranked = []
+        for band in bands:
+            pool = filtered.get((grain, band.key))
+            season = ctx.current_season if band.scope == 'current' else None
+            ranked.append(pool.top('pts', 'desc', k, season=season) if pool else [])
+        for r in range(k):
+            cells = []
+            for band, cands in zip(bands, ranked):
+                if r < len(cands) and cands[r].value > 0:
+                    row = cands[r].row
+                    cell = RecordCell(cands[r].value, [row], 1, None,
+                                      not row.get('complete', True))
+                    cell.metric = m
+                    cells.append(cell)
+                else:
+                    cells.append(None)
+            emit_record_row(sheet, f"{slot['label']} {r + 1}" if k > 1 else slot['label'],
+                            m, grain, bands, cells, ctx)
 
 
-def top_block(sheet, bands, pools, ctx, title, key):
-    """Best Performances / Season Stars: Top-10 hitters then pitchers per band."""
+def _block_title(sheet, title, bands, key):
     band_titles = [b.title for b in bands]
     if sheet.rows and not sheet._is_banner(sheet.rows[-1]):
         sheet.blank()
@@ -1048,7 +1104,59 @@ def top_block(sheet, bands, pools, ctx, title, key):
         sheet.merge(f'{_col(s)}{n}:{_col(s + BAND_COLS - 1)}{n}')
         sheet.fmt(f'{_col(s)}{n}', {'horizontalAlignment': 'CENTER', 'textFormat': {'bold': True}})
     sheet.jump_targets[key] = n
-    start = n
+    return n
+
+
+def _period_cell(row, band, ctx):
+    if band.grain == 'season':
+        return str(row.get('season'))
+    return _link_cell(ctx.period_label(row, band),
+                      ctx.period_link(row, band) if band.period_links else None)
+
+
+def team_top_block(sheet, bands, pools, ctx, key):
+    """The team-side Best Performances (Kyle 09-11): Top-10 team units by
+    Total, Hitting and Pitching Points per band, with the top contributors."""
+    start = _block_title(sheet, 'Best Performances', bands, key)
+    for disc, col, cat in (('Total', 'pts', 'total'), ('Hitting', 'hit_pts', 'hitting'),
+                           ('Pitching', 'pit_pts', 'pitching')):
+        sheet._shaded_run = 0
+        headers = [['Team', 'Owner', 'Points', 'Top Contributors',
+                    'Season' if b.grain == 'season' else 'Period'] for b in bands]
+        sheet.column_header(disc, headers, len(bands))
+        m = Metric(col, f'{disc} Points', 'points', cat, 'desc', 'pts')
+        lists = []
+        for band in bands:
+            pool = pools.get(('team', band.key))
+            season = ctx.current_season if band.scope == 'current' else None
+            lists.append(pool.top(col, 'desc', TOP_BLOCK_DEPTH, season=season) if pool else [])
+        for r in range(max((len(l) for l in lists), default=0)):
+            out = [r + 1]
+            for i, (band, cands) in enumerate(zip(bands, lists)):
+                out += [''] * (BAND_STARTS[i] - len(out))
+                if r < len(cands):
+                    row = cands[r].row
+                    contribs = ctx.contributors(row, m)
+                    out += [row.get('abbrev') or row.get('team_name') or '', owner_cell(row),
+                            value_cell(m, cands[r].value),
+                            ', '.join(f'{n}: {fmt_value(m, v)}' for n, v in contribs[:3]),
+                            _period_cell(row, band, ctx)]
+                else:
+                    out += [''] * BAND_COLS
+            rn = sheet.add(out)
+            _value_format(sheet, rn, m)
+            sheet.fmt(f'A{rn}', {'horizontalAlignment': 'CENTER'})
+            for i, (band, cands) in enumerate(zip(bands, lists)):
+                if r < len(cands):
+                    sheet.fmt(f'{_col(BAND_STARTS[i] + 3)}{rn}',
+                              {'textFormat': {'fontSize': STAT_LINE_FONT}})
+                    _recency(sheet, rn, i, RecordCell(cands[r].value, [cands[r].row], 1), band, ctx)
+    sheet.group(start + 1, sheet.n)
+
+
+def top_block(sheet, bands, pools, ctx, title, key):
+    """Best Performances / Season Stars: Top-10 hitters then pitchers per band."""
+    start = _block_title(sheet, title, bands, key)
     for disc, col, label in (('Hitters', 'hit_pts', 'hitting'), ('Pitchers', 'pit_pts', 'pitching')):
         if disc == 'Pitchers':
             sheet._shaded_run = 0
@@ -1097,7 +1205,9 @@ def top_block(sheet, bands, pools, ctx, title, key):
 LEGEND_POLARITY = (
     "Every record reads at the stat's good end -- most of a positive stat, "
     "fewest of a negative one (strikeouts, GIDP, walks allowed...), highest "
-    "AVG/OBP/SLG/K/9, lowest ERA/WHIP -- unless its label says Worst or Wasted."
+    "AVG/OBP/SLG/K/9, lowest ERA/WHIP -- unless its label says otherwise: "
+    "Worst, Wasted, and the team sections' closing block at the bad end "
+    "(Fewest of a positive stat, Most of a negative one, Lowest/Highest rates)."
 )
 
 
@@ -1145,12 +1255,15 @@ def build_period_tab(tab, pools, ctx, catalog, slots, legend_extra='',
             "marks an in-progress period -- it counts toward 'most' records and "
             "never toward 'fewest' or 'worst'.")
     p = 's-' if is_season else 'm-'
-    jump = [('Team Score Records', p + 'tscore'), ('Team Hitting', p + 'thit'),
-            ('Team Pitching', p + 'tpit'), ('Team Lineup Slots', p + 'tslot'),
-            ('Player Score Records', p + 'pscore'),
-            (top_titles[1] if is_season else top_titles[0], p + 'top'),
-            ('Player Hitting', p + 'phit'), ('Player Pitching', p + 'ppit'),
-            ('Player Lineup Slots', p + 'pslot')]
+    jump = [('Team Score Records', p + 'tscore')]
+    if not is_season:
+        jump.append(('Team Best Performances', p + 'ttop'))
+    jump += [('Team Hitting', p + 'thit'),
+             ('Team Pitching', p + 'tpit'), ('Team Lineup Slots', p + 'tslot'),
+             ('Player Score Records', p + 'pscore'),
+             (top_titles[1] if is_season else 'Player Best Performances', p + 'top'),
+             ('Player Hitting', p + 'phit'), ('Player Pitching', p + 'ppit'),
+             ('Player Lineup Slots', p + 'pslot')]
     sheet.jump_row(jump)
     band_titles = [b.title for b in bands]
     cols = [['Holder', 'Owner', 'Value', 'Details', b.last_col] for b in bands]
@@ -1159,11 +1272,13 @@ def build_period_tab(tab, pools, ctx, catalog, slots, legend_extra='',
     s0 = sheet.section('Score Records', band_titles, cols, p + 'tscore')
     score_rows(sheet, 'team', bands, pools, ctx)
     sheet.group(s0 + 1, sheet.n)
+    if not is_season:
+        team_top_block(sheet, bands, pools, ctx, p + 'ttop')
     s0 = sheet.section('Hitting Records', band_titles, cols, p + 'thit')
-    stat_rows(sheet, 'team', 'hitting', bands, pools, ctx, catalog)
+    stat_rows(sheet, 'team', 'hitting', bands, pools, ctx, catalog, worst=True)
     sheet.group(s0 + 1, sheet.n)
     s0 = sheet.section('Pitching Records', band_titles, cols, p + 'tpit')
-    stat_rows(sheet, 'team', 'pitching', bands, pools, ctx, catalog)
+    stat_rows(sheet, 'team', 'pitching', bands, pools, ctx, catalog, worst=True)
     sheet.group(s0 + 1, sheet.n)
     s0 = sheet.section('Lineup Slot Records', band_titles, cols, p + 'tslot')
     slot_rows(sheet, 'team', bands, pools, ctx, slots)
@@ -1349,8 +1464,8 @@ def hall(sheet, banner, caption, boards, ctx, key, franchise_mode, details_fn):
     """A Hall: three side-by-side Top-25 boards (Overall / Hitters / Pitchers)."""
     sheet.banner(banner, caption)
     sheet.jump_targets[key] = sheet.n
-    band_titles = ['Top 25 Careers — Overall', 'Top 25 Careers — Hitters',
-                   'Top 25 Careers — Pitchers']
+    band_titles = ['Top 25 Careers -- Overall', 'Top 25 Careers -- Hitters',
+                   'Top 25 Careers -- Pitchers']
     cells = ['']
     for i, bt in enumerate(band_titles):
         cells += [''] * (BAND_STARTS[i] - len(cells)) + [bt]
@@ -1486,7 +1601,7 @@ def build_lifetime_tab(tab, data, ctx, catalog, slots):
                     ('Team Records', 'l-team')])
 
     sheet.banner('PLAYER RECORDS')
-    bands_pts = ['Player Lifetime Points by Franchise', 'Player Lifetime Points — League-wide',
+    bands_pts = ['Player Lifetime Points by Franchise', 'Player Lifetime Points -- League-wide',
                  'Single Season Player Points by Franchise']
     bands_tot = [b.replace('Points', 'Totals') for b in bands_pts]
     cols = [['Player', 'Franchise', 'Value', 'Details', 'Years of Service'],
@@ -1532,8 +1647,8 @@ def build_lifetime_tab(tab, data, ctx, catalog, slots):
                  '(unrostered + benched + negative)')
     sheet.jump_targets['l-hos'] = sheet.n
     cells = ['']
-    for i, bt in enumerate(['Hitters — Most Wasted Career Points',
-                            'Pitchers — Most Wasted Career Points']):
+    for i, bt in enumerate(['Hitters -- Most Wasted Career Points',
+                            'Pitchers -- Most Wasted Career Points']):
         cells += [''] * (BAND_STARTS[i] - len(cells)) + [bt]
     n = sheet.add(cells, shaded=True)
     sheet.row_fmt(n, {'textFormat': {'bold': True}, 'backgroundColor': _POWDER})

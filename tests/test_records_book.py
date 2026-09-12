@@ -192,6 +192,20 @@ def test_player_rate_and_fewest_rows_have_no_week_or_day_cell():
                         [_band('season_all', 'season', 'all', 'Season')], pools, ctx) is True
 
 
+def test_player_slot_rows_match_the_starting_lineup_and_team_rows_stay_lumped():
+    slots = [{'label': 'SP', 'count': 2, 'category': 'pitching'}]
+    ctx = L.Context(2026, None, 12, {}, lambda r, b: 'Week')
+    rows = [_row(pid=f'p{i}', pname=f'P {i}', dname=f'P {i}', slot='SP', pts=50.0 - i, unit=i)
+            for i in range(3)]
+    sheet = L.Sheet()
+    L.slot_rows(sheet, 'player', [_band()], {('player_slot', 'level_all'): L.Pool(rows)}, ctx, slots)
+    assert [r[0] for r in sheet.rows] == ['SP 1', 'SP 2']
+    assert sheet.rows[0][3] == 50.0 and sheet.rows[1][3] == 49.0
+    sheet = L.Sheet()
+    L.slot_rows(sheet, 'team', [_band()], {('team_slot', 'level_all'): L.Pool(rows)}, ctx, slots)
+    assert [r[0] for r in sheet.rows] == ['SP']
+
+
 # ---- section 5: leaderboard depth and the Halls -----------------------------
 
 def test_slot_depth_halves_each_extra_copy():
@@ -262,14 +276,21 @@ def test_period_tab_has_the_required_sections_in_order():
         pools[('player', key)] = L.Pool([player])
     sheet = L.build_period_tab(tab, pools, ctx, catalog, [])
     labels = [r[0] for r in sheet.rows]
-    order = ['Matchup Records', 'TEAM RECORDS', 'Score Records', 'Hitting Records',
-             'Pitching Records', 'Lineup Slot Records', 'PLAYER RECORDS', 'Score Records',
-             'Best Performances', 'Hitting Records', 'Pitching Records', 'Lineup Slot Records']
+    order = ['Matchup Records', 'TEAM RECORDS', 'Score Records', 'Best Performances',
+             'Hitting Records', 'Pitching Records', 'Lineup Slot Records', 'PLAYER RECORDS',
+             'Score Records', 'Best Performances', 'Hitting Records', 'Pitching Records',
+             'Lineup Slot Records']
     idx = -1
     for label in order:
         idx = labels.index(label, idx + 1)
     assert 'Home Runs' in labels and 'Strikeouts' in labels
     assert sheet.jump_targets['m-tscore'] == labels.index('Score Records') + 1
+    # Kyle 09-11: team sections close at the bad end; players do not.
+    assert labels.count('Fewest Home Runs') == 1 and labels.count('Lowest AVG') == 1
+    assert labels.index('Fewest Home Runs') < labels.index('PLAYER RECORDS')
+    assert labels.count('Best Performances') == 2 and 'Total' in labels
+    assert all(collapsed for _, _, collapsed in sheet.groups)
+    assert not any('\u2014' in str(c) for r in sheet.rows for c in r)
 
 
 # ---- section 2.12 (09-09): stat lines and hybrid placement ------------------
@@ -469,6 +490,7 @@ def test_lifetime_tab_drops_the_score_section_and_fences_the_sentinel_by_franchi
     assert "League's Top Point Producers -- All Teams, active-slots only" in text
     assert 'top 25 careers with given franchise' in text
     assert 'Years of Service' in text and 'Span' not in text and '2: 2025–2026' in text
+    assert '\u2014' not in text and all(collapsed for _, _, collapsed in sheet.groups)
     assert 'Average per Matchup' in text and '5,000.0 over 44 matchups' in text
     hdr = next(r for r in sheet.rows if r[0] == 'Rank' and r[2] == 'Franchises')
     assert hdr[5] == 'Years of Service'

@@ -621,6 +621,57 @@ models:
         description: 'TRUE when the league scores this stat (a platform rule exists).'
         tests:
           - not_null
+  - name: fct_team_period_standing
+    description: >
+      Where each team stood after each period -- one fact for both platforms
+      (MLB-263, ledger S-29 / S-35). CBS rows are the platform-SERVED
+      snapshots from mart_period_standings (source = served). ESPN rows are
+      DERIVED from the daily fact the way espn_points_data.dense_rank_arc
+      did in Python: a dense team x scoring-day spine, cumulative active
+      production carried forward over quiet days, rank from the cumulative
+      total on that day, ties by team_id. period_key is the platform's own
+      ordinal (ESPN scoring_period, CBS period), not a matchup_period, and
+      not comparable across platforms. cume_pts rounds to one decimal, as
+      the Python query returned it. Materialized as table.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - season_year
+              - period_key
+              - team_id
+    columns:
+      - name: league_key
+        tests:
+          - not_null
+      - name: season_year
+        tests:
+          - not_null
+      - name: period_key
+        description: 'The platform''s own period ordinal: ESPN scoring_period (a day), CBS served period.'
+        tests:
+          - not_null
+      - name: team_id
+        tests:
+          - not_null
+      - name: team_name
+      - name: cume_pts
+        description: 'Cumulative points through this period, one decimal.'
+      - name: standings_rank
+        description: '1 = leader after this period.'
+        tests:
+          - not_null
+      - name: is_latest_period
+        description: 'TRUE on the latest captured period of the season.'
+        tests:
+          - not_null
+      - name: source
+        description: 'derived (ESPN, from the daily fact) | served (CBS, platform snapshot).'
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['derived', 'served']
   - name: dim_team_owner
     description: >
       (league, season, team) -> owner_display label. Collapses co-owned

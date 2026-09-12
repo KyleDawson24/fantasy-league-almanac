@@ -2143,6 +2143,42 @@ models:
           ESPN's own season point total. NOT asserted equal to the
           warehouse's calculated total -- the platform's point stats have
           diverged before, so this stays labelled as the platform's number.
+      - name: lens
+        description: >
+          Which notion of finish this row is (MLB-263, ledger S-31): 'platform'
+          = the ESPN platform's own final standings; 'awarded' = the CBS
+          league's awarded finishes as its standings page shows them.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['platform', 'awarded']
+      - name: standings_rank
+        description: >
+          The finish under this lens (ESPN final_rank; CBS awarded rank).
+          1 = champion. NULL on a platform-lens row whose season has not
+          finished: the platform serves no final rank until it closes, and
+          no finish is invented for it.
+        tests:
+          - not_null:
+              config:
+                where: "lens = 'awarded'"
+      - name: is_champion
+        description: 'standings_rank = 1 under this lens; NULL where standings_rank is NULL (unfinished season).'
+        tests:
+          - not_null:
+              config:
+                where: "standings_rank is not null"
+      - name: batting_points
+        description: 'CBS awarded lens only; NULL on ESPN rows.'
+      - name: pitching_points
+        description: 'CBS awarded lens only; NULL on ESPN rows.'
+      - name: total_points
+        description: 'CBS awarded lens only; NULL on ESPN rows.'
+      - name: points_behind
+        description: 'CBS awarded lens only; NULL on ESPN rows.'
+      - name: teams_in_season
+        description: 'Teams in this league-season under this lens.'
 
   - name: dim_league_format
     description: >

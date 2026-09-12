@@ -15,7 +15,7 @@ def _band(key='level_all', grain='week', scope='all', last='Period'):
 
 
 def _row(**kw):
-    base = {'season': 2026, 'unit': 5, 'mp': 5, 'team_id': '1', 'team_name': 'Team One',
+    base = {'season': 2026, 'unit': 5, 'mp': 5, 'team_id': 't1', 'team_name': 'Team One',
             'abbrev': 'ONE', 'owner': 'Owner One', 'pid': None, 'pname': None, 'dname': None,
             'pts': 100.0, 'hit_pts': 60.0, 'pit_pts': 40.0, 'ab': 300, 'outs': 200, 'h': 90,
             'b_bb': 30, 'hbp': 2, 'sf': 3, 'tb': 150, 'er': 40, 'p_bb': 20, 'p_h': 60, 'k': 70,
@@ -83,8 +83,8 @@ def test_rates_are_none_below_the_floor():
 
 
 def test_fewest_record_skips_rows_under_the_floor():
-    pool = L.Pool([_row(team_id='1', abbrev='ONE', b_so=5, ab=100),
-                   _row(team_id='2', abbrev='TWO', b_so=30, ab=300)])
+    pool = L.Pool([_row(team_id='t1', abbrev='ONE', b_so=5, ab=100),
+                   _row(team_id='t2', abbrev='TWO', b_so=30, ab=300)])
     m = L.Metric('b_so', 'Strikeouts', 'count', 'hitting', 'asc', 'int', 'ab', 'negative')
     cell = L.record_cell(pool, m, 'asc', _band(), 2026)
     assert cell.holders[0]['abbrev'] == 'TWO' and cell.value == 30
@@ -93,7 +93,7 @@ def test_fewest_record_skips_rows_under_the_floor():
 # ---- section 2.5: never render an empty row ---------------------------------
 
 def test_most_record_nobody_set_is_omitted():
-    pool = L.Pool([_row(cyc=0), _row(team_id='2', cyc=0)])
+    pool = L.Pool([_row(cyc=0), _row(team_id='t2', cyc=0)])
     m = L.Metric('cyc', 'Cycle', 'count', 'hitting', 'desc', 'int')
     assert L.record_cell(pool, m, 'desc', _band(), 2026) is None
 
@@ -110,9 +110,9 @@ def test_record_row_with_no_qualifying_band_is_not_emitted():
 # ---- section 2.9: ties -------------------------------------------------------
 
 def test_small_tie_lists_abbreviations_and_counts_in_details():
-    rows = [_row(team_id='1', abbrev='ONE', owner='A', hr=20, unit=3),
-            _row(team_id='2', abbrev='TWO', owner='B', hr=20, unit=7),
-            _row(team_id='3', abbrev='THR', owner='C', hr=10)]
+    rows = [_row(team_id='t1', abbrev='ONE', owner='A', hr=20, unit=3),
+            _row(team_id='t2', abbrev='TWO', owner='B', hr=20, unit=7),
+            _row(team_id='t3', abbrev='THR', owner='C', hr=10)]
     pool = L.Pool(rows)
     m = L.Metric('hr', 'Home Runs', 'count', 'hitting', 'desc', 'int')
     band = _band()
@@ -127,7 +127,7 @@ def test_small_tie_lists_abbreviations_and_counts_in_details():
 
 
 def test_big_tie_collapses_to_a_count():
-    rows = [_row(team_id=str(i), abbrev=f'T{i}', hr=5) for i in range(6)]
+    rows = [_row(team_id=f't{i}', abbrev=f'T{i}', hr=5) for i in range(6)]
     m = L.Metric('hr', 'Home Runs', 'count', 'hitting', 'desc', 'int')
     cell = L.record_cell(L.Pool(rows), m, 'desc', _band(), 2026)
     cells, _ = L.side_cells(cell, m, 'team', _band(),
@@ -137,7 +137,7 @@ def test_big_tie_collapses_to_a_count():
 
 
 def test_a_team_tied_with_itself_lists_once():
-    rows = [_row(team_id='1', abbrev='ONE', hr=9, unit=2), _row(team_id='1', abbrev='ONE', hr=9, unit=8)]
+    rows = [_row(team_id='t1', abbrev='ONE', hr=9, unit=2), _row(team_id='t1', abbrev='ONE', hr=9, unit=8)]
     m = L.Metric('hr', 'Home Runs', 'count', 'hitting', 'desc', 'int')
     cell = L.record_cell(L.Pool(rows), m, 'desc', _band(), 2026)
     cells, _ = L.side_cells(cell, m, 'team', _band(),
@@ -149,7 +149,7 @@ def test_a_team_tied_with_itself_lists_once():
 
 def test_in_flight_unit_never_holds_a_lowest_record_outside_its_own_season():
     rows = [_row(season=2026, pts=50.0, complete=False, standard=True),
-            _row(season=2025, team_id='2', abbrev='TWO', pts=80.0, complete=True, standard=True)]
+            _row(season=2025, team_id='t2', abbrev='TWO', pts=80.0, complete=True, standard=True)]
     m = L.POINTS_METRICS[0]
     cell = L.record_cell(L.Pool(rows), m, 'asc', _band('season_all', 'season'), 2026)
     assert cell.holders[0]['season'] == 2025
@@ -164,7 +164,7 @@ def test_in_flight_unit_never_holds_a_lowest_record_outside_its_own_season():
 
 def test_this_season_band_compares_in_flight_with_in_flight_and_carries_no_asterisk():
     rows = [_row(season=2026, pts=50.0, complete=False),
-            _row(season=2026, team_id='2', abbrev='TWO', pts=80.0, complete=False)]
+            _row(season=2026, team_id='t2', abbrev='TWO', pts=80.0, complete=False)]
     band = _band('season_cur', 'season', 'current', 'Runner-up')
     cell = L.record_cell(L.Pool(rows), L.POINTS_METRICS[0], 'asc', band, 2026, want_runner_up=True)
     assert cell.value == 50.0
@@ -175,8 +175,8 @@ def test_this_season_band_compares_in_flight_with_in_flight_and_carries_no_aster
 
 
 def test_worst_hitting_points_needs_a_hitter():
-    rows = [_row(team_id='1', pid='p1', hit_pts=0.0, ab=0, pname='Pitcher Pete'),
-            _row(team_id='2', pid='p2', hit_pts=-4.0, ab=20, pname='Hitter Hank')]
+    rows = [_row(team_id='t1', pid='p1', hit_pts=0.0, ab=0, pname='Pitcher Pete'),
+            _row(team_id='t2', pid='p2', hit_pts=-4.0, ab=20, pname='Hitter Hank')]
     cell = L.record_cell(L.Pool(rows), L.POINTS_METRICS[1], 'asc', _band(), 2026)
     assert cell.holders[0]['pid'] == 'p2'
 
@@ -229,7 +229,7 @@ def test_hall_boards_split_by_discipline_and_rank_25():
 
 
 def test_shame_cells_carry_the_three_terms_and_a_percentage():
-    row = {'pid': 'x', 'pname': 'Bench Bob', 'dname': 'Bench Bob', 'benched_hit': 100,
+    row = {'pid': 'x', 'pname': 'Bench Barnaby', 'dname': 'Bench Barnaby', 'benched_hit': 100,
            'unrostered_hit': 50, 'neg_hit': 10, 'hit_pts': 240, 'bench_by_hit': 'ONE (100)'}
     cells = L.shame_cells(row, 'hitting')
     assert cells[1] == 'ONE (100)'
@@ -356,13 +356,13 @@ def test_franchises_column_is_abbreviations_only():
 # ---- section 2.9 (09-09): mass ties ------------------------------------------
 
 def test_mass_tie_reads_no_record_beside_a_real_band_and_never_alone():
-    rows = [_row(team_id=str(i), abbrev=f'T{i}', unit=i, hld=1) for i in range(1, 4)]
+    rows = [_row(team_id=f't{i}', abbrev=f'T{i}', unit=i, hld=1) for i in range(1, 4)]
     m = L.Metric('hld', 'Holds', 'count', 'pitching', 'desc', 'int')
     cell = L.record_cell(L.Pool(rows), m, 'desc', _band(), 2026, mass_tie_limit=3)
     assert cell.mass_tie and cell.tie_n == 3
     assert not L.record_cell(L.Pool(rows), m, 'desc', _band(), 2026, mass_tie_limit=4).mass_tie
     # A lone holder is never a mass tie, even on a one-period band.
-    solo = [_row(team_id='1', hld=2)]
+    solo = [_row(team_id='t1', hld=2)]
     assert not L.record_cell(L.Pool(solo), m, 'desc', _band(), 2026, mass_tie_limit=1).mass_tie
     ctx = L.Context(2026, None, 12, {}, lambda r, b: 'Week', period_counts={'week': 3, 'day': 99})
     week, day = _band(), _band('day_all', 'day', 'all')
@@ -455,7 +455,7 @@ def test_season_grain_boards_highlight_the_most_recent_season_only():
 # ---- section 5 (09-09): the Lifetime tab's shape ----------------------------
 
 def _lifetime_data():
-    labels = {'1': 'ONE', '9999': '####'}
+    labels = {'t1': 'ONE', '9999': '####'}
 
     def pl(pid, team, abbrev, pts, seasons=(2025, 2026), **kw):
         base = dict(_row(pid=pid, pname=pid, dname=pid, team_id=team, cid=team, abbrev=abbrev,
@@ -465,11 +465,11 @@ def _lifetime_data():
                     neg_hit=0, neg_pit=0, **kw)
         return L.add_wasted(base)
 
-    fr = {('a', '1'): pl('a', '1', 'ONE', 500.0), ('b', '9999'): pl('b', '9999', '####', 900.0)}
-    league = {'a': pl('a', '1', 'ONE', 500.0), 'b': pl('b', '9999', '####', 900.0)}
-    ps = [pl('a', '1', 'ONE', 300.0, seasons=(2026,), season=2026),
+    fr = {('a', 't1'): pl('a', 't1', 'ONE', 500.0), ('b', '9999'): pl('b', '9999', '####', 900.0)}
+    league = {'a': pl('a', 't1', 'ONE', 500.0), 'b': pl('b', '9999', '####', 900.0)}
+    ps = [pl('a', 't1', 'ONE', 300.0, seasons=(2026,), season=2026),
           pl('b', '9999', '####', 400.0, seasons=(2025,), season=2025)]
-    team = [L.add_wasted(dict(_row(team_id='1', cid='1', abbrev='ONE', team_name='Team One',
+    team = [L.add_wasted(dict(_row(team_id='t1', cid='t1', abbrev='ONE', team_name='Team One',
                                    pts=5000.0, seasons={2025, 2026}), top_players={}))]
     avg = L.per_matchup_rows([dict(t) for t in team], lambda r: 44)
     return {'player_franchise': fr, 'player_league': league, 'player_season': ps,

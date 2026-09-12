@@ -44,7 +44,8 @@ def build_tabs(book):
                            'Details lead with the raw season total and the matchup count. '
                            'Player records are raw season figures.')
             sheet = build_period_tab(tab, book['pools'], book['ctx'], book['catalog'],
-                                     book['slots'], legend_extra=extra, team_caption=caption)
+                                     book['slots'], legend_extra=extra, team_caption=caption,
+                                     legend_link=book.get('legend_link'))
         out.append((tab['title'], sheet))
     return out
 

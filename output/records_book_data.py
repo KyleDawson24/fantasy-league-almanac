@@ -450,6 +450,39 @@ def _load_cbs(current_season, owners, slots):
         FROM d WHERE slot_label IS NOT NULL
         GROUP BY season_year, team_id, player_key, slot_label
         ORDER BY season_year, team_id, player_key, slot_label""")
+    # Kyle 09-11: before the daily capture logged hitter slots (2026), the
+    # season-grain slot records lean on the position-ELIGIBILITY estimates
+    # the standing CBS page used (fct_player_position_pts: one row per
+    # season / team / player / eligible position, active-weighted). Pitchers
+    # are actual in every year (always a P slot). U takes every hitter.
+    first_actual = q(f"""
+        SELECT MIN(season_year) AS s FROM fct_player_daily_performance
+        WHERE {league_predicate()} AND lineup_slot IN ('C','1B','2B','3B','SS','OF','DH','U')""")
+    first_actual = int(first_actual[0]['s']) if first_actual and first_actual[0]['s'] else None
+    slot_estimates = []
+    if first_actual:
+        est = q(f"""
+            SELECT season_year AS season, NULL AS unit, team_id, player_key AS pid,
+                   MAX(player_name) AS pname, MAX(display_name) AS dname, position AS slot,
+                   SUM(weighted_active_pts) AS pts, MAX(eligible_days) AS games
+            FROM fct_player_position_pts
+            WHERE {league_predicate()} AND matchup_period IS NULL AND position <> 'P'
+              AND season_year < {first_actual} AND weighted_active_pts > 0
+            GROUP BY season_year, team_id, player_key, position""")
+        names = {}
+        for r in player_season:
+            names[(int(r['season']), str(int(float(r['team_id']))))] = (r.get('team_name'), r.get('abbrev'))
+        seen_u = set()
+        for r in est:
+            key = (int(r['season']), str(int(float(r['team_id']))))
+            team_name, abbrev = names.get(key, (None, None))
+            row = dict(r, team_name=team_name, abbrev=abbrev, estimated=True)
+            slot_estimates.append(row)
+            if key + (r['pid'],) not in seen_u:
+                seen_u.add(key + (r['pid'],))
+                slot_estimates.append(dict(row, slot='U'))
+        slot_season = [r for r in slot_season
+                       if r.get('slot') == 'P' or int(r['season']) >= first_actual] + slot_estimates
     # Week-grain slot rows: top-K per slot and scope, so the 100k-row grain
     # never lands in memory whole.
     slot_week = q(f"""
@@ -572,6 +605,7 @@ def _load_cbs(current_season, owners, slots):
 
     return dict(team_week=team_week, player_week=None, team_day=None, player_day=None,
                 slot_week=slot_week, team_slot_week=team_slot_week,
+                slot_first_actual=first_actual,
                 inactive_week=None, inactive_day=None,
                 team_season=None, player_season=player_season,
                 season_totals=season_totals, slot_season=slot_season,
@@ -585,6 +619,13 @@ def _load_cbs(current_season, owners, slots):
 # ---------------------------------------------------------------------------
 
 _CANON = {'fn': lambda row: row.get('team_id'), 'latest_owner': {}}
+
+# Kyle 09-11: the universal caveat, one legend row, linked to the write-up.
+ESTIMATE_CAVEAT = (
+    "CBS sit/start data for seasons prior to this almanac's implementation is estimated "
+    "(and pre-2026 hitter lineup slots come from position eligibility). More on how can be "
+    "found here -- the user guide's 'How accurate is the old stuff?'",
+    "https://docs.google.com/document/d/12x75BxghrrS0qKpskgJb1bzJCnwnUMA2Qw748_c3It8/edit")
 
 
 def _finish(rows, owners, latest_owner, catalog):
@@ -945,9 +986,12 @@ def load_book(league_key=None):
     # every-team-at-zero fewest rows.
     period_counts['season'] = team_count
     if platform == 'cbs':
-        lifetime['legend_extra'] = ('2004-2020 lineups are start-share estimates; hitter lineup '
-                                    'slots are logged from the 2026 daily capture only, pitchers '
-                                    'count at P in every season.')
+        first_actual = raw.get('slot_first_actual')
+        lifetime['legend_extra'] = (
+            f"Hitter lineup slots are logged from the {first_actual} daily capture on; earlier "
+            "seasons' slot records use position eligibility (marked est.); pitchers count at P "
+            "in every season.")
+        lifetime['legend_link'] = ESTIMATE_CAVEAT
 
     tabs = derive_tabs('points' if fmt == 'points' else 'h2h', seasons_count=len(seasons),
                        level_label='Weeks')
@@ -979,7 +1023,8 @@ def load_book(league_key=None):
             if src is None:
                 return f"{float(row.get('games') or 0):,.0f} games at slot"
             cat = next((s['category'] for s in slots if s['label'] == row.get('slot')), None)
-            return stat_line(src, ppu, category=cat if cat in ('hitting', 'pitching') else None)
+            line = stat_line(src, ppu, category=cat if cat in ('hitting', 'pitching') else None)
+            return f'est. · {line}' if row.get('estimated') else line
         # CBS team slot-week: players at that slot in that week.
         players = contributors_index['week'].slot_players(row) if platform == 'cbs' else []
         return ', '.join(f'{n}: {v:,.1f}' for n, v in players[:3])
@@ -989,7 +1034,8 @@ def load_book(league_key=None):
     return {'ctx': ctx, 'tabs': tabs, 'pools': pools, 'lifetime': lifetime,
             'catalog': catalog, 'slots': slots, 'platform': platform, 'format': fmt,
             'seasons': seasons, 'counts': counts, 'current_season': current_season,
-            'latest_unit': latest_unit}
+            'latest_unit': latest_unit,
+            'legend_link': ESTIMATE_CAVEAT if platform == 'cbs' else None}
 
 
 def _cbs_wasted_pool(pool):
@@ -1209,7 +1255,7 @@ def _lifetime(player_season, inactive_season, team_season, slot_season, canon_of
     return {'player_franchise': by_fr, 'player_league': by_pl, 'player_season': ps_rows,
             'shame': shame, 'team_total': list(totals.values()), 'team_avg': avg_rows,
             'slot_franchise': slot_fr, 'slot_league': slot_pl, 'slot_season': slot_season,
-            'per_matchup': per_matchup}
+            'per_matchup': per_matchup, 'legend_link': None}
 
 
 def _merge_by_canon(by_team, canon):

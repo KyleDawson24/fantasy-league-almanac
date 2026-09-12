@@ -837,6 +837,14 @@ class Sheet:
         self.row_fmt(n, {'textFormat': {'italic': True, 'fontSize': 9},
                          'backgroundColor': _POWDER})
 
+    def legend_link(self, text, url):
+        """A legend row that is one in-sheet link (the estimate caveat)."""
+        n = self.add([_link_cell(text, url)])
+        self.row_fmt(n, {'textFormat': {'italic': True, 'fontSize': 9},
+                         'backgroundColor': _POWDER})
+        self.merge(f'A{n}:R{n}')
+        return n
+
     def banner(self, text, caption=None):
         self.blank()
         n = self.add([text] + [''] * 8 + [caption or ''])
@@ -1245,7 +1253,7 @@ LEGEND_POLARITY = (
 
 def build_period_tab(tab, pools, ctx, catalog, slots, legend_extra='',
                      top_titles=('Best Performances', 'Season Stars'),
-                     team_caption=None):
+                     team_caption=None, legend_link=None):
     """The Matchup Records and Season Records tabs (sections 3 and 4)."""
     bands = tab['bands']
     is_season = tab['key'] == 'season'
@@ -1286,6 +1294,8 @@ def build_period_tab(tab, pools, ctx, catalog, slots, legend_extra='',
             "last-matchup when its day falls inside it). An asterisk after a value "
             "marks an in-progress period -- it counts toward 'most' records and "
             "never toward 'fewest' or 'worst'.")
+    if legend_link:
+        sheet.legend_link(*legend_link)
     p = 's-' if is_season else 'm-'
     jump = [('Team Score Records', p + 'tscore')]
     if not is_season:
@@ -1394,6 +1404,9 @@ def aggregate(rows, key_fn, sum_cols):
         for ident in ('team_id', 'team_name', 'abbrev', 'owner', 'pid', 'pname', 'dname'):
             if row.get(ident) not in (None, ''):
                 a[ident] = row[ident]
+        for flag in AGG_FLAGS:
+            if row.get(flag):
+                a[flag] = True
     for a in acc.values():
         a['season'] = max(a['seasons']) if a['seasons'] else None
         a['unit'] = None
@@ -1407,6 +1420,8 @@ SUM_COLS = ['pts', 'hit_pts', 'pit_pts', 'neg', 'games', 'h', 'ab', 'b_bb', 'b_s
             'sv', 'hld', 'p_h', 'p_bb', 'p_hr', 'p_r', 'cg', 'blk', 'wp', 'hbp_p',
             'blsv', 'nh', 'pg', 'pk', 'sho', 'benched_hit', 'benched_pit',
             'unrostered_hit', 'unrostered_pit', 'neg_hit', 'neg_pit']
+# Aggregates carry an 'estimated' flag when any input row was estimated.
+AGG_FLAGS = ('estimated',)
 PER_UNIT_COLS = SUM_COLS + ['wasted', 'wasted_hit', 'wasted_pit', 'benched',
                             'unrostered', 'negative']
 
@@ -1609,7 +1624,9 @@ def build_lifetime_tab(tab, data, ctx, catalog, slots):
         "lines lead with the player's slash line (AVG/OBP/SLG or W-L-Sv/ERA/WHIP), "
         "then the stats that scored the most points across both disciplines; "
         "hitters' lines sit right, pitchers' left. Sections and boards are "
-        "collapsible (the +/- in the margin); the Halls open expanded.")
+        "collapsible (the +/- in the margin).")
+    if data.get('legend_link'):
+        sheet.legend_link(*data['legend_link'])
 
     def hall_details(row, disc):
         return stat_line(row, ctx.ppu, top_n=3)
@@ -1670,7 +1687,8 @@ def build_lifetime_tab(tab, data, ctx, catalog, slots):
         rows_for = [[r for r in rows if r.get('slot') == slot['label']] for rows in slot_bands]
         leaderboard(sheet, slot['label'], m, rows_for, ctx,
                     slot_depth(N, slot.get('count', 1)),
-                    details_fn=lambda r, mm: f"{float(r.get('games') or 0):,.0f} games at slot")
+                    details_fn=lambda r, mm: (f"{float(r.get('games') or 0):,.0f} games at slot"
+                                              + (' (est.)' if r.get('estimated') else '')))
     sheet.group(s0 + 1, sheet.n, collapsed=True)
 
     # Wasted Hall of Shame closes the player section.

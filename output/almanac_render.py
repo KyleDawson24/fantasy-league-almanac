@@ -1374,66 +1374,6 @@ def acquisition_half_values(team_row, lens):
     ]
 
 
-# The channels a platform can report as "already on the roster when the
-# league's scoring began". ESPN logs the draft and keeper designations
-# separately; CBS never logged drafts at all and reports the pair
-# collapsed, as `opening`. Both mean the same thing, and the season-points
-# presenter's Opening column is that shared meaning.
-ACQUISITION_OPENING_SOURCES = ('keeper', 'draft')
-
-
-def with_standard_acquisition_channels(rows, lenses=('active', 'rostered')):
-    """Give every adapter's acquisition rows the SHARED channel vocabulary.
-
-    THE DEFECT THIS FIXES (MLB-243 correction). The season-points Advanced
-    Standings reads `opening_<lens>_pts`. `mart_team_acquisition_channels`
-    -- the ESPN mart -- does not have that column: it carries
-    `keeper_<lens>_pts` and `draft_<lens>_pts`, because ESPN reports the two
-    separately and the H2H book shows them as separate columns. So the
-    presenter read a key that was not there, printed 0.0 for Opening, and
-    the Total beside it did not reconcile with its own components: a whole
-    season's drafted production went missing from the only row that was
-    supposed to account for it.
-
-    A SHARED PYTHON BRIDGE, NOT WAREHOUSE CONVERGENCE -- and the
-    distinction is the point (Kyle 2026-08-15). There is no shared
-    acquisition contract in the warehouse to converge ON:
-    `mart_team_acquisition_channels` carries `espn-main` rows only (CBS
-    stints never reach `fct_roster_stints`), and the CBS book builds its
-    channels from a Python query over `fct_cbs_player_game_attribution` and
-    `stg_cbs__ui_transactions`. This function is the ONLY place the two
-    vocabularies meet. It is shared, it is output-correct and it is tested,
-    which is what makes it an acceptable v1.9 compatibility layer -- it is
-    NOT the semantic model, and nothing here should be read as saying the
-    gap is closed. Closing it means landing CBS stints in the shared fact
-    and emitting one vocabulary from one mart: MLB-249, urgent.
-
-    Applied at the adapter seam rather than as a platform branch in the
-    renderer. Opening is DERIVED, never overwritten: an adapter that
-    already reports it (CBS) is returned untouched, so the existing book is
-    byte-identical.
-
-    Rows are copied; the caller's are not mutated.
-    """
-    out = []
-    for row in rows or ():
-        row = dict(row)
-        for lens in lenses:
-            key = f'opening_{lens}_pts'
-            if row.get(key) is not None:
-                continue
-            parts = [row.get(f'{source}_{lens}_pts')
-                     for source in ACQUISITION_OPENING_SOURCES]
-            if all(part is None for part in parts):
-                # Neither vocabulary is present. Leaving the key absent is
-                # the honest answer -- a 0.0 here would assert that nothing
-                # arrived that way.
-                continue
-            row[key] = sum(float(part or 0) for part in parts)
-        out.append(row)
-    return out
-
-
 def disambiguate_abbrevs(entity_ids, abbrevs):
     """Team abbreviation labels that are unique within the set.
 

@@ -1767,24 +1767,6 @@ def test_the_cbs_book_keeps_its_own_opening_sentence():
             in cbs_almanac_sheets.CBS_COPY["acquisition_opening_note"])
 
 
-def test_an_adapter_that_reports_opening_directly_is_left_alone():
-    """CBS already speaks the shared vocabulary; deriving over the top of it
-    would be a silent rewrite of a mart's own number."""
-    import almanac_render
-    rows = [{"team_id": 1, "opening_active_pts": 12.0,
-             "keeper_active_pts": 99.0, "draft_active_pts": 99.0}]
-    out = almanac_render.with_standard_acquisition_channels(rows)
-    assert out[0]["opening_active_pts"] == 12.0
-
-
-def test_no_opening_is_invented_when_neither_vocabulary_is_present():
-    """A 0.0 here would assert that nothing arrived that way."""
-    import almanac_render
-    out = almanac_render.with_standard_acquisition_channels(
-        [{"team_id": 1, "fa_add_active_pts": 5.0}])
-    assert "opening_active_pts" not in out[0]
-
-
 # ---- 1. The owner fallback, everywhere ----------------------------------
 
 def test_the_presentation_wrapper_performs_the_fallback(monkeypatch):
@@ -2191,18 +2173,3 @@ def test_util_rows_reach_a_u_column_when_the_resolver_is_supplied(
     header, body = _section_body(rows, 'Team')
     assert header[1:4] == ['C', 'U', 'P']
     assert all(isinstance(r[2], (int, float)) and r[2] > 0 for r in body)
-
-
-# ---- RULING 3: the acquisition bridge is named for what it is ------------
-
-def test_the_acquisition_bridge_is_not_described_as_warehouse_convergence():
-    from pathlib import Path
-    repo = Path(__file__).resolve().parents[1]
-    src = (repo / 'output' / 'almanac_render.py').read_text(encoding='utf-8')
-    start = src.index('def with_standard_acquisition_channels')
-    doc = src[start:start + 2600]
-    assert 'MLB-249' in doc, 'the owning ticket is not named'
-    assert 'NOT the semantic model' in doc or 'not the semantic model' in doc
-    changelog = (repo / 'CHANGELOG.md').read_text(encoding='utf-8')
-    assert 'not warehouse convergence' in changelog
-    assert 'MLB-249' in changelog

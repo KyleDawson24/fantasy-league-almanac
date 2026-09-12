@@ -1344,6 +1344,7 @@ def get_team_acquisition_channels_alltime():
             MAX_BY(owner_display, season_year) AS owner_display,
             CAST(SUM(CAST(keeper_active_pts AS DECIMAL(18, 6))) AS DOUBLE) AS keeper_active_pts,
             CAST(SUM(CAST(draft_active_pts AS DECIMAL(18, 6))) AS DOUBLE) AS draft_active_pts,
+            CAST(SUM(CAST(opening_active_pts AS DECIMAL(18, 6))) AS DOUBLE) AS opening_active_pts,
             CAST(SUM(CAST(trade_active_pts AS DECIMAL(18, 6))) AS DOUBLE) AS trade_active_pts,
             CAST(SUM(CAST(fa_add_active_pts AS DECIMAL(18, 6))) AS DOUBLE) AS fa_add_active_pts,
             CAST(SUM(CAST(acquired_active_pts AS DECIMAL(18, 6))) AS DOUBLE) AS acquired_active_pts,
@@ -1354,6 +1355,7 @@ def get_team_acquisition_channels_alltime():
             CAST(SUM(CAST(trade_delta_active_pts AS DECIMAL(18, 6))) AS DOUBLE) AS trade_delta_active_pts,
             CAST(SUM(CAST(keeper_rostered_pts AS DECIMAL(18, 6))) AS DOUBLE) AS keeper_rostered_pts,
             CAST(SUM(CAST(draft_rostered_pts AS DECIMAL(18, 6))) AS DOUBLE) AS draft_rostered_pts,
+            CAST(SUM(CAST(opening_rostered_pts AS DECIMAL(18, 6))) AS DOUBLE) AS opening_rostered_pts,
             CAST(SUM(CAST(trade_rostered_pts AS DECIMAL(18, 6))) AS DOUBLE) AS trade_rostered_pts,
             CAST(SUM(CAST(fa_add_rostered_pts AS DECIMAL(18, 6))) AS DOUBLE) AS fa_add_rostered_pts,
             CAST(SUM(CAST(acquired_rostered_pts AS DECIMAL(18, 6))) AS DOUBLE) AS acquired_rostered_pts,
@@ -1553,18 +1555,23 @@ def get_team_acquisition_channels(season_year):
     lenses, from mart_team_acquisition_channels (MLB-17). One row per team;
     the builder orders each lens block by its own Acquired total. Feeds the two
     transaction blocks stacked under the Advanced Standings weekly grid.
+
+    Carries BOTH vocabularies: the split `keeper_*` / `draft_*` the H2H book
+    shows as separate columns, and the mart's `opening_*` collapse of the
+    pair that the season-points Advanced Standings reads (MLB-263, S-01).
+    The collapse is the mart's, not a Python derivation.
     """
     return query_for_presentation(f"""
         SELECT
             team_id,
             team_abbrev,
             owner_display,
-            keeper_active_pts,   draft_active_pts,   trade_active_pts,
-            fa_add_active_pts,   acquired_active_pts,
+            keeper_active_pts,   draft_active_pts,   opening_active_pts,
+            trade_active_pts,    fa_add_active_pts,  acquired_active_pts,
             dropped_active_pts,  traded_away_active_pts, lost_active_pts,
             fa_delta_active_pts, trade_delta_active_pts,
-            keeper_rostered_pts,   draft_rostered_pts,   trade_rostered_pts,
-            fa_add_rostered_pts,   acquired_rostered_pts,
+            keeper_rostered_pts,   draft_rostered_pts,   opening_rostered_pts,
+            trade_rostered_pts,    fa_add_rostered_pts,  acquired_rostered_pts,
             dropped_rostered_pts,  traded_away_rostered_pts, lost_rostered_pts,
             fa_delta_rostered_pts, trade_delta_rostered_pts
         FROM mart_team_acquisition_channels

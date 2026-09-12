@@ -88,7 +88,6 @@ from almanac_render import (
     HOME_HEADER,
     SLOT_ORDER,
     disambiguate_abbrevs,
-    with_standard_acquisition_channels,
     _bref_link,
     _bref_player_cell,
     draft_initial_text,
@@ -4377,13 +4376,16 @@ def build_standings_rows(context, arc, finishes, active_franchises,
     if acquisition_rows or alltime_acquisition_rows:
         def _bucketize(rowset):
             out = {}
-            # SHARED CHANNEL VOCABULARY FIRST (MLB-243 correction): the
-            # Opening column is a meaning, not a column name, and the two
-            # platforms report it under different ones. Normalizing here
-            # rather than in either renderer is what keeps this presenter
-            # platform-neutral -- see
-            # almanac_render.with_standard_acquisition_channels.
-            for r in with_standard_acquisition_channels(rowset):
+            # ONE VOCABULARY, FROM THE WAREHOUSE (MLB-263, S-01). The
+            # Opening column is `opening_<lens>_pts` on every adapter's
+            # rows: the CBS query has always emitted it, and the ESPN mart
+            # now emits it as the keeper + draft collapse beside the split
+            # columns. This presenter used to derive it here through a
+            # Python bridge when a row arrived without it (the MLB-243
+            # correction); that bridge is what the mart column retired.
+            # `or ()`: the points caller passes None for an era it does
+            # not have, and an empty bucket is the right answer there.
+            for r in rowset or ():
                 cid = _canon(int(r['team_id']))
                 bucket = out.setdefault(cid, {})
                 for k, v in r.items():

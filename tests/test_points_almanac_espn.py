@@ -1663,14 +1663,18 @@ def test_detailed_standings_says_the_all_time_table_is_this_season():
 # ---- 5. Production by acquisition channel -------------------------------
 
 _ACQ = [
-    # The ESPN mart's vocabulary: keeper + draft, NOT `opening`.
+    # The ESPN mart's vocabulary: keeper + draft split, AND their
+    # `opening_*` collapse beside them (MLB-263, S-01) -- the presenter
+    # reads the collapse, the H2H book the split.
     {"team_id": t, "team_name": "Club %02d" % t,
      "keeper_active_pts": 0.0, "draft_active_pts": 3494.0 + t,
+     "opening_active_pts": 3494.0 + t,
      "fa_add_active_pts": 88.0, "trade_active_pts": 0.0,
      "acquired_active_pts": 3582.0 + t,
      "dropped_active_pts": 0.0, "traded_away_active_pts": 0.0,
      "lost_active_pts": 0.0,
      "keeper_rostered_pts": 0.0, "draft_rostered_pts": 4162.0 + t,
+     "opening_rostered_pts": 4162.0 + t,
      "fa_add_rostered_pts": 88.0, "trade_rostered_pts": 0.0,
      "acquired_rostered_pts": 4250.0 + t,
      "dropped_rostered_pts": 3.0, "traded_away_rostered_pts": 0.0,
@@ -1738,7 +1742,8 @@ def test_a_first_year_all_time_acquisition_equals_the_current_season():
 def test_a_real_prior_era_is_still_added_to_the_current_season():
     """The first-year fix must not stop a league WITH history accumulating
     one -- that is what the all-time half is for."""
-    prior = [dict(r, draft_active_pts=1000.0, acquired_active_pts=1000.0,
+    prior = [dict(r, draft_active_pts=1000.0, opening_active_pts=1000.0,
+                  acquired_active_pts=1000.0,
                   fa_add_active_pts=0.0, trade_active_pts=0.0,
                   keeper_active_pts=0.0) for r in _ACQ]
     rows, _ = _configured_tab(acquisition=_ACQ, prior_acquisition=prior)

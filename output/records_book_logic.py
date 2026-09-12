@@ -269,6 +269,12 @@ class Candidate:
     value: float
     row: dict
     tie_n: int = 1
+    tie_first: dict = None   # earliest / latest unit sharing the value
+    tie_last: dict = None
+
+
+def _when(row):
+    return (row.get('season') or 0, row.get('unit') or 0, str(row.get('date') or ''))
 
 
 def _sort_key(row):
@@ -310,8 +316,9 @@ class Pool:
         if not cands:
             return []
         best = cands[0][0]
-        tie_n = sum(1 for v, _ in cands if v == best)
-        return [Candidate(v, r, tie_n) for v, r in cands[:k]]
+        tied = [r for v, r in cands if v == best]
+        first, last = min(tied, key=_when), max(tied, key=_when)
+        return [Candidate(v, r, len(tied), first, last) for v, r in cands[:k]]
 
 
 class CandidatePool:
@@ -331,14 +338,15 @@ class CandidatePool:
         key = (metric, direction, season if season is not None else 'all')
         rows = self.cands.get(key) or []
         out = []
-        for value, row, tie_n in rows:
+        for value, row, tie_n, *span in rows:
             if require is not None and not require(row):
                 continue
             if complete_only and not row.get('complete', True):
                 continue
             if standard_only and not row.get('standard', True):
                 continue
-            out.append(Candidate(value, row, tie_n))
+            first, last = (span + [None, None])[:2]
+            out.append(Candidate(value, row, tie_n, first, last))
         return out[:k]
 
 
@@ -354,6 +362,8 @@ class RecordCell:
     runner_up: tuple = None  # (row, value) or None
     in_flight: bool = False
     mass_tie: bool = False   # 2.9: tied as often as the grain was played
+    tie_first: dict = None
+    tie_last: dict = None
 
 
 def record_cell(pool, metric, direction, band, current_season,
@@ -398,7 +408,8 @@ def record_cell(pool, metric, direction, band, current_season,
     if mass_tie_limit and tie_n > 1 and tie_n >= mass_tie_limit:
         # Kyle 09-10: not blank -- the band says so, if any other band on
         # the row holds a real record (record_row decides).
-        return RecordCell(best, holders, tie_n, None, False, True)
+        return RecordCell(best, holders, tie_n, None, False, True,
+                          cands[0].tie_first, cands[0].tie_last)
     runner = None
     if want_runner_up:
         for c in cands:
@@ -625,11 +636,20 @@ def stat_cell_format(row, align=True):
     return fmt
 
 
-def mass_tie_cells(cell, metric):
-    """2.9 (Kyle 09-10): a band tied as often as its grain was played
-    reads 'no record' instead of going blank, so the row lines up."""
+def mass_tie_cells(cell, metric, band, ctx):
+    """2.9 (Kyle 09-10/11): a band tied as often as its grain was played
+    reads 'no record', keeps the value, and says how often and when --
+    'N done M times -- first Week 3, 2025, last Week 22, 2026'."""
+    def when(row):
+        if row is None:
+            return ''
+        if band.grain == 'season':
+            return str(row.get('season') or '')
+        return ctx.period_label(row, band)
+    first, last = when(cell.tie_first), when(cell.tie_last)
+    span = f' -- first {first}, last {last}' if first and last else ''
     return ['no record', '', value_cell(metric, cell.value),
-            f'done {cell.tie_n:,} times at this grain', '']
+            f'{fmt_value(metric, cell.value)} done {cell.tie_n:,} times{span}', '']
 
 
 def _details_for(row, metric, grain, ctx, cell=None):
@@ -665,7 +685,7 @@ def side_cells(cell, metric, grain, band, ctx):
     if cell is None:
         return [''] * BAND_COLS, {}
     if cell.mass_tie:
-        return mass_tie_cells(cell, metric), {'mass_tie': True}
+        return mass_tie_cells(cell, metric, band, ctx), {'mass_tie': True}
     marks = {}
     holders = cell.holders
     # Section 4: the This-Season band is the in-flight leaderboard by

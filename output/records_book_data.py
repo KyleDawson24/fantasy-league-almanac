@@ -30,7 +30,7 @@ from collections import defaultdict
 import db
 from db import league_predicate, query_for_presentation
 import records
-from almanac_render import _boxscore_url, disambiguated_abbrev_map
+from almanac_render import _boxscore_url, disambiguated_abbrev_map, draft_initial_text
 from records_book_logic import (
     AB_FLOOR, OUTS_FLOOR, CandidatePool, Context, Pool, POINTS_METRICS,
     RATE_METRICS, SENTINEL_TEAM, WASTED_METRICS, add_rates, add_wasted, aggregate,
@@ -378,6 +378,14 @@ def _load_espn(current_season, owners, slots):
 # CBS adapter
 # ---------------------------------------------------------------------------
 
+def _wk_row(code):
+    """season*1000+week from the tie-span windows -> a label-able unit row."""
+    if code is None:
+        return None
+    code = int(code)
+    return {'season': code // 1000, 'unit': code % 1000, 'mp': code % 1000}
+
+
 def _cbs_wcounts():
     return ', '.join(f'SUM({c} * aw) AS {c}' for c in COUNT_COLS)
 
@@ -514,7 +522,11 @@ def _load_cbs(current_season, owners, slots):
                    ROW_NUMBER() OVER (PARTITION BY metric, (season = {current_season}) ORDER BY value DESC, season DESC, unit DESC, team_id, pid) AS rd_cur,
                    ROW_NUMBER() OVER (PARTITION BY metric, (season = {current_season}) ORDER BY value ASC, season DESC, unit DESC, team_id, pid) AS ra_cur,
                    COUNT(*) OVER (PARTITION BY metric, value) AS tie_all,
-                   COUNT(*) OVER (PARTITION BY metric, value, (season = {current_season})) AS tie_cur
+                   COUNT(*) OVER (PARTITION BY metric, value, (season = {current_season})) AS tie_cur,
+                   MIN(season * 1000 + unit) OVER (PARTITION BY metric, value) AS first_all,
+                   MAX(season * 1000 + unit) OVER (PARTITION BY metric, value) AS last_all,
+                   MIN(season * 1000 + unit) OVER (PARTITION BY metric, value, (season = {current_season})) AS first_cur,
+                   MAX(season * 1000 + unit) OVER (PARTITION BY metric, value, (season = {current_season})) AS last_cur
             FROM u
         )
         SELECT * FROM ranked
@@ -535,17 +547,19 @@ def _load_cbs(current_season, owners, slots):
         add_wasted(row)
         row['value'] = float(r['value'])
         row[m] = row['value']
+        span_all = [_wk_row(r['first_all']), _wk_row(r['last_all'])]
+        span_cur = [_wk_row(r['first_cur']), _wk_row(r['last_cur'])]
         if r['rd_all'] <= 12:
-            cands[(m, 'desc', 'all')].append((row['value'], row, int(r['tie_all']), r['rd_all']))
+            cands[(m, 'desc', 'all')].append((row['value'], row, int(r['tie_all']), r['rd_all'], span_all))
         if r['ra_all'] <= 12:
-            cands[(m, 'asc', 'all')].append((row['value'], row, int(r['tie_all']), r['ra_all']))
+            cands[(m, 'asc', 'all')].append((row['value'], row, int(r['tie_all']), r['ra_all'], span_all))
         if r['cur'] and r['rd_cur'] <= 12:
-            cands[(m, 'desc', current_season)].append((row['value'], row, int(r['tie_cur']), r['rd_cur']))
+            cands[(m, 'desc', current_season)].append((row['value'], row, int(r['tie_cur']), r['rd_cur'], span_cur))
         if r['cur'] and r['ra_cur'] <= 12:
-            cands[(m, 'asc', current_season)].append((row['value'], row, int(r['tie_cur']), r['ra_cur']))
+            cands[(m, 'asc', current_season)].append((row['value'], row, int(r['tie_cur']), r['ra_cur'], span_cur))
     for key, lst in cands.items():
         lst.sort(key=lambda t: t[3])
-        cands[key] = [(v, row, n) for v, row, n, _ in lst]
+        cands[key] = [(v, row, n, *span) for v, row, n, _, span in lst]
 
     def period_label(row, band):
         text = f"Week {row.get('unit')}"
@@ -685,7 +699,8 @@ def _team_slot_rows(slot_rows, key_fn):
             a['players'] = []
             acc[k] = a
         a['pts'] += float(r.get('pts') or 0)
-        a['players'].append((r.get('dname') or r.get('pname'), float(r.get('pts') or 0)))
+        a['players'].append((draft_initial_text(r.get('dname') or r.get('pname')),
+                             float(r.get('pts') or 0)))
     for a in acc.values():
         a['players'].sort(key=lambda t: (-t[1], str(t[0])))
     return list(acc.values())
@@ -946,7 +961,9 @@ def load_book(league_key=None):
             day_key(row) if grain == 'day' else week_key(row))
         players = contributors_index[grain][key] if grain != 'week' or platform == 'espn' \
             else contributors_index['week'].get(key)
-        ranked = sorted(((r.get('dname') or r.get('pname'), float(r.get(metric.key) or 0))
+        # Details name players short -- 'Y Alvarez' (Kyle 09-11); dname is
+        # already the nickname where the league's seed has one.
+        ranked = sorted(((draft_initial_text(r.get('dname') or r.get('pname')), float(r.get(metric.key) or 0))
                          for r in players if r.get(metric.key) is not None),
                         key=lambda t: (-t[1], str(t[0])))
         return [(n, v) for n, v in ranked if v > 0][:3]
@@ -1027,7 +1044,8 @@ class _CbsWeekIndex:
                   AND team_id = {int(row['team_id'])}
                   AND slot_label = '{str(row['slot']).replace("'", "''")}'
                 GROUP BY player_key""")
-            self.slot_cache[key] = sorted(((r.get('dname') or r.get('pname'), float(r['pts'] or 0))
+            self.slot_cache[key] = sorted(((draft_initial_text(r.get('dname') or r.get('pname')),
+                                            float(r['pts'] or 0))
                                            for r in rows), key=lambda t: (-t[1], str(t[0])))
         return self.slot_cache[key]
 
@@ -1147,7 +1165,7 @@ def _lifetime(player_season, inactive_season, team_season, slot_season, canon_of
     for r in player_season:
         cid = cid_of(r)
         for c in COUNT_COLS + ['pts', 'hit_pts', 'pit_pts']:
-            top_players[cid][c][r.get('dname') or r.get('pname')] += float(r.get(c) or 0)
+            top_players[cid][c][draft_initial_text(r.get('dname') or r.get('pname'))] += float(r.get(c) or 0)
     for cid, a in totals.items():
         a['team_name'] = canon_names.get(cid, a.get('team_name'))
         a['abbrev'] = canon_labels.get(cid, a.get('abbrev'))

@@ -343,8 +343,11 @@ def test_mass_tie_reads_no_record_beside_a_real_band_and_never_alone():
     pools = {('team', 'level_all'): L.Pool(rows), ('team', 'day_all'): L.Pool(rows)}
     assert L.record_row(sheet, 'Holds', m, 'desc', 'team', [week, day], pools, ctx) is True
     out = sheet.rows[-1]
-    assert out[1] == 'no record' and out[4] == 'done 3 times at this grain'
+    assert out[1] == 'no record' and out[3] == 1
+    assert out[4] == '1 done 3 times -- first Week, last Week'
     assert out[7] == 'T3, T2, T1'                        # team holders are abbreviations
+    span = L.Pool(rows).top('hld', 'desc', 1)[0]
+    assert span.tie_first['unit'] == 1 and span.tie_last['unit'] == 3
 
 
 def test_context_supplies_period_counts_per_band():

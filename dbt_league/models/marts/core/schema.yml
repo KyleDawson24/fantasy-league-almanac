@@ -572,6 +572,15 @@ models:
         description: 'Nickname if set, else proper-cased "First Last".'
         tests:
           - not_null
+      - name: is_name_withheld
+        description: >
+          TRUE when the platform withheld every name field and owner_display
+          is the owner_unavailable_label placeholder rather than a name
+          (MLB-263, ledger S-43). The identity is still real and keyed on
+          owner_id; only the label is unavailable. Consumers that used to
+          compare the label against the var's wording read this instead.
+        tests:
+          - not_null
 
   - name: dim_team_owner
     description: >
@@ -806,6 +815,14 @@ models:
         description: 'Owner-set short code for the fantasy team. Surfaced for compact team labels in output callouts (e.g., "Player (SMEL), 37.3 pts -- ...").'
       - name: owner_name
         description: 'Team owner display name.'
+      - name: owner_display
+        description: >
+          dim_team_owner's resolution of this (league, season, team)'s owner
+          label (MLB-263, ledger S-43), appended beside the platform-served
+          owner_name: nickname, casing and whitespace normalisation,
+          co-owner joins, and the withheld placeholder. NULL for free agents
+          and any team without an owner row. Consumers that COALESCE the two
+          today can read this one.
       - name: player_id
         description: 'ESPN stable numeric player identifier.'
         tests:

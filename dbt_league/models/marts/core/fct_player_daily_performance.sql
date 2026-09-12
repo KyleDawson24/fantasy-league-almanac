@@ -148,9 +148,23 @@ from {{ ref('int_player_daily') }}
 select b.* replace (
     coalesce(d.canonical_name, b.team_name)     as team_name,
     coalesce(d.canonical_abbrev, b.team_abbrev) as team_abbrev
-)
+),
+-- The dim-resolved owner label, APPENDED so the positional shape above is
+-- untouched (MLB-263, ledger S-43). owner_name is what the platform served
+-- on the day (stg_box_scores for ESPN; already dim-resolved for CBS);
+-- owner_display is dim_team_owner's resolution of the same (league,
+-- season, team) -- nickname, casing, whitespace, co-owner joins, and the
+-- withheld placeholder -- which four marts already attach downstream.
+-- Measured when it landed: ESPN 19,993 of 131,087 rows differ, across
+-- five label pairs; CBS 0. NULL where no owner row exists for the team
+-- (free agents, the unmanned team), the same as the marts.
+o.owner_display
 from base b
 left join {{ ref('dim_franchise_season') }} d
     on b.league_key = d.league_key
     and cast(b.team_id as varchar) = d.franchise_id
     and b.season_year = d.season_year
+left join {{ ref('dim_team_owner') }} o
+    on b.league_key = o.league_key
+    and b.season_year = o.season_year
+    and cast(b.team_id as varchar) = o.team_id

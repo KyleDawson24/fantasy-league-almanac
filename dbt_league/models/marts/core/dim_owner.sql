@@ -73,8 +73,9 @@ nicknames as (
         nullif(trim(last_name), '')      as last_name,
         nullif(trim(preferred_name), '') as preferred_name
     from {{ ref('owner_nicknames') }}
-)
+),
 
+resolved as (
 select
     o.league_key,
     o.owner_id,
@@ -124,3 +125,16 @@ select
 from owners o
 left join nicknames n
     on o.owner_id = n.owner_id
+)
+
+select
+    r.*,
+    -- WITHHELD AS A FLAG, NOT A STRING (MLB-263, ledger S-43). Every
+    -- consumer that needs to know whether the label above is a real name
+    -- or the platform-withheld placeholder used to compare the label
+    -- against the var's wording -- a sentinel-string contract between
+    -- this model and output/owner_labels.py that broke the moment the
+    -- wording moved. This is the same fact as a boolean, computed in
+    -- the one place the label is decided.
+    r.owner_display = '{{ var("owner_unavailable_label") }}' as is_name_withheld
+from resolved r

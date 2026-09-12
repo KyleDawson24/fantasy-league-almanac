@@ -3,9 +3,9 @@
     python output/generate_records_book.py --league espn-main
     python output/generate_records_book.py --league cbs-bsb --no-sheets --preview-dir out/
 
-Default target is the league's DEV sheet (sheets_target's safe default);
---prod is deliberately not offered here -- this is the eyeball-render
-entry point and the standing books stay untouched until the 2.2 pass.
+Default target is the league's DEV sheet (sheets_target's safe default).
+--prod writes the same tabs to the standing book -- offered from Kyle's
+09-11 "write these to prod" ruling on; it never ran to prod before that.
 The three tabs take the standing Records tab's place on the dev book
 (Lifetime · Season · Matchup) and that tab is hidden, not deleted;
 nothing else in the workbook is written.
@@ -54,6 +54,8 @@ def main():
     parser.add_argument('--league', default=None, metavar='LEAGUE_KEY')
     parser.add_argument('--no-sheets', action='store_true',
                         help='Build the tabs and print a summary without writing.')
+    parser.add_argument('--prod', action='store_true',
+                        help="Write to the league's production book instead of dev.")
     parser.add_argument('--preview-dir', default=None,
                         help='Write one TSV per tab to this directory.')
     parser.add_argument('--duckdb', nargs='?', const=True, default=None, metavar='PATH')
@@ -82,12 +84,12 @@ def main():
 
     if args.no_sheets:
         return
-    sheet_id, label = sheets_target.resolve_sheets_target(False, db.league())
+    sheet_id, label = sheets_target.resolve_sheets_target(args.prod, db.league())
     if not sheet_id:
         print('[records-book] no dev sheet configured for this league; preview only')
         return
     from records_book_write import tab_url, write_records_book
-    print(f"[records-book] writing to dev sheet: {sheet_id}")
+    print(f"[records-book] writing to {label} sheet: {sheet_id}")
     gids = write_records_book(sheet_id, tabs)
     for title, gid in gids.items():
         print(f"[records-book] {title}: {tab_url(sheet_id, gid)}")

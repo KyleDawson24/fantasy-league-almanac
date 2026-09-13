@@ -1,17 +1,25 @@
-"""tools/duckdb_run.sh retries a segfaulting sweep exactly once (MLB-179).
+"""tools/duckdb_run.sh retries a segfaulting sweep up to MAX_SEGV_RETRIES
+times, default 2 (MLB-179).
 
 `stg_mlb__player_game` segfaults nondeterministically on the DuckDB lane
-(exit 139, 2 of 4 attempts on 2026-08-02). A segfault writes no
-run_results.json, so the wrapper used to stop on its "startup failure"
-branch and the whole build died on a coin flip. These tests drive the
-wrapper with a FAKE dbt whose per-call behaviour is scripted, so no
-DuckDB, no warehouse and no real dbt are involved -- only the wrapper's
+(exit 139; the 2026-09-13 rate trial measured ~40% per attempt over 10
+attempts). A segfault writes no run_results.json, so the wrapper used to
+stop on its "startup failure" branch and the whole build died on a coin
+flip. One retry still left ~16% of builds dead; two leave ~6%, and a crash
+dies inside ~2.5 minutes, so the second retry is near-free. These tests
+drive the wrapper with a FAKE dbt whose per-call behaviour is scripted, so
+no DuckDB, no warehouse and no real dbt are involved -- only the wrapper's
 control flow is under test:
 
-  * segv then ok   -> retried once, loudly, and the run reports SUCCESS
-                      WITH the retry named in the summary;
-  * segv then segv -> retried once and then STOPS (exit 1), never loops;
-  * plain exit 1   -> NOT retried; only 139 is the flake.
+  * segv then ok          -> retried once, loudly, and the run reports
+                             SUCCESS WITH the retry named in the summary;
+  * segv, segv, then ok   -> retried twice and SUCCEEDS, both retries in
+                             the summary;
+  * segv x3               -> retried twice and then STOPS (exit 1), never
+                             loops;
+  * MAX_SEGV_RETRIES=1    -> the cap is honoured: segv, segv stops after
+                             one retry;
+  * plain exit 1          -> NOT retried; only 139 is the flake.
 
 Same bash precondition as tests/test_demo_isolation.py.
 """
@@ -45,7 +53,8 @@ esac
 """
 
 
-def run_wrapper(tmp_path: Path, script: list[str]) -> tuple[int, str, int]:
+def run_wrapper(tmp_path: Path, script: list[str],
+                extra_env: dict[str, str] | None = None) -> tuple[int, str, int]:
     """Run the wrapper against the fake dbt. Returns (rc, output, dbt calls)."""
     fake = tmp_path / "dbt"
     fake.write_text(FAKE_DBT, encoding="utf-8", newline="\n")
@@ -67,6 +76,7 @@ def run_wrapper(tmp_path: Path, script: list[str]) -> tuple[int, str, int]:
         # interpreter sits beside DBT_BIN; pin it to the one running the tests.
         "PATH": str(Path(sys.executable).parent) + os.pathsep + env.get("PATH", ""),
     })
+    env.update(extra_env or {})
     proc = subprocess.run(
         [BASH, str(WRAPPER)], cwd=REPO, env=env, capture_output=True,
         text=True, encoding="utf-8", errors="replace", timeout=120,
@@ -77,24 +87,45 @@ def run_wrapper(tmp_path: Path, script: list[str]) -> tuple[int, str, int]:
     return proc.returncode, proc.stdout + proc.stderr, calls
 
 
-def test_segfault_is_retried_once_and_the_success_summary_names_it(tmp_path):
+def test_segfault_is_retried_and_the_success_summary_names_it(tmp_path):
     rc, out, calls = run_wrapper(tmp_path, ["segv", "ok"])
     assert rc == 0, out
     assert calls == 2
     assert "SEGFAULTED (exit 139)" in out
-    assert "Retrying the same sweep ONCE" in out
+    assert "Retrying the same sweep (retry 1 of 2)" in out
     assert "SUCCESS" in out
     # Loud in the SUMMARY, not just at the moment it happened.
-    assert "NOTE: round 1 hit a SEGFAULT (exit 139) and was retried once" in out
-    assert "the retry exited 0" in out
+    assert "NOTE: round 1 hit a SEGFAULT (exit 139) and was retried (MLB-179)" in out
+    assert "retry 1 exited 0" in out
 
 
-def test_two_segfaults_stop_after_exactly_one_retry(tmp_path):
+def test_two_segfaults_are_retried_twice_and_succeed(tmp_path):
     rc, out, calls = run_wrapper(tmp_path, ["segv", "segv", "ok"])
+    assert rc == 0, out
+    assert calls == 3, "the second retry is what the cap of 2 buys"
+    assert "Retrying the same sweep (retry 1 of 2)" in out
+    assert "Retrying the same sweep (retry 2 of 2)" in out
+    assert "SUCCESS" in out
+    # Both retries land in the one summary line, in order.
+    assert "retry 1 exited 139; retry 2 exited 0" in out
+
+
+def test_three_segfaults_stop_after_exactly_two_retries(tmp_path):
+    rc, out, calls = run_wrapper(tmp_path, ["segv", "segv", "segv", "ok"])
     assert rc == 1, out
-    assert calls == 2, "must retry once and then stop, never loop"
-    assert "again after 1 retry" in out
+    assert calls == 3, "must retry twice and then stop, never loop"
+    assert "again after 2 retry(ies)" in out
     assert "MLB-179" in out
+    assert "retry 1 exited 139; retry 2 exited 139" in out
+
+
+def test_the_cap_is_tunable_down_to_one_retry(tmp_path):
+    rc, out, calls = run_wrapper(tmp_path, ["segv", "segv", "ok"],
+                                 extra_env={"MAX_SEGV_RETRIES": "1"})
+    assert rc == 1, out
+    assert calls == 2, "MAX_SEGV_RETRIES=1 must stop after one retry"
+    assert "Retrying the same sweep (retry 1 of 1)" in out
+    assert "again after 1 retry(ies)" in out
 
 
 def test_ordinary_failure_is_not_retried(tmp_path):

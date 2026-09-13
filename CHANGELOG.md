@@ -18,12 +18,14 @@ repository is idle._
 
 ### Changed
 
-- `tools/duckdb_run.sh` retries a segfaulting sweep exactly once (MLB-179).
+- `tools/duckdb_run.sh` retries a segfaulting sweep, up to twice (MLB-179).
   `stg_mlb__player_game` crashes nondeterministically on the local DuckDB
   lane (exit 139); the wrapper used to stop on its startup-failure branch.
-  The retry is announced where it happens and again in the run summary,
-  never silently, and a second segfault stops the build as a finding.
-  Tunable `MAX_SEGV_RETRIES` (default 1).
+  Every retry is announced where it happens and again in the run summary,
+  never silently, and exhausting the cap stops the build as a finding.
+  Tunable `MAX_SEGV_RETRIES`; the default moved from 1 to 2 after the
+  2026-09-13 rate trial measured the flake at ~40% per attempt (one retry
+  left ~16% of builds dead, two leave ~6%, and a crash dies in ~2.5 min).
 - Docs truth-up (MLB-259): QUICKSTART, SETUP and `.env.example` now state
   that Google branding verification is approved (standard permission
   screen, no unverified-app warning) and that private and public ESPN

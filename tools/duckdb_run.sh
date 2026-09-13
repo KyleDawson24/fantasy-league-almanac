@@ -46,10 +46,14 @@
 # passes producing byte-identical tables. A segfault writes no
 # run_results.json, so without special handling it fell into the "startup
 # failure" branch below and the whole build stopped on a coin flip. The
-# sweep is now retried ONCE on exit 139, and the retry is announced both
-# where it happens and in the final summary, so a nondeterministic crash
-# becomes a logged hiccup and never a silent one. One retry, not a loop:
-# two segfaults in a row is a finding to capture, not something to hide.
+# sweep is now retried on exit 139 -- up to MAX_SEGV_RETRIES times, default
+# 2 -- and every retry is announced both where it happens and in the final
+# summary, so a nondeterministic crash becomes a logged hiccup and never a
+# silent one. The cap was 1 until the MLB-179 rate trial (10 attempts,
+# 2026-09-13) measured the flake at ~40% per attempt: one retry still left
+# ~16% of builds dead, two retries leave ~6%, and a crash dies inside ~2.5
+# minutes, so the extra retry is near-free. A bounded cap, not a loop:
+# exhausting it is a finding to capture, not something to hide.
 #
 # Usage:   tools/duckdb_run.sh
 # Tunable: DBT_BIN DBT_THREADS DBT_DUCKDB_MEMORY_LIMIT DBT_DUCKDB_TEMP_LIMIT
@@ -76,7 +80,7 @@ TARGET_PATH="${TARGET_PATH:-target/duckdb}"
 DBT_THREADS="${DBT_THREADS:-1}"
 SWEEP_CMD="${SWEEP_CMD:-run}"
 MAX_ROUNDS="${MAX_ROUNDS:-4}"
-MAX_SEGV_RETRIES="${MAX_SEGV_RETRIES:-1}"   # exit-139 retries for the WHOLE run
+MAX_SEGV_RETRIES="${MAX_SEGV_RETRIES:-2}"   # exit-139 retries for the WHOLE run
 
 export DBT_DUCKDB_MEMORY_LIMIT="${DBT_DUCKDB_MEMORY_LIMIT:-6GB}"
 export DBT_DUCKDB_TEMP_LIMIT="${DBT_DUCKDB_TEMP_LIMIT:-6GB}"
@@ -190,19 +194,21 @@ while [ "$round" -lt "$MAX_ROUNDS" ]; do
 
   # 139 = the process was killed by SIGSEGV (bash's rendering of a Windows
   # access violation). Known nondeterministic on stg_mlb__player_game
-  # (MLB-179); retried once, loudly, and never more than MAX_SEGV_RETRIES
-  # per run. Any other non-zero exit is NOT retried -- a compile error or a
-  # real model failure is deterministic and re-running it hides nothing.
-  if [ "$sweep_rc" -eq 139 ] && [ "$segv_retries" -lt "$MAX_SEGV_RETRIES" ]; then
+  # (MLB-179); retried loudly, and never more than MAX_SEGV_RETRIES times
+  # per run -- the counter is per RUN, not per round, so the cap holds even
+  # when the crash lands in a later round. Any other non-zero exit is NOT
+  # retried -- a compile error or a real model failure is deterministic and
+  # re-running it hides nothing.
+  while [ "$sweep_rc" -eq 139 ] && [ "$segv_retries" -lt "$MAX_SEGV_RETRIES" ]; do
     segv_retries=$((segv_retries + 1))
     say "!! round $round: dbt SEGFAULTED (exit 139). This is the MLB-179 flake"
-    say "!! (stg_mlb__player_game, nondeterministic). Retrying the same sweep ONCE."
-    segv_note="round $round hit a SEGFAULT (exit 139) and was retried once (MLB-179)"
+    say "!! (stg_mlb__player_game, nondeterministic). Retrying the same sweep (retry $segv_retries of $MAX_SEGV_RETRIES)."
+    [ -n "$segv_note" ] || segv_note="round $round hit a SEGFAULT (exit 139) and was retried (MLB-179)"
     sweep
     sweep_rc=$?
-    say "!! round $round: retry after segfault exited $sweep_rc"
-    segv_note="$segv_note; the retry exited $sweep_rc"
-  fi
+    say "!! round $round: retry $segv_retries after segfault exited $sweep_rc"
+    segv_note="$segv_note; retry $segv_retries exited $sweep_rc"
+  done
 
   # A sweep that dies BEFORE writing run_results.json (compile error, bad
   # profile, missing adapter) leaves the previous run's file in place. Reading

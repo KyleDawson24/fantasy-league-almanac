@@ -580,54 +580,6 @@ def _fact_stat_column(stat_name):
     return column
 
 
-def rank_arc(season_year):
-    """Cumulative standing by SCORING PERIOD -- the points league's version
-    of the rank-by-week arc (MLB-243).
-
-    The H2H arc walks matchup periods and ranks on cumulative wins. This
-    format has one matchup period covering the whole season, so that arc is
-    a single point; the day is the unit that actually moves here, and the
-    standing is cumulative points.
-
-    Same output columns as `almanac_data.get_team_rank_arc`
-    (team_id, team_abbrev, period, standings_rank) so the chart machinery
-    is untouched.
-    """
-    return query_for_presentation(f"""
-        WITH daily AS (
-            SELECT team_id, scoring_period,
-                   SUM(CAST(COALESCE(total_stat_pts, 0) AS DECIMAL(18, 6)))
-                       AS pts
-            FROM fct_player_daily_performance
-            WHERE {league_predicate()}
-              AND season_year = {int(season_year)}
-              AND team_id IS NOT NULL
-              AND is_active_slot
-            GROUP BY team_id, scoring_period
-        ),
-        labelled AS (
-            SELECT d.team_id, d.scoring_period, d.pts, f.team_abbrev
-            FROM daily d
-            LEFT JOIN fct_team_season_performance f
-                ON  f.team_id     = d.team_id
-                AND f.season_year = {int(season_year)}
-                AND {league_predicate('f')}
-        ),
-        cume AS (
-            SELECT team_id, team_abbrev, scoring_period,
-                   SUM(pts) OVER (PARTITION BY team_id
-                                  ORDER BY scoring_period) AS cume_pts
-            FROM labelled
-        )
-        SELECT team_id, team_abbrev, scoring_period AS period,
-               ROW_NUMBER() OVER (
-                   PARTITION BY scoring_period
-                   ORDER BY cume_pts DESC, team_id) AS standings_rank
-        FROM cume
-        ORDER BY period, standings_rank
-    """)
-
-
 # ---------------------------------------------------------------------------
 # Inputs for the SHARED season-points standings presenter (MLB-243).
 #
@@ -675,83 +627,26 @@ def franchise_map():
 
 
 def dense_rank_arc(season_year):
-    """Team x SCORING DAY cumulative standing, built from first principles.
+    """Team x SCORING DAY cumulative standing, read off
+    fct_team_period_standing (MLB-263, S-29 reader half).
 
-    FOUR THINGS THIS HAS TO GET RIGHT, and the sparse version got none of
-    them:
-
-    1. DENSE SPINE. Every team gets a row for every scoring day through the
-       latest captured one -- not only the days it happened to score. A
-       cross join against the day list, not a group-by over production.
-    2. CARRY FORWARD. Cumulative totals run over the dense spine, so a day
-       with no production repeats yesterday's total instead of vanishing.
-       A team that goes quiet holds its line; it does not leave a hole in
-       the chart.
-    3. RANK FROM CUMULATIVE TOTALS, on that day -- the standing as it stood,
-       not a re-ranking of that day alone.
-    4. RECONCILIATION. The final day's cumulative total is the team's season
-       total, and the final day's rank is its place in the standings, so the
-       chart and the table below it cannot disagree.
+    The derivation this used to run here -- a DENSE team x day spine,
+    cumulative production carried forward over quiet days, rank from the
+    cumulative total on that day, ties by team_id -- moved into the fact
+    unchanged as its `derived` rows, and was measured row-for-row equal
+    against this function's old query on both warehouses before the read
+    moved. The sparse `rank_arc` that preceded it had no callers left and
+    retired in the same change.
 
     Rows carry the presenter's arc contract: team_id, team_name, period,
-    standings_rank, is_latest_period.
+    cume_pts, standings_rank, is_latest_period.
     """
     return query_for_presentation(f"""
-        WITH days AS (
-            SELECT DISTINCT scoring_period
-            FROM fct_player_daily_performance
-            WHERE {league_predicate()} AND season_year = {int(season_year)}
-        ),
-        teams AS (
-            SELECT team_id, team_name
-            FROM fct_team_season_performance
-            WHERE {league_predicate()} AND season_year = {int(season_year)}
-        ),
-        -- 1. THE DENSE SPINE.
-        spine AS (
-            SELECT t.team_id, t.team_name, d.scoring_period
-            FROM teams t CROSS JOIN days d
-        ),
-        scored AS (
-            SELECT team_id, scoring_period,
-                   SUM(CAST(COALESCE(total_stat_pts, 0) AS DECIMAL(18, 6)))
-                       AS pts
-            FROM fct_player_daily_performance
-            WHERE {league_predicate()}
-              AND season_year = {int(season_year)}
-              AND team_id IS NOT NULL
-              AND is_active_slot
-            GROUP BY team_id, scoring_period
-        ),
-        -- 2. CARRY FORWARD: the running sum walks the dense spine, so a
-        --    zero-production day inherits the previous total.
-        cume AS (
-            SELECT
-                s.team_id,
-                s.team_name,
-                s.scoring_period,
-                SUM(COALESCE(x.pts, 0)) OVER (
-                    PARTITION BY s.team_id
-                    ORDER BY s.scoring_period
-                    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-                ) AS cume_pts
-            FROM spine s
-            LEFT JOIN scored x
-                ON x.team_id = s.team_id
-               AND x.scoring_period = s.scoring_period
-        )
-        -- 3. RANK FROM THE CUMULATIVE TOTAL on each day.
-        SELECT
-            team_id,
-            team_name,
-            scoring_period AS period,
-            ROUND(CAST(cume_pts AS DOUBLE), 1) AS cume_pts,
-            ROW_NUMBER() OVER (
-                PARTITION BY scoring_period
-                ORDER BY cume_pts DESC, team_id) AS standings_rank,
-            scoring_period = (SELECT MAX(scoring_period) FROM days)
-                AS is_latest_period
-        FROM cume
+        SELECT team_id, team_name, period_key AS period, cume_pts,
+               standings_rank, is_latest_period
+        FROM fct_team_period_standing
+        WHERE {league_predicate()} AND season_year = {int(season_year)}
+          AND source = 'derived'
         ORDER BY period, standings_rank
     """)
 

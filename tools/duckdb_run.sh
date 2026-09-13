@@ -39,9 +39,21 @@
 # SWEEP_CMD=build to test everything, at a cost the published peaks do not
 # cover.
 #
+# EXIT 139 IS A THIRD CLASS (MLB-179). `stg_mlb__player_game` segfaults
+# nondeterministically on this box -- 2 of 4 attempts on 2026-08-02 and
+# 4 of 10 in the MLB-179 rate trial (2026-09-13; 40-142s in, free RAM
+# 7-10 GiB, duckdb 1.5.5), with nothing observing the build and the six
+# passes producing byte-identical tables. A segfault writes no
+# run_results.json, so without special handling it fell into the "startup
+# failure" branch below and the whole build stopped on a coin flip. The
+# sweep is now retried ONCE on exit 139, and the retry is announced both
+# where it happens and in the final summary, so a nondeterministic crash
+# becomes a logged hiccup and never a silent one. One retry, not a loop:
+# two segfaults in a row is a finding to capture, not something to hide.
+#
 # Usage:   tools/duckdb_run.sh
 # Tunable: DBT_BIN DBT_THREADS DBT_DUCKDB_MEMORY_LIMIT DBT_DUCKDB_TEMP_LIMIT
-#          SWEEP_CMD MAX_ROUNDS
+#          SWEEP_CMD MAX_ROUNDS MAX_SEGV_RETRIES
 #
 # NOT `set -e`: a failing dbt invocation is the normal path here.
 set -uo pipefail
@@ -64,6 +76,7 @@ TARGET_PATH="${TARGET_PATH:-target/duckdb}"
 DBT_THREADS="${DBT_THREADS:-1}"
 SWEEP_CMD="${SWEEP_CMD:-run}"
 MAX_ROUNDS="${MAX_ROUNDS:-4}"
+MAX_SEGV_RETRIES="${MAX_SEGV_RETRIES:-1}"   # exit-139 retries for the WHOLE run
 
 export DBT_DUCKDB_MEMORY_LIMIT="${DBT_DUCKDB_MEMORY_LIMIT:-6GB}"
 export DBT_DUCKDB_TEMP_LIMIT="${DBT_DUCKDB_TEMP_LIMIT:-6GB}"
@@ -79,6 +92,19 @@ COMMON=(--project-dir "$PROJECT_DIR" --profiles-dir "$PROFILES_DIR"
         --target-path "$TARGET_PATH" --threads "$DBT_THREADS")
 
 say() { printf '[duckdb_run] %s\n' "$*"; }
+
+segv_retries=0
+segv_note=""                # set when a retry happened; echoed in every summary
+segv_report() { [ -n "$segv_note" ] && say "NOTE: $segv_note"; return 0; }
+
+sweep() {   # the round's dbt invocation; a function so a retry is the same call
+  if [ -z "$sweep_selectors" ]; then
+    "$DBT_BIN" "$SWEEP_CMD" "${COMMON[@]}"
+  else
+    # shellcheck disable=SC2086
+    "$DBT_BIN" "$SWEEP_CMD" "${COMMON[@]}" -s $sweep_selectors
+  fi
+}
 
 # NO floor check here, deliberately. An earlier version warned below ~5.5 GB
 # on the strength of a measured "floor" -- but that floor was measured while
@@ -153,16 +179,30 @@ while [ "$round" -lt "$MAX_ROUNDS" ]; do
 
   if [ -z "$sweep_selectors" ]; then
     say "round $round: sweep -- dbt $SWEEP_CMD (whole project)"
-    "$DBT_BIN" "$SWEEP_CMD" "${COMMON[@]}"
   else
     # Selectors are SPACE-separated on purpose: dbt reads a COMMA as set
     # INTERSECTION, so `-s a,b` selects nothing and exits 0 -- a green run
     # that built nothing at all.
     say "round $round: rebuilding the skip cone ($(echo "$sweep_selectors" | wc -w) models)"
-    # shellcheck disable=SC2086
-    "$DBT_BIN" "$SWEEP_CMD" "${COMMON[@]}" -s $sweep_selectors
   fi
+  sweep
   sweep_rc=$?
+
+  # 139 = the process was killed by SIGSEGV (bash's rendering of a Windows
+  # access violation). Known nondeterministic on stg_mlb__player_game
+  # (MLB-179); retried once, loudly, and never more than MAX_SEGV_RETRIES
+  # per run. Any other non-zero exit is NOT retried -- a compile error or a
+  # real model failure is deterministic and re-running it hides nothing.
+  if [ "$sweep_rc" -eq 139 ] && [ "$segv_retries" -lt "$MAX_SEGV_RETRIES" ]; then
+    segv_retries=$((segv_retries + 1))
+    say "!! round $round: dbt SEGFAULTED (exit 139). This is the MLB-179 flake"
+    say "!! (stg_mlb__player_game, nondeterministic). Retrying the same sweep ONCE."
+    segv_note="round $round hit a SEGFAULT (exit 139) and was retried once (MLB-179)"
+    sweep
+    sweep_rc=$?
+    say "!! round $round: retry after segfault exited $sweep_rc"
+    segv_note="$segv_note; the retry exited $sweep_rc"
+  fi
 
   # A sweep that dies BEFORE writing run_results.json (compile error, bad
   # profile, missing adapter) leaves the previous run's file in place. Reading
@@ -174,7 +214,12 @@ while [ "$round" -lt "$MAX_ROUNDS" ]; do
   # stat both values come back empty, compare equal, and would condemn every
   # normal 72/74 run as a startup failure.
   if [ "$sweep_rc" -ne 0 ]; then
-    if [ ! -f "$RESULTS" ]; then
+    if [ "$sweep_rc" -eq 139 ]; then
+      say "round $round: dbt SEGFAULTED (exit 139) again after $segv_retries retry(ies) -- not retrying further."
+      say "Capture this log and the DuckDB version for MLB-179; the crash is a finding, not a build to loop on."
+      segv_report
+      exit 1
+    elif [ ! -f "$RESULTS" ]; then
       say "round $round: dbt exited $sweep_rc and $RESULTS does not exist."
       say "That is a startup failure, not a model failure -- read the dbt output above."
       exit 1
@@ -194,6 +239,7 @@ while [ "$round" -lt "$MAX_ROUNDS" ]; do
 
   if [ -z "$errors" ] && [ -z "$skips" ]; then
     say "round $round: clean -- no errors, nothing skipped"
+    segv_report
     say "SUCCESS: the chain is fully built."
     exit 0
   fi
@@ -228,6 +274,7 @@ while [ "$round" -lt "$MAX_ROUNDS" ]; do
 
   if [ -z "$skips" ]; then
     if [ "${#failed_reason[@]}" -eq 0 ]; then
+      segv_report
       say "SUCCESS: the chain is fully built (via $round round(s))."
       exit 0
     fi
@@ -239,6 +286,7 @@ done
 
 echo
 say "=================== INCOMPLETE BUILD ==================="
+segv_report
 if [ "${#failed_reason[@]}" -gt 0 ]; then
   say "models that fail even in their own process:"
   for m in "${!failed_reason[@]}"; do say "  - $m -- ${failed_reason[$m]}"; done

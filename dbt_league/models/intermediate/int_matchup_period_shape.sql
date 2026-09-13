@@ -46,7 +46,11 @@ select
     -- Carried so a reader can tell "this period's own evidence was bad" from
     -- "this season never established a norm" without a second join.
     e.is_well_formed,
-    e.participating_sides
+    e.participating_sides,
+    -- Carried so dim_matchup_period can say a season-points period is never a
+    -- playoff period, on a platform with no schedule settings to say so
+    -- (MLB-263, Ruling A prerequisite).
+    e.is_season_points_period
 from {{ ref('int_matchup_period_evidence') }} e
 inner join {{ ref('int_matchup_season_derivation') }} d
     on e.league_key = d.league_key

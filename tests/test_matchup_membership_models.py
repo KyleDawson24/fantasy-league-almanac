@@ -292,6 +292,21 @@ def built(tmp_path_factory):
             LEAGUE_KEY   varchar
         )
     """)
+    # The CBS season spine int_matchup_period_evidence and
+    # int_matchup_season_derivation read for their CBS branch (MLB-263,
+    # Ruling A prerequisite): present and EMPTY, so the build over
+    # stg_matchup_schedule+ resolves the refs and the branch contributes
+    # nothing -- the same stand-in shape test_franchise_rivalry carries.
+    con.execute("create schema if not exists ANALYTICS")
+    con.execute("""
+        create or replace table ANALYTICS.stg_cbs__ui_standings (
+            league_key varchar, season_year integer, franchise_id varchar,
+            total_points double)
+    """)
+    con.execute("""
+        create or replace table ANALYTICS.stg_cbs__standings (
+            league_key varchar, season_year integer, team_id varchar)
+    """)
     con.close()
 
     # dim_matchup_period is a descendant but belongs to rung 4A's contract and

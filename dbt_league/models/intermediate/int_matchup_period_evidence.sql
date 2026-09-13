@@ -344,8 +344,54 @@ season_points_output as (
     where current_league_type = 5
       and current_matchup_period = 1
       and latest_scoring_period between 1 and 400
+),
+
+cbs_season_points_output as (
+    -- CBS is a season-long points league with no platform matchup periods at
+    -- all (MLB-263, Ruling A prerequisite; S-37 / S-38). Mirror the ESPN
+    -- type-5 shape above so a CBS season reaches dim_matchup_period's
+    -- universe: one synthetic period per season, reportable, never closed,
+    -- never a completion candidate. min/max scoring_period are deliberately
+    -- NULL so the dim derives NO dates for it (the MLB calendar covers
+    -- 2025+ only, and a synthetic period has no platform calendar to be
+    -- wrong about).
+    -- Written to be deleted: MLB-271's matchup model replaces this.
+    select
+        league_key,
+        season_year,
+        1::integer as current_matchup_period,
+        1::integer as matchup_period,
+        false as is_closed,
+        true as is_reportable,
+        true as is_season_points_period,
+        false as is_completion_candidate,
+        true as is_well_formed,
+        0::integer as matchup_count,
+        0::integer as participating_sides,
+        0::integer as sides_with_membership,
+        0::integer as distinct_signatures,
+        0::integer as invalid_key_count,
+        -- No day count either: the platform defines no period, and the
+        -- count would only ever be read as a length to compare against a
+        -- standard this league does not have.
+        cast(null as integer) as scoring_period_count,
+        cast(null as integer) as min_scoring_period,
+        cast(null as integer) as max_scoring_period,
+        null as scoring_periods
+from (
+    -- The light CBS season spine: the UI standings page (2001-2025) and the
+    -- served period standings (the live season). NOT the CBS daily model --
+    -- that would hang the whole CBS reconstruction tree under the matchup
+    -- layer, and every DuckDB fixture that builds +dim_matchup_period would
+    -- have to stand it in.
+    select league_key, season_year from {{ ref('stg_cbs__ui_standings') }}
+    union
+    select league_key, season_year from {{ ref('stg_cbs__standings') }}
+) cbs_seasons
 )
 
 select * from h2h_output
 union all
 select * from season_points_output
+union all
+select * from cbs_season_points_output

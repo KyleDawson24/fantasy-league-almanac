@@ -130,6 +130,26 @@ def stranger(tmp_path_factory):
                 SEASON_YEAR decimal(38,0), RAW_JSON json,
                 EXTRACTED_AT timestamp, LEAGUE_KEY varchar)
         """)
+    # The CBS season spine int_matchup_period_evidence and
+    # int_matchup_season_derivation read for their CBS branch (MLB-263,
+    # Ruling A prerequisite). +dim_matchup_period now selects those two
+    # staging views, so their RAW sources must exist: present and EMPTY,
+    # in the contract's shape (config/raw_schema_contract.json), as the
+    # weekly-chain fixture creates every RAW table.
+    con.execute("""
+        create table RAW.CBS_UI_STANDINGS (
+            LEAGUE_KEY varchar, SEASON_YEAR decimal(38,0), DIVISION_NAME varchar,
+            STANDINGS_RANK decimal(38,0), FRANCHISE_ID decimal(38,0), TEAM_NAME varchar,
+            BATTING_POINTS double, PITCHING_POINTS double, TOTAL_POINTS double,
+            POINTS_BEHIND double, SOURCE_PATH varchar, LOADED_AT timestamp)
+    """)
+    con.execute("""
+        create table RAW.CBS_STANDINGS (
+            PERIOD decimal(38,0), PAYLOAD json, LEAGUE_KEY varchar, LEAGUE_SLUG varchar,
+            SEASON_YEAR decimal(38,0), ENDPOINT varchar, PARAMS json,
+            CAPTURED_AT timestamptz, HTTP_STATUS decimal(38,0), SOURCE_PATH varchar,
+            LOADED_AT timestamp)
+    """)
     stamped = datetime(2026, 8, 11, 12, 0, 0)
     for season_year in sorted(OPENER):
         con.execute("insert into RAW.MATCHUP_SCHEDULE values (?, ?, ?, ?)",

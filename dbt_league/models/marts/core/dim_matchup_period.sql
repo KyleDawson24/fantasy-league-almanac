@@ -78,7 +78,8 @@ with derived as (
         scoring_period_count,
         is_abnormal_derived,
         standard_period_length,
-        derivation_status
+        derivation_status,
+        is_season_points_period
     from {{ ref('int_matchup_period_shape') }}
 ),
 
@@ -204,7 +205,14 @@ resolved as (
         coalesce(
             case when s.regular_season_periods is not null
                  then u.matchup_period > s.regular_season_periods end,
-            l.is_playoff_legacy) as is_playoff,
+            l.is_playoff_legacy,
+            -- Third source (MLB-263, Ruling A prerequisite): a season-points
+            -- period is the whole season and is never a playoff period, on
+            -- any platform. ESPN type-5 already resolves FALSE through its
+            -- settings above; CBS has no settings row and no legacy seed, and
+            -- without this it would resolve NULL -- which the NULL-unsafe
+            -- `is_playoff = false` filters downstream would drop.
+            case when d.is_season_points_period then false end) as is_playoff,
 
         -- An explicit label survives; a generic one is offered only where the
         -- platform boundary is all that exists.

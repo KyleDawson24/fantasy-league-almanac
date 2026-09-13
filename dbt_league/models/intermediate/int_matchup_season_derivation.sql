@@ -201,3 +201,36 @@ select
         as periods_at_standard_length,
     {{ min_closed_periods }}::integer as min_closed_periods_required
 from classified
+
+union all
+
+-- CBS seasons (MLB-263, Ruling A prerequisite). The platform publishes no
+-- matchup schedule, so there is nothing to derive a standard from:
+-- 'unavailable' is the vocabulary's own word for "no schedule", and the
+-- shape model lets a season-points period through on any status but
+-- 'malformed'. One row per season the CBS standings feeds carry. Deletable
+-- with the rest of the shim (MLB-271).
+select
+    league_key,
+    season_year,
+    cast(null as timestamp) as captured_at,
+    season_year as declared_season_year,
+    1::integer as current_matchup_period,
+    0::integer as scheduled_matchup_count,
+    0::integer as closed_period_count,
+    0::integer as malformed_period_count,
+    'unavailable' as derivation_status,
+    cast(null as integer) as promoted_final_period,
+    cast(null as integer) as standard_period_length,
+    cast(null as integer) as periods_at_standard_length,
+    {{ min_closed_periods }}::integer as min_closed_periods_required
+from (
+    -- The light CBS season spine: the UI standings page (2001-2025) and the
+    -- served period standings (the live season). NOT the CBS daily model --
+    -- that would hang the whole CBS reconstruction tree under the matchup
+    -- layer, and every DuckDB fixture that builds +dim_matchup_period would
+    -- have to stand it in.
+    select league_key, season_year from {{ ref('stg_cbs__ui_standings') }}
+    union
+    select league_key, season_year from {{ ref('stg_cbs__standings') }}
+) cbs_seasons

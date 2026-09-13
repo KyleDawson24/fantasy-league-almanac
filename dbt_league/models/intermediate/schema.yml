@@ -877,6 +877,8 @@ models:
         description: >
           The season's status, carried so a consumer reading one row knows
           whether to trust it without a second join.
+      - name: is_season_points_period
+        description: 'Carried from the evidence model: TRUE for the synthetic season-long period of a season-points league (ESPN type 5, CBS). dim_matchup_period reads it to resolve is_playoff = FALSE where no settings row exists (MLB-263, Ruling A prerequisite).'
 
   - name: int_matchup_period_membership
     description: >

@@ -1316,12 +1316,17 @@ def get_cbs_record_catalog():
         SELECT DISTINCT d.stat_name, d.display_name,
                d.stat_category, d.polarity
         FROM dim_stat d
-        LEFT JOIN stg_cbs__scoring_settings s
-            ON s.canonical_key = d.canonical_key
+        -- The shared scoring-rule dim (MLB-263 S-30) instead of CBS's own
+        -- staging: it already resolved cbs_key -> canonical_key -> stat_name
+        -- through the seeds, so the join is by stat_name like every other
+        -- reader, and is_scored is the "this league scores it" fact.
+        LEFT JOIN dim_league_scoring_rule s
+            ON s.stat_name = d.stat_name
+            AND s.is_scored
             AND {league_predicate('s')}
         WHERE d.is_record_candidate
           AND d.stat_name IN ({carryable})
-          AND (s.canonical_key IS NOT NULL OR d.auto_tracked)
+          AND (s.stat_name IS NOT NULL OR d.auto_tracked)
     """)
     return {r['stat_name']: r for r in rows}
 

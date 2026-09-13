@@ -56,6 +56,13 @@ render: the same anchor over different data is a different corpus.
                     declared column_types) and leaves the table EMPTY --
                     which the 08-31 mint had already suffered; the corpus
                     has always rendered with owner_nicknames empty.
+  re-minted (2)     2026-09-13, at repo HEAD 0c8b989 + move 2.6, `dbt run` only
+                    (100+/100+ PASS), because the session's readers started
+                    reading models this database did not have yet
+                    (dim_league_scoring_rule for the stat specs). RULE: a
+                    reader re-point onto a NEW model needs this database
+                    re-minted at that code first, and the points corpus
+                    proven byte-still at HEAD before the reader moves.
   RAW adjustment    RAW.TRANSACTION_COVERAGE created EMPTY (see above)
   league            espn-main, format 'points' (dim_league_format)
   season            2026; matchup_period max 1; scoring_period max 142

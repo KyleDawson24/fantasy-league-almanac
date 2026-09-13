@@ -182,10 +182,13 @@ def get_team_week_stat_specs():
             d.stat_category,
             s.points_per_unit
         FROM dim_stat d
-        -- stg_scoring_settings is per-league (each league's own weights);
-        -- dim_stat is the platform stat vocabulary and stays unscoped.
-        INNER JOIN stg_scoring_settings s
+        -- dim_league_scoring_rule is per-league (each league's own weights,
+        -- either platform; MLB-263 S-30); dim_stat is the platform stat
+        -- vocabulary and stays unscoped. is_scored keeps the INNER join's
+        -- meaning: only stats this league actually scores.
+        INNER JOIN dim_league_scoring_rule s
             ON s.stat_name = d.stat_name
+            AND s.is_scored
             AND {league_predicate('s')}
         WHERE d.stat_category IN ('hitting', 'pitching')
           AND d.is_counting
@@ -3130,8 +3133,11 @@ def get_scored_record_specs():
             d.polarity,
             d.auto_tracked
         FROM dim_stat d
-        LEFT JOIN stg_scoring_settings s
+        -- The league's scoring rules, either platform (MLB-263 S-30): a
+        -- scored rule row exists iff the league scores the stat.
+        LEFT JOIN dim_league_scoring_rule s
             ON s.stat_name = d.stat_name
+            AND s.is_scored
             AND {league_predicate('s')}
         WHERE d.stat_category IN ('hitting', 'pitching', 'fielding')
           AND d.is_record_candidate

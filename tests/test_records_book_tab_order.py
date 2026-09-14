@@ -57,3 +57,54 @@ def test_input_list_is_not_mutated():
     order = list(ESPN)
     with_records_book_tabs(order, set(ESPN) | set(RECORDS_BOOK_TABS), 'Advanced Standings')
     assert order == ESPN
+
+
+# --------------------------------------------------------------------------
+# The Records book's own placement agrees with the standing renders, so the
+# two writers stop taking turns moving the strip.
+# --------------------------------------------------------------------------
+
+from records_book_write import placement_order  # noqa: E402
+
+NEW = [LIFETIME, SEASON, MATCHUP]
+
+
+def test_records_book_places_itself_after_advanced_standings():
+    # Freshly written tabs land at the end of the strip.
+    current = ESPN + NEW
+    assert placement_order(current, NEW, 'Records') == [
+        'Home', 'Records', 'Advanced Standings', LIFETIME, SEASON, MATCHUP,
+        'Trades', 'Draft Recap', 'AAA', 'BP', 'Matchup History']
+
+
+def test_records_book_placement_is_idempotent_after_a_standing_render():
+    placed = ['Home', 'Records', 'Advanced Standings', LIFETIME, SEASON, MATCHUP,
+              'Trades', 'Draft Recap', 'AAA', 'BP', 'Matchup History']
+    assert placement_order(placed, NEW, 'Records') == placed
+
+
+def test_records_book_placement_moves_tabs_back_from_the_front():
+    # The 09-09 rule had parked them in the Records slot, ahead of standings.
+    current = ['Home', LIFETIME, SEASON, MATCHUP, 'Records', 'Advanced Standings',
+               'Trades', 'Draft Recap', 'AAA', 'BP', 'Matchup History']
+    assert placement_order(current, NEW, 'Records') == [
+        'Home', 'Records', 'Advanced Standings', LIFETIME, SEASON, MATCHUP,
+        'Trades', 'Draft Recap', 'AAA', 'BP', 'Matchup History']
+
+
+def test_points_league_places_its_two_tabs():
+    current = CBS + [LIFETIME, SEASON]
+    assert placement_order(current, [LIFETIME, SEASON], 'Records') == [
+        'Home', 'Records', 'Advanced Standings', LIFETIME, SEASON,
+        'Draft Recap', 'Betty White Sox', 'Season History']
+
+
+def test_book_without_advanced_standings_uses_the_records_slot():
+    current = ['Home', 'Records', 'Draft Recap'] + NEW
+    assert placement_order(current, NEW, 'Records') == [
+        'Home', LIFETIME, SEASON, MATCHUP, 'Records', 'Draft Recap']
+
+
+def test_book_with_neither_anchor_is_left_alone():
+    current = ['Home', 'Draft Recap'] + NEW
+    assert placement_order(current, NEW, 'Records') == current

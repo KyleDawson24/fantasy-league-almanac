@@ -25,6 +25,10 @@ repository is idle._
   tab (wk23 dev eyeball, 2026-09-14). Only the tabs a workbook actually
   carries move -- a points league has no Matchup tab -- and target indexes
   are now contiguous, so a title the book lacks no longer leaves a gap.
+  `generate_records_book.py` places its tabs by the same rule, so the two
+  writers no longer take turns moving the strip: its 09-09 placement had
+  parked them in the hidden Records tab's slot, ahead of Advanced
+  Standings, and re-parked them there on every re-render.
 
 ### Changed
 

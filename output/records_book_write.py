@@ -7,14 +7,20 @@ parse), paints the presenter's format spec, adds the collapsible row
 groups, freezes the title band, and resolves the jump index into in-sheet
 links once the tab's gid exists.
 
-Tab placement (spec section 1, 09-09): on the DEV book the three tabs
-take the standing Records tab's position, ordered Lifetime · Season ·
-Matchup, and the standing tab is hidden -- never deleted, so the dev
-book keeps the old page for comparison. Prod never comes through here.
+Tab placement (spec section 1, 09-09; ordering revised 09-14): the three
+tabs ride directly after Advanced Standings, ordered Lifetime · Season ·
+Matchup, and the standing Records tab is hidden -- never deleted, so the
+book keeps the old page for comparison. That is the same slot the
+standing renderers' sort passes give them (almanac_write
+.with_records_book_tabs), so the two writers no longer take turns moving
+the strip. A book with no Advanced Standings tab falls back to the
+standing Records tab's own position. Prod comes through here from Kyle's
+09-11 ruling on.
 """
 
 import gspread
 
+from almanac_render import ADVANCED_STANDINGS_TAB
 from almanac_write import _is_quota_error, _sheets_call
 from records_book_logic import BAND_COLS, BAND_STARTS, TITLES, WIDTH, _col, sheet_safe
 
@@ -167,30 +173,55 @@ def write_tab(spreadsheet, title, sheet):
     return worksheet
 
 
+def placement_order(current_titles, new_titles, replace_title,
+                    after=ADVANCED_STANDINGS_TAB):
+    """The whole strip after placing the Records book. Pure.
+
+    `current_titles` is the workbook's tab order today, `new_titles` the
+    book's tabs in Lifetime · Season · Matchup order. They slot directly
+    after `after` when the workbook has it -- the standing renders' rule,
+    so a weekly render and a Records-book render agree on the strip --
+    and otherwise into `replace_title`'s own position, the 09-09 rule. A
+    book with neither is left as it is. The standing tab is never
+    removed; it is hidden by the caller."""
+    standing = [t for t in current_titles if t not in new_titles]
+    if after in standing:
+        at = standing.index(after) + 1
+    elif replace_title in standing:
+        at = standing.index(replace_title)
+    else:
+        return list(current_titles)
+    return standing[:at] + list(new_titles) + standing[at:]
+
+
 def place_tabs(spreadsheet, gids_in_order, replace_title):
-    """Move the new tabs into the standing tab's slot, in order, and hide
-    the standing tab. Idempotent: the slot is the lowest index among the
-    standing tab and the new tabs, so a re-render never shuffles them
-    (the API reads a target index in before-the-move positions, which
-    only behaves for moves toward the front)."""
+    """Move the new tabs to their slot (see placement_order) and hide the
+    standing tab. Every tab gets its index in one batch, in strip order:
+    that is the form the Sheets API honours for moves in either direction
+    (a lone target index is read in before-the-move positions and only
+    behaves for moves toward the front), and it is what the standing
+    renderers' sort passes already do."""
     meta = _sheets_call('meta', lambda: spreadsheet.fetch_sheet_metadata(
         {'fields': 'sheets(properties(sheetId,title,index,hidden))'}))
-    props = {s['properties']['title']: s['properties'] for s in meta.get('sheets', [])}
+    sheets = sorted(meta.get('sheets', []), key=lambda s: s['properties']['index'])
+    props = {s['properties']['title']: s['properties'] for s in sheets}
     old = props.get(replace_title)
     if old is None:
         print(f"[records-book] no '{replace_title}' tab to replace; tabs left where created")
         return
-    indexes = [old['index']] + [props[t]['index'] for t in props if props[t]['sheetId'] in gids_in_order]
-    base = min(indexes)
+    title_by_gid = {p['sheetId']: t for t, p in props.items()}
+    new_titles = [title_by_gid[g] for g in gids_in_order if g in title_by_gid]
+    order = placement_order([s['properties']['title'] for s in sheets], new_titles, replace_title)
     requests = []
-    for i, gid in enumerate(gids_in_order):
+    for i, title in enumerate(order):
         requests.append({'updateSheetProperties': {
-            'properties': {'sheetId': gid, 'index': base + i}, 'fields': 'index'}})
+            'properties': {'sheetId': props[title]['sheetId'], 'index': i}, 'fields': 'index'}})
     if not old.get('hidden'):
         requests.append({'updateSheetProperties': {
             'properties': {'sheetId': old['sheetId'], 'hidden': True}, 'fields': 'hidden'}})
     _sheets_call('place tabs', lambda: spreadsheet.batch_update({'requests': requests}))
-    print(f"[records-book] placed {len(gids_in_order)} tabs at index {base}; "
+    where = order.index(new_titles[0]) if new_titles else '-'
+    print(f"[records-book] placed {len(new_titles)} tabs at index {where}; "
           f"'{replace_title}' hidden")
 
 

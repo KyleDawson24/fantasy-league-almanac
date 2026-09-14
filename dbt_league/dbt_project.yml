@@ -109,6 +109,20 @@ vars:
   # record book.
   owner_unavailable_label: 'Owner unavailable'
 
+  # WHOSE SCORING THE cbs_stat_map SEED DOCUMENTS (MLB-219 / MLB-222). The
+  # seed's in_scoring_rules_2026 / points_2026 columns are ONE league's
+  # scoring configuration, hand-curated so assert_cbs_scoring_feed_matches_seed
+  # can catch the platform feed drifting away from the documentation. That
+  # is a documentation-drift check for a curated league, not a correctness
+  # invariant for every CBS league: a stranger's CBS league scores different
+  # categories at different weights by definition, and checking their
+  # correct feed against our seed would produce a wall of confident false
+  # failures. The assert therefore scopes itself to this league_key and is
+  # vacuous for every other league (and for an ESPN-only install, where the
+  # feed is empty). Set it to the league_key whose scoring the seed columns
+  # were curated from; there is no way to infer that from row counts.
+  cbs_curated_scoring_league: 'cbs-bsb'
+
 seeds:
   dbt_league:
     # ==================================================================

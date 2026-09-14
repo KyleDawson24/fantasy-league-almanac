@@ -1279,8 +1279,9 @@ models:
       with the verbatim feed values riding in cbs_key/feed_points. QS and
       IRSTR pass through as canonicals with no statsapi feed key -- engines
       DERIVE their per-game values. The cbs_stat_map seed's points_2026
-      mirrors this feed; assert_cbs_scoring_feed_matches_seed keeps them
-      in lockstep.
+      mirrors this feed FOR ONE LEAGUE (the cbs_curated_scoring_league
+      var); assert_cbs_scoring_feed_matches_seed keeps the two in lockstep
+      for that league and is vacuous for any other (MLB-219).
     tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:

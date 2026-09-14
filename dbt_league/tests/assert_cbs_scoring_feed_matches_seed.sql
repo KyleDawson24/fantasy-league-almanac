@@ -12,11 +12,24 @@
 -- out-granularity effective weight -- the seed documents the feed's
 -- surface, the staging model owns the translation.
 --
+-- SCOPED TO ONE LEAGUE, ON PURPOSE (MLB-219 / MLB-222). The seed columns
+-- are one league's configuration -- the one named by the
+-- cbs_curated_scoring_league var (dbt_project.yml). This is a
+-- documentation-drift check for THAT league, not a correctness invariant
+-- for CBS leagues in general: any other league scores different categories
+-- at different weights by definition, so its correct feed must never be
+-- graded against our seed. Every other league_key is filtered out here,
+-- and the `exists` guard makes the test vacuous when the curated league has
+-- no feed at all (an ESPN-only install: 0 feed rows, 16 seed rows -- which
+-- without the guard reads as 16 "seed scores a category the feed does not"
+-- failures). Measured on the ESPN-only fixture, 2026-09-13.
+--
 -- Returns one row per violation; zero rows = pass.
 
 with feed as (
     select cbs_key, feed_points
     from {{ ref('stg_cbs__scoring_settings') }}
+    where league_key = '{{ var("cbs_curated_scoring_league") }}'
 ),
 
 seed as (

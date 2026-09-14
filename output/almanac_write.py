@@ -114,6 +114,7 @@ from almanac_render import (
     team_tab_merge_ranges,
 )
 from sheets_writer import _get_authorized_client
+from records_book_logic import TITLES as _RECORDS_BOOK_TITLES
 
 
 # PITCHING_STAT_ORDER moved to almanac_data.py (Tier 2c.1). Re-exported
@@ -2811,13 +2812,39 @@ def _delete_prefixed_team_tabs(spreadsheet, current_titles):
             )
 
 
+# The MLB-212 Records book (Lifetime · Season · Matchup) is written by
+# generate_records_book.py, not by either standing renderer, so a standing
+# render's sort pass does not know its titles and used to shove all three
+# to the end of the tab strip, behind the appendix tab. They belong right
+# after the standings tab (Kyle 2026-09-14, wk23 dev eyeball).
+RECORDS_BOOK_TABS = (_RECORDS_BOOK_TITLES['lifetime'],
+                     _RECORDS_BOOK_TITLES['season'],
+                     _RECORDS_BOOK_TITLES['matchup'])
+
+
+def with_records_book_tabs(order, present_titles, after):
+    """`order` with whichever Records-book tabs the workbook actually has
+    slotted directly after `after`, in Lifetime · Season · Matchup order.
+    A points league has no Matchup tab, a fresh book has none -- only the
+    present ones move, and a title already in `order` is left alone."""
+    order = list(order)
+    extra = [t for t in RECORDS_BOOK_TABS if t in present_titles and t not in order]
+    if not extra or after not in order:
+        return order
+    at = order.index(after) + 1
+    return order[:at] + extra + order[at:]
+
+
 def _sort_almanac_tabs(spreadsheet, ordered_titles):
     worksheets_by_title = {worksheet.title: worksheet for worksheet in spreadsheet.worksheets()}
+    ordered_titles = with_records_book_tabs(
+        ordered_titles, worksheets_by_title, ADVANCED_STANDINGS_TAB)
+    # Contiguous target indexes: a title the book lacks must not leave a
+    # gap that the next tab is then asked to jump across.
+    present = [title for title in ordered_titles if title in worksheets_by_title]
     requests = []
-    for index, title in enumerate(ordered_titles):
-        worksheet = worksheets_by_title.get(title)
-        if not worksheet:
-            continue
+    for index, title in enumerate(present):
+        worksheet = worksheets_by_title[title]
         requests.append({
             'updateSheetProperties': {
                 'properties': {

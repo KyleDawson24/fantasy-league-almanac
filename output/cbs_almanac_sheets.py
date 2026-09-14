@@ -82,7 +82,7 @@ from almanac_logic import (
 # The ESPN draft board's red->white->green cell math, reused verbatim so
 # the two books' boards read identically (private import, same doctrine
 # as the almanac_logic ones above).
-from almanac_write import _draft_gradient_color
+from almanac_write import _draft_gradient_color, with_records_book_tabs
 from almanac_render import (
     HOME_DEVIATION_LABEL,
     HOME_HEADER,
@@ -5911,9 +5911,13 @@ def write_cbs_almanac(sheet_id):
     _write_tab(spreadsheet, home_title, patched, home_formats,
                value_input_option='USER_ENTERED')
 
-    # Tab order: Home, Records, Standings, team pages.
-    order = [HOME_TAB] + [t for t, _, _ in others]
+    # Tab order: Home, Records, Standings, the MLB-212 Records book if
+    # the workbook carries it (Lifetime · Season; a points league has no
+    # Matchup tab), team pages, Season History. Contiguous indexes only.
     by_title = {ws.title: ws for ws in spreadsheet.worksheets()}
+    order = with_records_book_tabs(
+        [HOME_TAB] + [t for t, _, _ in others], by_title, STANDINGS_TAB)
+    order = [t for t in order if t in by_title]
     requests = []
     for idx, title in enumerate(order):
         ws = by_title.get(title)

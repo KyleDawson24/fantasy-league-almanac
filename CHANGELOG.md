@@ -16,6 +16,16 @@ _Release notes are built from the commit range at each cut rather than
 accumulated here, so this section staying short is not a sign the
 repository is idle._
 
+### Fixed
+
+- The MLB-212 Records book (Lifetime · Season · Matchup Records) now rides
+  directly after Advanced Standings on both almanac workbooks. The standing
+  renderers' tab-sort passes knew only their own titles, so every weekly
+  render pushed the three tabs to the end of the strip behind the appendix
+  tab (wk23 dev eyeball, 2026-09-14). Only the tabs a workbook actually
+  carries move -- a points league has no Matchup tab -- and target indexes
+  are now contiguous, so a title the book lacks no longer leaves a gap.
+
 ### Changed
 
 - `tools/duckdb_run.sh` retries a segfaulting sweep, up to twice (MLB-179).

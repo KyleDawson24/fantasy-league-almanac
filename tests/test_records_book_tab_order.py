@@ -14,7 +14,7 @@ LIFETIME, SEASON, MATCHUP = RECORDS_BOOK_TABS
 ESPN = ['Home', 'Records', 'Advanced Standings', 'Trades', 'Draft Recap',
         'AAA', 'BP', 'Matchup History']
 CBS = ['Home', 'Records', 'Advanced Standings', 'Draft Recap',
-       'Betty White Sox', 'Season History']
+       'Baltic White Sox', 'Season History']
 
 
 def test_titles_are_the_records_book_titles():
@@ -33,7 +33,7 @@ def test_points_league_slots_only_the_tabs_it_has():
     present = set(CBS) | {LIFETIME, SEASON}
     out = with_records_book_tabs(CBS, present, 'Advanced Standings')
     assert out == ['Home', 'Records', 'Advanced Standings', LIFETIME, SEASON,
-                   'Draft Recap', 'Betty White Sox', 'Season History']
+                   'Draft Recap', 'Baltic White Sox', 'Season History']
 
 
 def test_fresh_book_without_a_records_book_is_untouched():
@@ -96,7 +96,7 @@ def test_points_league_places_its_two_tabs():
     current = CBS + [LIFETIME, SEASON]
     assert placement_order(current, [LIFETIME, SEASON], 'Records') == [
         'Home', 'Records', 'Advanced Standings', LIFETIME, SEASON,
-        'Draft Recap', 'Betty White Sox', 'Season History']
+        'Draft Recap', 'Baltic White Sox', 'Season History']
 
 
 def test_book_without_advanced_standings_uses_the_records_slot():

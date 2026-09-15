@@ -16,8 +16,99 @@ _Release notes are built from the commit range at each cut rather than
 accumulated here, so this section staying short is not a sign the
 repository is idle._
 
+## [2.1.0] - 2026-09-15
+
+The season-long release. The redesigned Records book and the roster-eligibility
+table land on both almanac workbooks, the traded-player week attribution is
+corrected, the build fails loudly where it used to under-count quietly, and the
+transform layer's two platforms converge on shared dimensions and facts with no
+rendered byte moving. Full story in
+[RELEASE NOTES v2.1.0.md](RELEASE%20NOTES%20v2.1.0.md).
+
+Minor rather than major: additive surfaces and fixes, one declared golden pass
+(2026-08-31), and no migration step for an existing install. The guided Windows
+launcher and setup wizard are byte-identical to v2.0.1.
+
+### Added
+
+- **The Records Page Redesign** (MLB-212). One shared engine renders a Records
+  book of three surfaces -- Lifetime Records, Season Records and, for
+  head-to-head leagues, Matchup Records -- on both the ESPN and CBS workbooks.
+  Format decides the tabs and the bands; the league's own scored stats and
+  fielded slots decide the rows. Halls and Top-N boards ride along. CBS hitter
+  slot records before 2026 lean on the standing position-eligibility estimates,
+  marked as such, with a linked legend row on every CBS tab. Written by
+  `output/generate_records_book.py` (`--prod` offered at Kyle's 09-11 ruling);
+  wiring it into the standing weekly writers is MLB-283.
+- **Roster eligibility counts on Advanced Standings, both books** (MLB-265).
+  Per team and position, how many current-roster players are eligible there,
+  directly under Points by Lineup Slot and in its shape. Only positions the
+  league fields render (seats, not settings rows); flex columns are kept
+  because they cannot be reconstructed from the atomic positions. The first
+  league-member-requested feature.
+- **Three loud-fail guards for silently under-counted scoring** (MLB-222).
+  `assert_espn_scoring_feed_is_in_vocabulary` and
+  `assert_cbs_scoring_feed_is_in_vocabulary` fail by id when a league scores a
+  stat the seeds cannot name; `assert_stat_points_split_sums_to_total` pins
+  hitting + pitching = total on every daily row. All vacuous for a league with
+  no feed, green on both pioneer leagues.
+- `cbs_curated_scoring_league` project variable (MLB-219): names the league
+  whose scoring the `cbs_stat_map` seed documents, so the seed-drift assert is
+  scoped to it and vacuous for every other league.
+- Shared dimensions and facts from the convergence program (MLB-249, MLB-263):
+  `dim_lineup_slot` and the current-roster eligibility mart, `dim_mlb_team`
+  with the club id on the daily fact, `dim_league_scoring_rule`,
+  `fct_team_period_standing`, the named lens on `dim_team_season_standing`
+  with CBS awarded finishes unioned in, a withheld-owner flag on `dim_owner`,
+  a game date on ESPN daily rows, `opening_*` emitted by the acquisition mart,
+  and the CBS league reaching `dim_matchup_period` in its true shape. All
+  output-neutral; the corpora stayed byte-still through every move.
+
+### Changed
+
+- League format is decided from settings, not feed shape (MLB-263, Ruling D).
+  `stg_cbs__league_settings` reads the CBS config's league rules; ESPN's
+  `currentLeagueType = 5` joins the same settings union; presence of period
+  standings is the fallback, not the verdict. Both verdicts are published as
+  columns and a singular test fails the build if they disagree.
+- The abbreviation-disambiguation rule is written into the platform adapter
+  contract (MLB-263, Ruling C).
+- The renderer's acquisition bridge is deleted at a measured zero callers;
+  the mart emits the `opening_*` collapse itself and a dbt singular test
+  guards `opening = keeper + draft` (MLB-263).
+- `tools/duckdb_run.sh` retries a segfaulting sweep, up to twice (MLB-179).
+  `stg_mlb__player_game` crashes nondeterministically on the local DuckDB
+  lane (exit 139); the wrapper used to stop on its startup-failure branch.
+  Every retry is announced where it happens and again in the run summary,
+  never silently, and exhausting the cap stops the build as a finding.
+  Tunable `MAX_SEGV_RETRIES`; the default moved from 1 to 2 after the
+  2026-09-13 rate trial measured the flake at ~40% per attempt (one retry
+  left ~16% of builds dead, two leave ~6%, and a crash dies in ~2.5 min).
+- Docs truth-up (MLB-259, MLB-276): QUICKSTART, SETUP and `.env.example` now
+  state that Google branding verification is approved (standard permission
+  screen, no unverified-app warning) and that private and public ESPN
+  leagues are both supported, matching the live site. Sentences describing
+  current behaviour no longer carry a version stamp; the period-completeness
+  direction is recorded and indexed.
+
 ### Fixed
 
+- **Traded-player week attribution** (MLB-264). The weekly slot fact's
+  recency key is chronological and carries `last_scoring_period`, so a
+  mid-week trade no longer files the whole week under the wrong team;
+  94 of 241 multi-team player-weeks relabelled. Golden-moving; rode the
+  release's one declared pass on 2026-08-31.
+- The Team of the Month board prices SP and RP as pitching (MLB-249 X-1).
+  The daily-window pool priced a pitcher reached through SP/RP eligibility on
+  hitting points, then dropped him for scoring zero. No golden moved; the fix
+  is carried by a test on the emitted SQL.
+- The incremental watermark compares `(season_year, matchup_period)` as two
+  columns instead of `season_year * 100 + matchup_period` (MLB-222). The
+  packed key silently skipped the first weeks of every new season for a
+  league with more than 99 periods a season.
+- `assert_cbs_scoring_feed_matches_seed` is scoped to the curated league
+  (MLB-219) instead of grading every CBS league's feed against one league's
+  hand-curated weights.
 - The MLB-212 Records book (Lifetime · Season · Matchup Records) now rides
   directly after Advanced Standings on both almanac workbooks. The standing
   renderers' tab-sort passes knew only their own titles, so every weekly
@@ -30,28 +121,13 @@ repository is idle._
   parked them in the hidden Records tab's slot, ahead of Advanced
   Standings, and re-parked them there on every re-render.
 
-### Changed
-
-- `tools/duckdb_run.sh` retries a segfaulting sweep, up to twice (MLB-179).
-  `stg_mlb__player_game` crashes nondeterministically on the local DuckDB
-  lane (exit 139); the wrapper used to stop on its startup-failure branch.
-  Every retry is announced where it happens and again in the run summary,
-  never silently, and exhausting the cap stops the build as a finding.
-  Tunable `MAX_SEGV_RETRIES`; the default moved from 1 to 2 after the
-  2026-09-13 rate trial measured the flake at ~40% per attempt (one retry
-  left ~16% of builds dead, two leave ~6%, and a crash dies in ~2.5 min).
-- Docs truth-up (MLB-259): QUICKSTART, SETUP and `.env.example` now state
-  that Google branding verification is approved (standard permission
-  screen, no unverified-app warning) and that private and public ESPN
-  leagues are both supported, matching the live site.
-
 ## [2.0.1] - 2026-08-20
 
 The first post-launch patch removes maintainer-only launch/release working
 files from the current public tree and latest consumer ZIP while preserving
 the release and PII controls locally. It also reconciles the 14 advanced
 league-configuration CSVs and documents which are active. Full story in
-[RELEASE NOTES v2.0.1.md](RELEASE%20NOTES%20v2.0.1.md).
+[RELEASE NOTES v2.0.1.md](docs/releases/RELEASE%20NOTES%20v2.0.1.md).
 
 ## [2.0.0] - 2026-08-20
 

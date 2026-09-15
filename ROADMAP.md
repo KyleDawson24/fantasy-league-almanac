@@ -22,7 +22,11 @@ then made the release ZIP a guided Windows journey: double-click setup,
 illustrated manual cookie acquisition, validate-before-write local config and
 the existing complete-history runner ending in a shareable Google workbook.
 v2.0.1 (2026-08-20) followed as a release-hygiene patch with no runtime
-almanac change.
+almanac change. v2.1.0 (2026-09-15), the season-long release, landed the
+redesigned Records book and a roster-eligibility table on both workbooks,
+corrected traded-player week attribution, made the build fail loudly on a
+scored stat it cannot name, and converged the two platforms on shared
+dimensions and facts without moving a rendered byte.
 See CHANGELOG.md for the per-release entries.
 
 **In flight right now:** v2.0's Reddit launch is the first broad stranger

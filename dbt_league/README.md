@@ -18,24 +18,24 @@ Browse the compiled catalog (lineage + column-level docs) at the
 RAW.* sources (30)         seeds (20)
    │                          │
    ▼                          │
-staging/    (34) stg_*   1:1 reshapes of RAW; no business logic
+staging/    (35) stg_*   1:1 reshapes of RAW; no business logic
    │                          │
    ▼                          │
 intermediate/ (23) int_* business logic that isn't yet a contract:
    │                     the slot-validity filter + daily wide rollup
    ▼                          │
-marts/core/ (22) dim_*   the star-schema contract layer: 11 dims
-   │            fct_*    + 11 facts (daily / weekly / season grains,
+marts/core/ (26) dim_*   the star-schema contract layer: 14 dims
+   │            fct_*    + 12 facts (daily / weekly / season grains,
    │                     active / inactive lenses, position points)
    ▼
-marts/reporting/ (18) mart_*  consumer-facing report shapes:
+marts/reporting/ (19) mart_*  consumer-facing report shapes:
    │                     leaderboard, benchmarks, matchup view,
    ▼                     roster snapshot, draft board, records
 exposures (4)            the Python output scripts, declared in
                          models/exposures.yml
 ```
 
-97 models in all. Counts here are regenerated at each release cut from
+103 models in all. Counts here are regenerated at each release cut from
 the parsed manifest; if you are reading them mid-cycle, `dbt parse` and
 the manifest are the truth.
 
@@ -43,10 +43,10 @@ Layer conventions:
 
 | Layer | Prefix | Default materialization | What belongs here |
 |---|---|---|---|
-| `staging/` | `stg_` | **table** (15 of 34 pin `view` themselves) | One model per raw-table *grain* (a multi-grain source like box_scores feeds several single-grain reshapes). Pure reshape: flatten VARIANT, type, rename. The only layer that reads `source()`. |
+| `staging/` | `stg_` | **table** (15 of 35 pin `view` themselves) | One model per raw-table *grain* (a multi-grain source like box_scores feeds several single-grain reshapes). Pure reshape: flatten VARIANT, type, rename. The only layer that reads `source()`. |
 | `intermediate/` | `int_` | **table** (all 23 pin their own; 18 are views) | Business logic that isn't yet a consumer contract: the slot-validity filter and the wide daily point rollup. |
-| `marts/core/` | `dim_` / `fct_` | table (3 weekly facts override to incremental; 11 thin dims/facts to view) | The contract layer. Grain-documented dimensions and facts that reporting marts and the Python output layer rely on. |
-| `marts/reporting/` | `mart_` | table (6 of 18 override to view) | Report-shaped derivations over core: rankings, league aggregates, matchup context, snapshot joins. |
+| `marts/core/` | `dim_` / `fct_` | table (3 weekly facts override to incremental; 14 thin dims/facts to view) | The contract layer. Grain-documented dimensions and facts that reporting marts and the Python output layer rely on. |
+| `marts/reporting/` | `mart_` | table (6 of 19 override to view) | Report-shaped derivations over core: rankings, league aggregates, matchup context, snapshot joins. |
 
 The staging/intermediate `table` defaults are deliberate and recent
 (MLB-134): a view over fat JSON re-runs the whole reshape for every
@@ -189,14 +189,14 @@ round every displayed value at source.
 
 ## Testing
 
-720 dbt data tests (696 generic + 24 singular) plus source-freshness
+770 dbt data tests (738 generic + 32 singular) plus source-freshness
 contracts:
 
-- **Generic tests** (696) -- every model carries a
+- **Generic tests** (738) -- every model carries a
   `dbt_utils.unique_combination_of_columns` grain test; keys and
   partitions carry `not_null` / `accepted_values`; staging FKs into the
   seed catalog carry `relationships`.
-- **Singular tests** (24, in `dbt_league/tests/`) -- cross-model
+- **Singular tests** (32, in `dbt_league/tests/`) -- cross-model
   invariants that used to be run-when-you-remember analyses, now
   enforced on every build: the season-fact-vs-weekly-rollup fidelity
   check (grain completeness both directions + points within the

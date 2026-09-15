@@ -222,9 +222,9 @@ The portability spike that sized the transform-layer port, including the traps i
 
 ## What this demonstrates
 
-The current shape of the transform layer: **97 dbt models** (50 views, 44 tables, 3 incremental), **20 seeds**, **720 data tests**, **30 sources**, and **4 declared exposures**. These counts are regenerated from the parsed manifest at each release cut; if you are reading them mid-cycle, `dbt parse` and the manifest are the truth.
+The current shape of the transform layer: **103 dbt models** (53 views, 47 tables, 3 incremental), **20 seeds**, **770 data tests**, **30 sources**, and **4 declared exposures**. These counts are regenerated from the parsed manifest at each release cut; if you are reading them mid-cycle, `dbt parse` and the manifest are the truth.
 
-Most of that needs a warehouse to exercise, but not all of it: with no account and no credentials, `dbt deps && dbt parse` compiles the project and `pytest tests/` passes. At this cut a fresh clone collects **1823** tracked pure tests, with **27** warehouse-marked goldens deselected by default -- collection counts, not a pass tally, since the tests wanting private regression corpora skip rather than fail. Your own checkout will print different totals: some tests need a POSIX shell and skip on Windows, and any untracked work of your own is collected too. Counts drift between releases; `pytest tests/ -q` on your machine is the truth.
+Most of that needs a warehouse to exercise, but not all of it: with no account and no credentials, `dbt deps && dbt parse` compiles the project and `pytest tests/` passes. At this cut a fresh clone collects **1883** tracked pure tests, with **31** warehouse-marked goldens deselected by default -- collection counts, not a pass tally, since the tests wanting private regression corpora skip rather than fail. Your own checkout will print different totals: some tests need a POSIX shell and skip on Windows, and any untracked work of your own is collected too. Counts drift between releases; `pytest tests/ -q` on your machine is the truth.
 
 - **Modeling that survived a second implementation.** Wide convergence facts at consumer grain; a symmetric active/inactive split ("active is fantasy reality, inactive is MLB reality") that is what makes wasted-production analysis possible at all; a seed-driven UNPIVOT mart where adding a tracked stat is a CSV row rather than a five-file SQL change.
 - **Reproducibility.** Floating-point sums are not associative, and SQL engines do not promise summation order, so rebuilding with no code change could move a rendered cell by one, and oh boy it often did. Sums now run in exact decimal with pinned tie-breaks, and a byte-diff harness pins a known week so any drift fails loudly.
@@ -255,13 +255,21 @@ Most of that needs a warehouse to exercise, but not all of it: with no account a
 
 ## Status
 
-- **v2.0.1** -- current, 2026-08-20. The first post-launch patch removes
+- **v2.1.0** -- current, 2026-09-15. The season-long release. The redesigned
+  Records book (Lifetime / Season / Matchup Records, one shared engine, format
+  decides the tabs) and a roster-eligibility table on Advanced Standings land
+  on both workbooks; traded-player week attribution is corrected; the build
+  fails loudly when a league scores a stat the vocabulary cannot name; and the
+  two platforms converge on shared dimensions and facts with no rendered byte
+  moving. The guided Windows journey is unchanged. Full notes:
+  [RELEASE NOTES v2.1.0.md](RELEASE%20NOTES%20v2.1.0.md).
+- **v2.0.1** -- 2026-08-20. The first post-launch patch removes
   maintainer-only launch/release working files from the current public tree
   and latest consumer ZIP, while the strict PII review ledger now stays with
   its private inventory and salt. It also reconciles the 14 advanced
   league-configuration CSVs and documents which are active. Runtime almanac
   behavior is unchanged. Full notes:
-  [RELEASE NOTES v2.0.1.md](RELEASE%20NOTES%20v2.0.1.md).
+  [RELEASE NOTES v2.0.1.md](docs/releases/RELEASE%20NOTES%20v2.0.1.md).
 - **v2.0.0** -- 2026-08-20. The release ZIP starts with a
   double-click Windows launcher that prepares its private Python environment,
   opens illustrated ESPN-cookie guidance, validates the exact league and

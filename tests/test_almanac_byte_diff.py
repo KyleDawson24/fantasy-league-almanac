@@ -10,9 +10,29 @@ Marked `warehouse` -- skipped by the default `pytest tests/` suite. Run at
 checkpoints during the refactor:
     pytest tests/ -m warehouse -k almanac_byte_diff
 
-To regenerate after an intentional output change (rare during refactor;
-typical when a new matchup_period has been loaded and the fixture should
-track the new state):
+ANCHOR STATE (MLB-295)
+  minted: 2026-09-18 at repo HEAD 15a1afd
+  freeze: wk22-2026; frozen = YES
+  input archive SHA256:
+    8d214251df61302907ee2bc7e7deb4c083cd00d8e377f802e026a839e9adceb3
+  horizon: ESPN 2025 plus 2026 MP1-22; CBS history through period 24,
+    2026-09-06; MLB through 2026-09-06
+  render anchor: ESPN 2026 matchup period 7
+  cache: data/fixtures/corpus-wk22-2026/cache/ESPN_FANTASY.duckdb
+  rebuilt by: tools/corpus_fixture.py build (103 models passed)
+  Snowflake parity validation is deferred; this anchor records the local lane.
+
+FROZEN INPUT (MLB-295). This corpus reads corpus-wk22-2026, the frozen
+week-22 RAW and projected league-config snapshot, never the live warehouse.
+tools/corpus_fixture.py builds its separate DuckDB cache and rebuilds when
+models, macros, reference seeds, project/profile config, RAW loader or adapter
+versions change. Fetch private inputs with tools/fetch_corpus_fixture.py.
+A byte diff means logic changed, not that a week passed. Regenerate only
+after reviewing the cause, one corpus at a time by explicit test-file path.
+Moving the freeze is a declared pass: freeze a new id, prepare private assets,
+update DEFAULT_FREEZE_ID and re-anchor the affected corpora together.
+
+To regenerate after a reviewed logic change:
     REGENERATE_BASELINES=1 pytest tests/test_almanac_byte_diff.py -m warehouse
 
 SCOPED BY FILE PATH, NOT BY `-k almanac_byte_diff` (2026-08-16). That
@@ -24,7 +44,7 @@ they were not. Regenerate one corpus at a time, deliberately.
 
 The season/matchup_period anchor is pinned because the entry script
 auto-detects MAX(matchup_period) when run without args; pinning keeps the
-test stable across weekly extracts during the refactor window.
+render anchor stable within the frozen input bundle.
 """
 
 import os
@@ -34,6 +54,8 @@ import sys
 from pathlib import Path
 
 import pytest
+
+from tests.byte_diff_report import describe_drift
 
 pytestmark = pytest.mark.warehouse
 
@@ -54,7 +76,7 @@ ANCHOR_SEASON = 2026
 ANCHOR_MATCHUP_PERIOD = 7
 
 
-def _run_almanac_preview(preview_dir: Path) -> None:
+def _run_almanac_preview(preview_dir: Path, corpus_db: Path) -> None:
     proc = subprocess.run(
         [
             sys.executable, "output/generate_almanac_sheet.py",
@@ -62,6 +84,7 @@ def _run_almanac_preview(preview_dir: Path) -> None:
             "--season-year", str(ANCHOR_SEASON),
             "--matchup-period", str(ANCHOR_MATCHUP_PERIOD),
             "--preview-dir", str(preview_dir),
+            "--duckdb", str(corpus_db),
         ],
         cwd=str(REPO),
         capture_output=True,
@@ -83,38 +106,9 @@ def _list_tsv(d: Path) -> set:
     return {p.name for p in d.iterdir() if p.suffix == ".tsv"}
 
 
-def _first_diff_hint(actual: bytes, expected: bytes) -> str:
-    if actual == expected:
-        return "match"
 
-    try:
-        a_lines = actual.decode("utf-8").splitlines()
-        e_lines = expected.decode("utf-8").splitlines()
-    except UnicodeDecodeError:
-        min_len = min(len(actual), len(expected))
-        byte_off = next(
-            (i for i in range(min_len) if actual[i] != expected[i]),
-            min_len,
-        )
-        return (
-            f"byte {byte_off} differs; "
-            f"actual {len(actual)} bytes, expected {len(expected)} bytes"
-        )
-
-    first_line = next(
-        (i for i, (a, e) in enumerate(zip(a_lines, e_lines)) if a != e),
-        min(len(a_lines), len(e_lines)),
-    )
-    return (
-        f"first diff line {first_line + 1} "
-        f"(actual {len(a_lines)} lines, expected {len(e_lines)} lines):\n"
-        f"      expected: {e_lines[first_line] if first_line < len(e_lines) else '<EOF>'}\n"
-        f"      actual:   {a_lines[first_line] if first_line < len(a_lines) else '<EOF>'}"
-    )
-
-
-def test_almanac_tsv_matches_baseline(tmp_path):
-    _run_almanac_preview(tmp_path)
+def test_almanac_tsv_matches_baseline(tmp_path, corpus_db):
+    _run_almanac_preview(tmp_path, corpus_db)
 
     actual_names = _list_tsv(tmp_path)
     expected_names = _list_tsv(FIX_DIR)
@@ -136,10 +130,10 @@ def test_almanac_tsv_matches_baseline(tmp_path):
         actual = (tmp_path / name).read_bytes()
         expected = (FIX_DIR / name).read_bytes()
         if actual != expected:
-            drifted.append((name, _first_diff_hint(actual, expected)))
+            drifted.append((name, describe_drift(name, actual, expected)))
 
     if drifted:
-        msg = ["Almanac TSV drift vs tests/fixtures/almanac_v1_1_0/:"]
+        msg = ["ESPN drift vs tests/fixtures/almanac_v1_1_0/ (frozen fixture wk22-2026):"]
         for name, hint in drifted:
             msg.append(f"  {name}: {hint}")
         msg.append(

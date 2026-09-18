@@ -25,10 +25,32 @@ TWO DIFFERENCES FROM THE ESPN HARNESS, both forced by the renderer:
    pinned here is only the window this test renders through.
 
 Marked `warehouse`. Run:
-    pytest tests/ -m warehouse -k cbs_almanac_byte_diff
+    pytest tests/test_cbs_almanac_byte_diff.py -m warehouse
+
+ANCHOR STATE (MLB-295)
+  minted: 2026-09-18 at repo HEAD 15a1afd
+  freeze: wk22-2026; frozen = YES
+  input archive SHA256:
+    8d214251df61302907ee2bc7e7deb4c083cd00d8e377f802e026a839e9adceb3
+  horizon: CBS all history through period 24 / 2026-09-06; ESPN 2025
+    plus 2026 MP1-22; MLB through 2026-09-06
+  render anchor: Team of the Month window 2026-06-01 through 2026-06-30
+  cache: data/fixtures/corpus-wk22-2026/cache/ESPN_FANTASY.duckdb
+  rebuilt by: tools/corpus_fixture.py build (103 models passed)
+  Snowflake parity validation is deferred; this anchor records the local lane.
+
+FROZEN INPUT (MLB-295). This corpus reads corpus-wk22-2026, the frozen
+week-22 RAW and projected league-config snapshot, never the live warehouse.
+tools/corpus_fixture.py builds its separate DuckDB cache and rebuilds when
+models, macros, reference seeds, project/profile config, RAW loader or adapter
+versions change. Fetch private inputs with tools/fetch_corpus_fixture.py.
+A byte diff means logic changed, not that a week passed. Regenerate only
+after reviewing the cause, one corpus at a time by explicit test-file path.
+Moving the freeze is a declared pass: freeze a new id, prepare private assets,
+update DEFAULT_FREEZE_ID and re-anchor the affected corpora together.
 
 Regenerate after a reviewed, intentional output change:
-    REGENERATE_BASELINES=1 pytest tests/ -m warehouse -k cbs_almanac_byte_diff
+    REGENERATE_BASELINES=1 pytest tests/test_cbs_almanac_byte_diff.py -m warehouse
 """
 
 import os
@@ -37,6 +59,8 @@ from datetime import date
 from pathlib import Path
 
 import pytest
+
+from tests.byte_diff_report import describe_drift
 
 pytestmark = pytest.mark.warehouse
 
@@ -55,6 +79,21 @@ CBS_LEAGUE_KEY = "cbs-bsb"
 # A COMPLETED month, so the pinned window never depends on how far the
 # current month has accrued. Move this and re-anchor in the same commit.
 MONTH_WINDOW = (date(2026, 6, 1), date(2026, 6, 30))
+
+
+@pytest.fixture
+def cbs_duckdb(corpus_db, monkeypatch):
+    """Restore all backend globals, including any previous cached connection."""
+    import db
+    for name in ('_BACKEND', '_duck_path', '_dialect', '_duck_conn'):
+        monkeypatch.setattr(db, name, getattr(db, name))
+    db._duck_conn = None
+    db.use_duckdb(str(corpus_db))
+    try:
+        yield
+    finally:
+        if db._duck_conn is not None:
+            db._duck_conn.close()
 
 
 @pytest.fixture
@@ -96,32 +135,8 @@ def _list_tsv(d: Path) -> set:
     return {p.name for p in d.iterdir() if p.suffix == ".tsv"}
 
 
-def _first_diff_hint(actual: bytes, expected: bytes) -> str:
-    if actual == expected:
-        return "match"
-    try:
-        a_lines = actual.decode("utf-8").splitlines()
-        e_lines = expected.decode("utf-8").splitlines()
-    except UnicodeDecodeError:
-        min_len = min(len(actual), len(expected))
-        byte_off = next((i for i in range(min_len) if actual[i] != expected[i]),
-                        min_len)
-        return (f"byte {byte_off} differs; actual {len(actual)} bytes, "
-                f"expected {len(expected)} bytes")
 
-    first_line = next(
-        (i for i, (a, e) in enumerate(zip(a_lines, e_lines)) if a != e),
-        min(len(a_lines), len(e_lines)),
-    )
-    return (
-        f"first diff line {first_line + 1} "
-        f"(actual {len(a_lines)} lines, expected {len(e_lines)} lines):\n"
-        f"      expected: {e_lines[first_line] if first_line < len(e_lines) else '<EOF>'}\n"
-        f"      actual:   {a_lines[first_line] if first_line < len(a_lines) else '<EOF>'}"
-    )
-
-
-def test_cbs_almanac_tsv_matches_baseline(tmp_path, monkeypatch, cbs_league):
+def test_cbs_almanac_tsv_matches_baseline(tmp_path, monkeypatch, cbs_duckdb, cbs_league):
     _render(tmp_path, monkeypatch)
 
     actual_names = _list_tsv(tmp_path)
@@ -144,14 +159,14 @@ def test_cbs_almanac_tsv_matches_baseline(tmp_path, monkeypatch, cbs_league):
         actual = (tmp_path / name).read_bytes()
         expected = (FIX_DIR / name).read_bytes()
         if actual != expected:
-            drifted.append((name, _first_diff_hint(actual, expected)))
+            drifted.append((name, describe_drift(name, actual, expected)))
 
     if drifted:
-        msg = ["CBS almanac TSV drift vs tests/fixtures/cbs_almanac/:"]
+        msg = ["CBS drift vs tests/fixtures/cbs_almanac/ (frozen fixture wk22-2026):"]
         for name, hint in drifted:
             msg.append(f"  {name}: {hint}")
         msg.append(
             "If intentional, regenerate with: REGENERATE_BASELINES=1 "
-            "pytest tests/ -m warehouse -k cbs_almanac_byte_diff"
+            "pytest tests/test_cbs_almanac_byte_diff.py -m warehouse"
         )
         pytest.fail("\n".join(msg))

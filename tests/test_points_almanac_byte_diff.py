@@ -1,7 +1,7 @@
 """Byte-diff regression test for the SEASON-POINTS almanac (MLB-263).
 
 The sibling harness, tests/test_almanac_byte_diff.py, pins the HEAD-TO-HEAD
-book against the real league on Snowflake. This one pins the OTHER book --
+book against a separate frozen week-22 fixture. This one pins the OTHER book --
 the season-long points workbook a points-format league receives -- and it
 had no baseline at all until now. That gap mattered the moment MLB-249 X-1
 went near `espn_points_data.window_lineup`: the Team-of-the-Month board is
@@ -13,8 +13,9 @@ league in Snowflake to render -- `espn-main` there is head-to-head. The
 only points-format dataset that exists is the first-year stranger
 rehearsal captured 2026-08-13 (the MLB-243 league: drafted July 31, never
 completed a matchup, so `max(matchup_period)` is 1). It lives in a local
-DuckDB file, which also makes this corpus FROZEN: unlike the H2H corpus,
-weekly extracts cannot move it, so a diff here is always code.
+DuckDB file, which makes this corpus FROZEN: weekly extracts cannot
+move it, so a diff here is always code. The H2H and CBS corpora now also
+use frozen inputs, in their own separate bundle.
 
 THE DATABASE IS NOT THE SHIPPED SNAPSHOT. The 1.9.0-era file the rehearsal
 left behind was built by 2026-08-13 model code, and the chain has moved
@@ -75,6 +76,12 @@ Marked `warehouse` -- skipped by the default `pytest tests/` suite, like
 both sibling corpora. Run it deliberately:
     pytest tests/test_points_almanac_byte_diff.py -m warehouse
 
+FROZEN INPUT (MLB-295). This corpus retains its own rehearsal database,
+POINTS_CORPUS_DB, outside the week-22 bundle, and never reads the live
+warehouse. Its ANCHOR STATE above remains authoritative. A byte diff means
+logic changed, not that a week passed. Regenerate only after reviewing the
+cause, one corpus at a time by explicit test-file path.
+
 To regenerate after an intentional output change:
     REGENERATE_BASELINES=1 pytest tests/test_points_almanac_byte_diff.py -m warehouse
 
@@ -92,6 +99,8 @@ import sys
 from pathlib import Path
 
 import pytest
+
+from tests.byte_diff_report import describe_drift
 
 pytestmark = pytest.mark.warehouse
 
@@ -153,35 +162,6 @@ def _list_tsv(d: Path) -> set:
     return {p.name for p in d.iterdir() if p.suffix == ".tsv"}
 
 
-def _first_diff_hint(actual: bytes, expected: bytes) -> str:
-    if actual == expected:
-        return "match"
-
-    try:
-        a_lines = actual.decode("utf-8").splitlines()
-        e_lines = expected.decode("utf-8").splitlines()
-    except UnicodeDecodeError:
-        min_len = min(len(actual), len(expected))
-        byte_off = next(
-            (i for i in range(min_len) if actual[i] != expected[i]),
-            min_len,
-        )
-        return (
-            f"byte {byte_off} differs; "
-            f"actual {len(actual)} bytes, expected {len(expected)} bytes"
-        )
-
-    first_line = next(
-        (i for i, (a, e) in enumerate(zip(a_lines, e_lines)) if a != e),
-        min(len(a_lines), len(e_lines)),
-    )
-    return (
-        f"first diff line {first_line + 1} "
-        f"(actual {len(a_lines)} lines, expected {len(e_lines)} lines):\n"
-        f"      expected: {e_lines[first_line] if first_line < len(e_lines) else '<EOF>'}\n"
-        f"      actual:   {a_lines[first_line] if first_line < len(a_lines) else '<EOF>'}"
-    )
-
 
 def test_points_almanac_tsv_matches_baseline(tmp_path):
     _run_points_preview(tmp_path)
@@ -206,8 +186,8 @@ def test_points_almanac_tsv_matches_baseline(tmp_path):
         actual = (tmp_path / name).read_bytes()
         expected = (FIX_DIR / name).read_bytes()
         if actual != expected:
-            drifted.append((name, _first_diff_hint(actual, expected)))
+            drifted.append((name, describe_drift(name, actual, expected)))
 
-    assert not drifted, "points almanac output drifted from baseline:\n" + "\n".join(
+    assert not drifted, "Points drift vs tests/fixtures/points_almanac_v2_1/ (frozen fixture points rehearsal):\n" + "\n".join(
         f"  {name}: {hint}" for name, hint in drifted
     )

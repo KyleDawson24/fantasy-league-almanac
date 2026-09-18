@@ -210,12 +210,35 @@ contracts:
   none yet).
 - **Byte-diff goldens** (outside dbt, `../tests/`) -- the ESPN and CBS
   almanac TSV fixtures, recap BBCode, and records-report BBCode are
-  regression-pinned; `pytest -m warehouse` from the repo root diffs them
-  against your warehouse. **These corpora are private** (they render
+  regression-pinned. The ESPN H2H and CBS TSV corpora render from a frozen
+  fixture, never your live warehouse: a private, hashed RAW/config snapshot
+  fetched with `python tools/fetch_corpus_fixture.py` and built into its own
+  DuckDB cache with `python tools/corpus_fixture.py build`. Model, macro,
+  reference-seed, project/profile, RAW-loader or adapter changes rebuild the
+  cache; weekly data refreshes cannot move it. The points corpus retains its
+  separate frozen rehearsal database (`POINTS_CORPUS_DB`). **These corpora are private** (they render
   real owner names, so they live on the maintainer's machine and the
   private dev remote only). In a fresh public clone the tests that need
   them *skip* rather than fail -- see "Which tests need what" in
   [SETUP.md](../SETUP.md).
+
+Run corpus checks by file path from the repository root, for example
+`pytest tests/test_almanac_byte_diff.py -m warehouse`. Regenerate only after
+reviewing the cause of every difference, one corpus at a time:
+`REGENERATE_BASELINES=1 pytest tests/<corpus test file> -m warehouse`.
+
+To move the frozen input horizon, use `tools/corpus_fixture.py freeze
+--freeze-id <new-id>` on a complete RAW capture. Configuration is projected
+to the committed public CSV schemas without changing private source files;
+projection hashes and equality proofs travel in the bundle. The column gate
+checks all physical RAW/CSV column names for contact-like or undeclared
+columns (it does not inspect nested JSON contents). Verify the new bundle,
+update `DEFAULT_FREEZE_ID`, rebuild and classify changes before re-anchoring.
+Keep the separate points rehearsal anchor unchanged unless explicitly in scope.
+Prepare the new private input archive and checksum, then a separate private
+goldens archive named for the freeze and anchor commit, with its own checksum.
+The maintainer uploads both assets to the private dev Release after review;
+never publish real league fixtures or goldens to the public repository.
 
 ## Running it
 

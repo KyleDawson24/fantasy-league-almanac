@@ -12,6 +12,8 @@ them by filename alone.)
 
 ## [Unreleased]
 
+- The ESPN head-to-head and CBS byte-diff corpora render from a frozen week-22 fixture (private, hashed RAW plus projected league config, rebuilt into its own DuckDB file when model logic changes), so a golden moves for a reviewed change and never merely because a week passed (MLB-295).
+
 _Release notes are built from the commit range at each cut rather than
 accumulated here, so this section staying short is not a sign the
 repository is idle._

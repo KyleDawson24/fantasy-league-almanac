@@ -59,6 +59,24 @@ if str(_REPO_ROOT) not in sys.path:
 
 import pytest
 
+
+@pytest.fixture(scope='session')
+def corpus_db():
+    """Build the frozen corpus cache before any reader opens it (MLB-295)."""
+    import subprocess
+    from tools.corpus_fixture import DEFAULT_FREEZE_ID, LIVE_DB, fixture_root
+
+    root = fixture_root(DEFAULT_FREEZE_ID)
+    if not (root / 'bundle/BUNDLE_MANIFEST.json').exists():
+        pytest.skip('frozen corpus fixture absent; run tools/fetch_corpus_fixture.py')
+    proc = subprocess.run(
+        [sys.executable, 'tools/corpus_fixture.py', 'build', '--freeze-id', DEFAULT_FREEZE_ID],
+        cwd=str(_REPO_ROOT), capture_output=True, text=True, encoding='utf-8')
+    assert proc.returncode == 0, f'Corpus build failed:\n{proc.stdout}\n{proc.stderr}'
+    path = (root / 'cache/ESPN_FANTASY.duckdb').resolve()
+    assert path != LIVE_DB, 'Corpus must never use the live warehouse'
+    return path
+
 # The ESPN rows the query builders actually ask about, verbatim from
 # dbt_league/seeds/slot_classification.csv, plus one CBS row. The CBS row is
 # load-bearing rather than decorative: it is `inactive` too, so a stub

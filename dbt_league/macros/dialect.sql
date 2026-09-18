@@ -945,6 +945,21 @@ array_size({{ arr }})
 len({{ arr }})
 {%- endmacro %}
 
+{% macro to_json_array(expr) -%}
+{#- MLB-295: output flattening requires a JSON array on DuckDB; Snowflake
+    keeps ARRAY. Both union branches must use the same representation. -#}
+    {{ return(adapter.dispatch('to_json_array', 'dbt_league')(expr)) }}
+{%- endmacro %}
+
+{% macro default__to_json_array(expr) -%}
+to_array({{ expr }})
+{%- endmacro %}
+
+{% macro duckdb__to_json_array(expr) -%}
+cast({{ expr }} as json)
+{%- endmacro %}
+
+
 
 {% macro try_to_double(expr) -%}
 {#- "parse this text as a float, NULL if it isn't one". Snowflake

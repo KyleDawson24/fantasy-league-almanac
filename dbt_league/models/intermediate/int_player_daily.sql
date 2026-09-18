@@ -21,6 +21,12 @@
 --   provenance    how we know the day's state ('captured' for everything
 --                 platform-served; the walk-back enum for CBS history).
 --
+-- MLB-295 / MLB-284 defect #2: both union branches explicitly cast every
+-- column to its semantic type. Counting stats, periods and numeric team/player
+-- ids are INTEGER (proven lossless); points and weights are DOUBLE. The
+-- platform-neutral player_key remains VARCHAR. Eligibility uses one JSON-array
+-- representation on DuckDB and ARRAY on Snowflake.
+--
 -- Grain: (league_key, season_year, scoring_period, team_id, player_KEY,
 -- lineup_slot). matchup_period travels as a derived column (functionally
 -- determined by (league_key, season_year, scoring_period) via the
@@ -260,19 +266,19 @@ final as (
     -- stg_box_scores (zero-stat players don't survive daily_long's INNER
     -- JOIN to classification on a stat_name they don't emit).
     select
-        w.league_key,
-        w.season_year,
-        w.matchup_period,
-        w.scoring_period,
-        w.team_id,
-        w.team_name,
-        w.team_abbrev,
-        w.owner_name,
-        w.player_id,
-        w.player_name,
-        coalesce(b.display_name, w.player_name) as display_name,
-        b.position,
-        b.pro_team,
+        cast(w.league_key as varchar) as league_key,
+        cast(w.season_year as integer) as season_year,
+        cast(w.matchup_period as integer) as matchup_period,
+        cast(w.scoring_period as integer) as scoring_period,
+        cast(w.team_id as integer) as team_id,
+        cast(w.team_name as varchar) as team_name,
+        cast(w.team_abbrev as varchar) as team_abbrev,
+        cast(w.owner_name as varchar) as owner_name,
+        cast(w.player_id as integer) as player_id,
+        cast(w.player_name as varchar) as player_name,
+        cast(coalesce(b.display_name, w.player_name) as varchar) as display_name,
+        cast(b.position as varchar) as position,
+        cast(b.pro_team as varchar) as pro_team,
         -- The MLB Stats API id behind that spelling (MLB-263, S-41):
         -- ESPN writes `Ari` / `ChC` / `Wsh`, the seed lists the
         -- upper-case spellings, and the join is case-folded. NULL only
@@ -280,13 +286,13 @@ final as (
         -- know the spelling -- and the singular test
         -- assert_espn_pro_team_resolves_to_mlb_team makes the second
         -- case loud rather than silent.
-        ab.team_id              as mlb_team_id,
-        b.eligible_slots,
-        w.lineup_slot,
-        w.lineup_slot_category,
-        case when w.lineup_slot_category != 'inactive' then true else false end as is_active_slot,
-        b.games_played,
-        b.points as platform_points,
+        cast(ab.team_id as integer) as mlb_team_id,
+        {{ to_json_array('b.eligible_slots') }} as eligible_slots,
+        cast(w.lineup_slot as varchar) as lineup_slot,
+        cast(w.lineup_slot_category as varchar) as lineup_slot_category,
+        cast(case when w.lineup_slot_category != 'inactive' then true else false end as boolean) as is_active_slot,
+        cast(b.games_played as integer) as games_played,
+        cast(b.points as double) as platform_points,
 
         -- Stat-contribution split of platform_points into hitting vs
         -- pitching, so the active fact can roll up weekly
@@ -316,40 +322,106 @@ final as (
         -- diverge for a two-way player by the off-slot production ESPN did not
         -- credit to the team -- the same divergence platform_calculated_delta
         -- captures at team grain.
-        case
+        cast(case
             when coalesce(u.unfiltered_hitting_pts, 0)
                + coalesce(u.unfiltered_pitching_pts, 0) = 0
                 then case when w.lineup_slot in ('SP', 'RP', 'P') then 0 else b.points end
             else b.points * u.unfiltered_hitting_pts
                  / (u.unfiltered_hitting_pts + u.unfiltered_pitching_pts)
-        end as platform_hitting_pts,
-        case
+        end as double) as platform_hitting_pts,
+        cast(case
             when coalesce(u.unfiltered_hitting_pts, 0)
                + coalesce(u.unfiltered_pitching_pts, 0) = 0
                 then case when w.lineup_slot in ('SP', 'RP', 'P') then b.points else 0 end
             else b.points * u.unfiltered_pitching_pts
                  / (u.unfiltered_hitting_pts + u.unfiltered_pitching_pts)
-        end as platform_pitching_pts,
+        end as double) as platform_pitching_pts,
 
         -- Wide stats (passthrough)
-        w.h, w.ab, w.b_bb, w.b_so, w.hbp, w.sf, w.hr, w.r, w.rbi,
-        w.sb, w.cs, w.tb, w.singles, w.doubles, w.triples, w.xbh,
-        w.gdp, w.b_ibb, w.cyc,
-        w.h_pts, w.ab_pts, w.b_bb_pts, w.b_so_pts, w.hbp_pts, w.sf_pts,
-        w.hr_pts, w.r_pts, w.rbi_pts, w.sb_pts, w.cs_pts, w.tb_pts,
-        w.singles_pts, w.doubles_pts, w.triples_pts, w.xbh_pts,
-        w.gdp_pts, w.b_ibb_pts, w.cyc_pts,
-        w.w, w.l, w.k, w.er, w.outs, w.qs, w.sv, w.hld,
-        w.p_h, w.p_bb, w.p_hr, w.p_r, w.cg, w.blk, w.wp,
-        w.hbp_p, w.blsv, w.nh, w.pg, w.pk, w.sho,
-        w.w_pts, w.l_pts, w.k_pts, w.er_pts, w.outs_pts, w.qs_pts,
-        w.sv_pts, w.hld_pts, w.p_h_pts, w.p_bb_pts, w.p_hr_pts, w.p_r_pts,
-        w.cg_pts, w.blk_pts, w.wp_pts, w.hbp_p_pts, w.blsv_pts,
-        w.nh_pts, w.pg_pts, w.pk_pts, w.sho_pts,
+        cast(w.h as integer) as h,
+        cast(w.ab as integer) as ab,
+        cast(w.b_bb as integer) as b_bb,
+        cast(w.b_so as integer) as b_so,
+        cast(w.hbp as integer) as hbp,
+        cast(w.sf as integer) as sf,
+        cast(w.hr as integer) as hr,
+        cast(w.r as integer) as r,
+        cast(w.rbi as integer) as rbi,
+        cast(w.sb as integer) as sb,
+        cast(w.cs as integer) as cs,
+        cast(w.tb as integer) as tb,
+        cast(w.singles as integer) as singles,
+        cast(w.doubles as integer) as doubles,
+        cast(w.triples as integer) as triples,
+        cast(w.xbh as integer) as xbh,
+        cast(w.gdp as integer) as gdp,
+        cast(w.b_ibb as integer) as b_ibb,
+        cast(w.cyc as integer) as cyc,
+        cast(w.h_pts as double) as h_pts,
+        cast(w.ab_pts as double) as ab_pts,
+        cast(w.b_bb_pts as double) as b_bb_pts,
+        cast(w.b_so_pts as double) as b_so_pts,
+        cast(w.hbp_pts as double) as hbp_pts,
+        cast(w.sf_pts as double) as sf_pts,
+        cast(w.hr_pts as double) as hr_pts,
+        cast(w.r_pts as double) as r_pts,
+        cast(w.rbi_pts as double) as rbi_pts,
+        cast(w.sb_pts as double) as sb_pts,
+        cast(w.cs_pts as double) as cs_pts,
+        cast(w.tb_pts as double) as tb_pts,
+        cast(w.singles_pts as double) as singles_pts,
+        cast(w.doubles_pts as double) as doubles_pts,
+        cast(w.triples_pts as double) as triples_pts,
+        cast(w.xbh_pts as double) as xbh_pts,
+        cast(w.gdp_pts as double) as gdp_pts,
+        cast(w.b_ibb_pts as double) as b_ibb_pts,
+        cast(w.cyc_pts as double) as cyc_pts,
+        cast(w.w as integer) as w,
+        cast(w.l as integer) as l,
+        cast(w.k as integer) as k,
+        cast(w.er as integer) as er,
+        cast(w.outs as integer) as outs,
+        cast(w.qs as integer) as qs,
+        cast(w.sv as integer) as sv,
+        cast(w.hld as integer) as hld,
+        cast(w.p_h as integer) as p_h,
+        cast(w.p_bb as integer) as p_bb,
+        cast(w.p_hr as integer) as p_hr,
+        cast(w.p_r as integer) as p_r,
+        cast(w.cg as integer) as cg,
+        cast(w.blk as integer) as blk,
+        cast(w.wp as integer) as wp,
+        cast(w.hbp_p as integer) as hbp_p,
+        cast(w.blsv as integer) as blsv,
+        cast(w.nh as integer) as nh,
+        cast(w.pg as integer) as pg,
+        cast(w.pk as integer) as pk,
+        cast(w.sho as integer) as sho,
+        cast(w.w_pts as double) as w_pts,
+        cast(w.l_pts as double) as l_pts,
+        cast(w.k_pts as double) as k_pts,
+        cast(w.er_pts as double) as er_pts,
+        cast(w.outs_pts as double) as outs_pts,
+        cast(w.qs_pts as double) as qs_pts,
+        cast(w.sv_pts as double) as sv_pts,
+        cast(w.hld_pts as double) as hld_pts,
+        cast(w.p_h_pts as double) as p_h_pts,
+        cast(w.p_bb_pts as double) as p_bb_pts,
+        cast(w.p_hr_pts as double) as p_hr_pts,
+        cast(w.p_r_pts as double) as p_r_pts,
+        cast(w.cg_pts as double) as cg_pts,
+        cast(w.blk_pts as double) as blk_pts,
+        cast(w.wp_pts as double) as wp_pts,
+        cast(w.hbp_p_pts as double) as hbp_p_pts,
+        cast(w.blsv_pts as double) as blsv_pts,
+        cast(w.nh_pts as double) as nh_pts,
+        cast(w.pg_pts as double) as pg_pts,
+        cast(w.pk_pts as double) as pk_pts,
+        cast(w.sho_pts as double) as sho_pts,
 
-        w.total_hitting_stat_pts,
-        w.total_pitching_stat_pts,
-        w.total_stat_pts,
+        cast(w.total_hitting_stat_pts as double) as total_hitting_stat_pts,
+        cast(w.total_pitching_stat_pts as double) as total_pitching_stat_pts,
+        cast(w.total_stat_pts as double) as total_stat_pts,
 
         -- Per-day net-negative platform_points magnitude. Stored UNSIGNED
         -- (positive) so the leaderboard ranks "most damage" naturally with
@@ -359,11 +431,11 @@ final as (
         -- concept (consumer-side: GREATEST(0, -week_active_platform_pts))
         -- when all the player's negative days fall in active slots, and is
         -- finer-grained otherwise (separately attributes each negative day).
-        case when b.points < 0 then -b.points else 0 end as negative_points,
+        cast(case when b.points < 0 then -b.points else 0 end as double) as negative_points,
 
         -- Union-layer columns (see the header). ESPN state is always
         -- platform-served, hence 'captured' / binary weight.
-        {{ to_varchar('w.player_id') }} as player_key,
+        cast({{ to_varchar('w.player_id') }} as varchar) as player_key,
         -- ONE TIME SPINE (MLB-263, ledger S-36). ESPN serves no ISO date --
         -- its day identity is the scoring_period ordinal -- so this column
         -- was NULL on every ESPN row and `espn_points_data` reconstructed
@@ -393,11 +465,11 @@ final as (
         -- evidence model had already cast its bounds to integer. Measured on
         -- the DuckDB lane (tests/test_weekly_chain_without_seed.py), not
         -- theorised.
-        {{ to_date_of(date_add_unit('day',
+        cast({{ to_date_of(date_add_unit('day',
                                     'cast(w.scoring_period as integer) - 1',
-                                    'cal.season_opener')) }} as game_date,
-        {{ iff("w.lineup_slot_category != 'inactive'", '1.0', '0.0') }} as active_weight,
-        'captured'              as provenance
+                                    'cal.season_opener')) }} as date) as game_date,
+        cast({{ iff("w.lineup_slot_category != 'inactive'", '1.0', '0.0') }} as double) as active_weight,
+        cast('captured' as varchar) as provenance
     from daily_wide w
     -- The season anchor for game_date above. LEFT so a season with no
     -- captured calendar row yields NULL rather than dropping the day.
@@ -434,23 +506,114 @@ union all
 -- contract. Explicit list so a drift in either file fails loudly at parse
 -- rather than silently mis-mapping a positional UNION.
 select
-    league_key, season_year, matchup_period, scoring_period, team_id,
-    team_name, team_abbrev, owner_name, player_id, player_name, display_name,
-    position, pro_team, mlb_team_id, eligible_slots, lineup_slot,
-    lineup_slot_category,
-    is_active_slot, games_played, platform_points, platform_hitting_pts,
-    platform_pitching_pts,
-    h, ab, b_bb, b_so, hbp, sf, hr, r, rbi, sb, cs, tb, singles, doubles,
-    triples, xbh, gdp, b_ibb, cyc,
-    h_pts, ab_pts, b_bb_pts, b_so_pts, hbp_pts, sf_pts, hr_pts, r_pts,
-    rbi_pts, sb_pts, cs_pts, tb_pts, singles_pts, doubles_pts, triples_pts,
-    xbh_pts, gdp_pts, b_ibb_pts, cyc_pts,
-    w, l, k, er, outs, qs, sv, hld, p_h, p_bb, p_hr, p_r, cg, blk, wp,
-    hbp_p, blsv, nh, pg, pk, sho,
-    w_pts, l_pts, k_pts, er_pts, outs_pts, qs_pts, sv_pts, hld_pts,
-    p_h_pts, p_bb_pts, p_hr_pts, p_r_pts, cg_pts, blk_pts, wp_pts,
-    hbp_p_pts, blsv_pts, nh_pts, pg_pts, pk_pts, sho_pts,
-    total_hitting_stat_pts, total_pitching_stat_pts, total_stat_pts,
-    negative_points,
-    player_key, game_date, active_weight, provenance
+        cast(league_key as varchar) as league_key,
+        cast(season_year as integer) as season_year,
+        cast(matchup_period as integer) as matchup_period,
+        cast(scoring_period as integer) as scoring_period,
+        cast(team_id as integer) as team_id,
+        cast(team_name as varchar) as team_name,
+        cast(team_abbrev as varchar) as team_abbrev,
+        cast(owner_name as varchar) as owner_name,
+        cast(player_id as integer) as player_id,
+        cast(player_name as varchar) as player_name,
+        cast(display_name as varchar) as display_name,
+        cast(position as varchar) as position,
+        cast(pro_team as varchar) as pro_team,
+        cast(mlb_team_id as integer) as mlb_team_id,
+        {{ to_json_array('eligible_slots') }} as eligible_slots,
+        cast(lineup_slot as varchar) as lineup_slot,
+        cast(lineup_slot_category as varchar) as lineup_slot_category,
+        cast(is_active_slot as boolean) as is_active_slot,
+        cast(games_played as integer) as games_played,
+        cast(platform_points as double) as platform_points,
+        cast(platform_hitting_pts as double) as platform_hitting_pts,
+        cast(platform_pitching_pts as double) as platform_pitching_pts,
+        cast(h as integer) as h,
+        cast(ab as integer) as ab,
+        cast(b_bb as integer) as b_bb,
+        cast(b_so as integer) as b_so,
+        cast(hbp as integer) as hbp,
+        cast(sf as integer) as sf,
+        cast(hr as integer) as hr,
+        cast(r as integer) as r,
+        cast(rbi as integer) as rbi,
+        cast(sb as integer) as sb,
+        cast(cs as integer) as cs,
+        cast(tb as integer) as tb,
+        cast(singles as integer) as singles,
+        cast(doubles as integer) as doubles,
+        cast(triples as integer) as triples,
+        cast(xbh as integer) as xbh,
+        cast(gdp as integer) as gdp,
+        cast(b_ibb as integer) as b_ibb,
+        cast(cyc as integer) as cyc,
+        cast(h_pts as double) as h_pts,
+        cast(ab_pts as double) as ab_pts,
+        cast(b_bb_pts as double) as b_bb_pts,
+        cast(b_so_pts as double) as b_so_pts,
+        cast(hbp_pts as double) as hbp_pts,
+        cast(sf_pts as double) as sf_pts,
+        cast(hr_pts as double) as hr_pts,
+        cast(r_pts as double) as r_pts,
+        cast(rbi_pts as double) as rbi_pts,
+        cast(sb_pts as double) as sb_pts,
+        cast(cs_pts as double) as cs_pts,
+        cast(tb_pts as double) as tb_pts,
+        cast(singles_pts as double) as singles_pts,
+        cast(doubles_pts as double) as doubles_pts,
+        cast(triples_pts as double) as triples_pts,
+        cast(xbh_pts as double) as xbh_pts,
+        cast(gdp_pts as double) as gdp_pts,
+        cast(b_ibb_pts as double) as b_ibb_pts,
+        cast(cyc_pts as double) as cyc_pts,
+        cast(w as integer) as w,
+        cast(l as integer) as l,
+        cast(k as integer) as k,
+        cast(er as integer) as er,
+        cast(outs as integer) as outs,
+        cast(qs as integer) as qs,
+        cast(sv as integer) as sv,
+        cast(hld as integer) as hld,
+        cast(p_h as integer) as p_h,
+        cast(p_bb as integer) as p_bb,
+        cast(p_hr as integer) as p_hr,
+        cast(p_r as integer) as p_r,
+        cast(cg as integer) as cg,
+        cast(blk as integer) as blk,
+        cast(wp as integer) as wp,
+        cast(hbp_p as integer) as hbp_p,
+        cast(blsv as integer) as blsv,
+        cast(nh as integer) as nh,
+        cast(pg as integer) as pg,
+        cast(pk as integer) as pk,
+        cast(sho as integer) as sho,
+        cast(w_pts as double) as w_pts,
+        cast(l_pts as double) as l_pts,
+        cast(k_pts as double) as k_pts,
+        cast(er_pts as double) as er_pts,
+        cast(outs_pts as double) as outs_pts,
+        cast(qs_pts as double) as qs_pts,
+        cast(sv_pts as double) as sv_pts,
+        cast(hld_pts as double) as hld_pts,
+        cast(p_h_pts as double) as p_h_pts,
+        cast(p_bb_pts as double) as p_bb_pts,
+        cast(p_hr_pts as double) as p_hr_pts,
+        cast(p_r_pts as double) as p_r_pts,
+        cast(cg_pts as double) as cg_pts,
+        cast(blk_pts as double) as blk_pts,
+        cast(wp_pts as double) as wp_pts,
+        cast(hbp_p_pts as double) as hbp_p_pts,
+        cast(blsv_pts as double) as blsv_pts,
+        cast(nh_pts as double) as nh_pts,
+        cast(pg_pts as double) as pg_pts,
+        cast(pk_pts as double) as pk_pts,
+        cast(sho_pts as double) as sho_pts,
+        cast(total_hitting_stat_pts as double) as total_hitting_stat_pts,
+        cast(total_pitching_stat_pts as double) as total_pitching_stat_pts,
+        cast(total_stat_pts as double) as total_stat_pts,
+        cast(negative_points as double) as negative_points,
+        cast(player_key as varchar) as player_key,
+        cast(game_date as date) as game_date,
+        cast(active_weight as double) as active_weight,
+        cast(provenance as varchar) as provenance
 from {{ ref('int_cbs__player_daily') }}

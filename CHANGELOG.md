@@ -16,6 +16,8 @@ _Release notes are built from the commit range at each cut rather than
 accumulated here, so this section staying short is not a sign the
 repository is idle._
 
+- Cast both daily-union and team-owner branches to their semantic types (numeric IDs and counts INTEGER, points and weights DOUBLE, platform player keys VARCHAR, eligibility JSON/ARRAY), preserve DOUBLE rate operands, and isolate two CBS ranking aggregates from a DuckDB optimizer failure so the CBS almanac renders locally (MLB-284, MLB-295).
+
 ## [2.1.0] - 2026-09-15
 
 The season-long release. The redesigned Records book and the roster-eligibility

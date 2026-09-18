@@ -2170,14 +2170,19 @@ def get_stat_sources():
     for r in get_provenance_mix():
         mix[r['provenance']] = mix.get(r['provenance'], 0) + r['n']
     total = sum(mix.values()) or 1
+    # As in _apply_alltime_board_context, finish the aggregate before
+    # DuckDB's top-N window rewrite can cross the shared daily UNION.
+    materialized = 'MATERIALIZED ' if db.dialect() == 'duckdb' else ''
     seasons = query_for_presentation(
-        f"SELECT season_year, provenance, COUNT(*) AS n"
+        f"WITH season_mix AS {materialized}("
+        f" SELECT season_year, provenance, COUNT(*) AS n"
         f" FROM fct_player_daily_performance"
         f" WHERE {league_predicate()} AND provenance IS NOT NULL"
         f"   AND game_date IS NOT NULL"
-        f" GROUP BY 1, 2"
+        f" GROUP BY 1, 2)"
+        f" SELECT season_year, provenance, n FROM season_mix"
         f" QUALIFY ROW_NUMBER() OVER (PARTITION BY season_year"
-        f"                           ORDER BY COUNT(*) DESC) = 1"
+        f"                           ORDER BY n DESC) = 1"
     )
     tier_of = {'captured': 'captured', 'reconstructed_day': 'reconstructed',
                'estimated_startshare': 'estimated',
@@ -2562,8 +2567,13 @@ def _apply_alltime_board_context(lineup, current_key, current_name, years_map, t
     franchises = {}
     if keys:
         quoted = ", ".join("'%s'" % k.replace("'", "''") for k in keys)
+        # DuckDB 1.5.5's top_n_window_elimination rewrite fails across the
+        # daily UNION even when both branches have identical output types.
+        # Finish the small per-franchise aggregate before ranking it; keep
+        # the workaround local rather than disabling an optimizer globally.
+        materialized = 'MATERIALIZED ' if db.dialect() == 'duckdb' else ''
         rows = query_for_presentation(f"""
-            WITH per_franchise AS (
+            WITH per_franchise AS {materialized}(
                 SELECT
                     player_key,
                     MAX_BY(team_abbrev, game_date)                 AS abbrev,

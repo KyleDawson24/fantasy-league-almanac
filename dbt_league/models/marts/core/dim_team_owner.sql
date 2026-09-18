@@ -18,10 +18,10 @@
 {{ config(materialized='view') }}
 
 select
-    sto.league_key,
-    sto.season_year,
-    sto.team_id,
-    {{ listagg_ordered('own.owner_display', ' / ', 'own.owner_display') }} as owner_display
+    cast(sto.league_key as varchar) as league_key,
+    cast(sto.season_year as integer) as season_year,
+    cast(sto.team_id as integer) as team_id,
+    cast({{ listagg_ordered('own.owner_display', ' / ', 'own.owner_display') }} as varchar) as owner_display
 from {{ ref('stg_team_owners') }} sto
 inner join {{ ref('dim_owner') }} own
     on sto.league_key = own.league_key
@@ -37,11 +37,11 @@ union all
 -- every ESPN row. Current-era rows only until MLB-64's chain-of-custody
 -- brings owner history.
 select
-    sto.league_key,
-    sto.season_year,
-    sto.team_id,
-    {{ iff('count(*) > 1', listagg_ordered('own.first_name', ', ', 'own.first_name'),
-           'max(own.owner_display)') }} as owner_display
+    cast(sto.league_key as varchar) as league_key,
+    cast(sto.season_year as integer) as season_year,
+    cast(sto.team_id as integer) as team_id,
+    cast({{ iff('count(*) > 1', listagg_ordered('own.first_name', ', ', 'own.first_name'),
+           'max(own.owner_display)') }} as varchar) as owner_display
 from {{ ref('stg_cbs__team_owners') }} sto
 inner join {{ ref('dim_owner') }} own
     on sto.league_key = own.league_key

@@ -1711,3 +1711,95 @@ models:
         description: 'Of eligible_player_count, how many resolved from the derived CBS eligibility windows (estimated primary position). 0 on ESPN by construction.'
         tests:
           - not_null
+
+  - name: mart_team_all_play
+    description: >
+      All-play (MLB-301): each team's PLATFORM score in a completed
+      regular-season matchup period set against every other team's score in
+      that period. One row per team-matchup carrying strict all-play wins,
+      strict losses and ties (counted separately, never half-wins) plus the
+      number of opponents it was compared against, so a consumer sums an
+      expected record honestly across a league whose size changed: expected
+      wins = SUM(all_play_wins / opponent_count), likewise losses and ties,
+      expected win% = expected wins / matchups. Promoted from the one-off
+      season-wrap SQL (section 2) so the shared almanac export and the
+      browser read one contract.
+
+      Playoff periods are excluded, and a period counts only when the
+      schedule capture proves it closed (or, for an uncaptured season, when
+      the season is independently proven finished) -- the same fail-closed
+      gate mart_franchise_rivalry applies. No self-comparisons. Wins and
+      losses are reciprocal league-wide by construction
+      (assert_all_play_is_reciprocal).
+
+      Grain: one row per (league_key, season_year, matchup_period, team_id).
+      Materialization: table.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - season_year
+              - matchup_period
+              - team_id
+    columns:
+      - name: league_key
+        description: 'League registry key.'
+        tests:
+          - not_null
+      - name: season_year
+        description: 'Season year.'
+        tests:
+          - not_null
+      - name: matchup_period
+        description: 'Completed regular-season matchup period.'
+        tests:
+          - not_null
+      - name: team_id
+        description: 'Platform team id.'
+        tests:
+          - not_null
+      - name: team_name
+        description: 'Team name as of this matchup week (from mart_team_matchup).'
+      - name: team_abbrev
+        description: 'Team abbreviation as of this matchup week.'
+      - name: platform_points
+        description: 'The platform''s own team total for the matchup -- the score every comparison uses.'
+        tests:
+          - not_null
+      - name: opponent_id
+        description: 'The scheduled opponent that week. Context only; all-play ignores the schedule.'
+      - name: matchup_result
+        description: 'The actual scheduled result (W/L/T), for reading luck beside the all-play record.'
+      - name: opponent_count
+        description: 'How many other teams this team was compared against in the period: the period''s team count minus one.'
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 1
+                inclusive: true
+      - name: all_play_wins
+        description: 'Other teams this team strictly outscored in the period.'
+        tests:
+          - not_null
+      - name: all_play_losses
+        description: 'Other teams that strictly outscored this team in the period.'
+        tests:
+          - not_null
+      - name: all_play_ties
+        description: 'Other teams with exactly the same platform score. Kept separate; never split into half-wins here.'
+        tests:
+          - not_null
+      - name: expected_win_share
+        description: 'all_play_wins / opponent_count -- this matchup''s contribution to expected wins.'
+        tests:
+          - not_null
+      - name: expected_loss_share
+        description: 'all_play_losses / opponent_count.'
+        tests:
+          - not_null
+      - name: expected_tie_share
+        description: 'all_play_ties / opponent_count.'
+        tests:
+          - not_null

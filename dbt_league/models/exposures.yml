@@ -147,3 +147,35 @@ exposures:
     owner:
       name: Kyle Dawson
       email: kpdawson24@gmail.com
+
+  - name: shared_almanac_export
+    label: Shared Almanac Export (MLB-301)
+    type: application
+    maturity: low
+    url: https://github.com/KyleDawson24/fantasy-league-almanac
+    description: >
+      The one export both the Google Sheet writer and the browser prototype
+      read: every reporting mart the almanac standings pages print, one file
+      per table under data/exports/shared/<league>/<snapshot>/, each row
+      carrying the printed number and the facts to recompute it (raw total,
+      denominator kind and value, display precision, scoring lens, polarity),
+      plus manifest.json and a presentation descriptor generated from the
+      writer's own gradient functions. Written by output/export_shared.py
+      once per almanac update. Local and gitignored; real names.
+    depends_on:
+      - ref('mart_team_season_standings')
+      - ref('dim_team_season_standing')
+      - ref('mart_team_matchup')
+      - ref('mart_team_slot_production')
+      - ref('mart_team_acquisition_channels')
+      - ref('mart_franchise_rivalry')
+      - ref('mart_franchise_rivalry_axes')
+      - ref('mart_team_all_play')
+      - ref('fct_team_weekly_active_performance')
+      - ref('fct_player_daily_performance')
+      - ref('dim_league_scoring_rule')
+      - ref('dim_stat')
+      - ref('dim_franchise_identity')
+    owner:
+      name: Kyle Dawson
+      email: kpdawson24@gmail.com

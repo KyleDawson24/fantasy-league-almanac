@@ -12,6 +12,7 @@ them by filename alone.)
 
 ## [Unreleased]
 
+- One shared almanac export for the Sheet writer and the browser (`output/export_shared.py`): every standings-page mart as one file per table under `data/exports/shared/<league>/<snapshot>/`, each row carrying the printed number beside its raw total, denominator kind and value, display precision, scoring lens and polarity; a presentation descriptor generated from the writer's own gradient functions; and all-play promoted from the season-wrap SQL into `mart_team_all_play` (strict wins, losses and ties per completed regular-season matchup with the opponent count, so a changing league size sums honestly). Existing marts and renderers are untouched (MLB-301).
 - The ESPN head-to-head and CBS byte-diff corpora render from a frozen week-22 fixture (private, hashed RAW plus projected league config, rebuilt into its own DuckDB file when model logic changes), so a golden moves for a reviewed change and never merely because a week passed (MLB-295).
 
 _Release notes are built from the commit range at each cut rather than

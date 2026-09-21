@@ -91,7 +91,12 @@ logs/
 # OS
 .DS_Store
 Thumbs.db
-.claude/
+# .claude/ is editor/agent state (worktrees, settings.local.json) and stays
+# ignored. Two files ship with every clone: the deny list and its README
+# (MLB-300 Tier 2). A directory pattern cannot be re-included below it,
+# hence the /* form.
+.claude/*
+!.claude/README-deny.md
 
 # Data
 # CBS raw capture landing (MLB-44/45): museum artifacts, never committed.
@@ -103,6 +108,8 @@ data/cbs_raw/
 !config/*.json
 !archive/*.json
 !tests/fixtures/*.json
+# MLB-300 Tier 2: the shipped deny list must survive the *.json rule above.
+!.claude/settings.json
 # The three seed homes, each of which must ship (MLB-114). `*.csv` above is
 # a blanket ignore, so a seed directory that is not named here is invisible
 # to git no matter what it contains -- a new template added later would be

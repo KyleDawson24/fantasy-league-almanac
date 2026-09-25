@@ -215,3 +215,13 @@ scratchpad/
 # Kyle's untracked WIP -- CLAUDE.md already says "ignore it"; this makes
 # the instruction enforceable rather than advisory.
 tests/test_records_report.py
+
+# Local working output that never reaches origin (v2.2.0 cut): delivered
+# one-off reports, assistant exports, scratch temp, generated images, and
+# browser-saved HTML pages with their asset folders. Left on disk.
+/deliverables/
+/Claude outputs/
+/tmp/
+output/imagegen/
+output/*.html
+output/*_files/

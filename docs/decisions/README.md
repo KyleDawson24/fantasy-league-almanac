@@ -25,6 +25,11 @@ every document anyone once called a decision is just another archive.
   the frictionless-bootstrap acceptance moved to v2.1 under MLB-11. The
   original acceptance text stays visible beneath the note in that
   document.
+- **`REAL_NAME_PUBLICATION_EXCEPTION.md`** -- the one league whose members'
+  real names may appear on the public dashboard (the maintainer's own league,
+  `espn-main`, with consent), what stays off it (email and phone, always),
+  and why the published data is served rather than committed. Read this
+  before flagging a real name on the dashboard as a leak.
 - **`../matchup-period-lifecycle-DRAFT.md`** -- the closed-period restriction
   is at the wrong LAYER: it protects an *aggregation* invariant but is
   enforced at *ingestion*, which is why it reads as a gate to be defeated.

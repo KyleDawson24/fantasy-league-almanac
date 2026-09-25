@@ -12,12 +12,35 @@ them by filename alone.)
 
 ## [Unreleased]
 
-- One shared almanac export for the Sheet writer and the browser (`output/export_shared.py`): every standings-page mart as one file per table under `data/exports/shared/<league>/<snapshot>/`, each row carrying the printed number beside its raw total, denominator kind and value, display precision, scoring lens and polarity; a presentation descriptor generated from the writer's own gradient functions; and all-play promoted from the season-wrap SQL into `mart_team_all_play` (strict wins, losses and ties per completed regular-season matchup with the opponent count, so a changing league size sums honestly). Existing marts and renderers are untouched (MLB-301).
-- The ESPN head-to-head and CBS byte-diff corpora render from a frozen week-22 fixture (private, hashed RAW plus projected league config, rebuilt into its own DuckDB file when model logic changes), so a golden moves for a reviewed change and never merely because a week passed (MLB-295).
-
 _Release notes are built from the commit range at each cut rather than
 accumulated here, so this section staying short is not a sign the
 repository is idle._
+
+## [2.2.0] - 2026-09-24
+
+The almanac gets a website. A live, anonymized demo dashboard reads the same
+data in the browser; its site code is not in this repository, but its data
+half is: one shared export for the Sheet writer and the browser, and all-play
+promoted into a tested mart. The ESPN and CBS byte-diff corpora render from a
+frozen fixture, and agents working in the maintainer's checkout are denied
+destructive commands. Full story in
+[RELEASE NOTES v2.2.0.md](RELEASE%20NOTES%20v2.2.0.md).
+
+Minor rather than major: additive surfaces, no golden moved, and no migration
+step for an existing install. The guided Windows launcher and setup wizard
+are byte-identical to v2.1.0.
+
+### Added
+
+- One shared almanac export for the Sheet writer and the browser (`output/export_shared.py`): every standings-page mart as one file per table under `data/exports/shared/<league>/<snapshot>/`, each row carrying the printed number beside its raw total, denominator kind and value, display precision, scoring lens and polarity; a presentation descriptor generated from the writer's own gradient functions; and all-play promoted from the season-wrap SQL into `mart_team_all_play` (strict wins, losses and ties per completed regular-season matchup with the opponent count, so a changing league size sums honestly). Existing marts and renderers are untouched (MLB-301).
+- `mart_team_all_play` carries reciprocity and completed-regular-matchup singular tests, and the shared export is registered as a dbt exposure (MLB-301).
+- A `permissions.deny` list in the tracked `.claude/settings.json` refuses working-tree wipes, every push, ref deletion, history rewriting and recursive deletes to agents in both shells, with the reasoning in `.claude/README-deny.md`; and `tools/backup_snapshot.ps1`, a nightly snapshot that bundles every ref and copies the untracked files into dated folders, never deleting (MLB-300).
+
+### Changed
+
+- The ESPN head-to-head and CBS byte-diff corpora render from a frozen week-22 fixture (private, hashed RAW plus projected league config, rebuilt into its own DuckDB file when model logic changes), so a golden moves for a reviewed change and never merely because a week passed (MLB-295).
+
+### Fixed
 
 - Cast both daily-union and team-owner branches to their semantic types (numeric IDs and counts INTEGER, points and weights DOUBLE, platform player keys VARCHAR, eligibility JSON/ARRAY), preserve DOUBLE rate operands, and isolate two CBS ranking aggregates from a DuckDB optimizer failure so the CBS almanac renders locally (MLB-284, MLB-295).
 
@@ -28,7 +51,7 @@ table land on both almanac workbooks, the traded-player week attribution is
 corrected, the build fails loudly where it used to under-count quietly, and the
 transform layer's two platforms converge on shared dimensions and facts with no
 rendered byte moving. Full story in
-[RELEASE NOTES v2.1.0.md](RELEASE%20NOTES%20v2.1.0.md).
+[RELEASE NOTES v2.1.0.md](docs/releases/RELEASE%20NOTES%20v2.1.0.md).
 
 Minor rather than major: additive surfaces and fixes, one declared golden pass
 (2026-08-31), and no migration step for an existing install. The guided Windows

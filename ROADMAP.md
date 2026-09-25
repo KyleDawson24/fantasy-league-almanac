@@ -26,7 +26,11 @@ almanac change. v2.1.0 (2026-09-15), the season-long release, landed the
 redesigned Records book and a roster-eligibility table on both workbooks,
 corrected traded-player week attribution, made the build fail loudly on a
 scored stat it cannot name, and converged the two platforms on shared
-dimensions and facts without moving a rendered byte.
+dimensions and facts without moving a rendered byte. v2.2.0 (2026-09-24) gave
+the almanac a website: a live, anonymized demo dashboard over the same data
+(its site code is not in this repository), fed by one shared export and an
+all-play mart, with the ESPN and CBS byte-diff corpora rendering from a
+frozen fixture.
 See CHANGELOG.md for the per-release entries.
 
 **In flight right now:** v2.0's Reddit launch is the first broad stranger

@@ -194,6 +194,30 @@ That comparison -- not his career line, the line for what he actually did *for t
 
 ---
 
+## The almanac dashboard (v2.2)
+
+**Everything in this repository builds the Google Sheets almanac. The dashboard below is a separate web layer over the same data. Its code isn't included here yet.** Cloning this repository gets you the pipeline and the Sheets almanac, not the website. What this repository does carry is the dashboard's data half: the public shared export (`output/export_shared.py`) and the all-play mart (`mart_team_all_play`) it reads from.
+
+**[Open the demo dashboard](https://kpdawson.com/almanac/demo/)** -- the ESPN demo league with fictional club and owner names and real MLB production. It runs entirely in your browser: DuckDB-WASM over published Parquet files, no server and nothing to install. Standings, team pages with a lineup diamond or table, player statistics, and filters that recompute in the page.
+
+Known limitation: the first load on a slow connection can take several seconds. Performance work is scheduled for 2.3.
+
+![Demo dashboard team page: the current roster's best lineup drawn on a baseball diamond, flex and bench players to the left, pitching staff to the right](docs/img/dashboard-team-page-lineup-diamond.png)
+
+*The dashboard, not the almanac: a team page's lineup in the diamond presentation. The same view toggles to a table.*
+
+![Demo dashboard Home: the matchup superteam on a diamond](docs/img/dashboard-home.png)
+
+*The dashboard's Home page, leading with the week's superteam.*
+
+![Demo dashboard Advanced Standings: per-matchup standings with expected winning percentage from the all-play mart](docs/img/dashboard-advanced-standings.png)
+
+*The dashboard's Advanced Standings, read from the shared export. Expected W% is the all-play method, and the colour direction comes from the same presentation descriptor the Sheet writer uses.*
+
+The Sheets samples above are still the full almanac. The dashboard is an early preview of a second way to read the same data.
+
+---
+
 ## Why v2.0
 
 **v2.0 set one goal: a stranger with an ESPN league enters the minimum credentials and league facts, follows one guided run, and gets an almanac their league can open.** That last clause is literal -- a workbook in their own Drive with sharing set, because a league almanac the league cannot open is a demo rather than a product. ESPN end to end is the supported release path. CBS has been priced as an urgent fast-follow rather than being represented as part of the v2.0 stranger journey.
@@ -206,7 +230,7 @@ Beyond that: the platform half -- Yahoo and Sleeper adapters, to prove the platf
 
 ## Quick start
 
-**Just here to look?** The screenshots above and the [hosted dbt catalog](https://kpdawson.com/fantasy-league-almanac/catalog/) cover the design; [docs/user-guide/](docs/user-guide/) covers how to read the almanac itself.
+**Just here to look?** The screenshots above and the [hosted dbt catalog](https://kpdawson.com/fantasy-league-almanac/catalog/) cover the design; [docs/user-guide/](docs/user-guide/) covers how to read the almanac itself. The [demo dashboard](https://kpdawson.com/almanac/demo/) is the same data in the browser (its site code is not in this repository).
 
 **Want to run it?** Open [QUICKSTART.md](QUICKSTART.md) first -- and if you downloaded the release ZIP, it is the only guide you need. It is the complete Windows runbook for the double-click launcher, written for someone who has never used a terminal: installing Python if it is missing, unzipping, following the illustrated ESPN-cookie guide, validating the league, and producing a shareable Google Sheet without manually editing configuration. (The ZIP also carries a `START_HERE.txt` that points there and nowhere else.) The notes below are context for people reading the source; they are not prerequisites for running it.
 
@@ -222,9 +246,9 @@ The portability spike that sized the transform-layer port, including the traps i
 
 ## What this demonstrates
 
-The current shape of the transform layer: **103 dbt models** (53 views, 47 tables, 3 incremental), **20 seeds**, **770 data tests**, **30 sources**, and **4 declared exposures**. These counts are regenerated from the parsed manifest at each release cut; if you are reading them mid-cycle, `dbt parse` and the manifest are the truth.
+The current shape of the transform layer: **104 dbt models** (53 views, 48 tables, 3 incremental), **20 seeds**, **786 data tests**, **30 sources**, and **5 declared exposures**. These counts are regenerated from the parsed manifest at each release cut; if you are reading them mid-cycle, `dbt parse` and the manifest are the truth.
 
-Most of that needs a warehouse to exercise, but not all of it: with no account and no credentials, `dbt deps && dbt parse` compiles the project and `pytest tests/` passes. At this cut a fresh clone collects **1883** tracked pure tests, with **31** warehouse-marked goldens deselected by default -- collection counts, not a pass tally, since the tests wanting private regression corpora skip rather than fail. Your own checkout will print different totals: some tests need a POSIX shell and skip on Windows, and any untracked work of your own is collected too. Counts drift between releases; `pytest tests/ -q` on your machine is the truth.
+Most of that needs a warehouse to exercise, but not all of it: with no account and no credentials, `dbt deps && dbt parse` compiles the project and `pytest tests/` passes. At this cut a fresh clone collects **1915** tracked pure tests, with **32** warehouse-marked goldens deselected by default -- collection counts, not a pass tally, since the tests wanting private regression corpora skip rather than fail. Your own checkout will print different totals: some tests need a POSIX shell and skip on Windows, and any untracked work of your own is collected too. Counts drift between releases; `pytest tests/ -q` on your machine is the truth.
 
 - **Modeling that survived a second implementation.** Wide convergence facts at consumer grain; a symmetric active/inactive split ("active is fantasy reality, inactive is MLB reality") that is what makes wasted-production analysis possible at all; a seed-driven UNPIVOT mart where adding a tracked stat is a CSV row rather than a five-file SQL change.
 - **Reproducibility.** Floating-point sums are not associative, and SQL engines do not promise summation order, so rebuilding with no code change could move a rendered cell by one, and oh boy it often did. Sums now run in exact decimal with pinned tie-breaks, and a byte-diff harness pins a known week so any drift fails loudly.
@@ -255,14 +279,23 @@ Most of that needs a warehouse to exercise, but not all of it: with no account a
 
 ## Status
 
-- **v2.1.0** -- current, 2026-09-15. The season-long release. The redesigned
+- **v2.2.0** -- current, 2026-09-24. The almanac gets a website. A live,
+  anonymized [demo dashboard](https://kpdawson.com/almanac/demo/) reads the
+  same data in the browser (its site code is not in this repository); the
+  data half is: one shared export for the Sheet writer and the browser, and
+  all-play promoted into a tested mart. The ESPN and CBS byte-diff corpora now
+  render from a frozen fixture, so their goldens move only when logic moves.
+  The guided Windows
+  journey is unchanged. Full notes:
+  [RELEASE NOTES v2.2.0.md](RELEASE%20NOTES%20v2.2.0.md).
+- **v2.1.0** -- 2026-09-15. The season-long release. The redesigned
   Records book (Lifetime / Season / Matchup Records, one shared engine, format
   decides the tabs) and a roster-eligibility table on Advanced Standings land
   on both workbooks; traded-player week attribution is corrected; the build
   fails loudly when a league scores a stat the vocabulary cannot name; and the
   two platforms converge on shared dimensions and facts with no rendered byte
   moving. The guided Windows journey is unchanged. Full notes:
-  [RELEASE NOTES v2.1.0.md](RELEASE%20NOTES%20v2.1.0.md).
+  [RELEASE NOTES v2.1.0.md](docs/releases/RELEASE%20NOTES%20v2.1.0.md).
 - **v2.0.1** -- 2026-08-20. The first post-launch patch removes
   maintainer-only launch/release working files from the current public tree
   and latest consumer ZIP, while the strict PII review ledger now stays with

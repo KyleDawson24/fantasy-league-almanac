@@ -188,9 +188,9 @@ def test_no_game_roster_days_become_dense_rows_with_null_production(tmp_path, ou
     db = tmp_path / "ESPN_FANTASY.duckdb"
     _build(db, rows, "points", extra_sql=[
         """CREATE TABLE ANALYTICS.fct_player_roster_day AS SELECT * FROM (VALUES
-            ('cbs-bsb', 2026, DATE '2026-04-01', '11', 1, 'SS', '["SS"]', 'rostered_game_day', 'observed_game_day'),
-            ('cbs-bsb', 2026, DATE '2026-04-02', '11', 1, NULL, '["SS"]', 'rostered', 'inferred_gap')
-        ) t(league_key, season_year, roster_date, player_key, team_id, lineup_slot,
+            ('cbs-bsb', 2026, DATE '2026-04-01', '11', 'Player 11', 1, 'SS', '["SS"]', 'rostered_game_day', 'observed_game_day'),
+            ('cbs-bsb', 2026, DATE '2026-04-02', '11', NULL, 1, NULL, '["SS"]', 'rostered', 'inferred_gap')
+        ) t(league_key, season_year, roster_date, player_key, display_name, team_id, lineup_slot,
             eligible_slots, roster_status, roster_source)"""])
     league_dir, manifest = _run(db, out, "cbs-bsb")
     got = duckdb.connect().execute(f"""SELECT scoring_day, has_game, total_pts, ab, deployment_state,

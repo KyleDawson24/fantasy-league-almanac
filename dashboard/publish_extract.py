@@ -372,7 +372,7 @@ class League:
              "CAST(TRY_CAST(r.player_key AS BIGINT) AS VARCHAR)"),
             ("mlbam_id", null("INTEGER"), null("INTEGER")),
             ("person_key", null("VARCHAR"), null("VARCHAR")),
-            ("display_name", "f.display_name", "n.display_name"),
+            ("display_name", "f.display_name", "COALESCE(r.display_name, n.display_name)"),
             # 3B time / completeness
             ("scoring_day_ordinal", "d.scoring_day_ordinal", "d.scoring_day_ordinal"),
             ("matchup_period_ordinal",
@@ -739,6 +739,15 @@ class League:
                                 AND o.lineup_slot = COALESCE(u.lineup_slot, st.lineup_slot)
             LEFT JOIN slot_map s ON s.lineup_slot = COALESCE(u.lineup_slot, st.lineup_slot)
             ORDER BY 1, s.sort_order NULLS LAST, 2""")
+
+        # As-of team names: the label a team carried over each stretch of a
+        # season, so a per-day view can show the name of that day while the
+        # names still live in one dim (never on the atom).
+        copy("team_names", f"""
+            SELECT CAST(season_year AS INTEGER) AS season_year, CAST(team_id AS INTEGER) AS team_id,
+                   team_name, team_abbrev, MIN(game_date) AS first_day, MAX(game_date) AS last_day
+            FROM {self.fact} WHERE team_id IS NOT NULL
+            GROUP BY ALL ORDER BY 1, 2, 5""")
 
         copy("scoring_rule", f"""
             SELECT league_key, stat_name, canonical_key, stat_category,

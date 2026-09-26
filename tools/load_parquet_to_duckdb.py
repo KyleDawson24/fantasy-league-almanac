@@ -45,6 +45,9 @@ SIMPLE_TYPES = {
     "TIMESTAMP_NTZ": "TIMESTAMP",
     "TIMESTAMP_TZ": "TIMESTAMPTZ",
     "VARIANT": "JSON",
+    "ARRAY": "JSON",
+    "OBJECT": "JSON",
+    "TIMESTAMP_LTZ": "TIMESTAMPTZ",
     # Snowflake FLOAT is 64-bit; DuckDB FLOAT is 32-bit. Never FLOAT.
     "FLOAT": "DOUBLE",
     "REAL": "DOUBLE",
@@ -81,9 +84,15 @@ def main():
                     help="path to the DuckDB database file")
     ap.add_argument("--parquet-dir", default=str(PARQUET_DIR))
     ap.add_argument("--memory-limit", default="6GB")
+    ap.add_argument("--schema", default="RAW",
+                    help="target schema; ANALYTICS loads data/parquet/analytics "
+                         "unless --parquet-dir says otherwise")
     args = ap.parse_args()
 
+    schema = args.schema.upper()
     parquet_dir = Path(args.parquet_dir)
+    if schema != "RAW" and args.parquet_dir == str(PARQUET_DIR):
+        parquet_dir = REPO_ROOT / "data" / "parquet" / schema.lower()
     manifest_path = parquet_dir / "_manifest.json"
     if not manifest_path.exists():
         sys.exit(f"no manifest at {manifest_path}; "
@@ -102,7 +111,7 @@ def main():
     con.execute(f"set temp_directory = '{temp_dir.as_posix()}'")
     con.execute("set max_temp_directory_size = '6GB'")
     con.execute("set preserve_insertion_order = false")
-    con.execute("create schema if not exists RAW")
+    con.execute(f"create schema if not exists {schema}")
 
     print(f"Loading {len(manifest['tables'])} tables -> {db_path}")
     mismatches = []
@@ -117,11 +126,11 @@ def main():
             for c in entry["columns"]
         )
         con.execute(
-            f'create or replace table RAW."{table}" as\n'
+            f'create or replace table {schema}."{table}" as\n'
             f"select {projection}\n"
             f"from read_parquet('{parquet_path.as_posix()}')"
         )
-        loaded = con.execute(f'select count(*) from RAW."{table}"').fetchone()[0]
+        loaded = con.execute(f'select count(*) from {schema}."{table}"').fetchone()[0]
         flag = ""
         if loaded != entry["rows"]:
             flag = f"  <== MISMATCH, manifest says {entry['rows']:,}"
@@ -131,7 +140,8 @@ def main():
     con.execute("checkpoint")
     size_mb = db_path.stat().st_size / 1e6
     total = con.execute(
-        "select sum(estimated_size) from duckdb_tables() where schema_name = 'RAW'"
+        "select sum(estimated_size) from duckdb_tables() where schema_name = ?",
+        [schema],
     ).fetchone()[0]
     con.close()
 

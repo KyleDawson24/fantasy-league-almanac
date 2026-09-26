@@ -99,7 +99,7 @@ def main(argv=None):
     # summed over the seasons the team played (not the days a team has rows).
     con.execute("""CREATE VIEW league_days AS
         SELECT season_year, COUNT(DISTINCT scoring_day) AS days FROM atom
-        WHERE phase = 'regular' GROUP BY 1""")
+        WHERE phase = 'regular' AND has_game GROUP BY 1""")
     grain = {}
     for scope_sql in ("CAST(season_year AS VARCHAR)", "'all_time'"):
         for row in con.execute(f"""

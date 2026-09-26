@@ -177,3 +177,28 @@ def test_team_names_that_look_odd_are_carried_verbatim(tmp_path, out):
         FROM read_parquet('{(league_dir / 'dims' / 'teams.parquet').as_posix()}') ORDER BY 1""").fetchall()
     assert names == [(1, "14-30-8-24-5-15-13-20", "fct_player_daily_performance"),
                      (9999, "####", "fct_player_daily_performance")]
+
+
+def test_no_game_roster_days_become_dense_rows_with_null_production(tmp_path, out):
+    game_day, off_day = date(2026, 4, 1), date(2026, 4, 2)
+    # A later game day keeps the off day inside the data horizon (days past
+    # the last completed game are never emitted).
+    rows = [_fact_row("cbs-bsb", 2026, game_day, 1, "11", "SS", "hitting", 1.0, pts=3.0),
+            _fact_row("cbs-bsb", 2026, date(2026, 4, 3), 1, "11", "SS", "hitting", 1.0)]
+    db = tmp_path / "ESPN_FANTASY.duckdb"
+    _build(db, rows, "points", extra_sql=[
+        """CREATE TABLE ANALYTICS.fct_player_roster_day AS SELECT * FROM (VALUES
+            ('cbs-bsb', 2026, DATE '2026-04-01', '11', 1, 'SS', '["SS"]', 'rostered_game_day', 'observed_game_day'),
+            ('cbs-bsb', 2026, DATE '2026-04-02', '11', 1, NULL, '["SS"]', 'rostered', 'inferred_gap')
+        ) t(league_key, season_year, roster_date, player_key, team_id, lineup_slot,
+            eligible_slots, roster_status, roster_source)"""])
+    league_dir, manifest = _run(db, out, "cbs-bsb")
+    got = duckdb.connect().execute(f"""SELECT scoring_day, has_game, total_pts, ab, deployment_state,
+        provenance, display_name, eligible_slots, period_key
+        FROM read_parquet('{(league_dir / 'atom' / '2026.parquet').as_posix()}') ORDER BY 1""").fetchall()
+    assert got[0][:3] == (game_day, True, 3.0)
+    # The off day exists, carries no production (NULL, never zero), and keeps
+    # its label, eligibility and period.
+    assert got[1] == (off_day, False, None, None, "unobserved", "inferred_gap", "Player 11",
+                      ["shortstop"], 1)
+    assert manifest["validations"]["dense_no_game_rows"] == 1

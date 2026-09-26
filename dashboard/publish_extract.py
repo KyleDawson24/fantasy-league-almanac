@@ -126,7 +126,24 @@ class League:
         self.fact = (f"(SELECT * FROM {src}.fct_player_daily_performance "
                      f"WHERE league_key = {lit(league_key)} "
                      f"AND game_date <= DATE {lit(self.horizon)})")
-        self.validations = {}
+        # The full stat line (W1/W6) and the dense roster ledger (W10) are
+        # read when the warehouse has them; an older warehouse still
+        # produces a valid atom (typed NULLs, game rows only), and the
+        # manifest says which it was.
+        schema = src.split(".", 1)[1]
+        rels = {r[0].lower() for r in q(con, """
+            SELECT table_name FROM information_schema.tables
+            WHERE table_catalog = 'wh' AND lower(table_schema) = lower(?)""", [schema])}
+        self.production = (f"(SELECT * FROM {src}.fct_player_daily_production "
+                           f"WHERE league_key = {lit(league_key)})"
+                           if "fct_player_daily_production" in rels else None)
+        self.roster = (f"(SELECT * FROM {src}.fct_player_roster_day "
+                       f"WHERE league_key = {lit(league_key)} "
+                       f"AND roster_date <= DATE {lit(self.horizon)})"
+                       if "fct_player_roster_day" in rels else None)
+        self.validations = {"inputs": {
+            "full_stat_line": "fct_player_daily_production" if self.production else "absent (credited components only)",
+            "dense_roster_days": "fct_player_roster_day" if self.roster else "absent (game days only)"}}
 
     # -- slot vocabulary ----------------------------------------------------
     def build_slot_map(self):
@@ -143,23 +160,25 @@ class League:
             SELECT lineup_slot, canonical_slot_key, slot_category AS dim_slot_category,
                    is_starting_slot, display_slot, sort_order
             FROM {src}.dim_lineup_slot WHERE platform = {lit(self.platform)}""")
-        unmapped = q(con, f"""
-            SELECT DISTINCT f.lineup_slot FROM {self.fact} f
-            LEFT JOIN slot_map s USING (lineup_slot) WHERE s.lineup_slot IS NULL""")
+        sources = [self.fact] + ([self.roster] if self.roster else [])
+        unmapped = q(con, " UNION ".join(f"""
+            SELECT DISTINCT f.lineup_slot FROM {rel} f
+            LEFT JOIN slot_map s USING (lineup_slot)
+            WHERE f.lineup_slot IS NOT NULL AND s.lineup_slot IS NULL""" for rel in sources))
         if unmapped:
             raise ExtractError(f"{self.key}: slot tokens missing from dim_lineup_slot: "
                                f"{[u[0] for u in unmapped]}")
 
-    def eligible_slots_sql(self):
+    def eligible_slots_sql(self, alias="f", relation="fct_player_daily_performance"):
         """eligible_slots arrives as JSON text from a dump and may arrive as a
         list from a native DuckDB build; either way it leaves as a list of
         canonical STARTING-slot keys (bench/IL/FA stripped, invariant 7)."""
         dtype = q(self.con, f"""
             SELECT data_type FROM information_schema.columns
-            WHERE table_catalog = 'wh' AND lower(table_name) = 'fct_player_daily_performance'
+            WHERE table_catalog = 'wh' AND lower(table_name) = '{relation}'
               AND lower(column_name) = 'eligible_slots'""")[0][0].upper()
-        raw = ("f.eligible_slots" if dtype.endswith("[]")
-               else "from_json(CAST(f.eligible_slots AS VARCHAR), '[\"VARCHAR\"]')")
+        raw = (f"{alias}.eligible_slots" if dtype.endswith("[]")
+               else f"from_json(CAST({alias}.eligible_slots AS VARCHAR), '[\"VARCHAR\"]')")
         return (f"list_distinct(list_filter(list_transform({raw}, "
                 f"x -> {self.starting_map_sql}[x]), x -> x IS NOT NULL))")
 
@@ -219,12 +238,17 @@ class League:
                        AS is_complete
             FROM periods p JOIN season_state s USING (season_year)""")
 
-        # One row per scoring day that carries data.
+        # One row per day that carries data: game days, plus no-game roster
+        # days when the dense ledger is present. Days before opening day are
+        # preseason, days past the last period offseason.
+        roster_days = (f"UNION SELECT DISTINCT CAST(season_year AS INTEGER), roster_date "
+                       f"FROM {self.roster}") if self.roster else ""
         con.execute(f"""
             CREATE OR REPLACE TEMP TABLE day_map AS
             WITH days AS (
                 SELECT DISTINCT CAST(season_year AS INTEGER) AS season_year, game_date
                 FROM {self.fact}
+                {roster_days}
             )
             SELECT d.season_year, d.game_date AS scoring_day,
                    CAST(date_diff('day', c.opener, d.game_date) + 1 AS INTEGER) AS scoring_day_ordinal,
@@ -233,7 +257,8 @@ class League:
                         THEN CAST(d.season_year AS VARCHAR) || '-P' || lpad(CAST(p.period_key AS VARCHAR), 2, '0')
                         ELSE strftime(d.game_date, '%G-W%V') END AS week_bin_key,
                    CAST(year(d.game_date) * 100 + month(d.game_date) AS INTEGER) AS month_bin_key,
-                   COALESCE(p.phase, 'offseason') AS phase,
+                   COALESCE(p.phase, CASE WHEN d.game_date < c.opener THEN 'preseason'
+                                          ELSE 'offseason' END) AS phase,
                    CASE WHEN s.is_final THEN 'final'
                         WHEN p.is_complete THEN 'complete'
                         ELSE 'in_flight' END AS day_state,
@@ -305,137 +330,183 @@ class League:
         self.validations["days_outside_any_period"] = offseason
 
     # -- the atom -------------------------------------------------------------
-    def atom_select(self):
-        src = self.src
-        return f"""
-    SELECT
-        -- 3A identity
-        f.league_key,
-        {lit(self.platform)} AS platform,
-        CAST(f.season_year AS INTEGER) AS season_year,
-        f.game_date AS scoring_day,
-        f.player_key,
-        CAST(CAST(f.player_id AS BIGINT) AS VARCHAR) AS platform_player_id,
-        NULL::INTEGER AS mlbam_id,
-        NULL::VARCHAR AS person_key,
-        f.display_name,
+    # (name, game-row expression, dense-row expression). Game rows are the
+    # daily fact's rows (alias f) with the full stat line (alias p) and the
+    # day map (d); dense rows are rostered days with no game (alias r), whose
+    # components and points are NULL, never zero (ruling R5).
+    BATTING = ["ab", "h", "singles", "doubles", "triples", "hr", "xbh", "tb", "r", "rbi",
+               "bb", "ibb", "so", "hbp", "sf", "sb", "cs", "gdp", "cyc"]
+    PITCHING = ["outs", "w", "l", "k", "er", "qs", "sv", "hld", "blsv", "p_h", "p_bb",
+                "p_hr", "p_r", "cg", "sho", "nh", "pg", "blk", "wp", "hbp_p", "pk"]
+    FACT_NAME = {"bb": "b_bb", "ibb": "b_ibb", "so": "b_so"}
 
-        -- 3B time / completeness
-        d.scoring_day_ordinal,
-        CASE WHEN {str(self.is_points).upper()} THEN NULL::INTEGER
-             ELSE CAST(f.matchup_period AS INTEGER) END AS matchup_period_ordinal,
-        d.week_bin_key,
-        d.month_bin_key,
-        d.phase,
-        d.day_state,
-        d.is_complete,
-        NULL::VARCHAR AS matchup_id,
+    def component(self, name):
+        """The full line where the warehouse has it, else the credited value
+        the fact carries (the published dashboard's own coalesce order)."""
+        fact = f"f.{self.FACT_NAME.get(name, name)}"
+        if self.production:
+            return f"CAST(COALESCE(p.{name}, {fact}) AS DOUBLE)"
+        return f"CAST({fact} AS DOUBLE)"
 
-        -- 3C rostering / deployment
-        CAST(f.team_id AS INTEGER) AS team_id,
-        COALESCE(fs.canonical_franchise_id, CAST(CAST(f.team_id AS INTEGER) AS VARCHAR)) AS franchise_id,
-        CASE WHEN f.team_id IS NULL OR s.canonical_slot_key = 'free_agent' THEN 'free_agent'
+    def line_only(self, name):
+        """A component only the full line carries (typed NULL without it)."""
+        return f"CAST(p.{name} AS DOUBLE)" if self.production else "NULL::DOUBLE"
+
+    def atom_columns(self):
+        slot_state = """CASE WHEN {team} IS NULL OR s.canonical_slot_key = 'free_agent' THEN 'free_agent'
              WHEN s.canonical_slot_key = 'estimated' THEN 'estimated'
              WHEN s.canonical_slot_key = 'injured' THEN 'il'
              WHEN s.canonical_slot_key = 'bench' THEN 'benched'
              WHEN s.is_starting_slot THEN 'active'
-             ELSE 'unclassified' END AS deployment_state,
-        s.canonical_slot_key AS lineup_slot,
-        f.lineup_slot AS platform_lineup_slot,
-        f.lineup_slot_category AS slot_category,
-        CAST(f.active_weight AS DOUBLE) AS active_share,
-        CAST(CASE f.lineup_slot_category
-             WHEN 'hitting' THEN f.active_weight
-             WHEN 'pitching' THEN 0
-             WHEN 'estimated' THEN f.active_weight
-             ELSE 0 END AS DOUBLE) AS batting_credited_share,
-        CAST(CASE f.lineup_slot_category
-             WHEN 'pitching' THEN f.active_weight
-             WHEN 'hitting' THEN 0
-             WHEN 'estimated' THEN f.active_weight
-             ELSE 0 END AS DOUBLE) AS pitching_credited_share,
-        CASE s.canonical_slot_key WHEN 'bench' THEN 'benched'
-                                  WHEN 'injured' THEN 'il' END AS wasted_reason,
-        NULL::VARCHAR AS acquisition_channel,
-        f.provenance,
-        TRUE AS has_game,
+             WHEN {slot} IS NULL THEN 'unobserved'
+             ELSE 'unclassified' END"""
+        null = lambda t: f"NULL::{t}"
+        cols = [
+            # 3A identity
+            ("league_key", "f.league_key", "r.league_key"),
+            ("platform", lit(self.platform), lit(self.platform)),
+            ("season_year", "CAST(f.season_year AS INTEGER)", "CAST(r.season_year AS INTEGER)"),
+            ("scoring_day", "f.game_date", "r.roster_date"),
+            ("player_key", "f.player_key", "r.player_key"),
+            ("platform_player_id", "CAST(CAST(f.player_id AS BIGINT) AS VARCHAR)",
+             "CAST(TRY_CAST(r.player_key AS BIGINT) AS VARCHAR)"),
+            ("mlbam_id", null("INTEGER"), null("INTEGER")),
+            ("person_key", null("VARCHAR"), null("VARCHAR")),
+            ("display_name", "f.display_name", "n.display_name"),
+            # 3B time / completeness
+            ("scoring_day_ordinal", "d.scoring_day_ordinal", "d.scoring_day_ordinal"),
+            ("matchup_period_ordinal",
+             null("INTEGER") if self.is_points else "d.period_key",
+             null("INTEGER") if self.is_points else "d.period_key"),
+            ("week_bin_key", "d.week_bin_key", "d.week_bin_key"),
+            ("month_bin_key", "d.month_bin_key", "d.month_bin_key"),
+            ("phase", "d.phase", "d.phase"),
+            ("day_state", "d.day_state", "d.day_state"),
+            ("is_complete", "d.is_complete", "d.is_complete"),
+            ("matchup_id", null("VARCHAR"), null("VARCHAR")),
+            # 3C rostering / deployment
+            ("team_id", "CAST(f.team_id AS INTEGER)", "CAST(r.team_id AS INTEGER)"),
+            ("franchise_id",
+             "COALESCE(fs.canonical_franchise_id, CAST(CAST(f.team_id AS INTEGER) AS VARCHAR))",
+             "COALESCE(fs.canonical_franchise_id, CAST(CAST(r.team_id AS INTEGER) AS VARCHAR))"),
+            ("deployment_state", slot_state.format(team="f.team_id", slot="f.lineup_slot"),
+             slot_state.format(team="r.team_id", slot="r.lineup_slot")),
+            ("lineup_slot", "s.canonical_slot_key", "s.canonical_slot_key"),
+            ("platform_lineup_slot", "f.lineup_slot", "r.lineup_slot"),
+            ("slot_category", "f.lineup_slot_category", "s.dim_slot_category"),
+            ("active_share", "CAST(f.active_weight AS DOUBLE)", null("DOUBLE")),
+            ("batting_credited_share", """CAST(CASE f.lineup_slot_category
+                 WHEN 'hitting' THEN f.active_weight WHEN 'pitching' THEN 0
+                 WHEN 'estimated' THEN f.active_weight ELSE 0 END AS DOUBLE)""", null("DOUBLE")),
+            ("pitching_credited_share", """CAST(CASE f.lineup_slot_category
+                 WHEN 'pitching' THEN f.active_weight WHEN 'hitting' THEN 0
+                 WHEN 'estimated' THEN f.active_weight ELSE 0 END AS DOUBLE)""", null("DOUBLE")),
+            ("wasted_reason", "CASE s.canonical_slot_key WHEN 'bench' THEN 'benched' WHEN 'injured' THEN 'il' END",
+             "CASE s.canonical_slot_key WHEN 'bench' THEN 'benched' WHEN 'injured' THEN 'il' END"),
+            ("acquisition_channel", null("VARCHAR"), null("VARCHAR")),
+            ("provenance", "f.provenance", "r.roster_source"),
+            ("has_game", "TRUE", "FALSE"),
+            # 3D eligibility / position
+            ("eligible_slots", self.eligible_slots_sql("f", "fct_player_daily_performance"),
+             self.eligible_slots_sql("r", "fct_player_roster_day") if self.roster else null("VARCHAR[]")),
+            ("primary_position", "f.position", null("VARCHAR")),
+            ("irl_positions_played", null("VARCHAR[]"), null("VARCHAR[]")),
+            ("mlb_team_id", "CAST(f.mlb_team_id AS INTEGER)", null("INTEGER")),
+            # 3E batting
+            ("batting_games", self.line_only("batting_games"), null("DOUBLE")),
+        ]
+        cols += [(c, self.component(c), null("DOUBLE")) for c in self.BATTING]
+        cols += [("sh", self.line_only("sh"), null("DOUBLE")),
+                 ("pa", self.line_only("pa"), null("DOUBLE")),
+                 ("pitching_games", self.line_only("pitching_games"), null("DOUBLE")),
+                 ("pitching_starts", self.line_only("pitching_starts"), null("DOUBLE"))]
+        cols += [(c, self.component(c), null("DOUBLE")) for c in self.PITCHING]
+        cols += [("bf", self.line_only("bf"), null("DOUBLE")),
+                 ("gf", self.line_only("gf"), null("DOUBLE"))]
+        # 3F.1 fielding, reserved until MLB-289
+        cols += [(c, null("DOUBLE"), null("DOUBLE")) for c in
+                 ("fielding_games", "po", "a", "e", "dp", "pb", "sb_allowed", "cs_caught")]
+        # 3G league-scored value: the credited calculated lens and the platform lens
+        cols += [
+            ("batting_pts", "CAST(f.total_hitting_stat_pts AS DOUBLE)", null("DOUBLE")),
+            ("pitching_pts", "CAST(f.total_pitching_stat_pts AS DOUBLE)", null("DOUBLE")),
+            ("total_pts", "CAST(f.total_stat_pts AS DOUBLE)", null("DOUBLE")),
+            ("negative_pts", "CAST(f.negative_points AS DOUBLE)", null("DOUBLE")),
+            ("platform_pts", "CAST(f.platform_points AS DOUBLE)", null("DOUBLE")),
+            ("platform_batting_pts", "CAST(f.platform_hitting_pts AS DOUBLE)", null("DOUBLE")),
+            ("platform_pitching_pts", "CAST(f.platform_pitching_pts AS DOUBLE)", null("DOUBLE")),
+            ("scoring_rule_version", lit(self.rule_version), lit(self.rule_version)),
+            # extension (nullable additions; the contract columns stay an exact prefix)
+            ("period_key", "d.period_key", "d.period_key"),
+            ("slot_provenance", "CASE WHEN f.provenance = 'captured' THEN 'captured' ELSE 'estimated' END",
+             "CASE WHEN r.roster_source = 'platform_roster_snapshot' THEN 'captured' ELSE 'estimated' END"),
+            ("p_ibb", self.line_only("p_ibb"), null("DOUBLE")),
+            ("production_source", "p.production_source" if self.production else null("VARCHAR"),
+             null("VARCHAR")),
+            # raw_ (platform-shaped, for provenance and reconciliation)
+            ("raw_scoring_period", "CAST(f.scoring_period AS BIGINT)", null("BIGINT")),
+            ("raw_matchup_period", "CAST(f.matchup_period AS INTEGER)", null("INTEGER")),
+            ("raw_games_played", "CAST(f.games_played AS INTEGER)", null("INTEGER")),
+            ("raw_is_active_slot", "f.is_active_slot", null("BOOLEAN")),
+            ("raw_performance_status", "f.performance_status", null("VARCHAR")),
+            ("raw_wasted_bucket", "f.wasted_bucket", null("VARCHAR")),
+            ("raw_pro_team", "f.pro_team", null("VARCHAR")),
+            ("raw_roster_status", "rs.roster_status" if self.roster else null("VARCHAR"),
+             "r.roster_status"),
+        ]
+        return cols
 
-        -- 3D eligibility / position
-        {self.eligible_slots_sql()} AS eligible_slots,
-        f.position AS primary_position,
-        NULL::VARCHAR[] AS irl_positions_played,
-        CAST(f.mlb_team_id AS INTEGER) AS mlb_team_id,
-
-        -- 3E batting components
-        NULL::DOUBLE AS batting_games,
-        f.ab, f.h, f.singles, f.doubles, f.triples, f.hr, f.xbh, f.tb, f.r, f.rbi,
-        f.b_bb AS bb, f.b_ibb AS ibb, f.b_so AS so, f.hbp, f.sf, f.sb, f.cs, f.gdp, f.cyc,
-        NULL::DOUBLE AS sh,
-        NULL::DOUBLE AS pa,
-
-        -- 3F pitching components
-        NULL::DOUBLE AS pitching_games,
-        NULL::DOUBLE AS pitching_starts,
-        f.outs, f.w, f.l, f.k, f.er, f.qs, f.sv, f.hld, f.blsv, f.p_h, f.p_bb, f.p_hr,
-        f.p_r, f.cg, f.sho, f.nh, f.pg, f.blk, f.wp, f.hbp_p, f.pk,
-        NULL::DOUBLE AS bf,
-        NULL::DOUBLE AS gf,
-
-        -- 3F.1 fielding (reserved, NULL until MLB-289)
-        NULL::DOUBLE AS fielding_games, NULL::DOUBLE AS po, NULL::DOUBLE AS a,
-        NULL::DOUBLE AS e, NULL::DOUBLE AS dp, NULL::DOUBLE AS pb,
-        NULL::DOUBLE AS sb_allowed, NULL::DOUBLE AS cs_caught,
-
-        -- 3G league-scored value
-        CAST(f.total_hitting_stat_pts AS DOUBLE) AS batting_pts,
-        CAST(f.total_pitching_stat_pts AS DOUBLE) AS pitching_pts,
-        CAST(f.total_stat_pts AS DOUBLE) AS total_pts,
-        CAST(f.negative_points AS DOUBLE) AS negative_pts,
-        CAST(f.platform_points AS DOUBLE) AS platform_pts,
-        CAST(f.platform_hitting_pts AS DOUBLE) AS platform_batting_pts,
-        CAST(f.platform_pitching_pts AS DOUBLE) AS platform_pitching_pts,
-        {lit(self.rule_version)} AS scoring_rule_version,
-
-        -- extension (nullable additions; contract columns above stay an exact prefix)
-        d.period_key,
-        CASE WHEN f.provenance = 'captured' THEN 'captured' ELSE 'estimated' END AS slot_provenance,
-
-        -- raw_ (platform-shaped columns kept for provenance and reconciliation)
-        CAST(f.scoring_period AS BIGINT) AS raw_scoring_period,
-        CAST(f.matchup_period AS INTEGER) AS raw_matchup_period,
-        CAST(f.games_played AS INTEGER) AS raw_games_played,
-        f.is_active_slot AS raw_is_active_slot,
-        f.performance_status AS raw_performance_status,
-        f.wasted_bucket AS raw_wasted_bucket,
-        f.pro_team AS raw_pro_team
+    def atom_select(self, season):
+        src = self.src
+        cols = self.atom_columns()
+        franchise = lambda a: f"""LEFT JOIN {src}.dim_franchise_season fs
+      ON fs.league_key = {a}.league_key
+     AND CAST(fs.season_year AS INTEGER) = CAST({a}.season_year AS INTEGER)
+     AND fs.franchise_id = CAST(CAST({a}.team_id AS INTEGER) AS VARCHAR)"""
+        game = f"""
+    SELECT {", ".join(f"{g} AS {n}" for n, g, _ in cols)}
     FROM {self.fact} f
-    JOIN day_map d
-      ON d.season_year = CAST(f.season_year AS INTEGER) AND d.scoring_day = f.game_date
+    JOIN day_map d ON d.season_year = CAST(f.season_year AS INTEGER) AND d.scoring_day = f.game_date
     LEFT JOIN slot_map s ON s.lineup_slot = f.lineup_slot
-    LEFT JOIN {src}.dim_franchise_season fs
-      ON fs.league_key = f.league_key
-     AND CAST(fs.season_year AS INTEGER) = CAST(f.season_year AS INTEGER)
-     AND fs.franchise_id = CAST(CAST(f.team_id AS INTEGER) AS VARCHAR)"""
+    {"LEFT JOIN " + self.production + " p ON p.game_date = f.game_date AND p.player_key = f.player_key" if self.production else ""}
+    {"LEFT JOIN " + self.roster + " rs ON rs.roster_date = f.game_date AND rs.player_key = f.player_key" if self.roster else ""}
+    {franchise("f")}
+    WHERE CAST(f.season_year AS INTEGER) = {season}"""
+        if not self.roster:
+            return game
+        dense = f"""
+    SELECT {", ".join(f"{e} AS {n}" for n, _, e in cols)}
+    FROM {self.roster} r
+    JOIN day_map d ON d.season_year = CAST(r.season_year AS INTEGER) AND d.scoring_day = r.roster_date
+    LEFT JOIN slot_map s ON s.lineup_slot = r.lineup_slot
+    LEFT JOIN names n ON n.player_key = r.player_key
+    {franchise("r")}
+    WHERE CAST(r.season_year AS INTEGER) = {season}
+      AND NOT EXISTS (SELECT 1 FROM {self.fact} f
+                      WHERE f.game_date = r.roster_date AND f.player_key = r.player_key)"""
+        return f"{game}\n    UNION ALL{dense}"
 
     def write_atoms(self, league_dir):
         con = self.con
         atom_dir = league_dir / "atom"
         atom_dir.mkdir(parents=True)
         seasons = [r[0] for r in q(con, "SELECT season_year FROM season_cal ORDER BY 1")]
-        select = self.atom_select()
-        out = []
+        con.execute(f"""CREATE OR REPLACE TEMP TABLE names AS
+            SELECT player_key, arg_max(display_name, game_date) AS display_name
+            FROM {self.fact} GROUP BY 1""")
+        out, dense_total = [], 0
         for season in seasons:
             path = atom_dir / f"{season}.parquet"
             con.execute(f"""
-                COPY ({select} WHERE CAST(f.season_year AS INTEGER) = {season}
-                      ORDER BY scoring_day, player_key)
+                COPY (SELECT * FROM ({self.atom_select(season)}) ORDER BY scoring_day, player_key)
                 TO {lit(path.as_posix())} {PARQUET_OPTS}""")
             written = f"read_parquet({lit(path.as_posix())})"
-            rows = q(con, f"SELECT COUNT(*) FROM {written}")[0][0]
+            rows, game_rows = q(con, f"SELECT COUNT(*), COUNT(*) FILTER (WHERE has_game) FROM {written}")[0]
             source_rows = q(con, f"SELECT COUNT(*) FROM {self.fact} f "
                                  f"WHERE CAST(f.season_year AS INTEGER) = {season}")[0][0]
-            if rows != source_rows:
-                raise ExtractError(f"{self.key}/{season}: wrote {rows} rows, fact has {source_rows}")
+            if game_rows != source_rows:
+                raise ExtractError(f"{self.key}/{season}: wrote {game_rows} game rows, fact has {source_rows}")
+            dense_total += rows - game_rows
             dupes = q(con, f"""SELECT COUNT(*) FROM (SELECT 1 FROM {written}
                 GROUP BY league_key, scoring_day, player_key HAVING COUNT(*) > 1)""")[0][0]
             if dupes:
@@ -445,9 +516,14 @@ class League:
                                   f"WHERE deployment_state = 'unclassified'")[0][0]
             if unclassified:
                 raise ExtractError(f"{self.key}/{season}: {unclassified} rows with no deployment state")
+            nonnull_dense = q(con, f"SELECT COUNT(*) FROM {written} WHERE NOT has_game "
+                                   f"AND (ab IS NOT NULL OR outs IS NOT NULL OR total_pts IS NOT NULL)")[0][0]
+            if nonnull_dense:
+                raise ExtractError(f"{self.key}/{season}: {nonnull_dense} no-game rows carry production")
             out.append((season, path, rows))
+        self.validations["dense_no_game_rows"] = dense_total
         self.validations["uniqueness_league_day_player"] = "pass (every season file checked)"
-        self.validations["row_parity_with_fact"] = "pass (every season file checked)"
+        self.validations["row_parity_with_fact"] = "pass: game rows = fact rows, every season file"
         # Share-vs-slot disagreements are carried as the warehouse states
         # them (the slot is the roster snapshot, the share is the scoring
         # attribution); counted here so they are visible, never repaired.
@@ -634,7 +710,7 @@ class League:
         copy("lineup_slot", f"""
             WITH used AS (
                 SELECT DISTINCT season_year, platform_lineup_slot AS lineup_slot
-                FROM read_parquet({atom})
+                FROM read_parquet({atom}) WHERE platform_lineup_slot IS NOT NULL
             ),
             observed AS (
                 SELECT season_year, platform_lineup_slot AS lineup_slot, MAX(n) AS observed_max

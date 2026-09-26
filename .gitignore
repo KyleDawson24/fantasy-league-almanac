@@ -126,6 +126,7 @@ archives/
 
 # Kyle's personal study/reference notes -- local only (2026-07-20).
 Study Material.MD
+Study Material -- Web Layer.MD
 
 # MLB-95 public-repo hardening (2026-07-21):
 # - raw league archives were untracked but NOT ignored -- one `git add .`

@@ -69,6 +69,9 @@ def main(argv=None):
     ap.add_argument("--export-dir", required=True)
     ap.add_argument("--extract-dir", required=True)
     ap.add_argument("--report")
+    ap.add_argument("--grain", choices=["warehouse", "round-once"], default="warehouse",
+                    help="warehouse (the dashboard's rule): round points where the marts "
+                         "round them; round-once: sum days, round at the end")
     args = ap.parse_args(argv)
     exp, ext = Path(args.export_dir), Path(args.extract_dir)
     con = duckdb.connect()
@@ -142,6 +145,13 @@ def main(argv=None):
             continue
         days, vals = grain[key]
         atom_raw = vals[m]  # OUTS stays in outs on both sides; the formula divides by 3
+        if m in POINT_METRICS:
+            if r1(vals[m]) != r1(week_rounded[key][m]):
+                ds_cells["info_round_once_would_differ"] += 1
+            if args.grain == "warehouse":
+                # Kyle, 2026-09-26: the dashboard prints what the Sheets
+                # almanac prints, so points round per team-week, then sum.
+                atom_raw = week_rounded[key][m]
         ok_raw = r1(atom_raw) == r1(r["raw_total"])
         ok_days = days == r["denominator_value"]
         spec = {"stat_name": m}
@@ -204,6 +214,11 @@ def main(argv=None):
     for r in ps:
         key = (r["scope"], r["team_id"], r["lineup_slot"])
         atom_raw = slot_pts.get(key)
+        if key in season_rounded_alltime:
+            if r1(atom_raw) != r1(season_rounded_alltime[key]):
+                ps_cells["info_round_once_would_differ"] += 1
+            if args.grain == "warehouse":
+                atom_raw = season_rounded_alltime[key]
         n = mp.get((r["scope"], r["team_id"]))
         printed = None if atom_raw is None or not n else round(atom_raw / n, 1)
         ok_raw = r1(atom_raw) == r1(r["raw_total"])

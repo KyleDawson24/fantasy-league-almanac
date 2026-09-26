@@ -2333,3 +2333,72 @@ models:
           - not_null
       - name: notes
         description: 'Seed free text for the things a reader would otherwise file as a bug.'
+
+  - name: fct_player_daily_production
+    description: >
+      The full real-life stat line per league x game day x rosterable asset
+      (contract v0.3 asks W1 + W6, MLB-319). Credited components live on
+      fct_player_daily_performance; this carries everything that happened,
+      including the discipline a started player's slot did not credit, plus
+      pa, sh, bf, gf and per-discipline games. Sourced from the platform's
+      own per-day breakdown where one exists and from the MLB game-log spine
+      through fct_cbs_player_game_attribution otherwise; the branch is decided
+      by which relation holds the league's rows, never by platform name.
+      Perfect game is NULL on the spine branch (no fielding errors to rule a
+      perfect game in or out).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - game_date
+              - player_key
+    columns:
+      - name: league_key
+        tests:
+          - not_null
+      - name: game_date
+        tests:
+          - not_null
+      - name: player_key
+        tests:
+          - not_null
+      - name: production_source
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['platform_breakdown', 'mlb_spine']
+
+  - name: fct_player_roster_day
+    description: >
+      Every day an asset sat on a fantasy roster, game or no game (contract
+      v0.3 ruling R5 / ask W10, MLB-319). From the platform's own daily roster
+      snapshot where one exists; otherwise from reconstructed add/drop stints
+      expanded to days, with lineup_slot NULL (stints observe membership, not
+      the lineup) and eligibility carried forward from the asset's latest game
+      day. Unresolved stints are excluded rather than guessed.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - roster_date
+              - player_key
+    columns:
+      - name: league_key
+        tests:
+          - not_null
+      - name: roster_date
+        tests:
+          - not_null
+      - name: player_key
+        tests:
+          - not_null
+      - name: team_id
+        tests:
+          - not_null
+      - name: roster_source
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['platform_roster_snapshot', 'observed_game_day', 'inferred_gap', 'reconstructed_stint']

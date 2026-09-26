@@ -1,761 +1,776 @@
 #!/usr/bin/env python3
 """
-publish_extract.py -- Publish dashboard Parquet extracts from a DuckDB warehouse.
+publish_extract.py -- the platform-neutral dashboard data layer (MLB-319).
 
-Reads fct_player_daily_performance (the DEMO variant) and supporting dims,
-writes per-league Parquet files shaped to the master-table contract (v0.3)
-into docs/dashboard/data/<league_slug>/.
+One extract for any league: the master-table contract's atom (v0.3,
+Appendix A of the MLB-297 kickoff) plus the converged dims, written per
+league as Parquet. Every dashboard page is then a filter over the atom and
+the dims; nothing downstream needs to know which platform a league came
+from. BSB, its twin and a future Fantrax league are data-source swaps.
+
+WHAT DECIDES BEHAVIOUR, AND WHAT NEVER DOES. The league's FORMAT
+(dim_league_format, settings-first) decides period semantics: a head-to-head
+league's periods are its matchups (dim_matchup_period, dated); a
+season-points league has ONE matchup, the season, which is why its
+dim_matchup_period rows carry NULL bounds by design, and its weekly scoring
+periods are BINS derived from a rule (period 1 starts on opening day, each
+later period 7 days after the one before). The platform name is used for
+exactly one thing: choosing which rows of dim_lineup_slot translate this
+league's slot tokens, because that dim is keyed by platform. It is read from
+the league registry, never spelled as a literal here.
+
+Output (a fresh stamped directory per run; nothing is ever deleted or
+overwritten -- rerunning writes a new directory beside the old one):
+
+    <out>/<stamp>/<league_slug>/
+        atom/<season>.parquet   the day atom, contract columns in Appendix A
+                                order, then the extension and raw_ groups
+        rollup.parquet          season x phase x team x player sums
+        dims/league.parquet     format, period vocabulary, horizon
+        dims/seasons.parquet    opener, last day, provenance mix per season
+        dims/periods.parquet    period key -> dates, label, completeness
+        dims/calendar.parquet   day -> period key, bins, phase, day_state
+        dims/teams.parquet      team-season names and standings, no contacts
+        dims/lineup_slot.parquet  slot vocabulary + capacity per season
+        dims/scoring_rule.parquet
+        manifest.json           files (rows, bytes, sha256), source commit,
+                                data horizon, every validation result
 
 Usage:
-    python dashboard/publish_extract.py [--db path/to/ESPN_FANTASY.duckdb]
-                                        [--out docs/dashboard]
+    python dashboard/publish_extract.py --db data/duckdb/ESPN_FANTASY.duckdb
+    python dashboard/publish_extract.py --db ... --league espn-main --horizon 2026-09-20
 
-The default --db is data/duckdb/demo/ESPN_FANTASY.duckdb.
+The warehouse file is attached READ_ONLY into an in-memory session, so the
+writer can build its temp tables without ever writing to the warehouse. It
+reads models only, so it runs over a DuckDB file built by the dbt DuckDB
+lane or loaded from a Parquet dump of either engine's models.
 """
 
 import argparse
+import hashlib
 import json
-import os
-import shutil
+import re
+import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import duckdb
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+from config.league_registry import get_league  # noqa: E402
 
-GENERATED_AT = datetime.now(timezone.utc).isoformat()
+PARQUET_OPTS = "(FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 50000)"
+PERIOD_DAYS = 7
+EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+PHONE_RE = re.compile(r"(?<!\d)(?:\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}(?!\d)")
+FORBIDDEN_COLUMN_RE = re.compile(r"email|phone|contact", re.I)
 
-# Starting slots per platform, used to filter eligible_slots.
-# Populated at runtime from dim_lineup_slot.
-STARTING_SLOTS_BY_PLATFORM = {}
+
+class ExtractError(RuntimeError):
+    """A contract invariant failed; the writer stops rather than publish."""
+
+
+def q(con, sql, params=None):
+    return con.execute(sql, params or []).fetchall()
+
+
+def lit(value):
+    return "'" + str(value).replace("'", "''") + "'"
+
+
+def sha256(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def source_commit():
+    def git(*args):
+        return subprocess.run(["git", *args], cwd=REPO_ROOT, capture_output=True,
+                              text=True).stdout.strip()
+    return {"commit": git("rev-parse", "HEAD") or None,
+            "branch": git("rev-parse", "--abbrev-ref", "HEAD") or None,
+            "dirty": bool(git("status", "--porcelain", "--untracked-files=no"))}
+
 
 # ---------------------------------------------------------------------------
-# Column contract (Appendix A ordering)
+# Per-league context: format, slot vocabulary, calendar
 # ---------------------------------------------------------------------------
 
-SEASON_ATOM_COLUMNS = """
-    -- 3A identity
-    f.league_key,
-    CASE
-        WHEN f.league_key LIKE 'espn%' THEN 'espn'
-        WHEN f.league_key LIKE 'cbs%' THEN 'cbs'
-        ELSE 'unknown'
-    END AS platform,
-    CAST(f.season_year AS INTEGER) AS season_year,
-    f.game_date AS scoring_day,
-    f.player_key,
-    CAST(f.player_id AS VARCHAR) AS platform_player_id,
-    NULL::INTEGER AS mlbam_id,
-    NULL::VARCHAR AS person_key,
-    f.display_name,
+class League:
+    def __init__(self, con, src, league_key, horizon):
+        self.con, self.src, self.key = con, src, league_key
+        self.slug = league_key.replace("-", "_")
+        self.platform = get_league(league_key).platform
+        fmt = q(con, f"SELECT league_format FROM {src}.dim_league_format WHERE league_key = ?",
+                [league_key])
+        if not fmt:
+            raise ExtractError(f"{league_key}: no dim_league_format row")
+        self.format = fmt[0][0]
+        if self.format not in ("h2h", "points"):
+            raise ExtractError(f"{league_key}: league_format {self.format!r} has no period rule")
+        self.is_points = self.format == "points"
+        self.period_kind = "scoring_period" if self.is_points else "matchup"
+        self.period_label = "Period" if self.is_points else "Matchup"
+        max_day = q(con, f"SELECT MAX(game_date) FROM {src}.fct_player_daily_performance "
+                         f"WHERE league_key = ?", [league_key])[0][0]
+        self.horizon = min(horizon, max_day) if horizon else max_day
+        self.rule_version = q(con, f"SELECT CAST(MAX(settings_season) AS VARCHAR) FROM "
+                                   f"{src}.dim_league_scoring_rule WHERE league_key = ?",
+                              [league_key])[0][0]
+        self.fact = (f"(SELECT * FROM {src}.fct_player_daily_performance "
+                     f"WHERE league_key = {lit(league_key)} "
+                     f"AND game_date <= DATE {lit(self.horizon)})")
+        self.validations = {}
 
-    -- 3B time/completeness
-    NULL::INTEGER AS scoring_day_ordinal,
-    CAST(f.matchup_period AS INTEGER) AS matchup_period_ordinal,
-    NULL::VARCHAR AS week_bin_key,
-    CAST(YEAR(f.game_date) * 100 + MONTH(f.game_date) AS INTEGER) AS month_bin_key,
-    NULL::VARCHAR AS phase,
-    NULL::VARCHAR AS day_state,
-    COALESCE((
-        SELECT mp.end_date < CURRENT_DATE
-        FROM ANALYTICS.DIM_MATCHUP_PERIOD mp
-        WHERE mp.league_key = f.league_key
-          AND CAST(mp.season_year AS INTEGER) = CAST(f.season_year AS INTEGER)
-          AND f.game_date BETWEEN mp.start_date AND mp.end_date
-        LIMIT 1
-    ), FALSE) AS is_complete,
-    NULL::VARCHAR AS matchup_id,
-
-    -- 3C rostering/deployment
-    CAST(f.team_id AS INTEGER) AS team_id,
-    CAST(f.team_id AS VARCHAR) AS franchise_id,
-    CASE
-        WHEN f.team_id IS NULL OR f.wasted_bucket = 'FA' THEN 'free_agent'
-        WHEN f.provenance LIKE 'estimated%' THEN 'estimated'
-        WHEN f.lineup_slot IN ('IL') THEN 'il'
-        WHEN f.lineup_slot IN ('BE', 'RS') THEN 'benched'
-        WHEN f.is_active_slot THEN 'active'
-        ELSE 'benched'
-    END AS deployment_state,
-    f.lineup_slot,
-    f.lineup_slot AS platform_lineup_slot,
-    f.lineup_slot_category AS slot_category,
-    f.active_weight AS active_share,
-    NULL::FLOAT AS batting_credited_share,
-    NULL::FLOAT AS pitching_credited_share,
-    CASE
-        WHEN f.lineup_slot IN ('BE', 'RS') THEN 'benched'
-        WHEN f.lineup_slot = 'IL' THEN 'il'
-        ELSE NULL
-    END AS wasted_reason,
-    NULL::VARCHAR AS acquisition_channel,
-    f.provenance,
-    TRUE AS has_game,
-
-    -- 3D eligibility/position (filter to starting-slot keys only)
-    f.eligible_slots AS eligible_slots,
-    f.position AS primary_position,
-    NULL::VARCHAR[] AS irl_positions_played,
-    f.mlb_team_id,
-
-    -- 3E batting components
-    NULL::DOUBLE AS batting_games,
-    f.ab,
-    f.h,
-    f.singles,
-    f.doubles,
-    f.triples,
-    f.hr,
-    f.xbh,
-    f.tb,
-    f.r,
-    f.rbi,
-    f.b_bb AS bb,
-    f.b_ibb AS ibb,
-    f.b_so AS so,
-    f.hbp,
-    f.sf,
-    f.sb,
-    f.cs,
-    f.gdp,
-    f.cyc,
-    NULL::DOUBLE AS sh,
-    NULL::DOUBLE AS pa,
-
-    -- 3F pitching components
-    NULL::DOUBLE AS pitching_games,
-    NULL::DOUBLE AS pitching_starts,
-    f.outs,
-    f.w,
-    f.l,
-    f.k,
-    f.er,
-    f.qs,
-    f.sv,
-    f.hld,
-    f.blsv,
-    f.p_h,
-    f.p_bb,
-    f.p_hr,
-    f.p_r,
-    f.cg,
-    f.sho,
-    f.nh,
-    f.pg,
-    f.blk,
-    f.wp,
-    f.hbp_p,
-    f.pk,
-    NULL::DOUBLE AS bf,
-    NULL::DOUBLE AS gf,
-
-    -- 3F.1 fielding (all reserved NULL)
-    NULL::DOUBLE AS fielding_games,
-    NULL::DOUBLE AS po,
-    NULL::DOUBLE AS a,
-    NULL::DOUBLE AS e,
-    NULL::DOUBLE AS dp,
-    NULL::DOUBLE AS pb,
-    NULL::DOUBLE AS sb_allowed,
-    NULL::DOUBLE AS cs_caught,
-
-    -- 3G league-scored value
-    f.total_hitting_stat_pts AS batting_pts,
-    f.total_pitching_stat_pts AS pitching_pts,
-    f.total_stat_pts AS total_pts,
-    f.negative_points AS negative_pts,
-    f.platform_points AS platform_pts,
-    f.platform_hitting_pts AS platform_batting_pts,
-    f.platform_pitching_pts AS platform_pitching_pts,
-    '2026' AS scoring_rule_version,
-
-    -- raw_ columns (unmapped source columns)
-    CAST(f.scoring_period AS INTEGER) AS raw_scoring_period,
-    f.team_name AS raw_team_name,
-    f.team_abbrev AS raw_team_abbrev,
-    f.owner_name AS raw_owner_name,
-    f.player_name AS raw_player_name,
-    f.pro_team AS raw_pro_team,
-    f.is_active_slot AS raw_is_active_slot,
-    f.performance_status AS raw_performance_status,
-    f.wasted_bucket AS raw_wasted_bucket,
-    CAST(f.games_played AS INTEGER) AS raw_games_played,
-    f.owner_display AS raw_owner_display,
-    f.h_pts AS raw_h_pts,
-    f.ab_pts AS raw_ab_pts,
-    f.b_bb_pts AS raw_bb_pts,
-    f.b_so_pts AS raw_so_pts,
-    f.hbp_pts AS raw_hbp_pts,
-    f.sf_pts AS raw_sf_pts,
-    f.hr_pts AS raw_hr_pts,
-    f.r_pts AS raw_r_pts,
-    f.rbi_pts AS raw_rbi_pts,
-    f.sb_pts AS raw_sb_pts,
-    f.cs_pts AS raw_cs_pts,
-    f.tb_pts AS raw_tb_pts,
-    f.singles_pts AS raw_singles_pts,
-    f.doubles_pts AS raw_doubles_pts,
-    f.triples_pts AS raw_triples_pts,
-    f.xbh_pts AS raw_xbh_pts,
-    f.gdp_pts AS raw_gdp_pts,
-    f.b_ibb_pts AS raw_ibb_pts,
-    f.cyc_pts AS raw_cyc_pts,
-    f.w_pts AS raw_w_pts,
-    f.l_pts AS raw_l_pts,
-    f.k_pts AS raw_k_pts,
-    f.er_pts AS raw_er_pts,
-    f.outs_pts AS raw_outs_pts,
-    f.qs_pts AS raw_qs_pts,
-    f.sv_pts AS raw_sv_pts,
-    f.hld_pts AS raw_hld_pts,
-    f.p_h_pts AS raw_p_h_pts,
-    f.p_bb_pts AS raw_p_bb_pts,
-    f.p_hr_pts AS raw_p_hr_pts,
-    f.p_r_pts AS raw_p_r_pts,
-    f.cg_pts AS raw_cg_pts,
-    f.blk_pts AS raw_blk_pts,
-    f.wp_pts AS raw_wp_pts,
-    f.hbp_p_pts AS raw_hbp_p_pts,
-    f.blsv_pts AS raw_blsv_pts,
-    f.nh_pts AS raw_nh_pts,
-    f.pg_pts AS raw_pg_pts,
-    f.pk_pts AS raw_pk_pts,
-    f.sho_pts AS raw_sho_pts
-"""
-
-
-def slug_for_league(league_key: str) -> str:
-    return league_key.replace("-", "_")
-
-
-def assert_uniqueness(con, league_key: str, season_year: int):
-    """Assert one row per (league_key, scoring_day, player_key)."""
-    dupes = con.execute("""
-        SELECT game_date, player_key, COUNT(*) AS n
-        FROM ANALYTICS.FCT_PLAYER_DAILY_PERFORMANCE
-        WHERE league_key = ? AND season_year = ?
-        GROUP BY game_date, player_key
-        HAVING COUNT(*) > 1
-        LIMIT 5
-    """, [league_key, season_year]).fetchall()
-    if dupes:
-        print(f"UNIQUENESS VIOLATION in {league_key}/{season_year}:", file=sys.stderr)
-        for d in dupes:
-            print(f"  {d[0]} / {d[1]} = {d[2]} rows", file=sys.stderr)
-        sys.exit(1)
-
-
-def write_season_parquet(con, league_key: str, season_year: int, out_path: Path):
-    """Write one season atom Parquet file via COPY TO."""
-    assert_uniqueness(con, league_key, season_year)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_file = str(out_path).replace("\\", "/")
-    con.execute(f"""
-        COPY (
-            SELECT {SEASON_ATOM_COLUMNS}
-            FROM ANALYTICS.FCT_PLAYER_DAILY_PERFORMANCE f
-            WHERE f.league_key = ? AND CAST(f.season_year AS INTEGER) = ?
-            ORDER BY f.game_date, f.player_key
-        ) TO '{out_file}'
-        (FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 50000)
-    """, [league_key, season_year])
-    row_count = con.execute("""
-        SELECT COUNT(*) FROM ANALYTICS.FCT_PLAYER_DAILY_PERFORMANCE
-        WHERE league_key = ? AND CAST(season_year AS INTEGER) = ?
-    """, [league_key, season_year]).fetchone()[0]
-    return row_count
-
-
-def write_rollup_parquet(con, league_key: str, out_path: Path):
-    """Write the season rollup: one row per player x team x season."""
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_file = str(out_path).replace("\\", "/")
-    con.execute(f"""
-        COPY (
-            SELECT
-                f.league_key,
-                CASE WHEN f.league_key LIKE 'espn%' THEN 'espn'
-                     WHEN f.league_key LIKE 'cbs%' THEN 'cbs'
-                     ELSE 'unknown' END AS platform,
-                CAST(f.season_year AS INTEGER) AS season_year,
-                f.player_key,
-                CAST(f.player_id AS VARCHAR) AS platform_player_id,
-                f.display_name,
-                CAST(f.team_id AS INTEGER) AS team_id,
-                f.position AS primary_position,
-                f.mlb_team_id,
-                MIN(f.game_date) AS first_scoring_day,
-                MAX(f.game_date) AS last_scoring_day,
-                COUNT(*) AS day_count,
-
-                -- Total sums (all rows)
-                SUM(f.total_hitting_stat_pts) AS total_batting_pts,
-                SUM(f.total_pitching_stat_pts) AS total_pitching_pts,
-                SUM(f.total_stat_pts) AS total_pts,
-
-                -- Active sums (weighted by active_share)
-                SUM(f.total_hitting_stat_pts * f.active_weight) AS active_batting_pts,
-                SUM(f.total_pitching_stat_pts * f.active_weight) AS active_pitching_pts,
-                SUM(f.total_stat_pts * f.active_weight) AS active_pts,
-
-                -- Wasted = total - active
-                SUM(f.total_stat_pts) - SUM(f.total_stat_pts * f.active_weight) AS wasted_pts,
-
-                -- 3E batting component sums
-                SUM(f.ab) AS ab,
-                SUM(f.h) AS h,
-                SUM(f.singles) AS singles,
-                SUM(f.doubles) AS doubles,
-                SUM(f.triples) AS triples,
-                SUM(f.hr) AS hr,
-                SUM(f.xbh) AS xbh,
-                SUM(f.tb) AS tb,
-                SUM(f.r) AS r,
-                SUM(f.rbi) AS rbi,
-                SUM(f.b_bb) AS bb,
-                SUM(f.b_ibb) AS ibb,
-                SUM(f.b_so) AS so,
-                SUM(f.hbp) AS hbp,
-                SUM(f.sf) AS sf,
-                SUM(f.sb) AS sb,
-                SUM(f.cs) AS cs,
-                SUM(f.gdp) AS gdp,
-                SUM(f.cyc) AS cyc,
-
-                -- 3F pitching component sums
-                SUM(f.outs) AS outs,
-                SUM(f.w) AS w,
-                SUM(f.l) AS l,
-                SUM(f.k) AS k,
-                SUM(f.er) AS er,
-                SUM(f.qs) AS qs,
-                SUM(f.sv) AS sv,
-                SUM(f.hld) AS hld,
-                SUM(f.blsv) AS blsv,
-                SUM(f.p_h) AS p_h,
-                SUM(f.p_bb) AS p_bb,
-                SUM(f.p_hr) AS p_hr,
-                SUM(f.p_r) AS p_r,
-                SUM(f.cg) AS cg,
-                SUM(f.sho) AS sho,
-                SUM(f.nh) AS nh,
-                SUM(f.pg) AS pg,
-                SUM(f.blk) AS blk,
-                SUM(f.wp) AS wp,
-                SUM(f.hbp_p) AS hbp_p,
-                SUM(f.pk) AS pk,
-
-                SUM(f.negative_points) AS negative_pts,
-                SUM(f.platform_points) AS platform_pts,
-                SUM(f.platform_hitting_pts) AS platform_batting_pts,
-                SUM(f.platform_pitching_pts) AS platform_pitching_pts
-
-            FROM ANALYTICS.FCT_PLAYER_DAILY_PERFORMANCE f
-            WHERE f.league_key = ?
-            GROUP BY f.league_key, f.season_year, f.player_key,
-                     f.player_id, f.display_name, f.team_id,
-                     f.position, f.mlb_team_id
-            ORDER BY CAST(f.season_year AS INTEGER), f.player_key
-        ) TO '{out_file}'
-        (FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 50000)
-    """, [league_key])
-
-    row_count = con.execute("""
-        SELECT COUNT(*) FROM (
-            SELECT 1 FROM ANALYTICS.FCT_PLAYER_DAILY_PERFORMANCE
-            WHERE league_key = ?
-            GROUP BY season_year, player_key, player_id, display_name,
-                     team_id, position, mlb_team_id
-        )
-    """, [league_key]).fetchone()[0]
-    return row_count
-
-
-def write_dims(con, league_key: str, dims_dir: Path):
-    """Write dimension Parquet files."""
-    dims_dir.mkdir(parents=True, exist_ok=True)
-    manifest_entries = []
-
-    # league.parquet
-    league_file = str(dims_dir / "league.parquet").replace("\\", "/")
-    con.execute(f"""
-        COPY (
-            SELECT DISTINCT
-                f.league_key,
-                CASE WHEN f.league_key LIKE 'espn%' THEN 'espn'
-                     WHEN f.league_key LIKE 'cbs%' THEN 'cbs'
-                     ELSE 'unknown' END AS platform,
-                MIN(CAST(f.season_year AS INTEGER)) AS first_season,
-                MAX(CAST(f.season_year AS INTEGER)) AS last_season,
-                COUNT(DISTINCT CAST(f.season_year AS INTEGER)) AS season_count
-            FROM ANALYTICS.FCT_PLAYER_DAILY_PERFORMANCE f
-            WHERE f.league_key = ?
-            GROUP BY f.league_key
-        ) TO '{league_file}'
-        (FORMAT PARQUET, COMPRESSION ZSTD)
-    """, [league_key])
-    manifest_entries.append(("dims/league.parquet", 1))
-
-    # franchise.parquet
-    franchise_file = str(dims_dir / "franchise.parquet").replace("\\", "/")
-    con.execute(f"""
-        COPY (
-            SELECT * FROM ANALYTICS.DIM_FRANCHISE
-            WHERE league_key = ?
-            ORDER BY franchise_id
-        ) TO '{franchise_file}'
-        (FORMAT PARQUET, COMPRESSION ZSTD)
-    """, [league_key])
-    fc = con.execute("SELECT COUNT(*) FROM ANALYTICS.DIM_FRANCHISE WHERE league_key = ?",
-                     [league_key]).fetchone()[0]
-    manifest_entries.append(("dims/franchise.parquet", fc))
-
-    # lineup_slot.parquet (no league filter -- carries no names)
-    platform = "espn" if "espn" in league_key else "cbs"
-    slot_file = str(dims_dir / "lineup_slot.parquet").replace("\\", "/")
-    con.execute(f"""
-        COPY (
-            SELECT * FROM ANALYTICS.DIM_LINEUP_SLOT
-            WHERE platform = ?
-            ORDER BY sort_order NULLS LAST
-        ) TO '{slot_file}'
-        (FORMAT PARQUET, COMPRESSION ZSTD)
-    """, [platform])
-    sc = con.execute("SELECT COUNT(*) FROM ANALYTICS.DIM_LINEUP_SLOT WHERE platform = ?",
-                     [platform]).fetchone()[0]
-    manifest_entries.append(("dims/lineup_slot.parquet", sc))
-
-    # scoring_rule.parquet (no names)
-    rule_file = str(dims_dir / "scoring_rule.parquet").replace("\\", "/")
-    con.execute(f"""
-        COPY (
-            SELECT * FROM ANALYTICS.DIM_LEAGUE_SCORING_RULE
-            WHERE league_key = ?
-            ORDER BY stat_name
-        ) TO '{rule_file}'
-        (FORMAT PARQUET, COMPRESSION ZSTD)
-    """, [league_key])
-    rc = con.execute("SELECT COUNT(*) FROM ANALYTICS.DIM_LEAGUE_SCORING_RULE WHERE league_key = ?",
-                     [league_key]).fetchone()[0]
-    manifest_entries.append(("dims/scoring_rule.parquet", rc))
-
-    # calendar.parquet — two paths: leagues with matchup-period dates (ESPN)
-    # vs leagues without (CBS has NULL start_date/end_date)
-    calendar_file = str(dims_dir / "calendar.parquet").replace("\\", "/")
-    has_mp_dates = con.execute("""
-        SELECT COUNT(*) FROM ANALYTICS.DIM_MATCHUP_PERIOD
-        WHERE league_key = ? AND start_date IS NOT NULL
-    """, [league_key]).fetchone()[0] > 0
-
-    if has_mp_dates:
+    # -- slot vocabulary ----------------------------------------------------
+    def build_slot_map(self):
+        con, src = self.con, self.src
+        rows = q(con, f"""
+            SELECT lineup_slot, canonical_slot_key, is_starting_slot
+            FROM {src}.dim_lineup_slot WHERE platform = ?""", [self.platform])
+        self.slot_rows = rows
+        starting = {tok: key for tok, key, starting in rows if starting}
+        pairs = ", ".join(f"{lit(t)}: {lit(k)}" for t, k in sorted(starting.items()))
+        self.starting_map_sql = f"MAP {{{pairs}}}" if pairs else "MAP {}"
         con.execute(f"""
-            COPY (
-                SELECT
-                    mp.league_key,
-                    CAST(mp.season_year AS INTEGER) AS season_year,
-                    sd.game_date AS scoring_day,
-                    mp.matchup_period AS matchup_period_ordinal,
-                    mp.start_date AS matchup_start_date,
-                    mp.end_date AS matchup_end_date,
-                    mp.is_playoff,
-                    CASE
-                        WHEN mp.end_date < CURRENT_DATE THEN TRUE
-                        ELSE FALSE
-                    END AS is_complete
-                FROM ANALYTICS.DIM_MATCHUP_PERIOD mp
-                CROSS JOIN (
-                    SELECT DISTINCT game_date
-                    FROM ANALYTICS.FCT_PLAYER_DAILY_PERFORMANCE
-                    WHERE league_key = ?
-                ) sd
-                WHERE mp.league_key = ?
-                  AND sd.game_date BETWEEN mp.start_date AND mp.end_date
-                ORDER BY sd.game_date
-            ) TO '{calendar_file}'
-            (FORMAT PARQUET, COMPRESSION ZSTD)
-        """, [league_key, league_key])
-    else:
+            CREATE OR REPLACE TEMP TABLE slot_map AS
+            SELECT lineup_slot, canonical_slot_key, slot_category AS dim_slot_category,
+                   is_starting_slot, display_slot, sort_order
+            FROM {src}.dim_lineup_slot WHERE platform = {lit(self.platform)}""")
+        unmapped = q(con, f"""
+            SELECT DISTINCT f.lineup_slot FROM {self.fact} f
+            LEFT JOIN slot_map s USING (lineup_slot) WHERE s.lineup_slot IS NULL""")
+        if unmapped:
+            raise ExtractError(f"{self.key}: slot tokens missing from dim_lineup_slot: "
+                               f"{[u[0] for u in unmapped]}")
+
+    def eligible_slots_sql(self):
+        """eligible_slots arrives as JSON text from a dump and may arrive as a
+        list from a native DuckDB build; either way it leaves as a list of
+        canonical STARTING-slot keys (bench/IL/FA stripped, invariant 7)."""
+        dtype = q(self.con, f"""
+            SELECT data_type FROM information_schema.columns
+            WHERE table_catalog = 'wh' AND lower(table_name) = 'fct_player_daily_performance'
+              AND lower(column_name) = 'eligible_slots'""")[0][0].upper()
+        raw = ("f.eligible_slots" if dtype.endswith("[]")
+               else "from_json(CAST(f.eligible_slots AS VARCHAR), '[\"VARCHAR\"]')")
+        return (f"list_distinct(list_filter(list_transform({raw}, "
+                f"x -> {self.starting_map_sql}[x]), x -> x IS NOT NULL))")
+
+    # -- calendar: seasons, periods, days -------------------------------------
+    def build_calendar(self):
+        con, src = self.con, self.src
         con.execute(f"""
-            COPY (
-                SELECT
-                    f.league_key,
-                    CAST(f.season_year AS INTEGER) AS season_year,
-                    f.game_date AS scoring_day,
-                    CAST(f.matchup_period AS INTEGER) AS matchup_period_ordinal,
-                    NULL::DATE AS matchup_start_date,
-                    NULL::DATE AS matchup_end_date,
-                    FALSE AS is_playoff,
-                    CASE
-                        WHEN f.game_date < CURRENT_DATE - INTERVAL '7' DAY THEN TRUE
-                        ELSE FALSE
-                    END AS is_complete
-                FROM (
-                    SELECT DISTINCT league_key, season_year, game_date, matchup_period
-                    FROM ANALYTICS.FCT_PLAYER_DAILY_PERFORMANCE
-                    WHERE league_key = ?
-                ) f
-                ORDER BY f.game_date
-            ) TO '{calendar_file}'
-            (FORMAT PARQUET, COMPRESSION ZSTD)
-        """, [league_key])
+            CREATE OR REPLACE TEMP TABLE season_cal AS
+            SELECT CAST(season_year AS INTEGER) AS season_year,
+                   MIN(game_date) AS opener, MAX(game_date) AS last_day,
+                   COUNT(DISTINCT game_date) AS game_days
+            FROM {self.fact} GROUP BY 1""")
+        max_season = q(con, "SELECT MAX(season_year) FROM season_cal")[0][0]
+        # A season is FINAL once a later season exists in the data. The
+        # current season is never final here; its periods close one by one.
+        con.execute(f"""
+            CREATE OR REPLACE TEMP TABLE season_state AS
+            SELECT season_year, season_year < {max_season} AS is_final FROM season_cal""")
 
-    cc = con.execute(f"SELECT COUNT(*) FROM read_parquet('{calendar_file}')").fetchone()[0]
-    manifest_entries.append(("dims/calendar.parquet", cc))
+        if self.is_points:
+            # The bin rule: period 1 starts on opening day, period k on
+            # opening day + 7(k-1). The key is derived from the rule, then
+            # validated against delivered period standings where they exist.
+            con.execute(f"""
+                CREATE OR REPLACE TEMP TABLE periods AS
+                SELECT c.season_year, k AS period_key,
+                       CAST(c.opener + INTERVAL ({PERIOD_DAYS} * (k - 1)) DAY AS DATE) AS start_date,
+                       CAST(c.opener + INTERVAL ({PERIOD_DAYS} * k - 1) DAY AS DATE) AS end_date,
+                       FALSE AS is_playoff, 'derived_rule' AS period_source
+                FROM season_cal c,
+                     range(1, CAST(date_diff('day', c.opener, c.last_day) // {PERIOD_DAYS} + 2 AS BIGINT)) r(k)""")
+        else:
+            con.execute(f"""
+                CREATE OR REPLACE TEMP TABLE periods AS
+                SELECT CAST(season_year AS INTEGER) AS season_year,
+                       CAST(matchup_period AS INTEGER) AS period_key,
+                       start_date, end_date, COALESCE(is_playoff, FALSE) AS is_playoff,
+                       'platform_calendar' AS period_source
+                FROM {src}.dim_matchup_period WHERE league_key = {lit(self.key)}""")
 
-    return manifest_entries
+        con.execute(f"""
+            CREATE OR REPLACE TEMP TABLE periods_out AS
+            SELECT p.*,
+                   {lit(self.period_kind)} AS period_kind,
+                   {lit(self.period_label)} || ' ' || p.period_key AS period_label,
+                   CASE WHEN p.is_playoff THEN 'postseason' ELSE 'regular' END AS phase,
+                   (s.is_final OR (p.end_date IS NOT NULL AND p.end_date <= DATE {lit(self.horizon)}))
+                       AS is_complete
+            FROM periods p JOIN season_state s USING (season_year)""")
 
+        # One row per scoring day that carries data.
+        con.execute(f"""
+            CREATE OR REPLACE TEMP TABLE day_map AS
+            WITH days AS (
+                SELECT DISTINCT CAST(season_year AS INTEGER) AS season_year, game_date
+                FROM {self.fact}
+            )
+            SELECT d.season_year, d.game_date AS scoring_day,
+                   CAST(date_diff('day', c.opener, d.game_date) + 1 AS INTEGER) AS scoring_day_ordinal,
+                   p.period_key,
+                   CASE WHEN {str(self.is_points).upper()}
+                        THEN CAST(d.season_year AS VARCHAR) || '-P' || lpad(CAST(p.period_key AS VARCHAR), 2, '0')
+                        ELSE strftime(d.game_date, '%G-W%V') END AS week_bin_key,
+                   CAST(year(d.game_date) * 100 + month(d.game_date) AS INTEGER) AS month_bin_key,
+                   COALESCE(p.phase, 'offseason') AS phase,
+                   CASE WHEN s.is_final THEN 'final'
+                        WHEN p.is_complete THEN 'complete'
+                        ELSE 'in_flight' END AS day_state,
+                   (s.is_final OR COALESCE(p.is_complete, FALSE)) AS is_complete
+            FROM days d
+            JOIN season_cal c USING (season_year)
+            JOIN season_state s USING (season_year)
+            LEFT JOIN periods_out p
+              ON p.season_year = d.season_year
+             AND d.game_date BETWEEN p.start_date AND p.end_date""")
 
-def write_fallback(con, league_key: str, out_dir: Path):
-    """Write pre-baked fallback JSON for the default All-League Team view."""
-    fallback_dir = out_dir / "fallback"
-    fallback_dir.mkdir(parents=True, exist_ok=True)
+        dup = q(con, "SELECT COUNT(*) FROM (SELECT scoring_day FROM day_map GROUP BY 1 HAVING COUNT(*) > 1)")[0][0]
+        if dup:
+            raise ExtractError(f"{self.key}: {dup} days fall in more than one period")
+        self.validate_periods()
 
-    latest_season = con.execute("""
-        SELECT MAX(CAST(season_year AS INTEGER))
-        FROM ANALYTICS.FCT_PLAYER_DAILY_PERFORMANCE
-        WHERE league_key = ?
-    """, [league_key]).fetchone()[0]
-
-    rows = con.execute("""
-        SELECT
-            f.player_key,
-            f.display_name,
-            f.position AS primary_position,
-            f.lineup_slot,
-            SUM(f.total_stat_pts * f.active_weight) AS active_pts,
-            SUM(f.total_stat_pts) AS total_pts,
-            SUM(f.total_stat_pts) - SUM(f.total_stat_pts * f.active_weight) AS wasted_pts,
-            COUNT(*) AS day_count
-        FROM ANALYTICS.FCT_PLAYER_DAILY_PERFORMANCE f
-        WHERE f.league_key = ? AND CAST(f.season_year AS INTEGER) = ?
-        GROUP BY f.player_key, f.display_name, f.position, f.lineup_slot
-        ORDER BY active_pts DESC
-        LIMIT 200
-    """, [league_key, latest_season]).fetchall()
-
-    fallback = {
-        "league_key": league_key,
-        "season_year": latest_season,
-        "measure": "active",
-        "generated_at": GENERATED_AT,
-        "players": [
-            {
-                "player_key": r[0],
-                "display_name": r[1],
-                "primary_position": r[2],
-                "lineup_slot": r[3],
-                "active_pts": round(r[4], 2) if r[4] else 0,
-                "total_pts": round(r[5], 2) if r[5] else 0,
-                "wasted_pts": round(r[6], 2) if r[6] else 0,
-                "day_count": r[7],
+    def validate_periods(self):
+        con, src = self.con, self.src
+        if self.is_points:
+            # Derived bins per season vs the delivered period count. A season
+            # with no delivered standings has no reference: say so, never
+            # infer one.
+            ref = dict(q(con, f"""
+                SELECT CAST(season_year AS INTEGER), COUNT(DISTINCT period)
+                FROM {src}.mart_period_standings WHERE league_key = ? GROUP BY 1""", [self.key]))
+            derived = q(con, """
+                SELECT p.season_year, COUNT(*) AS bins, MIN(c.opener), MAX(c.last_day)
+                FROM periods p JOIN season_cal c USING (season_year)
+                GROUP BY 1 ORDER BY 1""")
+            per_season = []
+            for season, bins, opener, last_day in derived:
+                reference = ref.get(season)
+                per_season.append({
+                    "season": season, "opener": str(opener), "last_day": str(last_day),
+                    "derived_periods": bins, "reference_periods": reference,
+                    "status": ("no_reference" if reference is None
+                               else "match" if reference == bins else "MISMATCH"),
+                })
+            self.validations["period_bins"] = {
+                "rule": f"period 1 starts on opening day (first game date in the league's data); "
+                        f"each later period starts {PERIOD_DAYS} days after the previous",
+                "reference": "COUNT(DISTINCT period) in mart_period_standings",
+                "seasons": per_season,
             }
-            for r in rows
-        ],
-    }
+            # The daily key: a YYYYMMDD game date, never days since the opener.
+            bad = q(con, f"""
+                SELECT COUNT(*) FROM {self.fact}
+                WHERE CAST(strftime(game_date, '%Y%m%d') AS BIGINT) <> CAST(scoring_period AS BIGINT)""")[0][0]
+            self.validations["daily_key_is_yyyymmdd"] = {"rows_disagreeing": bad}
+        else:
+            # A matchup league's rows carry the platform's own matchup key;
+            # the date-derived period must agree with it on every row.
+            bad = q(con, f"""
+                SELECT COUNT(*) FROM {self.fact} f
+                JOIN day_map d ON d.scoring_day = f.game_date
+                WHERE d.period_key IS DISTINCT FROM CAST(f.matchup_period AS INTEGER)""")[0][0]
+            self.validations["period_key_matches_fact_matchup_period"] = {"rows_disagreeing": bad}
+            if bad:
+                raise ExtractError(f"{self.key}: {bad} rows disagree with their matchup period")
+            ordinal_bad = q(con, f"""
+                SELECT COUNT(*) FROM {self.fact} f
+                JOIN day_map d ON d.scoring_day = f.game_date
+                WHERE d.scoring_day_ordinal <> CAST(f.scoring_period AS INTEGER)""")[0][0]
+            self.validations["scoring_day_ordinal_matches_platform_ordinal"] = {
+                "rows_disagreeing": ordinal_bad}
+        offseason = q(con, "SELECT COUNT(*) FROM day_map WHERE period_key IS NULL")[0][0]
+        self.validations["days_outside_any_period"] = offseason
 
-    out_file = fallback_dir / "all_league_default.json"
-    with open(out_file, "w") as fp:
-        json.dump(fallback, fp, indent=2)
-    return latest_season
+    # -- the atom -------------------------------------------------------------
+    def atom_select(self):
+        src = self.src
+        return f"""
+    SELECT
+        -- 3A identity
+        f.league_key,
+        {lit(self.platform)} AS platform,
+        CAST(f.season_year AS INTEGER) AS season_year,
+        f.game_date AS scoring_day,
+        f.player_key,
+        CAST(CAST(f.player_id AS BIGINT) AS VARCHAR) AS platform_player_id,
+        NULL::INTEGER AS mlbam_id,
+        NULL::VARCHAR AS person_key,
+        f.display_name,
+
+        -- 3B time / completeness
+        d.scoring_day_ordinal,
+        CASE WHEN {str(self.is_points).upper()} THEN NULL::INTEGER
+             ELSE CAST(f.matchup_period AS INTEGER) END AS matchup_period_ordinal,
+        d.week_bin_key,
+        d.month_bin_key,
+        d.phase,
+        d.day_state,
+        d.is_complete,
+        NULL::VARCHAR AS matchup_id,
+
+        -- 3C rostering / deployment
+        CAST(f.team_id AS INTEGER) AS team_id,
+        COALESCE(fs.canonical_franchise_id, CAST(CAST(f.team_id AS INTEGER) AS VARCHAR)) AS franchise_id,
+        CASE WHEN f.team_id IS NULL OR s.canonical_slot_key = 'free_agent' THEN 'free_agent'
+             WHEN s.canonical_slot_key = 'estimated' THEN 'estimated'
+             WHEN s.canonical_slot_key = 'injured' THEN 'il'
+             WHEN s.canonical_slot_key = 'bench' THEN 'benched'
+             WHEN s.is_starting_slot THEN 'active'
+             ELSE 'unclassified' END AS deployment_state,
+        s.canonical_slot_key AS lineup_slot,
+        f.lineup_slot AS platform_lineup_slot,
+        f.lineup_slot_category AS slot_category,
+        CAST(f.active_weight AS DOUBLE) AS active_share,
+        CAST(CASE f.lineup_slot_category
+             WHEN 'hitting' THEN f.active_weight
+             WHEN 'pitching' THEN 0
+             WHEN 'estimated' THEN f.active_weight
+             ELSE 0 END AS DOUBLE) AS batting_credited_share,
+        CAST(CASE f.lineup_slot_category
+             WHEN 'pitching' THEN f.active_weight
+             WHEN 'hitting' THEN 0
+             WHEN 'estimated' THEN f.active_weight
+             ELSE 0 END AS DOUBLE) AS pitching_credited_share,
+        CASE s.canonical_slot_key WHEN 'bench' THEN 'benched'
+                                  WHEN 'injured' THEN 'il' END AS wasted_reason,
+        NULL::VARCHAR AS acquisition_channel,
+        f.provenance,
+        TRUE AS has_game,
+
+        -- 3D eligibility / position
+        {self.eligible_slots_sql()} AS eligible_slots,
+        f.position AS primary_position,
+        NULL::VARCHAR[] AS irl_positions_played,
+        CAST(f.mlb_team_id AS INTEGER) AS mlb_team_id,
+
+        -- 3E batting components
+        NULL::DOUBLE AS batting_games,
+        f.ab, f.h, f.singles, f.doubles, f.triples, f.hr, f.xbh, f.tb, f.r, f.rbi,
+        f.b_bb AS bb, f.b_ibb AS ibb, f.b_so AS so, f.hbp, f.sf, f.sb, f.cs, f.gdp, f.cyc,
+        NULL::DOUBLE AS sh,
+        NULL::DOUBLE AS pa,
+
+        -- 3F pitching components
+        NULL::DOUBLE AS pitching_games,
+        NULL::DOUBLE AS pitching_starts,
+        f.outs, f.w, f.l, f.k, f.er, f.qs, f.sv, f.hld, f.blsv, f.p_h, f.p_bb, f.p_hr,
+        f.p_r, f.cg, f.sho, f.nh, f.pg, f.blk, f.wp, f.hbp_p, f.pk,
+        NULL::DOUBLE AS bf,
+        NULL::DOUBLE AS gf,
+
+        -- 3F.1 fielding (reserved, NULL until MLB-289)
+        NULL::DOUBLE AS fielding_games, NULL::DOUBLE AS po, NULL::DOUBLE AS a,
+        NULL::DOUBLE AS e, NULL::DOUBLE AS dp, NULL::DOUBLE AS pb,
+        NULL::DOUBLE AS sb_allowed, NULL::DOUBLE AS cs_caught,
+
+        -- 3G league-scored value
+        CAST(f.total_hitting_stat_pts AS DOUBLE) AS batting_pts,
+        CAST(f.total_pitching_stat_pts AS DOUBLE) AS pitching_pts,
+        CAST(f.total_stat_pts AS DOUBLE) AS total_pts,
+        CAST(f.negative_points AS DOUBLE) AS negative_pts,
+        CAST(f.platform_points AS DOUBLE) AS platform_pts,
+        CAST(f.platform_hitting_pts AS DOUBLE) AS platform_batting_pts,
+        CAST(f.platform_pitching_pts AS DOUBLE) AS platform_pitching_pts,
+        {lit(self.rule_version)} AS scoring_rule_version,
+
+        -- extension (nullable additions; contract columns above stay an exact prefix)
+        d.period_key,
+        CASE WHEN f.provenance = 'captured' THEN 'captured' ELSE 'estimated' END AS slot_provenance,
+
+        -- raw_ (platform-shaped columns kept for provenance and reconciliation)
+        CAST(f.scoring_period AS BIGINT) AS raw_scoring_period,
+        CAST(f.matchup_period AS INTEGER) AS raw_matchup_period,
+        CAST(f.games_played AS INTEGER) AS raw_games_played,
+        f.is_active_slot AS raw_is_active_slot,
+        f.performance_status AS raw_performance_status,
+        f.wasted_bucket AS raw_wasted_bucket,
+        f.pro_team AS raw_pro_team
+    FROM {self.fact} f
+    JOIN day_map d
+      ON d.season_year = CAST(f.season_year AS INTEGER) AND d.scoring_day = f.game_date
+    LEFT JOIN slot_map s ON s.lineup_slot = f.lineup_slot
+    LEFT JOIN {src}.dim_franchise_season fs
+      ON fs.league_key = f.league_key
+     AND CAST(fs.season_year AS INTEGER) = CAST(f.season_year AS INTEGER)
+     AND fs.franchise_id = CAST(CAST(f.team_id AS INTEGER) AS VARCHAR)"""
+
+    def write_atoms(self, league_dir):
+        con = self.con
+        atom_dir = league_dir / "atom"
+        atom_dir.mkdir(parents=True)
+        seasons = [r[0] for r in q(con, "SELECT season_year FROM season_cal ORDER BY 1")]
+        select = self.atom_select()
+        out = []
+        for season in seasons:
+            path = atom_dir / f"{season}.parquet"
+            con.execute(f"""
+                COPY ({select} WHERE CAST(f.season_year AS INTEGER) = {season}
+                      ORDER BY scoring_day, player_key)
+                TO {lit(path.as_posix())} {PARQUET_OPTS}""")
+            written = f"read_parquet({lit(path.as_posix())})"
+            rows = q(con, f"SELECT COUNT(*) FROM {written}")[0][0]
+            source_rows = q(con, f"SELECT COUNT(*) FROM {self.fact} f "
+                                 f"WHERE CAST(f.season_year AS INTEGER) = {season}")[0][0]
+            if rows != source_rows:
+                raise ExtractError(f"{self.key}/{season}: wrote {rows} rows, fact has {source_rows}")
+            dupes = q(con, f"""SELECT COUNT(*) FROM (SELECT 1 FROM {written}
+                GROUP BY league_key, scoring_day, player_key HAVING COUNT(*) > 1)""")[0][0]
+            if dupes:
+                raise ExtractError(f"{self.key}/{season}: {dupes} duplicate "
+                                   f"(league_key, scoring_day, player_key) keys")
+            unclassified = q(con, f"SELECT COUNT(*) FROM {written} "
+                                  f"WHERE deployment_state = 'unclassified'")[0][0]
+            if unclassified:
+                raise ExtractError(f"{self.key}/{season}: {unclassified} rows with no deployment state")
+            out.append((season, path, rows))
+        self.validations["uniqueness_league_day_player"] = "pass (every season file checked)"
+        self.validations["row_parity_with_fact"] = "pass (every season file checked)"
+        # Share-vs-slot disagreements are carried as the warehouse states
+        # them (the slot is the roster snapshot, the share is the scoring
+        # attribution); counted here so they are visible, never repaired.
+        glob = lit((atom_dir / "*.parquet").as_posix())
+        self.validations["starting_slot_with_zero_share"] = q(con, f"""
+            SELECT season_year, COUNT(*) FROM read_parquet({glob})
+            WHERE deployment_state = 'active' AND active_share = 0
+            GROUP BY 1 ORDER BY 1""")
+        if self.is_points:
+            self.validate_period_content(glob)
+        return out
+
+    def validate_period_content(self, glob):
+        """A matching period COUNT is weak evidence; matching CONTENT is the
+        real test. Where the platform delivered per-period points, compare
+        each team's credited points inside each derived period with them.
+        Reported, never used to move a boundary."""
+        rows = q(self.con, f"""
+            WITH atom AS (
+                SELECT season_year, period_key, team_id,
+                       SUM(batting_pts * batting_credited_share
+                           + pitching_pts * pitching_credited_share) AS pts
+                FROM read_parquet({glob}) WHERE team_id IS NOT NULL GROUP BY ALL
+            ),
+            delivered AS (
+                SELECT CAST(season_year AS INTEGER) AS season_year, CAST(period AS INTEGER) AS period_key,
+                       CAST(team_id AS INTEGER) AS team_id, period_points
+                FROM {self.src}.mart_period_standings WHERE league_key = {lit(self.key)}
+            )
+            SELECT d.season_year, COUNT(*) AS team_periods,
+                   COUNT(*) FILTER (WHERE ABS(a.pts - d.period_points) < 0.005) AS exact,
+                   COUNT(*) FILTER (WHERE ABS(a.pts - d.period_points) <= 1) AS within_1,
+                   COUNT(*) FILTER (WHERE a.pts IS NULL) AS no_atom_rows,
+                   ROUND(SUM(a.pts), 2) AS atom_points, ROUND(SUM(d.period_points), 2) AS delivered_points
+            FROM delivered d LEFT JOIN atom a USING (season_year, period_key, team_id)
+            GROUP BY 1 ORDER BY 1""")
+        keys = ["season", "team_periods", "exact", "within_1", "no_atom_rows",
+                "atom_points", "delivered_points"]
+        results = [dict(zip(keys, r)) for r in rows]
+        for r in results:
+            r["status"] = "match" if r["exact"] == r["team_periods"] else "MISMATCH"
+        self.validations["period_bin_content"] = {
+            "measure": "per team per derived period: SUM(batting_pts * batting_credited_share "
+                       "+ pitching_pts * pitching_credited_share) vs mart_period_standings.period_points",
+            "seasons": results,
+        }
+
+    # -- rollup ---------------------------------------------------------------
+    def write_rollup(self, league_dir):
+        atom = lit((league_dir / "atom" / "*.parquet").as_posix())
+        bat = ["ab", "h", "singles", "doubles", "triples", "hr", "xbh", "tb", "r", "rbi", "bb",
+               "ibb", "so", "hbp", "sf", "sb", "cs", "gdp", "cyc"]
+        pit = ["outs", "w", "l", "k", "er", "qs", "sv", "hld", "blsv", "p_h", "p_bb", "p_hr",
+               "p_r", "cg", "sho", "nh", "pg", "blk", "wp", "hbp_p", "pk"]
+        sums = ",\n".join(
+            [f"SUM({c}) AS {c}, SUM({c} * batting_credited_share) AS active_{c}" for c in bat]
+            + [f"SUM({c}) AS {c}, SUM({c} * pitching_credited_share) AS active_{c}" for c in pit])
+        path = league_dir / "rollup.parquet"
+        self.con.execute(f"""
+            COPY (
+                SELECT league_key, platform, season_year, phase, team_id, franchise_id, player_key,
+                       MAX(platform_player_id) AS platform_player_id,
+                       arg_max(display_name, scoring_day) AS display_name,
+                       MIN(scoring_day) AS first_scoring_day,
+                       MAX(scoring_day) AS last_scoring_day,
+                       COUNT(*) AS day_count,
+                       COUNT(*) FILTER (WHERE has_game) AS game_day_count,
+                       BOOL_AND(is_complete) AS all_days_complete,
+                       SUM(active_share) AS active_share_days,
+                       SUM(batting_pts) AS batting_pts,
+                       SUM(pitching_pts) AS pitching_pts,
+                       SUM(total_pts) AS total_pts,
+                       SUM(batting_pts * batting_credited_share) AS active_batting_pts,
+                       SUM(pitching_pts * pitching_credited_share) AS active_pitching_pts,
+                       SUM(batting_pts * batting_credited_share
+                           + pitching_pts * pitching_credited_share) AS active_pts,
+                       SUM(platform_pts) AS platform_pts,
+                       SUM(platform_batting_pts) AS platform_batting_pts,
+                       SUM(platform_pitching_pts) AS platform_pitching_pts,
+                       SUM(platform_batting_pts * batting_credited_share) AS active_platform_batting_pts,
+                       SUM(platform_pitching_pts * pitching_credited_share) AS active_platform_pitching_pts,
+                       SUM(negative_pts) AS negative_pts,
+                       {sums}
+                FROM read_parquet({atom})
+                GROUP BY ALL
+                ORDER BY season_year, phase, team_id NULLS LAST, player_key
+            ) TO {lit(path.as_posix())} {PARQUET_OPTS}""")
+        return path
+
+    # -- dims -----------------------------------------------------------------
+    def write_dims(self, league_dir):
+        con, src = self.con, self.src
+        dims = league_dir / "dims"
+        dims.mkdir()
+        atom = lit((league_dir / "atom" / "*.parquet").as_posix())
+        written = []
+
+        def copy(name, sql):
+            path = dims / f"{name}.parquet"
+            con.execute(f"COPY ({sql}) TO {lit(path.as_posix())} {PARQUET_OPTS}")
+            written.append(path)
+
+        seasons = q(con, "SELECT MIN(season_year), MAX(season_year), COUNT(*) FROM season_cal")[0]
+        copy("league", f"""
+            SELECT {lit(self.key)} AS league_key, {lit(self.platform)} AS platform,
+                   {lit(self.format)} AS league_format,
+                   {lit(self.period_kind)} AS period_kind, {lit(self.period_label)} AS period_label,
+                   {'NULL' if self.is_points else "'Matchup'"} AS matchup_label,
+                   {seasons[0]} AS first_season, {seasons[1]} AS last_season,
+                   {seasons[2]} AS season_count,
+                   DATE {lit(self.horizon)} AS data_horizon,
+                   {lit(self.rule_version)} AS scoring_rule_version""")
+
+        copy("seasons", f"""
+            SELECT c.season_year, c.opener, c.last_day, c.game_days, s.is_final,
+                   (SELECT COUNT(*) FROM periods_out p WHERE p.season_year = c.season_year) AS period_count,
+                   m.rows, m.captured_rows, m.reconstructed_rows, m.estimated_rows, m.sentinel_rows
+            FROM season_cal c JOIN season_state s USING (season_year)
+            JOIN (SELECT season_year, COUNT(*) AS rows,
+                         COUNT(*) FILTER (WHERE provenance = 'captured') AS captured_rows,
+                         COUNT(*) FILTER (WHERE provenance = 'reconstructed_day') AS reconstructed_rows,
+                         COUNT(*) FILTER (WHERE provenance LIKE 'estimated%') AS estimated_rows,
+                         COUNT(*) FILTER (WHERE provenance = 'sentinel') AS sentinel_rows
+                  FROM read_parquet({atom}) GROUP BY 1) m USING (season_year)
+            ORDER BY 1""")
+
+        copy("periods", """
+            SELECT p.season_year, p.period_key, p.period_kind, p.period_label,
+                   p.start_date, p.end_date, p.is_playoff, p.phase, p.is_complete, p.period_source,
+                   (SELECT COUNT(*) FROM day_map d WHERE d.season_year = p.season_year
+                      AND d.period_key = p.period_key) AS days_with_data
+            FROM periods_out p ORDER BY 1, 2""")
+
+        copy("calendar", "SELECT * FROM day_map ORDER BY scoring_day")
+
+        # Team-seasons come from the atom, so no team that played can drop.
+        # Names resolve settings-first with the source recorded: the
+        # standings dim, then the franchise-season dim, then the daily
+        # fact's own label (the holding-pen sentinel has only that).
+        copy("teams", f"""
+            WITH ts AS (
+                SELECT season_year, team_id, franchise_id, COUNT(*) AS atom_rows
+                FROM read_parquet({atom}) WHERE team_id IS NOT NULL GROUP BY ALL
+            ),
+            fact_label AS (
+                SELECT CAST(season_year AS INTEGER) AS season_year, CAST(team_id AS INTEGER) AS team_id,
+                       arg_max(team_name, game_date) AS team_name,
+                       arg_max(team_abbrev, game_date) AS team_abbrev
+                FROM {self.fact} WHERE team_id IS NOT NULL GROUP BY ALL
+            )
+            SELECT ts.season_year, ts.team_id, ts.franchise_id,
+                   COALESCE(st.team_name, fs.configured_name, fs.canonical_name, fl.team_name) AS team_name,
+                   COALESCE(st.team_abbrev, fs.configured_abbrev, fs.canonical_abbrev, fl.team_abbrev) AS team_abbrev,
+                   CASE WHEN st.team_name IS NOT NULL THEN 'dim_team_season_standing'
+                        WHEN COALESCE(fs.configured_name, fs.canonical_name) IS NOT NULL THEN 'dim_franchise_season'
+                        WHEN fl.team_name IS NOT NULL THEN 'fct_player_daily_performance'
+                   END AS name_source,
+                   fs.canonical_name AS franchise_canonical_name,
+                   fs.canonical_abbrev AS franchise_canonical_abbrev,
+                   CAST(st.standings_rank AS INTEGER) AS standings_rank,
+                   CAST(st.playoff_seed AS INTEGER) AS playoff_seed,
+                   CAST(st.final_rank AS INTEGER) AS final_rank,
+                   st.is_champion, st.made_playoffs,
+                   CAST(st.wins AS INTEGER) AS wins, CAST(st.losses AS INTEGER) AS losses,
+                   CAST(st.ties AS INTEGER) AS ties,
+                   st.platform_points, st.total_points, st.batting_points, st.pitching_points,
+                   st.lens AS standings_lens,
+                   CAST(st.teams_in_season AS INTEGER) AS teams_in_season,
+                   ts.atom_rows
+            FROM ts
+            LEFT JOIN {src}.dim_team_season_standing st
+              ON st.league_key = {lit(self.key)} AND CAST(st.season_year AS INTEGER) = ts.season_year
+             AND CAST(st.team_id AS INTEGER) = ts.team_id
+            LEFT JOIN {src}.dim_franchise_season fs
+              ON fs.league_key = {lit(self.key)} AND CAST(fs.season_year AS INTEGER) = ts.season_year
+             AND fs.franchise_id = CAST(ts.team_id AS VARCHAR)
+            LEFT JOIN fact_label fl ON fl.season_year = ts.season_year AND fl.team_id = ts.team_id
+            ORDER BY 1, 2""")
+
+        # Slot vocabulary with a capacity per season: the league's settings
+        # where the warehouse carries them (dim_roster_slot_counts), else the
+        # most starters observed in one slot on one team-day of CAPTURED
+        # rows. Reconstructed/estimated eras have no observable capacity.
+        copy("lineup_slot", f"""
+            WITH used AS (
+                SELECT DISTINCT season_year, platform_lineup_slot AS lineup_slot
+                FROM read_parquet({atom})
+            ),
+            observed AS (
+                SELECT season_year, platform_lineup_slot AS lineup_slot, MAX(n) AS observed_max
+                FROM (SELECT season_year, team_id, scoring_day, platform_lineup_slot, COUNT(*) AS n
+                      FROM read_parquet({atom})
+                      WHERE deployment_state = 'active' AND provenance = 'captured'
+                      GROUP BY ALL) GROUP BY ALL
+            ),
+            settings AS (
+                SELECT CAST(season_year AS INTEGER) AS season_year, lineup_slot,
+                       CAST(starter_count AS INTEGER) AS starter_count
+                FROM {src}.dim_roster_slot_counts WHERE league_key = {lit(self.key)}
+            )
+            SELECT COALESCE(u.season_year, st.season_year) AS season_year,
+                   COALESCE(u.lineup_slot, st.lineup_slot) AS lineup_slot,
+                   s.canonical_slot_key, s.display_slot, s.dim_slot_category AS slot_category,
+                   s.is_starting_slot, CAST(s.sort_order AS INTEGER) AS sort_order,
+                   COALESCE(st.starter_count, o.observed_max) AS capacity,
+                   CASE WHEN st.starter_count IS NOT NULL THEN 'settings'
+                        WHEN o.observed_max IS NOT NULL THEN 'observed_captured_max'
+                   END AS capacity_source,
+                   u.lineup_slot IS NOT NULL AS appears_in_data
+            FROM used u
+            FULL JOIN settings st ON st.season_year = u.season_year AND st.lineup_slot = u.lineup_slot
+            LEFT JOIN observed o ON o.season_year = COALESCE(u.season_year, st.season_year)
+                                AND o.lineup_slot = COALESCE(u.lineup_slot, st.lineup_slot)
+            LEFT JOIN slot_map s ON s.lineup_slot = COALESCE(u.lineup_slot, st.lineup_slot)
+            ORDER BY 1, s.sort_order NULLS LAST, 2""")
+
+        copy("scoring_rule", f"""
+            SELECT league_key, stat_name, canonical_key, stat_category,
+                   CAST(settings_season AS INTEGER) AS settings_season,
+                   platform_stat_key, points_per_unit, is_scored
+            FROM {src}.dim_league_scoring_rule WHERE league_key = {lit(self.key)}
+            ORDER BY stat_category, stat_name""")
+        return written
+
+    def pii_guard(self, paths):
+        """Emails and phone numbers never leave the warehouse. Any column
+        named like one, or any string value shaped like one, stops the run."""
+        con = self.con
+        for path in paths:
+            ref = f"read_parquet({lit(path.as_posix())})"
+            cols = q(con, f"DESCRIBE SELECT * FROM {ref}")
+            for name, dtype, *_ in cols:
+                if FORBIDDEN_COLUMN_RE.search(name):
+                    raise ExtractError(f"{path.name}: forbidden column {name!r}")
+                if dtype == "VARCHAR" and name not in ("player_key",):
+                    for (value,) in q(con, f"SELECT DISTINCT {name} FROM {ref} WHERE {name} IS NOT NULL"):
+                        if EMAIL_RE.search(value) or PHONE_RE.search(value):
+                            raise ExtractError(f"{path.name}.{name}: a value looks like an "
+                                               f"email or phone number; refusing to write")
 
 
-def build_manifest(league_key: str, league_dir: Path, season_info: list, rollup_rows: int,
-                   dim_entries: list, fallback_season: int):
-    """Build and write manifest.json."""
-    slug = slug_for_league(league_key)
-    platform = "espn" if "espn" in league_key else "cbs"
-    entries = []
+# ---------------------------------------------------------------------------
+# Driver
+# ---------------------------------------------------------------------------
 
-    for season_year, row_count, parquet_path in season_info:
-        fsize = os.path.getsize(parquet_path)
-        con_temp = duckdb.connect()
-        col_count = len(con_temp.execute(
-            f"SELECT * FROM read_parquet('{str(parquet_path).replace(chr(92), '/')}') LIMIT 0"
-        ).description)
-        min_max = con_temp.execute(f"""
-            SELECT MIN(scoring_day), MAX(scoring_day)
-            FROM read_parquet('{str(parquet_path).replace(chr(92), '/')}')
-        """).fetchone()
-        con_temp.close()
-        entries.append({
-            "path": f"data/{slug}/{season_year}.parquet",
-            "rows": row_count,
-            "bytes": fsize,
-            "season": season_year,
-            "min_scoring_day": str(min_max[0]) if min_max[0] else None,
-            "max_scoring_day": str(min_max[1]) if min_max[1] else None,
-            "column_count": col_count,
-        })
+def file_entry(con, league_dir, path, season=None):
+    ref = f"read_parquet({lit(path.as_posix())})"
+    entry = {"path": path.relative_to(league_dir).as_posix(),
+             "rows": q(con, f"SELECT COUNT(*) FROM {ref}")[0][0],
+             "bytes": path.stat().st_size, "sha256": sha256(path),
+             "columns": len(q(con, f"DESCRIBE SELECT * FROM {ref}"))}
+    if season is not None:
+        lo, hi = q(con, f"SELECT MIN(scoring_day), MAX(scoring_day) FROM {ref}")[0]
+        entry.update({"season": season, "min_scoring_day": str(lo), "max_scoring_day": str(hi)})
+    return entry
 
-    rollup_path = league_dir / "rollup.parquet"
-    entries.append({
-        "path": f"data/{slug}/rollup.parquet",
-        "rows": rollup_rows,
-        "bytes": os.path.getsize(rollup_path),
-        "season": "all",
-        "column_count": None,
-    })
 
-    for dim_rel_path, dim_rows in dim_entries:
-        dim_full = league_dir / dim_rel_path
-        entries.append({
-            "path": f"data/{slug}/{dim_rel_path}",
-            "rows": dim_rows,
-            "bytes": os.path.getsize(dim_full),
-        })
+def publish_league(con, src, league_key, horizon, out_root, generated_at, commit, db_path):
+    league = League(con, src, league_key, horizon)
+    league_dir = out_root / league.slug
+    league_dir.mkdir(parents=True)
+    print(f"\n== {league_key}: platform={league.platform} format={league.format} "
+          f"horizon={league.horizon} -> {league_dir}")
+    league.build_slot_map()
+    league.build_calendar()
+    atoms = league.write_atoms(league_dir)
+    rollup = league.write_rollup(league_dir)
+    dims = league.write_dims(league_dir)
+    league.pii_guard(dims + [rollup])
 
-    fallback_path = league_dir.parent / "fallback" / "all_league_default.json"
-    if fallback_path.exists():
-        entries.append({
-            "path": "fallback/all_league_default.json",
-            "bytes": os.path.getsize(fallback_path),
-            "default_season": fallback_season,
-        })
-
+    files = [file_entry(con, league_dir, p, s) for s, p, _ in atoms]
+    files.append(file_entry(con, league_dir, rollup))
+    files += [file_entry(con, league_dir, p) for p in dims]
     manifest = {
-        "league_key": league_key,
-        "league_slug": slug,
-        "platform": platform,
-        "generated_at": GENERATED_AT,
-        "files": entries,
+        "schema_version": 1,
+        "contract": "MLB-285 master-table contract v0.3, Appendix A order; "
+                    "extension columns period_key, slot_provenance; raw_ group last",
+        "league_key": league_key, "league_slug": league.slug, "platform": league.platform,
+        "league_format": league.format, "period_kind": league.period_kind,
+        "period_label": league.period_label,
+        "generated_at": generated_at,
+        "source": {**commit, "warehouse": str(db_path), "schema": src.split(".", 1)[1]},
+        "data_horizon": str(league.horizon),
+        "seasons": [s for s, _, _ in atoms],
+        "names_note": "team names are user data and are carried verbatim; they come from "
+                      "whichever warehouse was read. Publication is decided outside this writer.",
+        "validations": league.validations,
+        "files": files,
     }
-    manifest_path = league_dir / "manifest.json"
-    with open(manifest_path, "w") as fp:
-        json.dump(manifest, fp, indent=2)
+    (league_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, default=str),
+                                             encoding="utf-8")
+    for f in files:
+        print(f"  {f['path']:<28} {f['rows']:>9,} rows {f['bytes']:>11,} bytes")
     return manifest
 
 
-def names_gate(con):
-    """Print distinct values of name-bearing columns for inspection."""
-    def safe_print(s):
-        try:
-            print(s)
-        except UnicodeEncodeError:
-            print(s.encode('ascii', errors='replace').decode('ascii'))
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap.add_argument("--db", required=True, help="DuckDB warehouse file (opened read-only)")
+    ap.add_argument("--schema", default="ANALYTICS", help="schema holding the dbt models")
+    ap.add_argument("--out", default=str(REPO_ROOT / "data" / "exports" / "dashboard"),
+                    help="root; each run writes a new stamped directory under it")
+    ap.add_argument("--league", action="append",
+                    help="league_key to emit (repeatable; default every league in the fact)")
+    ap.add_argument("--horizon", type=date.fromisoformat,
+                    help="clip every league to game dates on or before this day")
+    args = ap.parse_args(argv)
 
-    safe_print("\n========== NAMES GATE ==========")
-    name_cols = [
-        "owner_name", "team_name", "owner_display", "display_name"
-    ]
-    for col in name_cols:
-        vals = con.execute(f"""
-            SELECT DISTINCT {col}
-            FROM ANALYTICS.FCT_PLAYER_DAILY_PERFORMANCE
-            WHERE {col} IS NOT NULL
-            ORDER BY {col}
-        """).fetchall()
-        safe_print(f"\n--- {col} ({len(vals)} distinct) ---")
-        for v in vals[:30]:
-            safe_print(f"  {v[0]}")
-        if len(vals) > 30:
-            safe_print(f"  ... and {len(vals) - 30} more")
-
-    franchise_cols = con.execute("""
-        SELECT DISTINCT canonical_name, configured_name
-        FROM ANALYTICS.DIM_FRANCHISE
-        ORDER BY canonical_name
-    """).fetchall()
-    safe_print(f"\n--- DIM_FRANCHISE names ({len(franchise_cols)} distinct) ---")
-    for v in franchise_cols:
-        safe_print(f"  canonical={v[0]}, configured={v[1]}")
-
-    safe_print("\n=== Columns checked: owner_name, team_name, owner_display, "
-               "display_name, DIM_FRANCHISE.canonical_name, DIM_FRANCHISE.configured_name ===")
-    safe_print("========== END NAMES GATE ==========\n")
-
-
-def main():
-    parser = argparse.ArgumentParser(description="Publish dashboard Parquet extracts")
-    parser.add_argument("--db", default="data/duckdb/demo/ESPN_FANTASY.duckdb",
-                        help="Path to the DuckDB warehouse file")
-    parser.add_argument("--out", default="docs/dashboard",
-                        help="Output directory root")
-    parser.add_argument("--names-gate-only", action="store_true",
-                        help="Only run the names gate check, don't write files")
-    args = parser.parse_args()
-
-    db_path = Path(args.db)
+    db_path = Path(args.db).resolve()
     if not db_path.exists():
-        print(f"ERROR: warehouse not found at {db_path}", file=sys.stderr)
-        sys.exit(1)
+        sys.exit(f"no warehouse at {db_path}")
+    generated_at = datetime.now(timezone.utc)
+    stamp = generated_at.strftime("%Y%m%dT%H%M%SZ")
+    out_root = Path(args.out) / stamp
+    if out_root.exists():
+        sys.exit(f"{out_root} already exists; the writer never overwrites")
 
-    out_root = Path(args.out)
-    con = duckdb.connect(str(db_path), read_only=True)
-
-    # Names gate first
-    names_gate(con)
-
-    if args.names_gate_only:
-        con.close()
-        return
-
-    # Get leagues
-    leagues = [r[0] for r in con.execute(
-        "SELECT DISTINCT league_key FROM ANALYTICS.FCT_PLAYER_DAILY_PERFORMANCE ORDER BY league_key"
-    ).fetchall()]
-    print(f"Leagues: {leagues}")
-
-    for league_key in leagues:
-        slug = slug_for_league(league_key)
-        league_dir = out_root / "data" / slug
-        print(f"\n{'='*60}")
-        print(f"Processing league: {league_key} -> {league_dir}")
-
-        # Delete and recreate (re-runnable)
-        if league_dir.exists():
-            shutil.rmtree(league_dir)
-        league_dir.mkdir(parents=True)
-
-        # Get seasons
-        seasons = [r[0] for r in con.execute("""
-            SELECT DISTINCT CAST(season_year AS INTEGER) AS sy
-            FROM ANALYTICS.FCT_PLAYER_DAILY_PERFORMANCE
-            WHERE league_key = ?
-            ORDER BY sy
-        """, [league_key]).fetchall()]
-        print(f"  Seasons: {seasons}")
-
-        # Write season atoms
-        season_info = []
-        for sy in seasons:
-            parquet_path = league_dir / f"{sy}.parquet"
-            rows = write_season_parquet(con, league_key, sy, parquet_path)
-            fsize = os.path.getsize(parquet_path)
-            print(f"  {sy}.parquet: {rows:,} rows, {fsize:,} bytes ({fsize/1024/1024:.2f} MB)")
-            season_info.append((sy, rows, parquet_path))
-
-        # Write rollup
-        rollup_path = league_dir / "rollup.parquet"
-        rollup_rows = write_rollup_parquet(con, league_key, rollup_path)
-        rollup_size = os.path.getsize(rollup_path)
-        print(f"  rollup.parquet: {rollup_rows:,} rows, {rollup_size:,} bytes ({rollup_size/1024/1024:.2f} MB)")
-
-        # Write dims
-        dims_dir = league_dir / "dims"
-        dim_entries = write_dims(con, league_key, dims_dir)
-        for dim_path, dim_rows in dim_entries:
-            dim_full = league_dir / dim_path
-            print(f"  {dim_path}: {dim_rows:,} rows, {os.path.getsize(dim_full):,} bytes")
-
-        # Write fallback (only for the first/ESPN league for the default page)
-        fallback_season = write_fallback(con, league_key, out_root)
-
-        # Build manifest
-        manifest = build_manifest(league_key, league_dir, season_info,
-                                  rollup_rows, dim_entries, fallback_season)
-        print(f"  manifest.json: {len(manifest['files'])} entries")
-
-    # Total size
-    total_bytes = sum(
-        os.path.getsize(os.path.join(dp, f))
-        for dp, _, files in os.walk(out_root / "data")
-        for f in files
-    )
-    print(f"\nTotal data size: {total_bytes:,} bytes ({total_bytes/1024/1024:.2f} MB)")
-
-    con.close()
-    print("\nDone.")
+    con = duckdb.connect()
+    con.execute(f"ATTACH {lit(db_path.as_posix())} AS wh (READ_ONLY)")
+    src = f"wh.{args.schema}"
+    leagues = args.league or [r[0] for r in q(con, f"SELECT DISTINCT league_key FROM "
+                                                   f"{src}.fct_player_daily_performance ORDER BY 1")]
+    commit = source_commit()
+    out_root.mkdir(parents=True)
+    summary = {}
+    for key in leagues:
+        m = publish_league(con, src, key, args.horizon, out_root, generated_at.isoformat(),
+                           commit, db_path)
+        summary[key] = {"files": len(m["files"]),
+                        "bytes": sum(f["bytes"] for f in m["files"])}
+    print(f"\nwrote {out_root}")
+    for key, s in summary.items():
+        print(f"  {key}: {s['files']} files, {s['bytes']:,} bytes")
+    return out_root
 
 
 if __name__ == "__main__":

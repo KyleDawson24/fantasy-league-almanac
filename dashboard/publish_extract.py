@@ -150,11 +150,16 @@ class League:
         con, src = self.con, self.src
         rows = q(con, f"""
             SELECT lineup_slot, canonical_slot_key, is_starting_slot
-            FROM {src}.dim_lineup_slot WHERE platform = ?""", [self.platform])
+            FROM {src}.dim_lineup_slot WHERE platform = ?
+            ORDER BY sort_order NULLS LAST, lineup_slot""", [self.platform])
         self.slot_rows = rows
         starting = {tok: key for tok, key, starting in rows if starting}
         pairs = ", ".join(f"{lit(t)}: {lit(k)}" for t, k in sorted(starting.items()))
         self.starting_map_sql = f"MAP {{{pairs}}}" if pairs else "MAP {}"
+        # Canonical starting keys in the slot dim's order, so eligibility
+        # lists read the same way for every league (C before DH before UTIL).
+        ordered = list(dict.fromkeys(k for _t, k, st in rows if st))
+        self.starting_order_sql = "[" + ", ".join(lit(k) for k in ordered) + "]"
         con.execute(f"""
             CREATE OR REPLACE TEMP TABLE slot_map AS
             SELECT lineup_slot, canonical_slot_key, slot_category AS dim_slot_category,
@@ -179,8 +184,8 @@ class League:
               AND lower(column_name) = 'eligible_slots'""")[0][0].upper()
         raw = (f"{alias}.eligible_slots" if dtype.endswith("[]")
                else f"from_json(CAST({alias}.eligible_slots AS VARCHAR), '[\"VARCHAR\"]')")
-        return (f"list_distinct(list_filter(list_transform({raw}, "
-                f"x -> {self.starting_map_sql}[x]), x -> x IS NOT NULL))")
+        mapped = f"list_transform({raw}, x -> {self.starting_map_sql}[x])"
+        return f"list_filter({self.starting_order_sql}, k -> list_contains({mapped}, k))"
 
     # -- calendar: seasons, periods, days -------------------------------------
     def build_calendar(self):

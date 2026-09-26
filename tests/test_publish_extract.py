@@ -100,7 +100,9 @@ def _run(db, out, league):
 
 
 def test_points_league_periods_are_bins_from_opening_day(tmp_path, out):
-    opener = date(2026, 3, 25)  # a Wednesday: the rule does not snap to Mondays
+    # A Wednesday opener: period 1 runs to the first Sunday (5 days), then
+    # Monday-Sunday weeks.
+    opener = date(2026, 3, 25)
     rows = [_fact_row("cbs-bsb", 2026, opener + timedelta(days=d), 1, "11", "SS", "hitting", 1.0)
             for d in range(10)]
     db = tmp_path / "ESPN_FANTASY.duckdb"
@@ -111,14 +113,16 @@ def test_points_league_periods_are_bins_from_opening_day(tmp_path, out):
         platform, lineup_slot, platform_lineup_slot, eligible_slots
         FROM read_parquet('{(league_dir / 'atom' / '2026.parquet').as_posix()}')
         ORDER BY scoring_day""").fetchall()
-    assert [r[1] for r in atom] == [1] * 7 + [2] * 3
-    assert atom[0][2] == "2026-P01" and atom[7][2] == "2026-P02"
+    assert [r[1] for r in atom] == [1] * 5 + [2] * 5
+    assert atom[0][2] == "2026-P01" and atom[5][2] == "2026-P02"
+    assert atom[5][0].weekday() == 0  # period 2 opens on a Monday
     assert {r[3] for r in atom} == {None}  # one matchup, the season: no matchup key
     assert atom[0][4] == "cbs" and atom[0][5] == "shortstop" and atom[0][6] == "SS"
     assert atom[0][7] == ["shortstop"]  # bench stripped, canonical keys
     periods = con.execute(f"""SELECT period_key, start_date, end_date, period_label
         FROM read_parquet('{(league_dir / 'dims' / 'periods.parquet').as_posix()}')""").fetchall()
-    assert periods[0] == (1, opener, opener + timedelta(days=6), "Period 1")
+    assert periods[0] == (1, opener, date(2026, 3, 29), "Period 1")
+    assert periods[1][1:3] == (date(2026, 3, 30), date(2026, 4, 5))
     bins = manifest["validations"]["period_bins"]["seasons"]
     assert bins[0]["derived_periods"] == 2 and bins[0]["status"] == "no_reference"
     assert manifest["validations"]["daily_key_is_yyyymmdd"]["rows_disagreeing"] == 0

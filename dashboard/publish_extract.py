@@ -13,8 +13,8 @@ WHAT DECIDES BEHAVIOUR, AND WHAT NEVER DOES. The league's FORMAT
 league's periods are its matchups (dim_matchup_period, dated); a
 season-points league has ONE matchup, the season, which is why its
 dim_matchup_period rows carry NULL bounds by design, and its weekly scoring
-periods are BINS derived from a rule (period 1 starts on opening day, each
-later period 7 days after the one before). The platform name is used for
+periods are BINS derived from a rule (period 1 runs from opening day to the
+first Sunday, then Monday-Sunday weeks). The platform name is used for
 exactly one thing: choosing which rows of dim_lineup_slot translate this
 league's slot tokens, because that dim is keyed by platform. It is read from
 the league registry, never spelled as a literal here.
@@ -180,17 +180,26 @@ class League:
             SELECT season_year, season_year < {max_season} AS is_final FROM season_cal""")
 
         if self.is_points:
-            # The bin rule: period 1 starts on opening day, period k on
-            # opening day + 7(k-1). The key is derived from the rule, then
-            # validated against delivered period standings where they exist.
+            # The bin rule (Kyle, 2026-09-26, replacing "opener + 7k"):
+            # period 1 runs from opening day to the first Sunday; every later
+            # period is a Monday-Sunday week. The ruled first version matched
+            # CBS's 2026 period COUNT but not its content (1 of 416
+            # team-periods); this one lines up the short periods CBS delivered
+            # (period 1, and the All-Star week). Only 2026 has delivered
+            # periods to check against; historic seasons are derived and
+            # known not to be a perfect match.
             con.execute(f"""
                 CREATE OR REPLACE TEMP TABLE periods AS
                 SELECT c.season_year, k AS period_key,
-                       CAST(c.opener + INTERVAL ({PERIOD_DAYS} * (k - 1)) DAY AS DATE) AS start_date,
-                       CAST(c.opener + INTERVAL ({PERIOD_DAYS} * k - 1) DAY AS DATE) AS end_date,
+                       CASE WHEN k = 1 THEN c.opener
+                            ELSE CAST(date_trunc('week', c.opener)
+                                      + INTERVAL ({PERIOD_DAYS} * (k - 1)) DAY AS DATE) END AS start_date,
+                       CAST(date_trunc('week', c.opener)
+                            + INTERVAL ({PERIOD_DAYS} * k - 1) DAY AS DATE) AS end_date,
                        FALSE AS is_playoff, 'derived_rule' AS period_source
                 FROM season_cal c,
-                     range(1, CAST(date_diff('day', c.opener, c.last_day) // {PERIOD_DAYS} + 2 AS BIGINT)) r(k)""")
+                     range(1, CAST(date_diff('week', date_trunc('week', c.opener),
+                                             date_trunc('week', c.last_day)) + 2 AS BIGINT)) r(k)""")
         else:
             con.execute(f"""
                 CREATE OR REPLACE TEMP TABLE periods AS
@@ -264,8 +273,10 @@ class League:
                                else "match" if reference == bins else "MISMATCH"),
                 })
             self.validations["period_bins"] = {
-                "rule": f"period 1 starts on opening day (first game date in the league's data); "
-                        f"each later period starts {PERIOD_DAYS} days after the previous",
+                "rule": "period 1 runs from opening day (first game date in the league's data) "
+                        "to the first Sunday; every later period is a Monday-Sunday week",
+                "historic_note": "only seasons with delivered period standings can be checked; "
+                                 "derived periods for other seasons are known not to be a perfect match",
                 "reference": "COUNT(DISTINCT period) in mart_period_standings",
                 "seasons": per_season,
             }

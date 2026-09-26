@@ -795,6 +795,7 @@ def _slot_points_alltime_raw():
 
 
 def _matchup_history(stat_specs):
+    stat_specs = almanac_data.carried_stat_specs(stat_specs, 'mart_team_matchup')
     stat_columns = [almanac_data._fact_stat_column_name(spec['stat_name']) for spec in stat_specs]
     for column in stat_columns:
         if not re.match(r'^[a-z][a-z0-9_]*$', column):
@@ -952,7 +953,11 @@ def run_export(league_key, duckdb_path=None, out_root='data/exports/shared',
         season_year, _ = almanac_data.get_latest_matchup_period()
     season_year = int(season_year)
 
-    specs = almanac_data.get_team_week_stat_specs()
+    # Only stats a team-grain mart breaks out (IRSTR on CBS does not):
+    # the descriptor, the standings rows and the history columns all walk
+    # this one list, so they cannot disagree about which stats exist.
+    specs = almanac_data.carried_stat_specs(
+        almanac_data.get_team_week_stat_specs(), 'mart_team_season_standings')
     hitting = almanac_render._team_week_specs_for_category(specs, 'hitting')
     pitching = almanac_render._team_week_specs_for_category(specs, 'pitching')
     seasons = _seasons()

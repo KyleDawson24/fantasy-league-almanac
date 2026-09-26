@@ -143,17 +143,23 @@ def manifest_entry(table, rows, out_path, columns):
     }
 
 
-def dump_table(cur, table, columns, force, schema="RAW"):
+def dump_table(cur, table, columns, force, schema="RAW", where=None):
     out_path = OUT_DIR / f"{table}.parquet"
     if out_path.exists() and not force:
         # A skipped file still belongs in the manifest: a resumed run
         # (after one relation failed) must describe every file on disk,
         # or the loader silently omits the ones the first attempt wrote.
         print(f"  {table:<24} SKIP (exists; --force to re-dump)")
-        return manifest_entry(table, pq.ParquetFile(out_path).metadata.num_rows,
-                              out_path, columns)
+        entry = manifest_entry(table, pq.ParquetFile(out_path).metadata.num_rows,
+                               out_path, columns)
+        if where:
+            entry["where"] = where
+        return entry
 
     sql = f'select {select_list(columns)}\nfrom ESPN_FANTASY.{schema}."{table}"'
+    if where:
+        # A row filter makes this file a SUBSET; the manifest records it.
+        sql += f"\nwhere {where}"
 
     started = time.time()
     cur.execute(sql)
@@ -194,7 +200,10 @@ def dump_table(cur, table, columns, force, schema="RAW"):
     size_mb = out_path.stat().st_size / 1e6
     elapsed = time.time() - started
     print(f"  {table:<24} {rows:>9,} rows  {size_mb:>7.1f} MB  {elapsed:>6.1f}s")
-    return manifest_entry(table, rows, out_path, columns)
+    entry = manifest_entry(table, rows, out_path, columns)
+    if where:
+        entry["where"] = where
+    return entry
 
 
 def main():
@@ -207,6 +216,8 @@ def main():
                     help="source schema (RAW or ANALYTICS)")
     ap.add_argument("--exclude", action="append", default=[],
                     help="skip this relation (repeatable)")
+    ap.add_argument("--where", action="append", default=[], metavar="TABLE=PREDICATE",
+                    help="dump only the rows of TABLE matching PREDICATE (repeatable)")
     ap.add_argument("--keep-going", action="store_true",
                     help="record relations that fail to select and continue")
     args = ap.parse_args()
@@ -227,6 +238,7 @@ def main():
         if unknown:
             sys.exit(f"unknown {schema} relation(s): {', '.join(unknown)}")
         excluded = {t.upper() for t in args.exclude}
+        wheres = {t.upper(): pred for t, pred in (w.split("=", 1) for w in args.where)}
         wanted = [t for t in wanted if t not in excluded]
 
         print(f"Dumping {len(wanted)} {schema} relation(s) -> {OUT_DIR}")
@@ -237,7 +249,8 @@ def main():
         broken = {}
         for table in wanted:
             try:
-                result = dump_table(cur, table, all_tables[table], args.force, schema)
+                result = dump_table(cur, table, all_tables[table], args.force, schema,
+                                    wheres.get(table))
             except snowflake.connector.errors.ProgrammingError as exc:
                 # A view over a dropped model fails to expand. With
                 # --keep-going it is recorded and skipped rather than

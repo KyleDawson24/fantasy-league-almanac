@@ -1,6 +1,7 @@
 # One consented real-name exception: the maintainer's own league
 
-**Status: in force from 2026-09-22 (approved by Kyle).**
+**Status: in force from 2026-09-22 (approved by Kyle). Amended 2026-09-27:
+a second league, `cbs-bsb`, is added under Amendment 1 below.**
 
 ## The rule this bends
 
@@ -10,7 +11,7 @@ name-anonymized demo twins (`demo/league_config/`); the real league data stays
 on the maintainer's disk (MLB-95, MLB-176). That posture is unchanged for
 every league except the one below.
 
-## The exception
+## The exception: `espn-main`
 
 One league (`league_key = espn-main`), the maintainer's own
 ESPN league, may show its members' real names on the public dashboard.
@@ -50,11 +51,41 @@ exclude it.
 - **Not linked from any public page.** The README, the portfolio pages and the
   release notes link the anonymized dashboard, never the real-name one.
 
+## Amendment 1 (2026-09-27): the CBS league, `cbs-bsb`
+
+**In force from 2026-09-27 (approved by Kyle).** The league's commissioner
+confirmed on the morning of 2026-09-27, on behalf of the members, that their
+names may be shown.
+
+A second league, `league_key = cbs-bsb` (the CBS "Box Score Baseball" league,
+2001 to present), may show its members' real names on its own public
+dashboard, on exactly the terms above: the same field table, the same
+allowlist publication step, served through the artifact deploy and never
+committed, reachable only at an unlinked address that the maintainer hands to
+the league. Email, phone and every other contact field stay off it.
+
+Two things are specific to this league:
+
+- **A favor to the league first, a stress test second.** Twenty-six seasons
+  of daily data make this the largest edition the site serves, so historic
+  pages may be slow to load, and the site says so in a caveat line. The
+  league's contact should never need to install anything: the deliverable is
+  a link that works in a browser.
+- **Temporary as a real-name site.** The intent is to anonymize this league
+  later so it can serve as the project's display piece. When that happens
+  the real-name site comes down and this amendment is marked superseded. The
+  members' consent permits the site; it does not oblige the project to keep
+  it up.
+
+If a member withdraws consent, the rule below applies unchanged: struck from
+future versions, nothing further promised or built.
+
 ## What this does NOT change
 
 - Email or phone data anywhere public is still a leak.
-- The CBS league (`cbs-bsb`) and every other league publish only as anonymized
-  twins. A second league needs its own consent and its own amendment here.
+- Every league other than the two named in this document publishes only as
+  an anonymized twin. A further league needs its own consent and its own
+  amendment here.
 - The `league_config/` skip-worktree mechanics and the false-alarm rules in
   CLAUDE.md are unchanged.
 - Per-league privacy modes, for users who want less exposure than this league
@@ -62,8 +93,8 @@ exclude it.
 
 ## For agents
 
-Showing that league's member names on the dashboard through the sanctioned
-pipeline is **not a leak. Do not scrub it.** Do not deliberately add member
+Showing either consented league's member names on its dashboard through the
+sanctioned pipeline is **not a leak. Do not scrub it.** Do not deliberately add member
 names to tracked files, and do not start a history rewrite over names already
 there. Kyle's own name is never a finding.
 
@@ -75,4 +106,6 @@ built.
 ## References
 
 MLB-285 (2.2 definition ruling, 2026-09-22) · MLB-299 (the prototype and its
-publication acceptance) · MLB-176 (name guard) · MLB-95 (public scrub)
+publication acceptance) · MLB-176 (name guard) · MLB-95 (public scrub) ·
+MLB-308 (BSB dashboard; commissioner consent 2026-09-27) · MLB-319 (the
+platform-neutral data layer that builds the BSB edition)

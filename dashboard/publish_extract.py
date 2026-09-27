@@ -878,6 +878,18 @@ class League:
                     SELECT COUNT(*) FROM per_team JOIN teams USING (season_year)
                     WHERE games <> {expected}""")[0][0]}
 
+        # Franchise-identity rivalry ledgers (MLB-229, already format-aware:
+        # matchup meetings for H2H, the season lens for every format) and
+        # the platform's delivered period standings where it delivers them.
+        # Passed through as published so no second implementation of
+        # franchise lineage or official ranking exists.
+        for name, rel in (("rivalries", "mart_franchise_rivalry"),
+                          ("rivalry_axes", "mart_franchise_rivalry_axes"),
+                          ("period_standings", "mart_period_standings")):
+            if rel in self.rels:
+                copy(name, f"SELECT * EXCLUDE (league_key) FROM {src}.{rel} "
+                           f"WHERE league_key = {lit(self.key)}")
+
         # As-of team names: the label a team carried over each stretch of a
         # season, so a per-day view can show the name of that day while the
         # names still live in one dim (never on the atom).

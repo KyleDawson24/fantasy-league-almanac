@@ -52,12 +52,14 @@ def _build(path, rows, fmt, matchups=(), extra_sql=()):
                 + ", ".join("(" + ", ".join("?" for _ in cols) + ")" for _ in rows)
                 + ") t(" + ", ".join(cols) + ")", [r[c] for r in rows for c in cols])
     con.execute("""CREATE TABLE ANALYTICS.dim_lineup_slot AS SELECT * FROM (VALUES
-        ('espn','SS','shortstop','hitting',TRUE,'SS',50),
-        ('espn','BE','bench','inactive',FALSE,'BE',900),
-        ('cbs','SS','shortstop','hitting',TRUE,'SS',50),
-        ('cbs','RS','bench','inactive',FALSE,'RS',900)
+        ('espn','SS','shortstop','hitting',TRUE,TRUE,'SS',50),
+        ('espn','UTIL','utility','hitting',TRUE,FALSE,'UTIL',120),
+        ('espn','BE','bench','inactive',FALSE,FALSE,'BE',900),
+        ('cbs','SS','shortstop','hitting',TRUE,TRUE,'SS',50),
+        ('cbs','U','utility','hitting',TRUE,FALSE,'U',120),
+        ('cbs','RS','bench','inactive',FALSE,FALSE,'RS',900)
         ) t(platform, lineup_slot, canonical_slot_key, slot_category, is_starting_slot,
-            display_slot, sort_order)""")
+            is_position_slot, display_slot, sort_order)""")
     con.execute(f"""CREATE TABLE ANALYTICS.dim_league_format AS
         SELECT DISTINCT league_key, '{fmt}' AS league_format
         FROM ANALYTICS.fct_player_daily_performance""")
@@ -118,7 +120,9 @@ def test_points_league_periods_are_bins_from_opening_day(tmp_path, out):
     assert atom[5][0].weekday() == 0  # period 2 opens on a Monday
     assert {r[3] for r in atom} == {None}  # one matchup, the season: no matchup key
     assert atom[0][4] == "cbs" and atom[0][5] == "shortstop" and atom[0][6] == "SS"
-    assert atom[0][7] == ["shortstop"]  # bench stripped, canonical keys
+    # Bench stripped, canonical keys, and the open flex slot (CBS's U) added
+    # for a hitter even though the platform never prints it on the card.
+    assert atom[0][7] == ["shortstop", "utility"]
     periods = con.execute(f"""SELECT period_key, start_date, end_date, period_label
         FROM read_parquet('{(league_dir / 'dims' / 'periods.parquet').as_posix()}')""").fetchall()
     assert periods[0] == (1, opener, date(2026, 3, 29), "Period 1")
@@ -200,5 +204,5 @@ def test_no_game_roster_days_become_dense_rows_with_null_production(tmp_path, ou
     # The off day exists, carries no production (NULL, never zero), and keeps
     # its label, eligibility and period.
     assert got[1] == (off_day, False, None, None, "unobserved", "inferred_gap", "Player 11",
-                      ["shortstop"], 1)
+                      ["shortstop", "utility"], 1)
     assert manifest["validations"]["dense_no_game_rows"] == 1

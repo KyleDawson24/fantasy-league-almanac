@@ -152,6 +152,20 @@ class League:
             SELECT lineup_slot, canonical_slot_key, is_starting_slot
             FROM {src}.dim_lineup_slot WHERE platform = ?
             ORDER BY sort_order NULLS LAST, lineup_slot""", [self.platform])
+        # An open flex slot -- a starting HITTING slot that is not a fielding
+        # position (ESPN's UTIL, CBS's U) -- takes any hitter. ESPN prints it
+        # in every hitter's eligibility; CBS never prints it on a card but
+        # grants it in play. Adding it wherever a row has any hitting
+        # eligibility makes both read the same way.
+        flex = q(con, f"""
+            SELECT DISTINCT canonical_slot_key FROM {src}.dim_lineup_slot
+            WHERE platform = ? AND is_starting_slot AND slot_category = 'hitting'
+              AND NOT is_position_slot""", [self.platform])
+        hitting = q(con, f"""
+            SELECT DISTINCT canonical_slot_key FROM {src}.dim_lineup_slot
+            WHERE platform = ? AND is_starting_slot AND slot_category = 'hitting'""", [self.platform])
+        self.open_flex_sql = "[" + ", ".join(lit(r[0]) for r in flex) + "]"
+        self.hitting_keys_sql = "[" + ", ".join(lit(r[0]) for r in hitting) + "]"
         self.slot_rows = rows
         starting = {tok: key for tok, key, starting in rows if starting}
         pairs = ", ".join(f"{lit(t)}: {lit(k)}" for t, k in sorted(starting.items()))
@@ -184,8 +198,13 @@ class League:
               AND lower(column_name) = 'eligible_slots'""")[0][0].upper()
         raw = (f"{alias}.eligible_slots" if dtype.endswith("[]")
                else f"from_json(CAST({alias}.eligible_slots AS VARCHAR), '[\"VARCHAR\"]')")
+        # The row's tokens are mapped ONCE (bound as m through a one-element
+        # list); the ordered filter then tests membership, plus the open flex
+        # slots when m holds any hitting slot.
         mapped = f"list_transform({raw}, x -> {self.starting_map_sql}[x])"
-        return f"list_filter({self.starting_order_sql}, k -> list_contains({mapped}, k))"
+        return (f"list_transform([{mapped}], m -> list_filter({self.starting_order_sql}, "
+                f"k -> list_contains(m, k) OR (list_contains({self.open_flex_sql}::VARCHAR[], k) "
+                f"AND list_has_any(m, {self.hitting_keys_sql}::VARCHAR[]))))[1]")
 
     # -- calendar: seasons, periods, days -------------------------------------
     def build_calendar(self):

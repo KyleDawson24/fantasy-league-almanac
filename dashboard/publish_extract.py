@@ -712,7 +712,8 @@ class League:
             fact_label AS (
                 SELECT CAST(season_year AS INTEGER) AS season_year, CAST(team_id AS INTEGER) AS team_id,
                        arg_max(team_name, game_date) AS team_name,
-                       arg_max(team_abbrev, game_date) AS team_abbrev
+                       arg_max(team_abbrev, game_date) AS team_abbrev,
+                       arg_max(owner_display, game_date) AS owner_display
                 FROM {self.fact} WHERE team_id IS NOT NULL GROUP BY ALL
             )
             SELECT ts.season_year, ts.team_id, ts.franchise_id,
@@ -722,6 +723,7 @@ class League:
                         WHEN COALESCE(fs.configured_name, fs.canonical_name) IS NOT NULL THEN 'dim_franchise_season'
                         WHEN fl.team_name IS NOT NULL THEN 'fct_player_daily_performance'
                    END AS name_source,
+                   fl.owner_display,
                    fs.canonical_name AS franchise_canonical_name,
                    fs.canonical_abbrev AS franchise_canonical_abbrev,
                    CAST(st.standings_rank AS INTEGER) AS standings_rank,
@@ -885,10 +887,17 @@ class League:
         # franchise lineage or official ranking exists.
         for name, rel in (("rivalries", "mart_franchise_rivalry"),
                           ("rivalry_axes", "mart_franchise_rivalry_axes"),
-                          ("period_standings", "mart_period_standings")):
+                          ("period_standings", "mart_period_standings"),
+                          ("franchise_identity", "dim_franchise_identity")):
             if rel in self.rels:
                 copy(name, f"SELECT * EXCLUDE (league_key) FROM {src}.{rel} "
                            f"WHERE league_key = {lit(self.key)}")
+
+        # The stat vocabulary (dim_stat): reference data, the same for every
+        # league, shipped so no consumer mirrors its name translation
+        # ('1B' -> 'SINGLES', ...), which by design lives only in dim_stat.
+        if "dim_stat" in self.rels:
+            copy("stat_vocabulary", f"SELECT * FROM {src}.dim_stat ORDER BY stat_name")
 
         # As-of team names: the label a team carried over each stretch of a
         # season, so a per-day view can show the name of that day while the

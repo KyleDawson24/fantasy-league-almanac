@@ -708,41 +708,69 @@ class League:
             LEFT JOIN fact_label fl ON fl.season_year = ts.season_year AND fl.team_id = ts.team_id
             ORDER BY 1, 2""")
 
-        # Slot vocabulary with a capacity per season: the league's settings
-        # where the warehouse carries them (dim_roster_slot_counts), else the
-        # most starters observed in one slot on one team-day of CAPTURED
-        # rows. Reconstructed/estimated eras have no observable capacity.
+        # Slot vocabulary with a capacity per season. In order of authority:
+        # the league's settings (dim_roster_slot_counts); else the MODAL
+        # number of players in that slot per team-day across OBSERVED lineups
+        # (captured game rows plus a platform's daily roster capture -- the
+        # mode, because a maximum picks up intraday changes and uncredited
+        # snapshot rows); else, for a season with neither, the shape of the
+        # nearest later season, labelled carried_from_<season> so no page can
+        # pass it off as observed.
         copy("lineup_slot", f"""
-            WITH used AS (
+            WITH seasons AS (SELECT DISTINCT season_year FROM read_parquet({atom})),
+            used AS (
                 SELECT DISTINCT season_year, platform_lineup_slot AS lineup_slot
                 FROM read_parquet({atom}) WHERE platform_lineup_slot IS NOT NULL
             ),
             observed AS (
-                SELECT season_year, platform_lineup_slot AS lineup_slot, MAX(n) AS observed_max
-                FROM (SELECT season_year, team_id, scoring_day, platform_lineup_slot, COUNT(*) AS n
+                SELECT season_year, lineup_slot, mode(n) AS observed_mode
+                FROM (SELECT season_year, team_id, scoring_day, platform_lineup_slot AS lineup_slot, COUNT(*) AS n
                       FROM read_parquet({atom})
-                      WHERE deployment_state = 'active' AND provenance = 'captured'
+                      WHERE team_id IS NOT NULL AND platform_lineup_slot IS NOT NULL
+                        AND provenance IN ('captured', 'platform_roster_snapshot')
                       GROUP BY ALL) GROUP BY ALL
             ),
             settings AS (
                 SELECT CAST(season_year AS INTEGER) AS season_year, lineup_slot,
                        CAST(starter_count AS INTEGER) AS starter_count
                 FROM {src}.dim_roster_slot_counts WHERE league_key = {lit(self.key)}
+            ),
+            direct AS (
+                SELECT COALESCE(u.season_year, st.season_year) AS season_year,
+                       COALESCE(u.lineup_slot, st.lineup_slot) AS lineup_slot,
+                       COALESCE(st.starter_count, o.observed_mode) AS capacity,
+                       CASE WHEN st.starter_count IS NOT NULL THEN 'settings'
+                            WHEN o.observed_mode IS NOT NULL THEN 'observed_mode'
+                       END AS capacity_source
+                FROM used u
+                FULL JOIN settings st ON st.season_year = u.season_year AND st.lineup_slot = u.lineup_slot
+                LEFT JOIN observed o ON o.season_year = COALESCE(u.season_year, st.season_year)
+                                    AND o.lineup_slot = COALESCE(u.lineup_slot, st.lineup_slot)
+            ),
+            has_cap AS (SELECT DISTINCT season_year FROM direct WHERE capacity IS NOT NULL),
+            donor AS (
+                SELECT s.season_year, MIN(h.season_year) AS donor
+                FROM seasons s JOIN has_cap h ON h.season_year > s.season_year
+                WHERE s.season_year NOT IN (SELECT season_year FROM has_cap)
+                GROUP BY 1
+            ),
+            carried AS (
+                SELECT d.season_year, x.lineup_slot, x.capacity,
+                       'carried_from_' || CAST(d.donor AS VARCHAR) AS capacity_source
+                FROM donor d JOIN direct x ON x.season_year = d.donor AND x.capacity IS NOT NULL
             )
-            SELECT COALESCE(u.season_year, st.season_year) AS season_year,
-                   COALESCE(u.lineup_slot, st.lineup_slot) AS lineup_slot,
+            SELECT COALESCE(d.season_year, c.season_year) AS season_year,
+                   COALESCE(d.lineup_slot, c.lineup_slot) AS lineup_slot,
                    s.canonical_slot_key, s.display_slot, s.dim_slot_category AS slot_category,
                    s.is_starting_slot, CAST(s.sort_order AS INTEGER) AS sort_order,
-                   COALESCE(st.starter_count, o.observed_max) AS capacity,
-                   CASE WHEN st.starter_count IS NOT NULL THEN 'settings'
-                        WHEN o.observed_max IS NOT NULL THEN 'observed_captured_max'
-                   END AS capacity_source,
+                   COALESCE(d.capacity, c.capacity) AS capacity,
+                   CASE WHEN d.capacity IS NOT NULL THEN d.capacity_source ELSE c.capacity_source END AS capacity_source,
                    u.lineup_slot IS NOT NULL AS appears_in_data
-            FROM used u
-            FULL JOIN settings st ON st.season_year = u.season_year AND st.lineup_slot = u.lineup_slot
-            LEFT JOIN observed o ON o.season_year = COALESCE(u.season_year, st.season_year)
-                                AND o.lineup_slot = COALESCE(u.lineup_slot, st.lineup_slot)
-            LEFT JOIN slot_map s ON s.lineup_slot = COALESCE(u.lineup_slot, st.lineup_slot)
+            FROM direct d
+            FULL JOIN carried c ON c.season_year = d.season_year AND c.lineup_slot = d.lineup_slot
+            LEFT JOIN used u ON u.season_year = COALESCE(d.season_year, c.season_year)
+                            AND u.lineup_slot = COALESCE(d.lineup_slot, c.lineup_slot)
+            LEFT JOIN slot_map s ON s.lineup_slot = COALESCE(d.lineup_slot, c.lineup_slot)
             ORDER BY 1, s.sort_order NULLS LAST, 2""")
 
         # As-of team names: the label a team carried over each stretch of a

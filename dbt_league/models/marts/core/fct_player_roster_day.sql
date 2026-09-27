@@ -17,11 +17,15 @@
 --     evidence winning any day they both claim:
 --       1. observed_game_day -- the daily fact's own rostered rows (the
 --          asset had a game and a team credited it);
---       2. inferred_gap -- the days BETWEEN two game days on the SAME team
+--       2. platform_roster_snapshot -- a daily roster capture staged for
+--          this platform (CBS 2026: stg_cbs__rosters), which observes the
+--          lineup slot on no-game days too. Eligibility still comes from the
+--          fact (the capture lists one primary position), carried forward;
+--       3. inferred_gap -- the days BETWEEN two game days on the SAME team
 --          on which the asset has no row at all (off days, the All-Star
 --          break, an injured spell). An asset with a game that day and no
 --          rostered row was not rostered, so only row-less days are filled;
---       3. reconstructed_stint -- add/drop stints from the transaction
+--       4. reconstructed_stint -- add/drop stints from the transaction
 --          record expanded to days, for tenure the first two cannot see.
 --          Stints whose asset never resolved to a key are left out, never
 --          guessed (8,615 of 20,077 at MLB-319).
@@ -73,6 +77,23 @@ observed as (
       and f.league_key not in (select league_key from snapshot_leagues)
 ),
 
+platform_snapshot as (
+    select
+        s.league_key,
+        s.season_year,
+        s.roster_date,
+        s.player_id as player_key,
+        s.player_name as display_name,
+        s.pro_team,
+        cast(s.team_id as integer) as team_id,
+        case when s.roster_status = 'A' then s.roster_pos else 'RS' end as lineup_slot,
+        null as eligible_slots,
+        2 as evidence_rank,
+        'platform_roster_snapshot' as roster_source
+    from {{ ref('stg_cbs__rosters') }} s
+    where s.league_key not in (select league_key from snapshot_leagues)
+),
+
 observed_next as (
     select
         o.*,
@@ -109,7 +130,7 @@ gaps as (
         o.team_id,
         cast(null as {{ dbt.type_string() }}) as lineup_slot,
         null as eligible_slots,
-        2 as evidence_rank,
+        3 as evidence_rank,
         'inferred_gap' as roster_source
     from observed_next o
     inner join calendar c
@@ -156,7 +177,7 @@ stint_days as (
         s.team_id,
         cast(null as {{ dbt.type_string() }}) as lineup_slot,
         null as eligible_slots,
-        3 as evidence_rank,
+        4 as evidence_rank,
         'reconstructed_stint' as roster_source
     from stints s
     inner join calendar c
@@ -172,6 +193,8 @@ layered as (
         ) as pick
     from (
         select * from observed
+        union all
+        select * from platform_snapshot
         union all
         select * from gaps
         union all

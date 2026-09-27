@@ -42,6 +42,15 @@ import almanac_render  # noqa: E402
 import export_shared as ex  # noqa: E402
 
 ATOM_NAME = {"b_bb": "bb", "b_so": "so", "b_ibb": "ibb"}  # fact name -> atom name
+# Colour-rule prose in the words the published demo already uses. "Blank" is
+# an ordinary word that is also an exact entry in a real-name reference a
+# public edition's gate holds, so the neutral descriptor avoids it. The
+# export's own wording (output/export_shared.py) is left as it is.
+GATE_NEUTRAL_RULES = {
+    "affinities": ("One scale per block (season, all-time), across all cells; bold each MLB club maximum, "
+                   "including ties. Zero and empty cells remain unpainted."),
+    "rivalries": "Row team win rate against each opponent. The empty diagonal and 0-0 carry no colour.",
+}
 
 
 def rows(con, sql):
@@ -361,7 +370,11 @@ def main(argv=None):
                       ("affinities", "club-name vocabulary is still ESPN-shaped")):
         tables[name] = write_table(out_dir, name, [], {"not_available": why})
 
-    (out_dir / "presentation.json").write_text(ex._dumps(ex.presentation_descriptor(hitting, pitching)), encoding="utf-8")
+    presentation = ex.presentation_descriptor(hitting, pitching)
+    for key, rule in GATE_NEUTRAL_RULES.items():
+        if key in presentation.get("tables", {}):
+            presentation["tables"][key]["rule"] = rule
+    (out_dir / "presentation.json").write_text(ex._dumps(presentation), encoding="utf-8")
     manifest = {
         "schema_version": ex.SCHEMA_VERSION, "ticket": "MLB-319",
         "league_key": league["league_key"], "league_slug": league["league_key"].replace("-", "_"),
@@ -370,7 +383,16 @@ def main(argv=None):
         "performance_cutoff": str(league["data_horizon"]),
         # Team labels come from the extract's dims, so they are as of its horizon.
         "club_identity_as_of": str(league["data_horizon"]),
-        "source": {"neutral_extract": str(ext), "extract_commit": manifest_in["source"]["commit"]},
+        # The extract's identity, never its local path: this manifest ships
+        # inside a published site. An edition's label projection is pinned
+        # by hash (the map itself stays private).
+        "source": {"extract_generated_at": manifest_in["generated_at"],
+                   "extract_commit": manifest_in["source"]["commit"],
+                   "extract_dirty": manifest_in["source"].get("dirty"),
+                   **({"edition_labels": {k: manifest_in["edition_labels"][k]
+                                          for k in ("label_map_sha256", "player_names")
+                                          if k in manifest_in["edition_labels"]}}
+                      if manifest_in.get("edition_labels") else {})},
         "tables": tables, "presentation": {"file": "presentation.json"},
     }
     (out_dir / "manifest.json").write_text(ex._dumps(manifest), encoding="utf-8")

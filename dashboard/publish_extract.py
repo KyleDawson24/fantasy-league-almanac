@@ -455,7 +455,7 @@ class League:
             ("raw_is_active_slot", "f.is_active_slot", null("BOOLEAN")),
             ("raw_performance_status", "f.performance_status", null("VARCHAR")),
             ("raw_wasted_bucket", "f.wasted_bucket", null("VARCHAR")),
-            ("raw_pro_team", "f.pro_team", null("VARCHAR")),
+            ("raw_pro_team", "f.pro_team", "r.pro_team"),
             ("raw_roster_status", "rs.roster_status" if self.roster else null("VARCHAR"),
              "r.roster_status"),
         ]

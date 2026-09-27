@@ -134,6 +134,7 @@ class League:
         rels = {r[0].lower() for r in q(con, """
             SELECT table_name FROM information_schema.tables
             WHERE table_catalog = 'wh' AND lower(table_schema) = lower(?)""", [schema])}
+        self.rels = rels
         self.production = (f"(SELECT * FROM {src}.fct_player_daily_production "
                            f"WHERE league_key = {lit(league_key)})"
                            if "fct_player_daily_production" in rels else None)
@@ -808,6 +809,74 @@ class League:
                             AND u.lineup_slot = COALESCE(d.lineup_slot, c.lineup_slot)
             LEFT JOIN slot_map s ON s.lineup_slot = COALESCE(d.lineup_slot, c.lineup_slot)
             ORDER BY 1, s.sort_order NULLS LAST, 2""")
+
+        # Team-grain outcomes (contract 5.3: beside the atom, not on it).
+        # Every format has matchups (Kyle, 2026-09-26). Head-to-head: the
+        # platform's own weekly pairings. Season points: ONE matchup per
+        # season against every other team -- finishing above a team is a
+        # win, level a tie -- on the same season-points basis the rivalry
+        # mart uses (int_franchise_season_points, the platform's own totals),
+        # plus the delivered period standings for a season still in flight.
+        needed = ({"int_franchise_season_points", "mart_period_standings"} if self.is_points
+                  else {"mart_team_matchup"})
+        if not needed <= self.rels:
+            self.validations["matchup_record_invariant"] = "matchups absent: " + ", ".join(sorted(needed - self.rels))
+            matchup_sql = None
+        elif self.is_points:
+            matchup_sql = f"""
+                WITH season_points AS (
+                    SELECT CAST(season_year AS INTEGER) AS season_year,
+                           CAST(franchise_id AS INTEGER) AS team_id,
+                           CAST(season_points AS DOUBLE) AS points, TRUE AS is_complete,
+                           points_source AS result_source
+                    FROM {src}.int_franchise_season_points
+                    WHERE league_key = {lit(self.key)} AND is_season_complete
+                    UNION ALL
+                    SELECT CAST(ps.season_year AS INTEGER), CAST(ps.team_id AS INTEGER),
+                           CAST(ps.points AS DOUBLE), FALSE, 'delivered_period_standings'
+                    FROM {src}.mart_period_standings ps
+                    WHERE ps.league_key = {lit(self.key)} AND ps.is_latest_period
+                      AND CAST(ps.season_year AS INTEGER) NOT IN (
+                          SELECT CAST(season_year AS INTEGER) FROM {src}.int_franchise_season_points
+                          WHERE league_key = {lit(self.key)} AND is_season_complete)
+                )
+                SELECT a.season_year, 1 AS matchup_period, a.team_id, b.team_id AS opponent_id,
+                       a.points AS team_points, b.points AS opponent_points,
+                       CASE WHEN a.points > b.points THEN 'W' WHEN a.points < b.points THEN 'L'
+                            ELSE 'T' END AS result,
+                       FALSE AS is_playoff, a.is_complete, a.result_source
+                FROM season_points a JOIN season_points b
+                  ON b.season_year = a.season_year AND b.team_id <> a.team_id"""
+        else:
+            matchup_sql = f"""
+                SELECT CAST(m.season_year AS INTEGER) AS season_year,
+                       CAST(m.matchup_period AS INTEGER) AS matchup_period,
+                       CAST(m.team_id AS INTEGER) AS team_id, CAST(m.opponent_id AS INTEGER) AS opponent_id,
+                       CAST(m.platform_points AS DOUBLE) AS team_points,
+                       CAST(m.opponent_points AS DOUBLE) AS opponent_points,
+                       m.result, COALESCE(m.is_playoff, FALSE) AS is_playoff,
+                       COALESCE(p.is_complete, FALSE) AS is_complete, 'platform_matchup' AS result_source
+                FROM {src}.mart_team_matchup m
+                LEFT JOIN periods_out p ON p.season_year = CAST(m.season_year AS INTEGER)
+                                       AND p.period_key = CAST(m.matchup_period AS INTEGER)
+                WHERE m.league_key = {lit(self.key)}"""
+        if matchup_sql is not None:
+            copy("matchups", f"SELECT * FROM ({matchup_sql}) ORDER BY 1, 2, 3, 4")
+        # The invariant that makes both formats checkable: per team per
+        # matchup, W+L+T = teams in it - 1 (season points) or 1 (H2H).
+        mpath = lit((dims / "matchups.parquet").as_posix())
+        if matchup_sql is not None:
+            expected = "n - 1" if self.is_points else "1"
+            self.validations["matchup_record_invariant"] = {
+                "rule": "per team per matchup W+L+T = "
+                        + ("teams in the season - 1" if self.is_points else "1"),
+                "violations": q(con, f"""
+                    WITH per_team AS (SELECT season_year, matchup_period, team_id, COUNT(*) AS games
+                                      FROM read_parquet({mpath}) GROUP BY ALL),
+                         teams AS (SELECT season_year, COUNT(DISTINCT team_id) AS n
+                                   FROM read_parquet({mpath}) GROUP BY 1)
+                    SELECT COUNT(*) FROM per_team JOIN teams USING (season_year)
+                    WHERE games <> {expected}""")[0][0]}
 
         # As-of team names: the label a team carried over each stretch of a
         # season, so a per-day view can show the name of that day while the

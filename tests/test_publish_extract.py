@@ -53,9 +53,11 @@ def _build(path, rows, fmt, matchups=(), extra_sql=()):
                 + ") t(" + ", ".join(cols) + ")", [r[c] for r in rows for c in cols])
     con.execute("""CREATE TABLE ANALYTICS.dim_lineup_slot AS SELECT * FROM (VALUES
         ('espn','SS','shortstop','hitting',TRUE,TRUE,'SS',50),
+        ('espn','DH','designated_hitter','hitting',TRUE,TRUE,'DH',110),
         ('espn','UTIL','utility','hitting',TRUE,FALSE,'UTIL',120),
         ('espn','BE','bench','inactive',FALSE,FALSE,'BE',900),
         ('cbs','SS','shortstop','hitting',TRUE,TRUE,'SS',50),
+        ('cbs','DH','designated_hitter','hitting',TRUE,TRUE,'DH',110),
         ('cbs','U','utility','hitting',TRUE,FALSE,'U',120),
         ('cbs','RS','bench','inactive',FALSE,FALSE,'RS',900)
         ) t(platform, lineup_slot, canonical_slot_key, slot_category, is_starting_slot,
@@ -120,9 +122,10 @@ def test_points_league_periods_are_bins_from_opening_day(tmp_path, out):
     assert atom[5][0].weekday() == 0  # period 2 opens on a Monday
     assert {r[3] for r in atom} == {None}  # one matchup, the season: no matchup key
     assert atom[0][4] == "cbs" and atom[0][5] == "shortstop" and atom[0][6] == "SS"
-    # Bench stripped, canonical keys, and the open flex slot (CBS's U) added
-    # for a hitter even though the platform never prints it on the card.
-    assert atom[0][7] == ["shortstop", "utility"]
+    # Bench stripped, canonical keys, and BSB's open slots (DH and U, a
+    # league rule in config/leagues.yml) added for a hitter even though the
+    # platform never prints them on the card.
+    assert atom[0][7] == ["shortstop", "designated_hitter", "utility"]
     periods = con.execute(f"""SELECT period_key, start_date, end_date, period_label
         FROM read_parquet('{(league_dir / 'dims' / 'periods.parquet').as_posix()}')""").fetchall()
     assert periods[0] == (1, opener, date(2026, 3, 29), "Period 1")
@@ -204,5 +207,18 @@ def test_no_game_roster_days_become_dense_rows_with_null_production(tmp_path, ou
     # The off day exists, carries no production (NULL, never zero), and keeps
     # its label, eligibility and period.
     assert got[1] == (off_day, False, None, None, "unobserved", "inferred_gap", "Player 11",
-                      ["shortstop", "utility"], 1)
+                      ["shortstop", "designated_hitter", "utility"], 1)
     assert manifest["validations"]["dense_no_game_rows"] == 1
+
+
+def test_a_league_without_overrides_keeps_dh_eligibility_only(tmp_path, out):
+    # Buns: DH needs DH eligibility; only the non-position UTIL is open.
+    days = [date(2026, 3, 25) + timedelta(days=d) for d in range(3)]
+    rows = [_fact_row("espn-main", 2026, d, 1, "21", "SS", "hitting", 1.0, matchup=1) for d in days]
+    db = tmp_path / "ESPN_FANTASY.duckdb"
+    _build(db, rows, "h2h", matchups=[("espn-main", 2026, 1, date(2026, 3, 25), date(2026, 3, 31), False)])
+    league_dir, manifest = _run(db, out, "espn-main")
+    got = duckdb.connect().execute(f"""SELECT DISTINCT eligible_slots
+        FROM read_parquet('{(league_dir / 'atom' / '2026.parquet').as_posix()}')""").fetchall()
+    assert got == [(["shortstop", "utility"],)]
+    assert manifest["validations"]["open_hitting_slots"]["slots"] == ["utility"]

@@ -38,6 +38,11 @@
 #                   by the loader today; output scripts start resolving
 #                   destinations from it under MLB-58. Sheets ids stay in
 #                   .env for the same quasi-privacy reason as league ids.
+#   settings_overrides  (optional) a league's own rules the pipeline cannot
+#                   yet read from the platform's settings, stated per league,
+#                   never per platform. Known key: open_hitting_slots, the
+#                   league's slot tokens that take any hitter regardless of
+#                   listed eligibility. Unknown keys fail at load.
 #
 # default_league names the entry every edge script (extract, output)
 # targets when no --league flag is given -- the ESPN league, preserving
@@ -77,3 +82,7 @@ leagues:
       # quasi-privacy convention; access verified by title read at wiring.
       sheets_almanac_env: CBS_SHEETS_OUTPUT_ID
       sheets_dev_env: CBS_SHEETS_DEV_ID
+    # Kyle, 2026-09-26: in this league DH (like U) takes any hitter. A league
+    # rule, not a CBS rule; stated here until settings extraction derives it.
+    settings_overrides:
+      open_hitting_slots: [U, DH]

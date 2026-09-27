@@ -157,10 +157,26 @@ class League:
         # in every hitter's eligibility; CBS never prints it on a card but
         # grants it in play. Adding it wherever a row has any hitting
         # eligibility makes both read the same way.
-        flex = q(con, f"""
-            SELECT DISTINCT canonical_slot_key FROM {src}.dim_lineup_slot
-            WHERE platform = ? AND is_starting_slot AND slot_category = 'hitting'
-              AND NOT is_position_slot""", [self.platform])
+        # A league can state its own open slots (config/leagues.yml
+        # settings_overrides.open_hitting_slots, e.g. BSB's U and DH); the
+        # slot dim's non-position hitting slots are the default.
+        declared = get_league(self.key).settings_overrides.get("open_hitting_slots")
+        if declared is not None:
+            flex = q(con, f"""
+                SELECT DISTINCT canonical_slot_key FROM {src}.dim_lineup_slot
+                WHERE platform = ? AND lineup_slot IN (SELECT unnest(?::VARCHAR[]))""",
+                     [self.platform, declared])
+            if len(flex) != len(set(declared)):
+                raise ExtractError(f"{self.key}: open_hitting_slots {declared} names a slot "
+                                   f"outside this league's vocabulary")
+        else:
+            flex = q(con, f"""
+                SELECT DISTINCT canonical_slot_key FROM {src}.dim_lineup_slot
+                WHERE platform = ? AND is_starting_slot AND slot_category = 'hitting'
+                  AND NOT is_position_slot""", [self.platform])
+        self.validations["open_hitting_slots"] = {
+            "source": "config/leagues.yml settings_overrides" if declared is not None else "dim_lineup_slot (non-position hitting slots)",
+            "slots": sorted(r[0] for r in flex)}
         hitting = q(con, f"""
             SELECT DISTINCT canonical_slot_key FROM {src}.dim_lineup_slot
             WHERE platform = ? AND is_starting_slot AND slot_category = 'hitting'""", [self.platform])
@@ -732,9 +748,11 @@ class League:
         # number of players in that slot per team-day across OBSERVED lineups
         # (captured game rows plus a platform's daily roster capture -- the
         # mode, because a maximum picks up intraday changes and uncredited
-        # snapshot rows); else, for a season with neither, the shape of the
-        # nearest later season, labelled carried_from_<season> so no page can
-        # pass it off as observed.
+        # snapshot rows); else, for a season with neither, the league's
+        # CURRENT shape (its latest season with a known shape), labelled
+        # current_shape_from_<season> so no page can pass it off as observed.
+        # Kyle, 2026-09-26: historic views show how players would fit today's
+        # league, with that caveat, until historic shapes are recovered.
         copy("lineup_slot", f"""
             WITH seasons AS (SELECT DISTINCT season_year FROM read_parquet({atom})),
             used AS (
@@ -768,14 +786,13 @@ class League:
             ),
             has_cap AS (SELECT DISTINCT season_year FROM direct WHERE capacity IS NOT NULL),
             donor AS (
-                SELECT s.season_year, MIN(h.season_year) AS donor
-                FROM seasons s JOIN has_cap h ON h.season_year > s.season_year
+                SELECT s.season_year, (SELECT MAX(season_year) FROM has_cap) AS donor
+                FROM seasons s
                 WHERE s.season_year NOT IN (SELECT season_year FROM has_cap)
-                GROUP BY 1
             ),
             carried AS (
                 SELECT d.season_year, x.lineup_slot, x.capacity,
-                       'carried_from_' || CAST(d.donor AS VARCHAR) AS capacity_source
+                       'current_shape_from_' || CAST(d.donor AS VARCHAR) AS capacity_source
                 FROM donor d JOIN direct x ON x.season_year = d.donor AND x.capacity IS NOT NULL
             )
             SELECT COALESCE(d.season_year, c.season_year) AS season_year,

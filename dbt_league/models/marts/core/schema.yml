@@ -2397,6 +2397,14 @@ models:
       - name: team_id
         tests:
           - not_null
+      - name: display_name
+        description: >
+          The league's display name. ESPN's carries the league's
+          player-nickname seed (applied in stg_box_scores).
+      - name: platform_player_name
+        description: >
+          The platform's own player name, never the league's nickname: what
+          an edition publishes when it must not carry league-authored names.
       - name: roster_source
         tests:
           - accepted_values:

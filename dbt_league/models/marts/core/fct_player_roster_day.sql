@@ -30,6 +30,10 @@
 --          Stints whose asset never resolved to a key are left out, never
 --          guessed (8,615 of 20,077 at MLB-319).
 -- A roster day carries the deployed slot only where the source observed one.
+-- NAMES: display_name is the league's display (ESPN's carries the league's
+-- player-nickname seed, applied in stg_box_scores); platform_player_name is
+-- the platform's own name, so an edition that must not publish the league's
+-- nicknames can take that one instead (the demo edition, MLB-319).
 -- Eligibility on a no-game day is carried forward from the asset's most
 -- recent game day in that season (NULL before its first).
 --
@@ -44,6 +48,7 @@ with snapshot_days as (
         cast({{ dbt.dateadd('day', 'cast(r.scoring_period as integer) - 1', 'c.season_opener') }} as date) as roster_date,
         cast(r.player_id as {{ dbt.type_string() }}) as player_key,
         r.display_name,
+        r.player_name as platform_player_name,
         r.pro_team,
         r.team_id,
         r.lineup_slot,
@@ -66,6 +71,7 @@ observed as (
         f.game_date as roster_date,
         f.player_key,
         f.display_name,
+        f.player_name as platform_player_name,
         f.pro_team,
         f.team_id,
         f.lineup_slot,
@@ -84,6 +90,7 @@ platform_snapshot as (
         s.roster_date,
         s.player_id as player_key,
         s.player_name as display_name,
+        s.player_name as platform_player_name,
         s.pro_team,
         cast(s.team_id as integer) as team_id,
         case when s.roster_status = 'A' then s.roster_pos else 'RS' end as lineup_slot,
@@ -126,6 +133,7 @@ gaps as (
         cast(c.date_day as date) as roster_date,
         o.player_key,
         o.display_name,
+        o.platform_player_name,
         cast(null as {{ dbt.type_string() }}) as pro_team,
         o.team_id,
         cast(null as {{ dbt.type_string() }}) as lineup_slot,
@@ -173,6 +181,7 @@ stint_days as (
         cast(c.date_day as date) as roster_date,
         s.player_key,
         cast(null as {{ dbt.type_string() }}) as display_name,
+        cast(null as {{ dbt.type_string() }}) as platform_player_name,
         cast(null as {{ dbt.type_string() }}) as pro_team,
         s.team_id,
         cast(null as {{ dbt.type_string() }}) as lineup_slot,
@@ -209,6 +218,7 @@ layer_rows as (
         roster_date,
         player_key,
         display_name,
+        platform_player_name,
         pro_team,
         team_id,
         lineup_slot,

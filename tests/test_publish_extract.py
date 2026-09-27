@@ -195,19 +195,19 @@ def test_no_game_roster_days_become_dense_rows_with_null_production(tmp_path, ou
     db = tmp_path / "ESPN_FANTASY.duckdb"
     _build(db, rows, "points", extra_sql=[
         """CREATE TABLE ANALYTICS.fct_player_roster_day AS SELECT * FROM (VALUES
-            ('cbs-bsb', 2026, DATE '2026-04-01', '11', 'Player 11', 'NYY', 1, 'SS', '["SS"]', 'rostered_game_day', 'observed_game_day'),
-            ('cbs-bsb', 2026, DATE '2026-04-02', '11', NULL, NULL, 1, NULL, '["SS"]', 'rostered', 'inferred_gap')
-        ) t(league_key, season_year, roster_date, player_key, display_name, pro_team, team_id, lineup_slot,
-            eligible_slots, roster_status, roster_source)"""])
+            ('cbs-bsb', 2026, DATE '2026-04-01', '11', 'Player 11', 'P', 'NYY', 1, 'SS', '["SS"]', 'rostered_game_day', 'observed_game_day'),
+            ('cbs-bsb', 2026, DATE '2026-04-02', '11', NULL, NULL, NULL, 1, NULL, '["SS"]', 'rostered', 'inferred_gap')
+        ) t(league_key, season_year, roster_date, player_key, display_name, platform_player_name, pro_team, team_id,
+            lineup_slot, eligible_slots, roster_status, roster_source)"""])
     league_dir, manifest = _run(db, out, "cbs-bsb")
     got = duckdb.connect().execute(f"""SELECT scoring_day, has_game, total_pts, ab, deployment_state,
-        provenance, display_name, eligible_slots, period_key
+        provenance, display_name, eligible_slots, period_key, platform_player_name
         FROM read_parquet('{(league_dir / 'atom' / '2026.parquet').as_posix()}') ORDER BY 1""").fetchall()
     assert got[0][:3] == (game_day, True, 3.0)
     # The off day exists, carries no production (NULL, never zero), and keeps
     # its label, eligibility and period.
     assert got[1] == (off_day, False, None, None, "unobserved", "inferred_gap", "Player 11",
-                      ["shortstop", "designated_hitter", "utility"], 1)
+                      ["shortstop", "designated_hitter", "utility"], 1, "P")
     assert manifest["validations"]["dense_no_game_rows"] == 1
 
 
@@ -222,3 +222,20 @@ def test_a_league_without_overrides_keeps_dh_eligibility_only(tmp_path, out):
         FROM read_parquet('{(league_dir / 'atom' / '2026.parquet').as_posix()}')""").fetchall()
     assert got == [(["shortstop", "utility"],)]
     assert manifest["validations"]["open_hitting_slots"]["slots"] == ["utility"]
+
+
+def test_platform_name_rides_beside_the_league_display_name(tmp_path, out):
+    # ESPN's display_name carries the league's player-nickname seed; an
+    # edition that must not publish it reads platform_player_name instead.
+    days = [date(2026, 3, 25) + timedelta(days=d) for d in range(2)]
+    rows = [_fact_row("espn-main", 2026, d, 1, "21", "SS", "hitting", 1.0, matchup=1) for d in days]
+    db = tmp_path / "ESPN_FANTASY.duckdb"
+    _build(db, rows, "h2h", matchups=[("espn-main", 2026, 1, date(2026, 3, 25), date(2026, 3, 31), False)])
+    league_dir, manifest = _run(db, out, "espn-main")
+    con = duckdb.connect()
+    atom = con.execute(f"""SELECT DISTINCT display_name, platform_player_name
+        FROM read_parquet('{(league_dir / 'atom' / '2026.parquet').as_posix()}')""").fetchall()
+    rollup = con.execute(f"""SELECT DISTINCT display_name, platform_player_name
+        FROM read_parquet('{(league_dir / 'rollup.parquet').as_posix()}')""").fetchall()
+    assert atom == rollup == [("Player 21", "P")]
+    assert manifest["validations"]["inputs"]["platform_player_name"].startswith("fact player_name")

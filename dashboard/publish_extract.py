@@ -142,9 +142,17 @@ class League:
                        f"WHERE league_key = {lit(league_key)} "
                        f"AND roster_date <= DATE {lit(self.horizon)})"
                        if "fct_player_roster_day" in rels else None)
+        roster_cols = {r[0].lower() for r in q(con, """
+            SELECT column_name FROM information_schema.columns
+            WHERE table_catalog = 'wh' AND lower(table_schema) = lower(?)
+              AND lower(table_name) = 'fct_player_roster_day'""", [schema])}
+        self.roster_platform_name = "platform_player_name" in roster_cols
         self.validations = {"inputs": {
             "full_stat_line": "fct_player_daily_production" if self.production else "absent (credited components only)",
-            "dense_roster_days": "fct_player_roster_day" if self.roster else "absent (game days only)"}}
+            "dense_roster_days": "fct_player_roster_day" if self.roster else "absent (game days only)",
+            "platform_player_name": ("fact player_name; roster days from fct_player_roster_day"
+                                     if self.roster_platform_name else
+                                     "fact player_name; roster-only days fall back to the asset's latest game-day name")}}
 
     # -- slot vocabulary ----------------------------------------------------
     def build_slot_map(self):
@@ -484,6 +492,12 @@ class League:
             ("p_ibb", self.line_only("p_ibb"), null("DOUBLE")),
             ("production_source", "p.production_source" if self.production else null("VARCHAR"),
              null("VARCHAR")),
+            # The platform's own name beside display_name, which can carry the
+            # league's player nicknames (ESPN applies the seed in staging). An
+            # edition that must not publish league-authored names uses this.
+            ("platform_player_name", "f.player_name",
+             "COALESCE(r.platform_player_name, n.platform_player_name)" if self.roster_platform_name
+             else "n.platform_player_name"),
             # raw_ (platform-shaped, for provenance and reconciliation)
             ("raw_scoring_period", "CAST(f.scoring_period AS BIGINT)", null("BIGINT")),
             ("raw_matchup_period", "CAST(f.matchup_period AS INTEGER)", null("INTEGER")),
@@ -533,7 +547,8 @@ class League:
         atom_dir.mkdir(parents=True)
         seasons = [r[0] for r in q(con, "SELECT season_year FROM season_cal ORDER BY 1")]
         con.execute(f"""CREATE OR REPLACE TEMP TABLE names AS
-            SELECT player_key, arg_max(display_name, game_date) AS display_name
+            SELECT player_key, arg_max(display_name, game_date) AS display_name,
+                   arg_max(player_name, game_date) AS platform_player_name
             FROM {self.fact} GROUP BY 1""")
         out, dense_total = [], 0
         for season in seasons:
@@ -628,6 +643,7 @@ class League:
                 SELECT league_key, platform, season_year, phase, team_id, franchise_id, player_key,
                        MAX(platform_player_id) AS platform_player_id,
                        arg_max(display_name, scoring_day) AS display_name,
+                       arg_max(platform_player_name, scoring_day) AS platform_player_name,
                        MIN(scoring_day) AS first_scoring_day,
                        MAX(scoring_day) AS last_scoring_day,
                        COUNT(*) AS day_count,

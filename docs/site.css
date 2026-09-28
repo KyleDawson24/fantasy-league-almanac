@@ -142,8 +142,8 @@ h1 {
 
 .hero-visual { margin: 0; }
 .hero-visual img {
-  width: 118%;
-  max-width: none;
+  width: 100%;
+  max-width: 100%;
   border: 1px solid rgba(23, 50, 77, .24);
   border-radius: .65rem;
   box-shadow: var(--shadow);
@@ -354,3 +354,8 @@ footer {
 @media (prefers-reduced-motion: reduce) {
   :root { scroll-behavior: auto; }
 }
+
+/* Dashboard-first overview: keep complete demo views legible. */
+.dashboard-intro { padding-bottom: 3rem; }
+.dashboard-showcase .showcase-card img { aspect-ratio: auto; object-fit: contain; }
+.data-story { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }

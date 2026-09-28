@@ -9,14 +9,14 @@
   <meta property="og:type" content="website">
   <meta property="og:title" content="Fantasy League Almanac | The Unofficial Museum of Your League">
   <meta property="og:description" content="A free, open-source Google Sheets record book for your fantasy baseball league.">
-  <meta property="og:image" content="https://kpdawson.com/fantasy-league-almanac/img/espn-all-league-team.png">
+  <meta property="og:image" content="https://kpdawson.com/fantasy-league-almanac/img/dashboard-team-page-lineup-diamond.png">
   <meta property="og:url" content="https://kpdawson.com/fantasy-league-almanac/">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Fantasy League Almanac | The Unofficial Museum of Your League">
   <meta name="twitter:description" content="A free, open-source Google Sheets record book for your fantasy baseball league.">
-  <meta name="twitter:image" content="https://kpdawson.com/fantasy-league-almanac/img/espn-all-league-team.png">
+  <meta name="twitter:image" content="https://kpdawson.com/fantasy-league-almanac/img/dashboard-team-page-lineup-diamond.png">
   <link rel="canonical" href="https://kpdawson.com/fantasy-league-almanac/">
-  <link rel="stylesheet" href="site.css">
+  <link rel="stylesheet" href="site.css?v=20260928-1">
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to main content</a>
@@ -27,7 +27,9 @@
       <span>Fantasy League Almanac</span>
     </a>
     <nav aria-label="Main navigation">
-      <a href="#what-it-makes">What it makes</a>
+      <a href="#dashboard">Dashboard</a>
+      <a href="#what-it-makes">Workbook</a>
+      <a href="dashboard-guide.html">Dashboard guide</a>
       <a href="#how-it-works">How it works</a>
       <a href="#whats-next">What’s next</a>
       <a href="#how-it-works">Get started</a>
@@ -39,24 +41,56 @@
       <div class="hero-copy">
         <p class="eyebrow">Free &amp; open source <span>•</span> Runs locally on your PC</p>
         <h1>Give your fantasy league a museum</h1>
-        <p class="lede">Fantasy League Almanac turns the history your league accumulates into a Google Sheets Almanac specific to its teams, scoring and actual lineup decisions.</p>
+        <p class="lede">Fantasy League Almanac turns the history your league accumulates into a record book specific to its teams, scoring and actual lineup decisions. Explore it in the browser or build a Google Sheets almanac for your own league.</p>
         <div class="actions">
-          <a class="button primary" href="https://github.com/KyleDawson24/fantasy-league-almanac/releases/download/v2.2.0/fantasy-league-almanac-2.2.0.zip">Build my league’s Almanac</a>
-          <a class="button secondary" href="https://docs.google.com/spreadsheets/d/1klObsxdRdO1GS-emhYzCB1dYS_fSy9WyatKoY5Mfsnk" target="_blank" rel="noopener">Browse a real Almanac</a>
+          <a class="button primary" href="https://kpdawson.com/almanac/demo/">Explore the demo dashboard</a>
+          <a class="button secondary" href="#how-it-works">Build my league’s Almanac</a>
         </div>
-        <p class="download-note">Downloads the Windows ZIP · v2.2.0. <a href="https://github.com/KyleDawson24/fantasy-league-almanac/releases/tag/v2.2.0">Release notes &amp; checksum</a></p>
-        <p class="microcopy">No new accounts. Completely free. Writes to your Google Drive.</p>
+        <p class="download-note">Sheets download: Windows ZIP · v2.2.0. <a href="https://github.com/KyleDawson24/fantasy-league-almanac/releases/tag/v2.2.0">Release notes &amp; checksum</a></p>
+        <p class="microcopy">The demo needs no installation or account. The Sheets build runs locally and writes to your Google Drive.</p>
       </div>
       <figure class="hero-visual">
-        <img src="img/espn-all-league-team.png" alt="Fantasy League Almanac all-league team showing the best fantasy performances at each lineup slot" width="1658" height="798">
-        <figcaption>Real workbook, built from an anonymized fantasy league.</figcaption>
+        <a href="https://kpdawson.com/almanac/demo/" aria-label="Explore the team lineup in the live demo"><img src="img/dashboard-team-page-lineup-diamond.png" alt="Public demo team page with its lineup on a baseball diamond, alongside the bench and pitching staff" width="1440" height="1310"></a>
+        <figcaption>The demo’s team page. Switch between the diamond and a table, or explore a club’s history.</figcaption>
       </figure>
     </section>
 
+    <section class="section dashboard-intro" id="dashboard">
+      <div class="recap-copy">
+        <p class="section-label">New in v2.2 · a separate web layer</p>
+        <h2>Start with a team, a season, or a question</h2>
+        <p>The demo runs a sample ESPN league with fictional club and owner names and real MLB production. It runs entirely in your browser: standings, team pages with a lineup diamond or table, player statistics, and filters that recompute on the page. There's nothing to install and no account.</p>
+        <p>The data comes from the same pipeline as the workbook. Filters change what you’re looking at without affecting the underlying data, so you can present your data however you'd wish.</p>
+        <p><a href="dashboard-guide.html#team-pages">Team pages</a> cover the current roster and club history. <a href="dashboard-guide.html#superteams">Superteams</a> lets you build a lineup across clubs and periods. The guide explains their filters and controls, along with the plans for pages still taking shape.</p>
+        <p>Early preview: the first load on a slow connection can take several seconds. Faster loads are planned for 2.3.</p>
+        <a class="text-link" href="https://kpdawson.com/almanac/demo/">Open the demo dashboard →</a>
+        <p><a class="text-link" href="dashboard-guide.html">Read the dashboard guide →</a></p>
+      </div>
+    </section>
+
+    <section class="showcase dashboard-showcase" aria-label="Examples from the demo dashboard">
+      <figure class="showcase-card">
+        <img src="img/dashboard-home.png" alt="Demo dashboard Home page leading with the week's superteam on a diamond" width="1440" height="1530" loading="lazy">
+        <figcaption><strong>Dashboard Home.</strong> Leads with a Superteam for the selected period and links into each club’s history.</figcaption>
+      </figure>
+      <figure class="showcase-card">
+        <img src="img/dashboard-advanced-standings.png" alt="Demo dashboard Advanced Standings with expected winning percentage" width="1440" height="1176" loading="lazy">
+        <figcaption><strong>Dashboard Advanced Standings.</strong> Expected W% from the all-play method, colored by the same rules as the workbook. This page is still in development.</figcaption>
+      </figure>
+    </section>
+
+    <section class="section data-story" id="underlying-data">
+      <p class="section-label">What it is built on</p>
+      <h2>The dashboard is the visible part. The valuable work is making the historic data trustworthy.</h2>
+      <p>Fantasy platforms leave years of roster and lineup history behind. The models reconstruct it from transaction logs, season endpoints, scoring settings, and the other evidence that survives, recovering far more of the league than any single source exposes. Some eras are still fuzzier than others, and the Almanac labels those limits instead of laundering estimates into facts.</p>
+      <p>dbt brings those sources into a shared model. The workbook and dashboard are two presentations of that underlying data; the dashboard does not read the Sheets workbook. Scoring definitions, totals, and display rules travel with the data so the browser can use the same interpretation.</p>
+      <p><a class="text-link" href="catalog/">Browse the technical catalog →</a></p>
+    </section>
+
     <section class="narrative-intro section" id="what-it-makes">
-      <p class="section-label">What it makes</p>
+      <p class="section-label">The Google Sheets almanac</p>
       <h2>A record book for what happened in <em>your</em> league</h2>
-      <p>Hi there, fantasy baseball folk! I’m building something that turns fantasy baseball leagues into a Google Sheets Almanac, specific to that league’s history. I started with ESPN-hosted points leagues, both season-points and head-to-head, and I’m looking for people willing to try it.</p>
+      <p>The downloadable project builds a Google Sheets Almanac, specific to your league’s history. The browser dashboard is a separate web layer; its code is not included in the download. I started with ESPN-hosted points leagues, both season-points and head-to-head, and I’m looking for people willing to try it.</p>
       <p>It produces all-time standings and records, matchup and draft history, a page for every team, a trade board, and other views built around what actually counted in your fantasy league -- not just the MLB stats your players accumulated along the way.</p>
       <p>Here’s a <a href="https://docs.google.com/spreadsheets/d/1klObsxdRdO1GS-emhYzCB1dYS_fSy9WyatKoY5Mfsnk" target="_blank" rel="noopener">read-only Almanac built from a real ESPN league</a>. That’s the actual output as it stands today.</p>
 
@@ -96,6 +130,10 @@
 
     <section class="showcase" aria-label="Examples from the Almanac">
       <figure class="showcase-card showcase-wide">
+        <img src="img/espn-all-league-team.png" alt="Fantasy League Almanac all-league team showing the best fantasy performances at each lineup slot" width="1658" height="798" loading="lazy">
+        <figcaption>Real workbook, built from an anonymized fantasy league.</figcaption>
+      </figure>
+      <figure class="showcase-card showcase-wide">
         <img src="img/espn-slot-records.png" alt="Fantasy league records ranked by lineup slot" width="2395" height="743" loading="lazy">
         <figcaption><strong>Records built for your league.</strong> Automatically tracks the best and worst performances for every scored stat, then prices that production according to your league’s settings and its managers’ start/sit decisions.</figcaption>
       </figure>
@@ -131,32 +169,6 @@
       <figure>
         <img src="img/espn-recap-posted.png" alt="A generated weekly fantasy baseball recap posted on an ESPN league page" width="1349" height="1347" loading="lazy">
         <figcaption>A generated recap posted to the league’s actual ESPN front page.</figcaption>
-      </figure>
-    </section>
-
-    <section class="recap-band" id="dashboard">
-      <div class="recap-copy">
-        <p class="section-label">New in v2.2 · a separate web layer</p>
-        <h2>The same data, in your browser</h2>
-        <p>Everything the download builds is the Google Sheets almanac. The dashboard is a separate web layer over the same data, and its code isn't part of the download yet.</p>
-        <p>The demo runs a sample ESPN league with fictional club and owner names and real MLB production. It runs entirely in your browser: standings, team pages with a lineup diamond or table, player statistics, and filters that recompute on the page. There's nothing to install and no account.</p>
-        <p>Early preview: the first load on a slow connection can take several seconds. Faster loads are planned for 2.3.</p>
-        <a class="text-link" href="https://kpdawson.com/almanac/demo/">Open the demo dashboard →</a>
-      </div>
-      <figure>
-        <img src="img/dashboard-team-page-lineup-diamond.png" alt="Demo dashboard team page: the current roster's best lineup drawn on a baseball diamond, with bench and pitching staff alongside" width="1440" height="1310" loading="lazy">
-        <figcaption>The dashboard, not the almanac: a team page's lineup as a diamond. The same view toggles to a table.</figcaption>
-      </figure>
-    </section>
-
-    <section class="showcase" aria-label="Examples from the demo dashboard">
-      <figure class="showcase-card">
-        <img src="img/dashboard-home.png" alt="Demo dashboard Home page leading with the week's superteam on a diamond" width="1440" height="1530" loading="lazy">
-        <figcaption><strong>Dashboard Home.</strong> Leads with the week's superteam.</figcaption>
-      </figure>
-      <figure class="showcase-card">
-        <img src="img/dashboard-advanced-standings.png" alt="Demo dashboard Advanced Standings with expected winning percentage" width="1440" height="1176" loading="lazy">
-        <figcaption><strong>Dashboard Advanced Standings.</strong> Expected W% from the all-play method, colored by the same rules as the Sheet.</figcaption>
       </figure>
     </section>
 
@@ -219,7 +231,7 @@
       </div>
       <div class="future-copy">
         <p>If people find this useful, the directions I’m most interested in are broader coverage: guided CBS setup first, <a href="https://github.com/KyleDawson24/fantasy-league-almanac/issues/new?template=02-coverage-request.yml">followed by other platforms and formats in the order people actually request them</a>; and deeper league-history features like player-career and milestone views.</p>
-        <p>Going deeper would probably involve a visual overhaul to a more interactive, clickable dashboard experience. If one of those, or something I haven’t considered, is what would make you excited to use this, say so or <a href="https://github.com/KyleDawson24/fantasy-league-almanac/issues/new?template=03-product-feedback.yml">send me product feedback here</a>.</p>
+        <p>The browser dashboard is now available as an early preview, with more views and faster loads still to come. If one of those, or something I haven’t considered, is what would make you excited to use this, say so or <a href="https://github.com/KyleDawson24/fantasy-league-almanac/issues/new?template=03-product-feedback.yml">send me product feedback here</a>.</p>
       </div>
     </section>
 

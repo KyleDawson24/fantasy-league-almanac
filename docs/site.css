@@ -359,3 +359,52 @@ footer {
 .dashboard-intro { padding-bottom: 3rem; }
 .dashboard-showcase .showcase-card img { aspect-ratio: auto; object-fit: contain; }
 .data-story { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+
+/* Editorial overview and dedicated setup page. */
+nav { flex-wrap: wrap; gap: .65rem 1.25rem; }
+.nav-start { color: var(--navy); }
+.section { width: min(1180px, calc(100% - 2rem)); padding-block: 4rem; }
+.section > p, .story > aside { max-width: 70ch; }
+.section > h2 { max-width: 24ch; }
+.feature-list { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 2rem; }
+.feature-list article { min-height: auto; }
+.feature-list h3 { margin-top: .9rem; }
+.showcase { margin-bottom: 4rem; }
+.workbook-showcase .showcase-card img { aspect-ratio: auto; object-fit: contain; }
+.dashboard-intro { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(2rem, 5vw, 5rem); align-items: start; }
+.dashboard-copy p { max-width: 70ch; }
+.dashboard-intro h2 { font-size: clamp(2.2rem, 3.8vw, 3.3rem); }
+.data-story { margin-top: 2rem; }
+.pull-quote { margin-block: 2rem; }
+.final-cta { padding-block: 4rem; }
+.final-cta .microcopy { font-size: .9rem; color: #dce5ec; }
+footer { margin-top: 0; }
+.footer-inner { width: min(1180px, 100%); }
+.footer-links { flex-wrap: wrap; }
+.setup-hero h1 { max-width: 19ch; font-size: clamp(3rem, 5vw, 4.5rem); }
+.setup-hero .lede { max-width: 60ch; }
+.how { padding: 4rem max(1rem, calc((100% - 1180px) / 2)); }
+.steps { margin-top: 2rem; }
+.steps span { margin-bottom: 1.5rem; }
+.setup-notes h3 { margin-bottom: 1rem; }
+.setup-notes p { font-size: .95rem; }
+.support-note { font-size: .95rem !important; color: var(--muted); }
+:target { scroll-margin-top: 1.5rem; }
+@media (max-width: 1000px) {
+  .site-header { flex-direction: column; align-items: flex-start; gap: 1rem; padding-block: 1rem; }
+  nav { display: flex; }
+  .dashboard-intro { grid-template-columns: 1fr; }
+  .dashboard-intro .hero-visual { max-width: 680px; }
+}
+@media (max-width: 700px) {
+  .feature-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .section { padding-block: 3rem; }
+}
+@media (max-width: 560px) {
+  .hero, .section, .showcase { width: calc(100% - 2rem); }
+  .feature-list { grid-template-columns: 1fr; }
+  nav { font-size: .85rem; gap: .65rem 1rem; }
+  .brand { font-size: .95rem; }
+  .brand-mark { flex-shrink: 0; }
+  .footer-links { gap: .75rem; }
+}

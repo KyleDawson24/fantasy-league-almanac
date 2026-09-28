@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Get started | Fantasy League Almanac</title>
+  <meta name="description" content="Requirements, download, setup and support for building your league’s Google Sheets Almanac.">
+  <meta name="theme-color" content="#17324d">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Get started | Fantasy League Almanac">
+  <meta property="og:description" content="Your fantasy baseball league’s record book, in the browser and in Google Sheets.">
+  <meta property="og:image" content="https://kpdawson.com/fantasy-league-almanac/img/dashboard-team-page-lineup-diamond.png">
+  <meta property="og:url" content="https://kpdawson.com/fantasy-league-almanac/get-started.html">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Get started | Fantasy League Almanac">
+  <meta name="twitter:description" content="Your fantasy baseball league’s record book, in the browser and in Google Sheets.">
+  <meta name="twitter:image" content="https://kpdawson.com/fantasy-league-almanac/img/dashboard-team-page-lineup-diamond.png">
+  <link rel="canonical" href="https://kpdawson.com/fantasy-league-almanac/get-started.html">
+  <link rel="stylesheet" href="site.css?v=editorial-preview-1">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to main content</a>
+
+  <header class="site-header">
+    <a class="brand" href="./" aria-label="Fantasy League Almanac home">
+      <span class="brand-mark" aria-hidden="true">FLA</span>
+      <span>Fantasy League Almanac</span>
+    </a>
+    <nav aria-label="Main navigation">
+      <a href="./#what-it-makes">Workbook</a>
+      <a href="./#dashboard">Dashboard</a>
+      <a href="dashboard-guide.html">Dashboard guide</a>
+      <a class="nav-start" href="get-started.html">Get started →</a>
+    </nav>
+  </header>
+
+  <main id="main">
+    <section class="setup-hero section" id="available-now">
+      <p class="section-label">Get started · v2.2.0</p>
+      <h1>Want to give your league an Almanac?</h1>
+      <p class="lede">The free download builds a Google Sheets record book for your league. You’ll need a Windows PC, an ESPN points league and a Google account for the finished workbook.</p>
+      <p>The guided setup supports head-to-head and season-long points, public and private leagues, and draft and completed-auction histories. <strong>Not yet: rotisserie.</strong> <a href="https://github.com/KyleDawson24/fantasy-league-almanac/issues/new?template=02-coverage-request.yml">Request your platform or format</a>.</p>
+      <div class="actions" id="download">
+        <a class="button primary" href="https://github.com/KyleDawson24/fantasy-league-almanac/releases/download/v2.2.0/fantasy-league-almanac-2.2.0.zip">Download v2.2.0 for Windows</a>
+        <a class="button secondary" href="https://docs.google.com/spreadsheets/d/1klObsxdRdO1GS-emhYzCB1dYS_fSy9WyatKoY5Mfsnk" target="_blank" rel="noopener">Browse a sample workbook</a>
+      </div>
+      <p class="download-note"><a href="https://github.com/KyleDawson24/fantasy-league-almanac/releases/tag/v2.2.0">Release notes &amp; checksum</a> · Prefer the browser? <a href="https://kpdawson.com/almanac/demo/">Try the demo</a>.</p>
+    </section>
+
+    <section class="how" id="how-it-works">
+      <div class="section-heading">
+        <p class="section-label">How it works</p>
+        <h2>One ZIP, one guide, one build</h2>
+        <p>The launcher walks you through setup and checks your inputs before saving them.</p>
+        <p class="guide-preview"><a href="https://github.com/KyleDawson24/fantasy-league-almanac/blob/main/QUICKSTART.md">Read the full quickstart →</a></p>
+        <p class="guide-preview"><a href="espn-cookie-guide.html" target="_blank" rel="noopener">Preview the illustrated setup guide →</a></p>
+      </div>
+      <ol class="steps">
+        <li><span>1</span><div><h3>Download</h3><p>Download the ZIP above and extract it. Each folder holds one league; for a second league, extract a fresh copy.</p></div></li>
+        <li><span>2</span><div><h3>Double-click</h3><p>Open <code>START_ALMANAC.cmd</code>. The launcher creates its own Python environment.</p></div></li>
+        <li><span>3</span><div><h3>Follow the guide</h3><p>Choose the league and seasons you want. For private ESPN leagues, the illustrated guide also walks through copying two session-cookie values from your browser. The launcher validates everything before saving.</p></div></li>
+        <li><span>4</span><div><h3>Press Enter</h3><p>At “Create the almanac now? [Y/n],” press Enter. The app builds the history and writes the workbook into your Google Drive. Keep an eye out for the authorization pop-up during this stage.</p></div></li>
+      </ol>
+      <p class="no-chops">No Git chops, terminal commands, configuration-file editing, warehouse account or Google Cloud project required.</p>
+      <p class="support-note">In a league’s first season, some all-time and single-season workbook views will naturally show the same values.</p>
+      <div class="setup-notes" id="privacy">
+        <p>The guide has screenshots for every click of the session-cookie step. The process isn’t difficult, but it is slightly inelegant and will be simplified in a future release.</p>
+        <h3>Your data and permissions</h3>
+        <p>All league processing happens on your PC. ESPN cookies remain local, and the Google token is stored in Windows Credential Locker. There’s no hosted Almanac API, user database, telemetry, usage analytics or backend of mine receiving any of it. The Google permission applies only to workbooks the app creates, and every workbook begins private.</p>
+        <p><strong>Google authorization:</strong> Google has approved brand verification for the Almanac’s OAuth project. You’ll still see Google’s standard permission screen during setup, but the app should no longer present an “unverified app” warning.</p>
+      </div>
+    </section>
+
+    <section class="section setup-support" id="whats-next">
+      <h2>Help shape what comes next</h2>
+      <p>I’m looking for people who want a record book now and an early voice in what it becomes. Tell me where setup lost you, whether the workbook represented your league correctly, or what would make it more useful.</p>
+      <p>Guided CBS setup is next: I already run CBS points support weekly for one of my leagues and am finishing the standardization for others. Here’s an <a href="https://docs.google.com/spreadsheets/d/1mZeqeIQZeIFjs5Kj3LUwQcWU0pBh03sBep8RKwXJVo8/edit?usp=sharing" target="_blank" rel="noopener">anonymized sample from our 25-year-old season-points league</a>. Other platforms and formats will follow demand, alongside deeper player history and more dashboard views.</p>
+      <p><a class="text-link" href="https://github.com/KyleDawson24/fantasy-league-almanac/issues/new/choose">Get help, report a problem or suggest something →</a></p>
+      <p class="support-note">The issue chooser includes a private-support route. If a workbook looks wrong, you can ask there about sharing it view-only; ordinary feedback doesn’t require access. Please keep workbook links and credentials out of public issues.</p>
+      <p>If you’d rather follow along for now, <a href="https://github.com/KyleDawson24/fantasy-league-almanac">star or watch the repository</a>. Thanks so much!</p>
+    </section>
+  </main>
+
+  <footer>
+    <div class="footer-inner">
+      <div>
+        <strong>Fantasy League Almanac</strong>
+        <p>An independent open-source project. Not affiliated with or endorsed by ESPN, Google or Major League Baseball.</p>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/KyleDawson24/fantasy-league-almanac">GitHub</a>
+        <a href="get-started.html">Get started</a>
+        <a href="dashboard-guide.html">Dashboard guide</a>
+        <a href="catalog/">Technical catalog</a>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>

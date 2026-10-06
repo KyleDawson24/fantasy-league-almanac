@@ -14,8 +14,8 @@ shared state). It is to copy the dev workbook in Drive and rewrite the
 COPY. Nothing in the repo or the warehouse is touched; the worst case is
 deleting a bad copy and making another.
 
-    python tools/anonymize_sheet_copy.py --target <id-or-url> [--target ...]
-    python tools/anonymize_sheet_copy.py --target <id> --dry-run
+    python tools/anonymize_sheet_copy.py --league <key> --target <id-or-url> [--target ...]
+    python tools/anonymize_sheet_copy.py --league <key> --target <id> --dry-run
 
 WHERE THE MAPPING COMES FROM
     Derived at runtime, never hardcoded -- this file has to be safe to
@@ -128,25 +128,51 @@ DOUBLE SAFETY LATCH (in this order, both before any write)
         prepend the ANON banner and carry on -- the copy has already
         proven it is not a real sheet.
 
-ACCEPTANCE
-    A residual audit re-reads every cell and formula of every tab and
-    rescans for every real token that was actually applied, printing
-    per-tab counts. It also confirms zero baseball-reference player cells
-    were altered. Zero on both is the pass condition; anything else exits
-    non-zero.
+ACCEPTANCE (MLB-323)
+    The audit does NOT rescan the tokens the mapping applied. That was the
+    old design, and it could only ever confirm the scrub did what it set
+    out to do: a form dropped as a player collision, or never mapped at
+    all, is invisible to it by construction (MLB-321 found both on the dev
+    books). Instead build_form_inventory enumerates, from the REAL side
+    alone, every form a reader could see -- co-owner labels in both
+    spellings the reader meets, owner full and first names, team names,
+    team abbreviations (matched case-sensitively), owner ids, contact
+    details, the private map's own forms, and the owner labels of the
+    platform roster (the shared export: members who left before the
+    config knew them). The audit re-reads every cell, formula and tab
+    title of the copy and searches it for all of them, printing residuals
+    per class.
+
+    A hit is a residual unless the positive player check proves it sits
+    inside an MLB player's name, against the MLB spine on disk rather than
+    anything the sheet says about itself (proven_players). The exclusions
+    print by player, so the report says what it let through and why. A
+    form is set aside only when the published twin keeps it unchanged --
+    those print too. Zero residuals is the pass condition; anything else
+    exits non-zero.
+
+    --league names the book being copied. Forms carry the league whose
+    config they came from, and the inventory is that league's plus the
+    private map's (which has no league column), so a first name in one
+    league is not a finding in the other's team names.
 
 Auth: the same cached user token as every other sheets writer
 (output/.sheets_oauth_token.json); no new consent flow, no Drive scope.
 """
 
 import argparse
+import json
 import os
 import re
 import subprocess
 import sys
 import time
+import unicodedata
+import urllib.parse
 from collections import Counter, defaultdict
+from itertools import product
 from pathlib import Path
+from typing import NamedTuple, Optional
 
 import gspread
 from google.auth.exceptions import RefreshError
@@ -178,6 +204,9 @@ SEED_TEAM_OWNERS = 'cbs_team_owners.csv'
 SEED_ALIAS = 'owner_alias.csv'
 SEED_NICKNAMES = 'owner_nicknames.csv'
 SEED_BY_YEAR = 'team_owner_by_year.csv'
+# Not twinned (it carries no names today), but a canonical name or abbrev
+# written into it later is a form a reader would see.
+LINEAGE = 'franchise_lineage.csv'
 
 ALL_SEEDS = (
     SEED_FRANCHISES, SEED_TEAM_OWNERS, SEED_ALIAS, SEED_NICKNAMES, SEED_BY_YEAR,
@@ -234,6 +263,20 @@ _ALIAS_REDACTION = 'cbs-redacted-owner'
 # Nothing in the current seeds trips it; if that ever changes the skip is
 # printed, never silent.
 _MIN_TOKEN_LEN = 3
+
+# The universal MLB spine on disk (MLB-70): one Stats API document per
+# player, each split naming the player as {id, fullName}. The positive
+# player check reads it as the INDEPENDENT record of who the players are;
+# the sheet is never allowed to vouch for its own cells. Read-only, local,
+# no warehouse connection.
+_SPINE_DIR = REPO_ROOT / 'data' / 'mlb_stats' / 'season'
+
+# The shared almanac export (MLB-301): per league, every team the platform
+# ever served, with its owner label. Platform-served owners never land in
+# league_config (an ESPN member who left the league is only in the
+# warehouse), so this is where the inventory finds them. Local and
+# gitignored like the rest of data/.
+_SHARED_EXPORTS = REPO_ROOT / 'data' / 'exports' / 'shared'
 
 
 # --------------------------------------------------------------------------
@@ -375,6 +418,147 @@ def _assert_stable(name, paired, cols):
                     f"supposed to be stable. Refusing to derive a mapping "
                     f"from an unreconciled pair."
                 )
+
+
+# --------------------------------------------------------------------------
+# Co-owner labels, in the renderer's own format
+# --------------------------------------------------------------------------
+#
+# A co-owned CBS franchise-season is labelled by its owners' FIRST NAMES,
+# and no config column holds that string -- the warehouse builds it and the
+# renderer rewrites it. Reproduced here step for step, because a label
+# that is guessed rather than derived is a label the audit cannot find:
+#
+#   int_cbs__team_owner_season  owner_name -> owner_id: a current owner's
+#       display name keeps its seeded id, anyone else is slugged from the
+#       name, then owner_alias folds variants onto a canonical id.
+#   dim_owner                   first_name = the first space-separated
+#       token of that owner's most recent owner_name.
+#   dim_team_owner (CBS branch) two or more owners -> first names joined
+#       with ', ', ordered by first name.
+#   output/ (cbs_almanac_sheets, records_book_data) rewrite ', ' to ' & '
+#       for display; surfaces that read owner_display directly keep ', '.
+#
+# So both spellings reach a reader, and both are forms.
+
+CO_OWNER_JOIN = ', '
+CO_OWNER_RENDER = ' & '
+
+
+def _read_real(name):
+    """Rows of the maintainer's real league_config file (disk); [] when
+    the file does not exist."""
+    path = REPO_ROOT / _REAL_DIR / name
+    return _parse_csv(path.read_text(encoding='utf-8-sig')) if path.is_file() else []
+
+
+def _read_twin(name):
+    """Rows of the published twin (HEAD of demo/league_config)."""
+    return _parse_csv(_git_show(f'{_TWIN_DIR}/{name}'))
+
+
+def _slug_owner_name(name):
+    """The id int_cbs__team_owner_season mints for a name it cannot match
+    to a current owner (build_continuity_sheet._slug's rule)."""
+    return 'cbs-' + re.sub(r'[^a-z0-9]+', '-', name.lower()).strip('-')
+
+
+def resolve_owner_years(load):
+    """[(league_key, season_year, franchise_id, owner_id, owner_name)] for
+    every named row of team_owner_by_year, resolved to canonical owner ids
+    the way int_cbs__team_owner_season does it. `load` reads one config
+    file by name -- the real side or the twin side."""
+    nick = {(r.get('owner_id') or '').strip(): r for r in load(SEED_NICKNAMES)}
+    current = {}
+    for r in load(SEED_TEAM_OWNERS):
+        oid = (r.get('owner_id') or '').strip()
+        n = nick.get(oid) or {}
+        display = (n.get('preferred_name') or '').strip() or _owner_name(n)
+        if oid and display:
+            current.setdefault(display.lower(), oid)
+    alias = {(r.get('owner_id') or '').strip(): (r.get('canonical_owner_id') or '').strip()
+             for r in load(SEED_ALIAS)}
+    out = []
+    for r in load(SEED_BY_YEAR):
+        name = (r.get('owner_name') or '').strip()
+        if not name:
+            continue
+        raw = current.get(name.lower()) or _slug_owner_name(name)
+        out.append(((r.get('league_key') or '').strip(),
+                     (r.get('season_year') or '').strip(),
+                     (r.get('franchise_id') or '').strip(),
+                     alias.get(raw) or raw, name))
+    return out
+
+
+def _platform_league(platform):
+    """The registry's one league on `platform`, or None when there is not
+    exactly one. A form that cannot be placed in a league stays unscoped,
+    which is the strict side: unscoped forms are audited on every target."""
+    keys = [k for k, lg in load_registry()['leagues'].items()
+            if getattr(lg, 'platform', None) == platform]
+    return keys[0] if len(keys) == 1 else None
+
+
+def owner_leagues(load):
+    """owner_id -> league_key for every owner the config can place.
+
+    owner_nicknames carries no league column. A CBS owner is placed by the
+    franchise rows that name it; an ESPN owner is a retained member GUID,
+    which only the ESPN platform mints.
+    """
+    out = {}
+    for r in load(SEED_TEAM_OWNERS):
+        oid, lg = (r.get('owner_id') or '').strip(), (r.get('league_key') or '').strip()
+        if oid and lg:
+            out.setdefault(oid, lg)
+    for lg, _, _, oid, _ in resolve_owner_years(load):
+        if lg:
+            out.setdefault(oid, lg)
+    for r in load(SEED_ALIAS):
+        lg = (r.get('league_key') or '').strip()
+        for col in ('owner_id', 'canonical_owner_id'):
+            oid = (r.get(col) or '').strip()
+            if oid and lg:
+                out.setdefault(oid, lg)
+    espn = _platform_league('espn')
+    for r in load(SEED_NICKNAMES):
+        oid = (r.get('owner_id') or '').strip()
+        if espn and _STABLE_ID.match(oid):
+            out.setdefault(oid, espn)
+    return out
+
+
+def co_owner_labels(load):
+    """{(league_key, season_year, franchise_id): [label, ...]} for every
+    co-owned franchise-season, in the warehouse's ', ' form.
+
+    Usually one label per key. dim_owner takes the first name from an
+    owner's most recent owner_name; if that season carries two spellings
+    with different first tokens the warehouse's pick is arbitrary, so every
+    candidate label is returned rather than guessing which one renders.
+    """
+    resolved = resolve_owner_years(load)
+    latest = {}
+    for _, season, _, oid, name in resolved:
+        year = int(season) if season.isdigit() else -1
+        prior = latest.get(oid)
+        if prior is None or year > prior[0]:
+            latest[oid] = (year, {name})
+        elif year == prior[0]:
+            prior[1].add(name)
+    first = {oid: sorted({n.split(' ')[0] for n in names})
+             for oid, (_, names) in latest.items()}
+
+    owners = defaultdict(set)
+    for league, season, fid, oid, _ in resolved:
+        owners[(league, season, fid)].add(oid)
+
+    # Python's str ordering is codepoint order, which is the binary
+    # collation both warehouse engines use for the LISTAGG ORDER BY.
+    return {key: sorted({CO_OWNER_JOIN.join(sorted(combo))
+                         for combo in product(*(first[o] for o in oids))})
+            for key, oids in owners.items() if len(oids) > 1}
 
 
 # --------------------------------------------------------------------------
@@ -553,17 +737,23 @@ def build_mapping(verbose=True):
     log shows what was decided rather than just what was replaced.
     """
     crosswalk = _build_owner_crosswalk(verbose=verbose)
+    leagues = owner_leagues(_read_real)
     pairs = []          # (real, anon)
     report = {'sources': Counter(), 'ambiguous': [], 'skipped_short': [],
-              'unpaired_alias': []}
+              'unpaired_alias': [], 'kept': []}
 
-    def add(real_value, anon_value, source):
+    def add(real_value, anon_value, source, league=None):
         real_value = (real_value or '').strip()
         anon_value = (anon_value or '').strip()
         # Identity pairs carry no secret and MUST NOT enter the audit set:
         # a value that is legitimately unchanged would otherwise be
-        # reported as a residual forever, making zero unreachable.
-        if not real_value or not anon_value or real_value == anon_value:
+        # reported as a residual forever, making zero unreachable. They are
+        # recorded, with the league whose twin keeps them, so the form
+        # inventory can say what it set aside and why.
+        if real_value and real_value == anon_value:
+            report['kept'].append((real_value, league, source))
+            return
+        if not real_value or not anon_value:
             return
         if len(real_value) < _MIN_TOKEN_LEN:
             report['skipped_short'].append((real_value, source))
@@ -611,16 +801,17 @@ def build_mapping(verbose=True):
         nick_pairs.append((r, a))
 
     for r, a in nick_pairs:
-        add(r.get('first_name'), a.get('first_name'), 'nicknames.first_name')
-        add(r.get('last_name'), a.get('last_name'), 'nicknames.last_name')
-        add(r.get('preferred_name'), a.get('preferred_name'), 'nicknames.preferred_name')
+        lg = leagues.get((r.get('owner_id') or '').strip())
+        add(r.get('first_name'), a.get('first_name'), 'nicknames.first_name', lg)
+        add(r.get('last_name'), a.get('last_name'), 'nicknames.last_name', lg)
+        add(r.get('preferred_name'), a.get('preferred_name'), 'nicknames.preferred_name', lg)
         # Composite forms the sheets build but no single column holds.
         first, last = (r.get('first_name') or '').strip(), (r.get('last_name') or '').strip()
         afirst, alast = (a.get('first_name') or '').strip(), (a.get('last_name') or '').strip()
         if first and last and afirst and alast:
-            add(f'{first} {last}', f'{afirst} {alast}', 'nicknames.full_name')
-            add(f'{last}, {first}', f'{alast}, {afirst}', 'nicknames.last_first')
-            add(f'{first[0]}. {last}', f'{afirst[0]}. {alast}', 'nicknames.initial_last')
+            add(f'{first} {last}', f'{afirst} {alast}', 'nicknames.full_name', lg)
+            add(f'{last}, {first}', f'{alast}, {afirst}', 'nicknames.last_first', lg)
+            add(f'{first[0]}. {last}', f'{afirst[0]}. {alast}', 'nicknames.initial_last', lg)
             note_name(f'{first} {last}', f'{afirst} {alast}')
             note_name(f'{last}, {first}', f'{alast}, {afirst}')
         note_name(r.get('preferred_name'), a.get('preferred_name'))
@@ -629,10 +820,10 @@ def build_mapping(verbose=True):
         for col, placeholder in _REDACTIONS.items():
             raw = (r.get(col) or '').strip()
             if raw:
-                add(raw, placeholder, f'nicknames.{col}')
+                add(raw, placeholder, f'nicknames.{col}', lg)
                 digits = re.sub(r'\D', '', raw)
                 if col == 'phone_number' and len(digits) >= 7 and digits != raw:
-                    add(digits, re.sub(r'\D', '', placeholder), 'nicknames.phone_digits')
+                    add(digits, re.sub(r'\D', '', placeholder), 'nicknames.phone_digits', lg)
 
     # owner_alias: legacy/duplicate owner ids folded into a canonical one.
     # Its own owner_id column is a name-DERIVED variant slug that the scrub
@@ -669,7 +860,8 @@ def build_mapping(verbose=True):
                     f"different twin id than {SEED_TEAM_OWNERS} does."
                 )
             crosswalk.setdefault(rid, aid)
-        add(r.get('preferred_name'), a.get('preferred_name'), 'alias.preferred_name')
+        add(r.get('preferred_name'), a.get('preferred_name'), 'alias.preferred_name',
+            (r.get('league_key') or '').strip() or None)
 
     # Anything still unpaired carries a real, name-derived slug with no
     # twin to become. Redact it to a neutral placeholder rather than let
@@ -678,7 +870,8 @@ def build_mapping(verbose=True):
     # through. Reported, never silent.
     for r in alias_pending:
         for col in ('owner_id', 'canonical_owner_id'):
-            add(r.get(col), _ALIAS_REDACTION, f'alias.{col}.redacted')
+            add(r.get(col), _ALIAS_REDACTION, f'alias.{col}.redacted',
+                (r.get('league_key') or '').strip() or None)
         report['unpaired_alias'].append((r.get('canonical_owner_id') or '').strip())
 
     # The CBS owner_id slugs are themselves name-derived, so an id that
@@ -686,7 +879,7 @@ def build_mapping(verbose=True):
     # outright. (ESPN's GUIDs are identical on both sides and drop out via
     # the identity rule.)
     for rid, aid in crosswalk.items():
-        add(rid, aid, 'owner_id.slug')
+        add(rid, aid, 'owner_id.slug', leagues.get(rid))
 
     # team_owner_by_year: the rendered owner label per season. The stable
     # key names several rows for a co-owned franchise-season, so those
@@ -733,13 +926,15 @@ def build_mapping(verbose=True):
 
     year_real, year_twin = _load_pair(SEED_BY_YEAR)
     for r, a in _pair_by_key(SEED_BY_YEAR, year_real, year_twin, _resolve_by_year):
-        add(r.get('owner_name'), a.get('owner_name'), 'by_year.owner_name')
+        add(r.get('owner_name'), a.get('owner_name'), 'by_year.owner_name',
+            (r.get('league_key') or '').strip() or None)
 
     # cbs_franchises: team names (which carry surnames) and abbrevs.
     fr_real, fr_twin = _load_pair(SEED_FRANCHISES)
     for r, a in _pair_by_key(SEED_FRANCHISES, fr_real, fr_twin):
-        add(r.get('franchise_name'), a.get('franchise_name'), 'franchises.franchise_name')
-        add(r.get('abbrev'), a.get('abbrev'), 'franchises.abbrev')
+        lg = (r.get('league_key') or '').strip() or None
+        add(r.get('franchise_name'), a.get('franchise_name'), 'franchises.franchise_name', lg)
+        add(r.get('abbrev'), a.get('abbrev'), 'franchises.abbrev', lg)
 
     # Private map fills what the seeds cannot: ESPN team names, which only
     # ever existed in the live API. Add only real-forms the seeds did not
@@ -769,6 +964,22 @@ def build_mapping(verbose=True):
     return pairs, report
 
 
+def _read_private_map():
+    """Every (real, fake) row of the private scrub map with both sides set,
+    short ones included, or [] when the map is absent (a clone)."""
+    if not _PRIVATE_MAP.is_file():
+        return []
+    import csv
+    out = []
+    with open(_PRIVATE_MAP, newline='', encoding='utf-8-sig') as f:
+        for row in csv.DictReader(f):
+            real = (row.get('real') or '').strip()
+            fake = (row.get('fake') or '').strip()
+            if real and fake:
+                out.append((real, fake))
+    return out
+
+
 def _load_private_map():
     """(real, fake) rows from the private scrub map, or [] when absent.
 
@@ -778,17 +989,8 @@ def _load_private_map():
     skipped. No literal names live in this script -- they come from the
     file at runtime, exactly like the seed twins.
     """
-    if not _PRIVATE_MAP.is_file():
-        return []
-    import csv
-    out = []
-    with open(_PRIVATE_MAP, newline='', encoding='utf-8-sig') as f:
-        for row in csv.DictReader(f):
-            real = (row.get('real') or '').strip()
-            fake = (row.get('fake') or '').strip()
-            if real and fake and real != fake and len(real) >= _MIN_TOKEN_LEN:
-                out.append((real, fake))
-    return out
+    return [(real, fake) for real, fake in _read_private_map()
+            if real != fake and len(real) >= _MIN_TOKEN_LEN]
 
 
 def _resolve(pairs):
@@ -836,6 +1038,492 @@ def _assert_auditable(pairs):
             f"correct replacement, so zero residuals would be unverifiable. "
             f"Resolve the seed twins before anonymizing a sheet."
         )
+
+
+# --------------------------------------------------------------------------
+# The form inventory: what COULD be wrong (MLB-323)
+# --------------------------------------------------------------------------
+#
+# The mapping says what to CHANGE. The audit asks a different question --
+# is any real identity still VISIBLE -- and a rescan of the forms the
+# mapping applied cannot answer it: a form dropped as a player collision,
+# or never mapped at all, is invisible to that rescan by construction.
+# MLB-321's simulation found both on the dev books.
+#
+# So the inventory is built from the REAL side alone, independently of the
+# mapping, and holds every form a reader could see. A form is set aside
+# only when the published twin itself keeps it unchanged (it is public in
+# the demo fixture), and every set-aside is printed with its reason.
+
+CLS_CO_OWNER = 'co-owner label'
+CLS_OWNER_FULL = 'owner full name'
+CLS_OWNER_FIRST = 'owner first name'
+CLS_TEAM = 'team name'
+CLS_ABBREV = 'team abbreviation'
+CLS_OWNER_ID = 'owner id'
+CLS_CONTACT = 'contact detail'
+CLS_SCRUB_MAP = 'scrub-map form'
+
+# Report order, and the class a hit is filed under when one string is
+# several kinds of form at once.
+FORM_CLASSES = (CLS_CO_OWNER, CLS_OWNER_FULL, CLS_OWNER_FIRST, CLS_TEAM,
+                CLS_ABBREV, CLS_OWNER_ID, CLS_CONTACT, CLS_SCRUB_MAP)
+
+# Abbreviations render in capitals and nowhere else. Matched case-
+# sensitively, "CAL" is a team and "Cal" is Cal Raleigh; every other class
+# is matched case-insensitively.
+EXACT_CASE_CLASSES = frozenset({CLS_ABBREV})
+
+# The shortest form the audit searches for. Two characters are safe on
+# word boundaries; a one-character form cannot be searched and is reported.
+_MIN_FORM_LEN = 2
+
+# A scrub-map row's real side carries no category column; its shape does.
+_ABBREV_SHAPE = re.compile(r'^[A-Z0-9#]{2,6}$')
+
+
+class Form(NamedTuple):
+    value: str
+    cls: str
+    league: Optional[str]      # None: every league (the private map has no league column)
+    source: str
+
+
+def _classify_private(real):
+    if real.startswith('cbs-'):
+        return CLS_OWNER_ID
+    if real.isdigit():
+        return CLS_CONTACT
+    if _ABBREV_SHAPE.match(real):
+        return CLS_ABBREV
+    return CLS_SCRUB_MAP
+
+
+def _form_key(cls, value):
+    return value if cls in EXACT_CASE_CLASSES else value.lower()
+
+
+def platform_roster(root=_SHARED_EXPORTS):
+    """(rows, sources) from the latest shared export of every league.
+
+    rows: dicts with league_key, team_name, team_abbrev, owner_display.
+    sources: (league_key, snapshot, identity-as-of) per export read, so the
+    report can say how fresh the roster is. Both empty when no export is on
+    disk, which the report states rather than hides.
+    """
+    rows, sources = [], []
+    if not root.is_dir():
+        return rows, sources
+    for league_dir in sorted(p for p in root.iterdir() if p.is_dir()):
+        pointer = league_dir / 'LATEST'
+        if not pointer.is_file():
+            continue
+        snap = league_dir / pointer.read_text(encoding='utf-8').strip()
+        try:
+            manifest = json.loads((snap / 'manifest.json').read_text(encoding='utf-8'))
+            teams = json.loads((snap / 'teams.json').read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            continue
+        league = manifest.get('league_key')
+        for t in teams.get('rows') or []:
+            rows.append({'league_key': league,
+                         'team_name': (t.get('team_name') or '').strip(),
+                         'team_abbrev': (t.get('team_abbrev') or '').strip(),
+                         'owner_display': (t.get('owner_display') or '').strip()})
+        sources.append((league, snap.name, manifest.get('club_identity_as_of')))
+    return rows, sources
+
+
+def build_form_inventory(league, kept, roster=(), load=_read_real,
+                         private=_read_private_map):
+    """(forms, notes): every real form a reader of a `league` book could see.
+
+    Sources, all on the real side: the five twinned config files plus
+    franchise_lineage, the private scrub map, the co-owner labels as the
+    warehouse and renderer build them, and the owner labels of the
+    platform roster (owners who left the league before the config knew
+    them). `kept` is build_mapping's report['kept']: (value, league,
+    source) identity pairs, which the published twin carries unchanged.
+    `load` reads one real config file by name and `private` returns the
+    scrub map's rows; both default to the maintainer's disk.
+
+    A form tagged with another league is out of scope; an untagged one
+    (the private map has no league column) is always in scope. Within
+    scope a form is set aside only when the target league's twin keeps it
+    -- and notes['kept'] lists it.
+    """
+    forms = []
+
+    def add(value, cls, lg, source):
+        value = (value or '').strip()
+        if value:
+            forms.append(Form(value, cls, lg or None, source))
+
+    leagues = owner_leagues(load)
+
+    for r in load(SEED_NICKNAMES):
+        oid = (r.get('owner_id') or '').strip()
+        lg = leagues.get(oid)
+        first = (r.get('first_name') or '').strip()
+        last = (r.get('last_name') or '').strip()
+        add(first, CLS_OWNER_FIRST, lg, 'nicknames.first_name')
+        add(r.get('preferred_name'), CLS_OWNER_FULL, lg, 'nicknames.preferred_name')
+        if first and last:
+            add(f'{first} {last}', CLS_OWNER_FULL, lg, 'nicknames.full_name')
+            add(f'{last}, {first}', CLS_OWNER_FULL, lg, 'nicknames.last_first')
+            add(f'{first[0]}. {last}', CLS_OWNER_FULL, lg, 'nicknames.initial_last')
+        if oid and not _STABLE_ID.match(oid):
+            add(oid, CLS_OWNER_ID, lg, 'nicknames.owner_id')
+        for col in _REDACTIONS:
+            raw = (r.get(col) or '').strip()
+            add(raw, CLS_CONTACT, lg, f'nicknames.{col}')
+            digits = re.sub(r'\D', '', raw)
+            if col == 'phone_number' and len(digits) >= 7 and digits != raw:
+                add(digits, CLS_CONTACT, lg, 'nicknames.phone_digits')
+
+    for lg, _, _, oid, name in resolve_owner_years(load):
+        if ' ' in name:
+            add(name, CLS_OWNER_FULL, lg, 'by_year.owner_name')
+        add(name.split(' ')[0], CLS_OWNER_FIRST, lg, 'by_year.first_name')
+        if not _STABLE_ID.match(oid):
+            add(oid, CLS_OWNER_ID, lg, 'by_year.owner_id')
+
+    for (lg, _, _), labels in co_owner_labels(load).items():
+        for label in labels:
+            add(label, CLS_CO_OWNER, lg, 'co_owner.warehouse')
+            add(label.replace(CO_OWNER_JOIN, CO_OWNER_RENDER), CLS_CO_OWNER, lg,
+                'co_owner.rendered')
+
+    for r in load(SEED_ALIAS):
+        lg = (r.get('league_key') or '').strip()
+        add(r.get('preferred_name'), CLS_OWNER_FULL, lg, 'alias.preferred_name')
+        for col in ('owner_id', 'canonical_owner_id'):
+            oid = (r.get(col) or '').strip()
+            if not _STABLE_ID.match(oid):
+                add(oid, CLS_OWNER_ID, lg, f'alias.{col}')
+
+    for r in load(SEED_TEAM_OWNERS):
+        oid = (r.get('owner_id') or '').strip()
+        if not _STABLE_ID.match(oid):
+            add(oid, CLS_OWNER_ID, r.get('league_key'), 'team_owners.owner_id')
+
+    for r in load(SEED_FRANCHISES):
+        add(r.get('franchise_name'), CLS_TEAM, r.get('league_key'), 'franchises.franchise_name')
+        add(r.get('abbrev'), CLS_ABBREV, r.get('league_key'), 'franchises.abbrev')
+    for r in load(LINEAGE):
+        add(r.get('canonical_name'), CLS_TEAM, r.get('league_key'), 'lineage.canonical_name')
+        add(r.get('canonical_abbrev'), CLS_ABBREV, r.get('league_key'), 'lineage.canonical_abbrev')
+
+    for real, _ in private():
+        add(real, _classify_private(real), None, 'scrub_map')
+
+    for row in roster:
+        add(row.get('owner_display'), CLS_OWNER_FULL, row.get('league_key'),
+            'roster.owner_display')
+
+    def in_scope(lg):
+        return league is None or lg is None or lg == league
+
+    kept_keys = {}
+    for value, lg, source in kept:
+        if in_scope(lg):
+            kept_keys.setdefault(value, source)
+            kept_keys.setdefault(value.lower(), source)
+
+    notes = {'kept': defaultdict(set), 'too_short': Counter(),
+             'out_of_scope': 0, 'forms': Counter()}
+    audited, seen = [], set()
+    for f in forms:
+        if not in_scope(f.league):
+            notes['out_of_scope'] += 1
+            continue
+        key = (f.cls, _form_key(f.cls, f.value))
+        if key in seen:
+            continue
+        seen.add(key)
+        if _form_key(f.cls, f.value) in kept_keys:
+            notes['kept'][f.cls].add(f.value)
+            continue
+        if len(f.value) < _MIN_FORM_LEN:
+            notes['too_short'][f.cls] += 1
+            continue
+        audited.append(f)
+        notes['forms'][f.cls] += 1
+    return audited, notes
+
+
+class FormMatcher:
+    """One word-bounded alternation over every audited form, longest first,
+    abbreviations case-sensitive and everything else case-insensitive."""
+
+    def __init__(self, forms):
+        self._exact, self._loose = {}, {}
+        for f in forms:
+            if f.cls in EXACT_CASE_CLASSES:
+                self._exact.setdefault(f.value, f)
+            else:
+                self._loose.setdefault(f.value.lower(), f)
+        alts = [(v, True) for v in self._exact] + \
+               [(f.value, False) for f in self._loose.values()]
+        # Longest first; at equal length the case-sensitive alternative
+        # goes first, so "MATT" the abbreviation outranks "Matt" the name.
+        alts.sort(key=lambda a: (-len(a[0]), not a[1], a[0]))
+        body = '|'.join(f'(?-i:{re.escape(v)})' if exact else re.escape(v)
+                        for v, exact in alts)
+        self._pattern = re.compile(
+            rf'(?<![0-9A-Za-z_])(?:{body})(?![0-9A-Za-z_])', re.IGNORECASE,
+        ) if alts else None
+
+    def find(self, text):
+        """[(start, end, Form)] for every audited form present."""
+        if self._pattern is None or not text:
+            return []
+        out = []
+        for m in self._pattern.finditer(text):
+            found = m.group(0)
+            form = self._exact.get(found) or self._loose.get(found.lower())
+            out.append((m.start(), m.end(),
+                        form or Form(found, CLS_SCRUB_MAP, None, 'unkeyed')))
+        return out
+
+
+# The positive player check knows exactly two cell shapes, both written by
+# the renderer and nothing else:
+#
+#   a player link -- output/almanac_render._bref_link: bref's name search
+#       keyed on the official name, the visible label as display text;
+#   a contributor list -- the record "Details" cells
+#       (cbs_almanac_sheets._contributor_detail, records_book_logic,
+#       almanac_render): ', '.join(f'{name}: {value}'), values formatted
+#       numbers like 1,127 or 807.7.
+_BREF_CELL = re.compile(
+    r'^=HYPERLINK\("https://www\.baseball-reference\.com/search/search\.fcgi\?'
+    r'search=([^"]*)",\s*"((?:[^"]|"")*)"\)$'
+)
+_CONTRIB_VALUE = r'-?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?'
+_CONTRIB_ITEM = re.compile(rf'(?:^|, )([^,:]+?): {_CONTRIB_VALUE}(?=, |$)')
+_CONTRIB_CELL = re.compile(
+    rf'^[^,:]+?: {_CONTRIB_VALUE}(?:, [^,:]+?: {_CONTRIB_VALUE})*$')
+
+
+def _fold_name(value):
+    """Accent-, period-, case- and spacing-blind spelling of a person's name.
+    Periods go because the renderer strips them from the search key."""
+    value = unicodedata.normalize('NFKD', value)
+    value = ''.join(c for c in value if not unicodedata.combining(c))
+    return ' '.join(value.replace('.', '').casefold().split())
+
+
+def load_player_spine(root=_SPINE_DIR):
+    """Folded MLB spine names (Stats API fullName), or an empty set when
+    the spine is not on disk -- in which case nothing can be proven and
+    every hit counts, which is the safe direction to fail."""
+    names = set()
+    if not Path(root).is_dir():
+        return frozenset()
+    for path in Path(root).glob('*.json'):
+        try:
+            doc = json.loads(path.read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            continue
+        for block in (doc.get('payload') or {}).get('stats') or []:
+            for split in block.get('splits') or []:
+                name = ((split.get('player') or {}).get('fullName') or '').strip()
+                if name:
+                    names.add(_fold_name(name))
+    return frozenset(names)
+
+
+def _draft_initial_text(name):
+    """output/almanac_render.draft_initial_text, mirrored rather than
+    imported (the renderer drags its warehouse modules in with it). A
+    test pins the two together; if they ever drift, labels stop proving and
+    the audit fails closed rather than open."""
+    name = (name or '').strip()
+    if not name:
+        return ''
+    parts = name.split()
+    first, rest = parts[0], ' '.join(parts[1:])
+    core = first.replace('.', '')
+    if not rest:
+        return first
+    if core.isupper() and 2 <= len(core) <= 3:
+        return f'{core} {rest}'
+    return f'{(core[:1] or first[:1]).upper()} {rest}'
+
+
+_POINTS_LABEL = re.compile(r'^(.*) \(-?\d+\)$')
+
+
+def _is_player_label(display, name):
+    """True when `display` is one of the visible labels the renderer derives
+    from a player's official name: the name itself or its board short form
+    ('M Trout'), either one keeper-marked ' (K)' (almanac_render.
+    _draft_player_label / _draft_initial_label), or the name with a points
+    total, 'Chris Sale (872)' (cbs_almanac_sheets' draft top-3 cells)."""
+    short = _draft_initial_text(name)
+    labels = {_fold_name(v) for v in (name, f'{name} (K)', short, f'{short} (K)') if v}
+    if _fold_name(display) in labels:
+        return True
+    m = _POINTS_LABEL.match(display)
+    return bool(m) and _fold_name(m.group(1)) == _fold_name(name)
+
+
+def proven_players(cell, spine):
+    """[(start, end, player)] spans of `cell` PROVEN to be MLB player names,
+    or [] when the cell proves nothing.
+
+    The sheet never vouches for itself: the MLB spine is the independent
+    record of who the players are (the demo gate's name_gate_v2 rule,
+    MLB-319). A proof is all-or-nothing per cell --
+
+      * player link: the whole cell is the renderer's baseball-reference
+        link, the name it searches for is on the spine, and its visible
+        text is that same name or one of the renderer's fixed labels for
+        it (_is_player_label) -- a nickname label fails. The span is the
+        whole cell, since the search key repeats the name.
+      * contributor list: the whole cell is the renderer's list shape and
+        EVERY name in it is on the spine. One unproven name and the cell
+        proves nothing at all. The spans are the names, so a hit counts as
+        excluded only if it sits inside one.
+    """
+    if not isinstance(cell, str) or not spine:
+        return []
+    m = _BREF_CELL.match(cell)
+    if m:
+        key = urllib.parse.unquote_plus(m.group(1))
+        display = m.group(2).replace('""', '"')
+        if _fold_name(key) in spine and _is_player_label(display, key):
+            return [(0, len(cell), key)]
+        return []
+    if _CONTRIB_CELL.match(cell):
+        spans = [(it.start(1), it.end(1), it.group(1))
+                 for it in _CONTRIB_ITEM.finditer(cell)]
+        if spans and all(_fold_name(name) in spine for _, _, name in spans):
+            return spans
+    return []
+
+
+def audit_tabs(tabs, forms, spine, spreadsheet_title=None):
+    """Search every cell, formula and tab title for every audited form.
+
+    tabs: {title: (grid, origin_row, origin_col)} as _read_tabs returns.
+    A hit is a residual unless it lies inside a span proven_players proves;
+    those are excluded and returned by player name, so the report can show
+    exactly what the positive check let through.
+    """
+    matcher = FormMatcher(forms)
+    result = {'residuals': Counter(), 'cells': [],
+              'excluded': defaultdict(Counter), 'excluded_cells': 0}
+
+    def residual(where, form):
+        result['residuals'][form.cls] += 1
+        result['cells'].append((where, form))
+
+    for text, where in ([(spreadsheet_title, '[spreadsheet title]')]
+                        if spreadsheet_title else []):
+        for _, _, form in matcher.find(text):
+            residual(where, form)
+    for title, (grid, row0, col0) in tabs.items():
+        for _, _, form in matcher.find(title):
+            residual(f'{title} [tab title]', form)
+        for r, row in enumerate(grid):
+            for c, cell in enumerate(row):
+                if cell is None or cell == '' or isinstance(cell, bool):
+                    continue
+                text = cell if isinstance(cell, str) else str(cell)
+                hits = matcher.find(text)
+                if not hits:
+                    continue
+                spans = proven_players(cell, spine)
+                where = f'{title}!{_col_letters(col0 + c)}{row0 + r}'
+                excused = False
+                for start, end, form in hits:
+                    player = next((p for s, e, p in spans if s <= start and end <= e), None)
+                    if player is None:
+                        residual(where, form)
+                    else:
+                        result['excluded'][form.cls][player] += 1
+                        excused = True
+                result['excluded_cells'] += excused
+    return result
+
+
+def print_audit(result, notes, spine, roster_sources, show=25):
+    """The audit report. Real forms are never printed -- a residual is named
+    by its class, its length and a non-reversible digest, plus the cell to
+    open. Excluded player names ARE printed: they are public MLB names, and
+    the report has to show what the positive check let through."""
+    total = sum(result['residuals'].values())
+    n_forms = sum(notes['forms'].values())
+    print(f'  residual audit: {n_forms} real form(s) in {len(notes["forms"])} '
+          f'class(es), searched in every cell, formula and tab title')
+    print(f'    {"class":<20} {"forms":>6} {"residual hits":>14}')
+    for cls in FORM_CLASSES:
+        if notes['forms'][cls] or result['residuals'][cls]:
+            flag = '   <-- RESIDUAL' if result['residuals'][cls] else ''
+            print(f'    {cls:<20} {notes["forms"][cls]:>6} '
+                  f'{result["residuals"][cls]:>14}{flag}')
+    print(f'    {"TOTAL":<20} {n_forms:>6} {total:>14}')
+    for where, form in result['cells'][:show]:
+        print(f'      {where}: {form.cls}, len {len(form.value)}, '
+              f'#{_ref(form.value)} ({form.source})')
+    if len(result['cells']) > show:
+        print(f'      ... and {len(result["cells"]) - show} more')
+
+    excluded = sum(sum(c.values()) for c in result['excluded'].values())
+    print(f'  excluded by the positive player check: {excluded} hit(s) in '
+          f'{result["excluded_cells"]} cell(s), each hit inside a name the '
+          f'MLB spine ({len(spine)} names) proves is a player: a renderer '
+          f'player link labelled with its own search key (or the renderer\'s '
+          f'short form of it), or a contributor list whose every name is on '
+          f'the spine')
+    for cls in FORM_CLASSES:
+        players = result['excluded'].get(cls)
+        if players:
+            listed = ', '.join(f'{p!r} x{n}' for p, n in players.most_common(8))
+            more = f', +{len(players) - 8} more' if len(players) > 8 else ''
+            print(f'    {cls}: {listed}{more}')
+    if not spine:
+        print('    WARNING: no MLB spine on disk -- nothing can be proven, so '
+              'every hit above counts as a residual')
+
+    for cls in FORM_CLASSES:
+        if notes['kept'].get(cls):
+            print(f'  set aside, kept unchanged by the published twin: {cls}: '
+                  f'{", ".join(sorted(notes["kept"][cls]))}')
+    for cls, n in notes['too_short'].items():
+        print(f'  NOT searchable (shorter than {_MIN_FORM_LEN} chars): {cls} x{n}')
+    if roster_sources:
+        for lg, snap, as_of in roster_sources:
+            print(f'  platform roster: {lg} shared export {snap} '
+                  f'(club identity as of {as_of})')
+    else:
+        print('  WARNING: no shared export on disk -- owners the platform served '
+              'but the config never held (members who left) are NOT in the '
+              'inventory')
+    return total
+
+
+def simulate_scrub(tabs, replacer):
+    """What the live pass would leave behind, computed offline: tab titles
+    and every non-player cell rewritten by `replacer`, duplicate titles
+    suffixed as _rename_tabs does. Lets the audit be measured -- and tested
+    -- without touching a sheet."""
+    out, taken = {}, set(tabs)
+    for title, (grid, row0, col0) in tabs.items():
+        new_title, n = replacer.sub(title)
+        candidate = title
+        if n and new_title != title:
+            candidate, suffix = new_title, 2
+            while candidate in taken:
+                candidate, suffix = f'{new_title} ({suffix})', suffix + 1
+            taken.discard(title)
+            taken.add(candidate)
+        out[candidate] = ([[replacer.sub(cell)[0]
+                            if isinstance(cell, str) and cell and not _is_player_cell(cell)
+                            else cell for cell in row] for row in grid], row0, col0)
+    return out
 
 
 # --------------------------------------------------------------------------
@@ -1281,48 +1969,33 @@ def anonymize(spreadsheet, all_pairs, dry_run):
     return replacer
 
 
-def audit(spreadsheet, replacer):
-    """Re-read everything and rescan against the applied (player-safe) map.
-
-    Returns (owner_residuals, player_hits):
-      * owner_residuals -- applied real tokens still present in titles or
-        non-player cells. Must be zero: the owner is not hidden otherwise.
-      * player_hits -- applied real tokens found INSIDE a baseball-reference
-        player cell. Must be zero too: a nonzero here means a kept token
-        collides with a player the oracle missed (the write guard still
-        spared the cell, but it flags an oracle gap).
-    """
+def audit(spreadsheet, forms, notes, spine, roster_sources):
+    """Re-read the whole copy and search it for every inventoried real form
+    -- not for the forms the mapping applied. Returns the residual count;
+    zero is the pass condition."""
     titles = [ws.title for ws in _sheets_call('list tabs', spreadsheet.worksheets)]
     tabs = _read_tabs(spreadsheet, titles)
-    owner_residuals = player_hits = 0
-
-    title_hits = len(replacer.find(spreadsheet.title))
-    print(f'  {"[spreadsheet title]":<38} {title_hits}')
-    owner_residuals += title_hits
-
-    for title in titles:
-        grid, _, _ = tabs.get(title, ([], 1, 1))
-        hits = len(replacer.find(title))
-        for row in grid:
-            for cell in row:
-                if not isinstance(cell, str) or not cell:
-                    continue
-                if _is_player_cell(cell):
-                    player_hits += len(replacer.find(cell))
-                else:
-                    hits += len(replacer.find(cell))
-        flag = '' if hits == 0 else '   <-- RESIDUAL'
-        print(f'  {title:<38} {hits}{flag}')
-        owner_residuals += hits
-    return owner_residuals, player_hits
+    result = audit_tabs(tabs, forms, spine, spreadsheet.title)
+    return print_audit(result, notes, spine, roster_sources)
 
 
 # --------------------------------------------------------------------------
 
 def main():
+    if hasattr(sys.stdout, 'reconfigure'):
+        # Player and team names are not all cp1252; a console that cannot
+        # print one must not crash the run halfway through a scrub.
+        sys.stdout.reconfigure(errors='backslashreplace')
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument('--target', action='append', required=True,
                     help='spreadsheet id or url of a THROWAWAY copy; repeatable')
+    ap.add_argument('--league', required=True,
+                    choices=sorted(load_registry()['leagues']),
+                    help="the league whose book the target(s) copy; the audit's "
+                         "form inventory is that league's")
+    ap.add_argument('--player-spine', default=str(_SPINE_DIR),
+                    help='MLB Stats API season documents (the positive player '
+                         'check); default: %(default)s')
     ap.add_argument('--dry-run', action='store_true',
                     help='report what would change; write nothing')
     args = ap.parse_args()
@@ -1333,7 +2006,12 @@ def main():
           '(disk = real, HEAD = anonymized)'
           + (' + the private scrub map' if _PRIVATE_MAP.is_file() else '')
           + ' ...')
-    pairs, _ = build_mapping()
+    pairs, report = build_mapping()
+    roster, roster_sources = platform_roster()
+    forms, notes = build_form_inventory(args.league, report['kept'], roster)
+    spine = load_player_spine(args.player_spine)
+    print(f'  form inventory ({args.league}): {len(forms)} real forms to audit; '
+          f'MLB spine: {len(spine)} names')
 
     protected = _protected_sheet_ids()
     print(f'  latch (a): {len(protected)} real sheet id(s) resolved and protected')
@@ -1353,14 +2031,13 @@ def main():
         # roster, so a sheet with different players drops the right tokens.
         replacer = anonymize(spreadsheet, pairs, args.dry_run)
 
-        print('  residual audit (every cell + formula + title, per tab):')
-        owner_residuals, player_hits = audit(spreadsheet, replacer)
-        if owner_residuals or player_hits:
-            print(f'  AUDIT FAILED: {owner_residuals} owner residual(s), '
-                  f'{player_hits} token(s) inside player cells.')
-            failures.append((target_id, owner_residuals, player_hits))
+        residuals = audit(spreadsheet, forms, notes, spine, roster_sources)
+        if residuals:
+            print(f'  AUDIT FAILED: {residuals} real form(s) still visible.')
+            failures.append((target_id, residuals))
         else:
-            print('  AUDIT PASSED: zero owner residuals, zero player cells altered.')
+            print('  AUDIT PASSED: zero real forms visible outside proven '
+                  'player cells.')
 
     print()
     if args.dry_run:
@@ -1368,12 +2045,10 @@ def main():
               'as it stands, not as it would be.')
         return 0
     if failures:
-        for target_id, owner_residuals, player_hits in failures:
-            print(f'FAIL {target_id}: {owner_residuals} owner residual(s), '
-                  f'{player_hits} player-cell hit(s)')
+        for target_id, residuals in failures:
+            print(f'FAIL {target_id}: {residuals} residual(s)')
         return 1
-    print(f'All {len(args.target)} target(s) anonymized with zero residuals '
-          f'and no player names altered.')
+    print(f'All {len(args.target)} target(s) anonymized with zero residuals.')
     return 0
 
 

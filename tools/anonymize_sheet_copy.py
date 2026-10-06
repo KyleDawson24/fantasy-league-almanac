@@ -221,6 +221,8 @@ AFTER THE RUN: THE COPY STILL REMEMBERS (MLB-323)
     takes by hand: make a Drive copy of the scrubbed copy (a copy starts
     with no revisions), share THAT copy as anyone-with-the-link reader, and
     delete the scrubbed one. A failed run says the copy is unpublishable.
+    Both copies live in the project's Drive folder, "almanac work" (its id
+    in .env as ALMANAC_DRIVE_FOLDER_ID), and retired samples move there.
 
 Auth: the same cached user token as every other sheets writer
 (output/.sheets_oauth_token.json); no new consent flow, no Drive scope --
@@ -2615,30 +2617,51 @@ def audit(spreadsheet, forms, notes, spine, roster_sources, kept_names=()):
 # What is left for the operator's hands
 # --------------------------------------------------------------------------
 
-def publish_checklist(target_ids):
-    """The three steps between a clean audit and a publishable book.
+# Where every anonymized copy and every Drive deliverable of this project
+# lands (Kyle, 2026-10-06). The name is fixed here; the folder's id lives in
+# .env like every other Google id this public repo works with.
+DRIVE_FOLDER_NAME = 'almanac work'
+_DRIVE_FOLDER_ENV = 'ALMANAC_DRIVE_FOLDER_ID'
+
+
+def _drive_folder():
+    folder_id = (os.getenv(_DRIVE_FOLDER_ENV) or '').strip()
+    url = (f'https://drive.google.com/drive/folders/{folder_id}' if folder_id
+           else f'(set {_DRIVE_FOLDER_ENV} in .env for its link)')
+    return f'"{DRIVE_FOLDER_NAME}" {url}'
+
+
+def publish_checklist(target_ids, folder=None):
+    """The steps between a clean audit and a publishable book.
 
     A scrub in place removes the real render from the cells, not from the
     file: Drive's version history still holds it (Study Material 08-06:
     4 revisions on a scrubbed book against 1 on a fresh copy of it). A copy
     starts with no history. This tool cannot take the steps itself -- its
-    token is Sheets-scope only, by design -- so it prints them.
+    token is Sheets-scope only, by design -- so it prints them, with the
+    project's Drive folder both copies live in.
     """
+    folder = folder or _drive_folder()
     lines = ['REMAINING STEPS (by hand; this tool holds a Sheets-only token and '
              'cannot reach Drive):',
+             f'  Drive folder for every anonymized copy: {folder}. Both copies '
+             f'live there -- this scrubbed one until step 3, and the clean '
+             f're-copy that gets shared.',
              '  The scrubbed copy still remembers the real render in its version '
              'history (File > Version history). A Drive copy starts with none.']
     for target_id in target_ids:
         url = f'https://docs.google.com/spreadsheets/d/{target_id}/edit'
         lines += [
             f'  {url}',
-            '    1. Make a Drive copy of THIS scrubbed copy (File > Make a copy). '
-            'The new copy has no revisions.',
+            f'    1. Make a Drive copy of THIS scrubbed copy into "{DRIVE_FOLDER_NAME}" '
+            f'(File > Make a copy). The new copy has no revisions.',
             '    2. Share THAT new copy -- not this one -- as anyone-with-the-link, '
             'Viewer.',
             '    3. Delete THIS scrubbed copy (and empty it from Drive trash): it '
             'is the one whose history still holds the real names.',
         ]
+    lines.append(f'  When a published sample is retired, move it into '
+                 f'"{DRIVE_FOLDER_NAME}" too.')
     return lines
 
 

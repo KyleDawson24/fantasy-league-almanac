@@ -614,6 +614,18 @@ def test_publish_checklist_names_the_three_steps_in_order():
     assert steps == sorted(steps)
 
 
+def test_publish_checklist_names_the_project_drive_folder(monkeypatch):
+    """Both copies live in the project's Drive folder, and retired samples
+    move there; its id comes from .env, never from this public file."""
+    tool = _tool()
+    monkeypatch.setenv(tool._DRIVE_FOLDER_ENV, 'folder-id-for-test')
+    text = '\n'.join(tool.publish_checklist(['copy-one']))
+    assert '"almanac work" https://drive.google.com/drive/folders/folder-id-for-test' in text
+    assert 'into "almanac work"' in text and 'retired' in text
+    monkeypatch.delenv(tool._DRIVE_FOLDER_ENV)
+    assert f'set {tool._DRIVE_FOLDER_ENV} in .env' in '\n'.join(tool.publish_checklist(['c']))
+
+
 def _clean_run(monkeypatch, tool, *extra):
     """main() over an empty book with nothing to find: the audit passes."""
     class _Sheet:

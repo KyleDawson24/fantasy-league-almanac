@@ -185,8 +185,18 @@ ACCEPTANCE (MLB-323)
     private map's (which has no league column), so a first name in one
     league is not a finding in the other's team names.
 
+AFTER THE RUN: THE COPY STILL REMEMBERS (MLB-323)
+    A zero-residual audit is a claim about the cells, not the file. Drive's
+    version history still holds the real render the scrub replaced (Study
+    Material 08-06: 4 revisions on a scrubbed book against 1 on a fresh
+    copy of it). So a clean run ends by printing three steps the operator
+    takes by hand: make a Drive copy of the scrubbed copy (a copy starts
+    with no revisions), share THAT copy as anyone-with-the-link reader, and
+    delete the scrubbed one. A failed run says the copy is unpublishable.
+
 Auth: the same cached user token as every other sheets writer
-(output/.sheets_oauth_token.json); no new consent flow, no Drive scope.
+(output/.sheets_oauth_token.json); no new consent flow, no Drive scope --
+which is why the steps above are printed rather than performed.
 """
 
 import argparse
@@ -2238,6 +2248,35 @@ def audit(spreadsheet, forms, notes, spine, roster_sources):
 
 
 # --------------------------------------------------------------------------
+# What is left for the operator's hands
+# --------------------------------------------------------------------------
+
+def publish_checklist(target_ids):
+    """The three steps between a clean audit and a publishable book.
+
+    A scrub in place removes the real render from the cells, not from the
+    file: Drive's version history still holds it (Study Material 08-06:
+    4 revisions on a scrubbed book against 1 on a fresh copy of it). A copy
+    starts with no history. This tool cannot take the steps itself -- its
+    token is Sheets-scope only, by design -- so it prints them.
+    """
+    lines = ['REMAINING STEPS (by hand; this tool holds a Sheets-only token and '
+             'cannot reach Drive):',
+             '  The scrubbed copy still remembers the real render in its version '
+             'history (File > Version history). A Drive copy starts with none.']
+    for target_id in target_ids:
+        url = f'https://docs.google.com/spreadsheets/d/{target_id}/edit'
+        lines += [
+            f'  {url}',
+            '    1. Make a Drive copy of THIS scrubbed copy (File > Make a copy). '
+            'The new copy has no revisions.',
+            '    2. Share THAT new copy -- not this one -- as anyone-with-the-link, '
+            'Viewer.',
+            '    3. Delete THIS scrubbed copy (and empty it from Drive trash): it '
+            'is the one whose history still holds the real names.',
+        ]
+    return lines
+
 
 def main():
     if hasattr(sys.stdout, 'reconfigure'):
@@ -2309,8 +2348,13 @@ def main():
     if failures:
         for target_id, residuals in failures:
             print(f'FAIL {target_id}: {residuals} residual(s)')
+        print('Nothing here is publishable. Fix the residuals and re-run on a '
+              'FRESH copy of the dev book -- a failed copy\'s version history '
+              'holds the real render; delete it.')
         return 1
     print(f'All {len(args.target)} target(s) anonymized with zero residuals.')
+    print()
+    print('\n'.join(publish_checklist([_sheet_id(t) for t in args.target])))
     return 0
 
 

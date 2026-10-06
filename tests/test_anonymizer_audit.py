@@ -449,6 +449,64 @@ def test_the_refusal_comes_before_any_write(monkeypatch):
     assert "'QQRY' has no twin" in str(refusal.value)
 
 
+# --------------------------------------------------------------------------
+# After a clean audit: the revision-history steps
+# --------------------------------------------------------------------------
+
+def test_publish_checklist_names_the_three_steps_in_order():
+    tool = _tool()
+    text = '\n'.join(tool.publish_checklist(['copy-one']))
+    assert 'https://docs.google.com/spreadsheets/d/copy-one/edit' in text
+    assert 'version history' in text
+    steps = [text.index(s) for s in ('1. Make a Drive copy', '2. Share THAT new copy',
+                                     '3. Delete THIS scrubbed copy')]
+    assert steps == sorted(steps)
+
+
+def _clean_run(monkeypatch, tool, *extra):
+    """main() over an empty book with nothing to find: the audit passes."""
+    class _Sheet:
+        title = 'ANON copy'
+
+        def worksheets(self):
+            return []
+
+    class _Client:
+        def open_by_key(self, key):
+            return _Sheet()
+
+    empty = lambda name: []  # noqa: E731
+    inventory = tool.build_form_inventory
+    monkeypatch.setattr(tool, '_load_env', lambda: None)
+    monkeypatch.setattr(tool, 'build_mapping', lambda **kw: ([], {'kept': []}))
+    monkeypatch.setattr(tool, 'platform_roster', lambda: ([], [('lg', 'snap', 'today')]))
+    monkeypatch.setattr(tool, 'build_form_inventory',
+                        lambda league, kept, roster: inventory(league, kept, roster,
+                                                               load=empty, private=list))
+    monkeypatch.setattr(tool, 'load_player_spine', lambda root: frozenset())
+    monkeypatch.setattr(tool, '_protected_sheet_ids', lambda: {'real-dev-id': 'SHEETS_DEV_ID'})
+    monkeypatch.setattr(tool, '_client', lambda: _Client())
+    monkeypatch.setattr(tool, '_read_tabs', lambda spreadsheet, titles: {})
+    league = sorted(tool.load_registry()['leagues'])[0]
+    monkeypatch.setattr('sys.argv', ['anonymize_sheet_copy.py', '--league', league,
+                                     '--target', 'copy-one', *extra])
+    return tool.main()
+
+
+def test_a_clean_run_ends_with_the_checklist(monkeypatch, capsys):
+    tool = _tool()
+    assert _clean_run(monkeypatch, tool) == 0
+    out = capsys.readouterr().out
+    assert 'zero residuals' in out
+    assert out.index('AUDIT PASSED') < out.index('REMAINING STEPS')
+
+
+def test_a_dry_run_prints_no_checklist(monkeypatch, capsys):
+    tool = _tool()
+    assert _clean_run(monkeypatch, tool, '--dry-run') == 0
+    assert 'REMAINING STEPS' not in capsys.readouterr().out
+
+
 def test_simulate_scrub_suffixes_a_renamed_title_like_the_live_pass():
     tool = _tool()
     rep = tool.Replacer([('Wendell Quigg', 'Walt Quill')])

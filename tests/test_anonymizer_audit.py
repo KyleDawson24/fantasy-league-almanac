@@ -296,6 +296,54 @@ def test_multi_token_forms_are_never_dropped_as_player_collisions():
     assert safe == [(PLAYER, 'Walt Quill')] and not dropped
 
 
+# --------------------------------------------------------------------------
+# Abbreviations: case-sensitive, never vetoed by a player, scoped by league
+# --------------------------------------------------------------------------
+
+def test_abbreviation_pairs_replace_case_sensitively():
+    """'THAD' the team and 'Thad' the person are different strings; at equal
+    length the abbreviation wins its own spelling and nothing else."""
+    tool = _tool()
+    rep = tool.Replacer([tool.Pair('THAD', 'TMAX', True), ('Thad', 'Walt')])
+    assert rep.sub('Thad Rook (THAD)') == ('Walt Rook (TMAX)', 2)
+    assert rep.sub('THADS and Thadd') == ('THADS and Thadd', 0)
+
+
+def test_a_player_first_name_cannot_veto_an_abbreviation():
+    """The CAL case: an abbreviation used to be dropped because a player's
+    first name matched it case-insensitively."""
+    tool = _tool()
+    pairs = [tool.Pair('THAD', 'TMAX', True), ('Thad', 'Walt')]
+    safe, dropped = tool.split_player_safe(pairs, {'Thad Rook'})
+    assert safe == [tool.Pair('THAD', 'TMAX', True)]
+    assert dropped == [('Thad', 'Walt')]
+
+
+def test_two_letter_abbreviations_are_matched_on_word_boundaries():
+    tool = _tool()
+    assert tool._classify_private('QX') == tool.CLS_ABBREV
+    assert tool._classify_private('Quigg Quarry') == tool.CLS_SCRUB_MAP
+    rep = tool.Replacer([tool.Pair('QX', 'TMQX', True)])
+    assert rep.sub('(QX) QXL Qx') == ('(TMQX) QXL Qx', 1)
+
+
+def test_pairs_are_scoped_and_the_targets_kept_form_wins():
+    """The private map has no league column. Its row for one league's 'QX'
+    must not rename the other league's team whose twin keeps 'QX'."""
+    tool = _tool()
+    tagged = [('QX', 'TMQX', 'private_map', None, True),
+              ('Wendell Quigg', 'Walt Quill', 'by_year.owner_name', LEAGUE, False),
+              ('Agnes Thorne', 'Ava Tern', 'by_year.owner_name', OTHER, False)]
+    kept = [('QX', OTHER, 'franchises.abbrev')]
+
+    here, _, _ = tool.scope_pairs(tagged, kept, LEAGUE)
+    assert here == [tool.Pair('QX', 'TMQX', True), tool.Pair('Wendell Quigg', 'Walt Quill')]
+
+    there, kept_over, _ = tool.scope_pairs(tagged, kept, OTHER)
+    assert there == [tool.Pair('Agnes Thorne', 'Ava Tern')]
+    assert kept_over == [('QX', 'private_map')]
+
+
 def test_simulate_scrub_suffixes_a_renamed_title_like_the_live_pass():
     tool = _tool()
     rep = tool.Replacer([('Wendell Quigg', 'Walt Quill')])

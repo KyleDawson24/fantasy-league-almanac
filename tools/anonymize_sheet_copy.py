@@ -122,11 +122,18 @@ CO-OWNER LABELS ARE MAPPED WHOLE (MLB-323)
     "A' & B'" in both spellings; longest-first replaces the whole label in
     one step, before any name inside it could match.
 
-    The deliberately-kept team whose name is "14-30-8-24-5-15-13-20"
-    (abbrev MATT) is left intact: its abbrev coincides with an owner's
-    first name, but the abbrev is a kept identity (its seed twin equals
-    itself) and only the owner-first-name rule -- now dropped as a player
-    collision -- ever rewrote it.
+ABBREVIATIONS ARE CASE-SENSITIVE (MLB-323)
+    Team abbreviations render in capitals and are matched that way. Matched
+    case-insensitively they collided with names: "CAL" was dropped because
+    Cal Raleigh is a player, the CBS franchise abbreviated MATT (team name
+    "14-30-8-24-5-15-13-20", kept) collapsed into the owner first name
+    Matt and was dropped with it -- though its twin abbreviation is now
+    CODE -- and two-letter abbreviations (BP, HH) were skipped as too
+    short. Case-sensitive and word-bounded, two letters are safe and a
+    player first name cannot veto an abbreviation. Pairs carry their
+    league, and --league keeps the target's own: where the target league's
+    twin keeps an abbreviation unchanged (CBS's HH), the other league's
+    pair for the same letters does not apply.
 
 DOUBLE SAFETY LATCH (in this order, both before any write)
     (a) Resolve the real dev/prod spreadsheet ids from the league registry
@@ -769,20 +776,27 @@ def _build_owner_crosswalk(verbose=True):
     return crosswalk
 
 
-def build_mapping(verbose=True):
+def build_mapping(verbose=True, league=None):
     """Derive real -> anon for every name form the sheets can render.
 
-    Returns (pairs, report) where pairs is a list of (real, anon) and
-    report carries the counts and every judgement call made, so the run
-    log shows what was decided rather than just what was replaced.
+    Returns (pairs, report) where pairs is a list of Pair(real, anon,
+    exact) and report carries the counts and every judgement call made, so
+    the run log shows what was decided rather than just what was replaced.
+
+    `league` scopes the result to one book: a pair derived from another
+    league's config is left out, and a form the target league's twin KEEPS
+    unchanged wins over a pair for the same string from elsewhere -- the
+    private map's ESPN "HH" row must not rename the CBS team whose twin
+    abbreviation is also HH. None keeps every league (the mapping's shape
+    before MLB-323).
     """
     crosswalk = _build_owner_crosswalk(verbose=verbose)
     leagues = owner_leagues(_read_real)
-    pairs = []          # (real, anon)
+    tagged = []         # (real, anon, source, league, exact)
     report = {'sources': Counter(), 'ambiguous': [], 'skipped_short': [],
-              'unpaired_alias': [], 'kept': []}
+              'unpaired_alias': [], 'kept': [], 'kept_over_pair': []}
 
-    def add(real_value, anon_value, source, league=None):
+    def add(real_value, anon_value, source, league=None, exact=False):
         real_value = (real_value or '').strip()
         anon_value = (anon_value or '').strip()
         # Identity pairs carry no secret and MUST NOT enter the audit set:
@@ -795,11 +809,13 @@ def build_mapping(verbose=True):
             return
         if not real_value or not anon_value:
             return
-        if len(real_value) < _MIN_TOKEN_LEN:
+        # An abbreviation is matched case-sensitively and on word
+        # boundaries, which makes two characters (HH, BP) safe; a name is
+        # matched case-insensitively and needs three.
+        if len(real_value) < (_MIN_FORM_LEN if exact else _MIN_TOKEN_LEN):
             report['skipped_short'].append((real_value, source))
             return
-        pairs.append((real_value, anon_value))
-        report['sources'][source] += 1
+        tagged.append((real_value, anon_value, source, league, exact))
 
     # Real owner-name form -> twin form. This is what separates co-owner
     # rows in the by-year file further down, where the stable key alone
@@ -984,16 +1000,23 @@ def build_mapping(verbose=True):
     for r, a in _pair_by_key(SEED_FRANCHISES, fr_real, fr_twin):
         lg = (r.get('league_key') or '').strip() or None
         add(r.get('franchise_name'), a.get('franchise_name'), 'franchises.franchise_name', lg)
-        add(r.get('abbrev'), a.get('abbrev'), 'franchises.abbrev', lg)
+        add(r.get('abbrev'), a.get('abbrev'), 'franchises.abbrev', lg, exact=True)
 
     # Private map fills what the seeds cannot: ESPN team names, which only
     # ever existed in the live API. Add only real-forms the seeds did not
     # already cover, so owner names stay identical to the seed twins.
-    seed_reals = {real.lower() for real, _ in pairs}
-    for real_value, anon_value in _load_private_map():
-        if real_value.lower() not in seed_reals:
-            add(real_value, anon_value, 'private_map')
+    seed_reals = {_form_key(CLS_ABBREV if ex else CLS_OWNER_FULL, real)
+                  for real, _, _, _, ex in tagged}
+    for real_value, anon_value in _read_private_map():
+        if real_value == anon_value:
+            continue
+        exact = _classify_private(real_value) == CLS_ABBREV
+        key = _form_key(CLS_ABBREV if exact else CLS_OWNER_FULL, real_value)
+        if key not in seed_reals:
+            add(real_value, anon_value, 'private_map', exact=exact)
 
+    pairs, report['kept_over_pair'], report['sources'] = scope_pairs(
+        tagged, report['kept'], league)
     pairs, report['ambiguous'] = _resolve(pairs)
 
     if verbose:
@@ -1006,12 +1029,42 @@ def build_mapping(verbose=True):
                   f"{len(others) + 1} owners; using one anonymized form "
                   f"consistently (all candidates are anonymous)")
         for value, src in report['skipped_short']:
-            print(f"  [skipped] {src}: real form shorter than "
-                  f"{_MIN_TOKEN_LEN} chars -- unsafe to match, NOT replaced")
+            print(f"  [skipped] {src}: real form too short to match safely "
+                  f"({len(value)} chars) -- NOT replaced")
+        for value, src in report['kept_over_pair']:
+            print(f"  [kept] {src}: a {len(value)}-char form the target "
+                  f"league's twin keeps unchanged -- not replaced")
         for canon in report['unpaired_alias']:
             print(f"  [unpaired] {SEED_ALIAS}: canonical owner {_ref(canon)} "
                   f"has no twin row; its slugs are REDACTED, not mapped")
     return pairs, report
+
+
+def scope_pairs(tagged, kept, league):
+    """(pairs, kept_over_pair, sources) for one target league.
+
+    tagged: (real, anon, source, league, exact) as build_mapping collects
+    them; kept: (value, league, source) identity pairs. A pair from another
+    league's config is out of scope. Within scope, a real form the target
+    league's twin keeps UNCHANGED beats any pair for the same string from
+    elsewhere -- the twin is what a stranger's clone renders for this book.
+    league=None keeps everything.
+    """
+    def in_scope(lg):
+        return league is None or lg is None or lg == league
+
+    kept_here = {value for value, lg, _ in kept if in_scope(lg)}
+    kept_fold = {value.lower() for value in kept_here}
+    pairs, kept_over_pair, sources = [], [], Counter()
+    for real_value, anon_value, source, lg, exact in tagged:
+        if not in_scope(lg):
+            continue
+        if (real_value in kept_here) if exact else (real_value.lower() in kept_fold):
+            kept_over_pair.append((real_value, source))
+            continue
+        pairs.append(Pair(real_value, anon_value, exact))
+        sources[source] += 1
+    return pairs, kept_over_pair, sources
 
 
 def _read_private_map():
@@ -1043,8 +1096,21 @@ def _load_private_map():
             if real != fake and len(real) >= _MIN_TOKEN_LEN]
 
 
+class Pair(NamedTuple):
+    """real -> anon. `exact` pairs (team abbreviations) match case-
+    sensitively: "MATT" the team is not "Matt" the owner or Matt Olson."""
+    real: str
+    anon: str
+    exact: bool = False
+
+
+def _as_pair(p):
+    return p if isinstance(p, Pair) else Pair(*p)
+
+
 def _resolve(pairs):
-    """Collapse to one anon form per real form, case-insensitively.
+    """Collapse to one anon form per real form -- case-insensitively for
+    names, exactly for abbreviations, which never collapse into a name.
 
     A bare first name shared by two owners is genuinely ambiguous with no
     surname context (longest-first already resolves the cases that DO have
@@ -1053,21 +1119,21 @@ def _resolve(pairs):
     what matters is that it is deterministic and reported.
     """
     by_real = defaultdict(list)
-    for real_value, anon_value in pairs:
-        by_real[real_value.lower()].append((real_value, anon_value))
+    for p in map(_as_pair, pairs):
+        by_real[(p.exact, p.real if p.exact else p.real.lower())].append(p)
 
     resolved, ambiguous = {}, []
-    for key, candidates in by_real.items():
-        counts = Counter(anon for _, anon in candidates)
+    for (exact, _), candidates in by_real.items():
+        counts = Counter(p.anon for p in candidates)
         # Most frequent wins; lexicographic breaks the tie so reruns and
         # different machines agree.
         best = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[0][0]
         # Keep the real form's most common surface casing for the pattern.
-        surface = Counter(real for real, _ in candidates).most_common(1)[0][0]
-        resolved[key] = (surface, best)
+        surface = Counter(p.real for p in candidates).most_common(1)[0][0]
+        resolved[(exact, surface.lower() if not exact else surface)] = Pair(surface, best, exact)
         if len(counts) > 1:
             ambiguous.append((surface, best, [a for a in counts if a != best]))
-    return sorted(resolved.values(), key=lambda p: (-len(p[0]), p[0])), ambiguous
+    return sorted(resolved.values(), key=lambda p: (-len(p.real), p.real, not p.exact)), ambiguous
 
 
 def _assert_auditable(pairs):
@@ -1078,8 +1144,8 @@ def _assert_auditable(pairs):
     the audit could never reach zero -- there would be no way to tell a
     leak from a correct substitution.
     """
-    reals = {r.lower() for r, _ in pairs}
-    anons = {a.lower() for _, a in pairs}
+    reals = {p.real.lower() for p in map(_as_pair, pairs)}
+    anons = {p.anon.lower() for p in map(_as_pair, pairs)}
     collisions = sorted(reals & anons)
     if collisions:
         raise RuntimeError(
@@ -1541,7 +1607,7 @@ def print_audit(result, notes, spine, roster_sources, show=25):
     for cls in FORM_CLASSES:
         if notes['kept'].get(cls):
             print(f'  set aside, kept unchanged by the published twin: {cls}: '
-                  f'{", ".join(sorted(notes["kept"][cls]))}')
+                  f'{", ".join(repr(v) for v in sorted(notes["kept"][cls]))}')
     for cls, n in notes['too_short'].items():
         print(f'  NOT searchable (shorter than {_MIN_FORM_LEN} chars): {cls} x{n}')
     if roster_sources:
@@ -1628,15 +1694,21 @@ def split_player_safe(pairs, player_names):
     label, a team name -- is never dropped: player cells are never written
     at all, and dropping one would leave a whole owner identity visible.
     Whatever a drop leaves visible, the inventory audit catches.
+
+    An abbreviation pair collides only case-sensitively, the way it is
+    matched: "CAL" is not inside "Cal Raleigh", so a player's first name
+    can no longer veto a team abbreviation.
     """
     blob = '\n'.join(player_names)
     safe, dropped = [], []
-    for real_value, anon_value in pairs:
-        pattern = rf'(?<![0-9A-Za-z_]){re.escape(real_value)}(?![0-9A-Za-z_])'
-        if len(real_value.split()) == 1 and re.search(pattern, blob, re.IGNORECASE):
-            dropped.append((real_value, anon_value))
+    for item in pairs:
+        p = _as_pair(item)
+        pattern = rf'(?<![0-9A-Za-z_]){re.escape(p.real)}(?![0-9A-Za-z_])'
+        flags = 0 if p.exact else re.IGNORECASE
+        if len(p.real.split()) == 1 and re.search(pattern, blob, flags):
+            dropped.append(item)
         else:
-            safe.append((real_value, anon_value))
+            safe.append(item)
     return safe, dropped
 
 
@@ -1654,11 +1726,15 @@ class Replacer:
     """
 
     def __init__(self, pairs):
-        self.pairs = pairs
-        self._by_key = {real.lower(): anon for real, anon in pairs}
-        # Sorted longest-first so "First Last" wins over a bare "First".
-        ordered = sorted(pairs, key=lambda p: (-len(p[0]), p[0]))
-        alternation = '|'.join(re.escape(real) for real, _ in ordered)
+        self.pairs = [_as_pair(p) for p in pairs]
+        self._exact = {p.real: p.anon for p in self.pairs if p.exact}
+        self._by_key = {p.real.lower(): p.anon for p in self.pairs if not p.exact}
+        # Sorted longest-first so "First Last" wins over a bare "First"; at
+        # equal length a case-sensitive abbreviation goes first, so "MATT"
+        # the team outranks "Matt" the name.
+        ordered = sorted(self.pairs, key=lambda p: (-len(p.real), not p.exact, p.real))
+        alternation = '|'.join(f'(?-i:{re.escape(p.real)})' if p.exact else re.escape(p.real)
+                               for p in ordered)
         # Lookarounds rather than \b: these forms can start or end with a
         # non-word character (initials like "J.", possessive-adjacent
         # surnames), where \b would silently fail to anchor.
@@ -1675,6 +1751,9 @@ class Replacer:
 
         def _repl(match):
             found = match.group(0)
+            if found in self._exact:
+                count[0] += 1
+                return self._exact[found]
             anon = self._by_key.get(found.lower())
             if anon is None:  # pragma: no cover - alternation guarantees a hit
                 return found
@@ -1684,7 +1763,9 @@ class Replacer:
         return self._pattern.sub(_repl, text), count[0]
 
     def find(self, text):
-        """Real forms still present -- the audit's view."""
+        """The APPLIED real forms present in `text`. Not the audit: the audit
+        searches for the whole inventory (audit_tabs), which is the point of
+        MLB-323."""
         if self._pattern is None or not text:
             return []
         return self._pattern.findall(text)
@@ -1993,9 +2074,9 @@ def anonymize(spreadsheet, all_pairs, dry_run):
     print(f'  mapping forms: kept {len(safe)}, dropped {len(dropped)} that '
           f'collide with a real player name')
     if dropped:
-        print(f'    dropped forms left unscrubbed (they occur only inside '
-              f'player names or as the kept MATT abbrev): lengths '
-              f'{sorted(len(r) for r, _ in dropped)}')
+        print(f'    dropped single names left unscrubbed (each occurs inside a '
+              f'player name; the audit reports any that stay visible '
+              f'elsewhere): lengths {sorted(len(_as_pair(p).real) for p in dropped)}')
 
     _rename_tabs(spreadsheet, replacer, dry_run)
     titles = [ws.title for ws in _sheets_call('list tabs', spreadsheet.worksheets)]
@@ -2059,7 +2140,7 @@ def main():
           '(disk = real, HEAD = anonymized)'
           + (' + the private scrub map' if _PRIVATE_MAP.is_file() else '')
           + ' ...')
-    pairs, report = build_mapping()
+    pairs, report = build_mapping(league=args.league)
     roster, roster_sources = platform_roster()
     forms, notes = build_form_inventory(args.league, report['kept'], roster)
     spine = load_player_spine(args.player_spine)

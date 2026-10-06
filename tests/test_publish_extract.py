@@ -299,12 +299,13 @@ def test_outfield_games_count_one_game_per_spot_for_the_leagues_players(tmp_path
     db = tmp_path / "ESPN_FANTASY.duckdb"
     _build(db, rows, "points", extra_sql=[
         """CREATE TABLE ANALYTICS.dim_player_identity AS SELECT * FROM (VALUES
-            ('cbs', 'a', 2026, 1011, NULL, 11, FALSE, 1),
-            ('cbs', 'b', 2026, 1012, NULL, 12, TRUE, 2),
-            ('cbs', 'b', 2026, 1112, NULL, 12, TRUE, 2),
-            ('cbs', 'c', 2026, 1013, NULL, 13, FALSE, 1),
-            ('cbs', 'd', 2026, 1014, NULL, 14, FALSE, 1),
-            ('espn', 'a', 2026, 9011, NULL, 11, FALSE, 1)
+            ('cbs', 'a', 2026, 1011, NULL, '11', FALSE, 1),
+            ('cbs', 'b', 2026, 1012, NULL, '12', TRUE, 2),
+            ('cbs', 'b', 2026, 1112, NULL, '12', TRUE, 2),
+            ('cbs', 'c', 2026, 1013, NULL, '13', FALSE, 1),
+            ('cbs', 'd', 2026, 1014, NULL, '14', FALSE, 1),
+            ('espn', 'a', 2026, 9011, NULL, '11', FALSE, 1),
+            ('cbs', 'e', 2026, 1015, NULL, 'ui-only-15', FALSE, 1)
         ) t(platform, name_key, season_year, mlbam_id, stat_group_scope, platform_player_id,
             is_ambiguous, n_mlbam)""",
         """CREATE TABLE ANALYTICS.stg_mlb__game_positions AS SELECT * FROM (VALUES

@@ -1002,7 +1002,8 @@ class League:
         # league whose lineups say only OF seats its outfielders on the
         # diamond by these counts. One game per game_pk at a spot (a player
         # moved LF to CF mid-game counts once at each), inside the horizon.
-        # Players reach MLB ids through the platform's identity crosswalk; an
+        # Players reach MLB ids through the platform's identity crosswalk (ids
+        # are text: CBS carries ui-only-<n> forms beside numeric ones); an
         # ambiguous identity is left out, so the page falls back to its fixed
         # order rather than seating a player by someone else's games.
         if {"stg_mlb__game_positions", "dim_player_identity"} <= self.rels:
@@ -1010,7 +1011,7 @@ class League:
                 WITH players AS (SELECT DISTINCT season_year, player_key FROM read_parquet({atom})),
                 ident AS (
                     SELECT CAST(season_year AS INTEGER) AS season_year,
-                           CAST(CAST(platform_player_id AS BIGINT) AS VARCHAR) AS player_key,
+                           CAST(platform_player_id AS VARCHAR) AS player_key,
                            MIN(CAST(mlbam_id AS BIGINT)) AS mlbam_id
                     FROM {src}.dim_player_identity
                     WHERE platform = {lit(self.platform)} AND NOT COALESCE(is_ambiguous, FALSE)

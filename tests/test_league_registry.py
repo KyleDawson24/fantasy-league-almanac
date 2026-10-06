@@ -196,3 +196,48 @@ def test_league_dataclass_is_immutable():
     league = get_league()
     with pytest.raises(Exception):
         league.key = "other"
+
+
+# ---------------------------------------------------------------------------
+# settings_overrides: league rules stated per league until settings derive them
+# ---------------------------------------------------------------------------
+def _with_overrides(block):
+    return MINIMAL_YML + textwrap.indent(textwrap.dedent(block), "    ")
+
+
+def test_settings_overrides_default_to_empty(tmp_path):
+    league = get_league("espn-test", path=write_registry(tmp_path))
+    assert league.settings_overrides == {}
+
+
+def test_open_hitting_slots_override_is_carried(tmp_path):
+    path = write_registry(tmp_path, _with_overrides("""\
+        settings_overrides:
+          open_hitting_slots: [U, DH]
+    """))
+    assert get_league("cbs-test", path=path).settings_overrides == {"open_hitting_slots": ["U", "DH"]}
+
+
+def test_unknown_settings_override_fails_at_load(tmp_path):
+    path = write_registry(tmp_path, _with_overrides("""\
+        settings_overrides:
+          dh_rule: open
+    """))
+    with pytest.raises(LeagueRegistryError, match="unknown settings_overrides"):
+        load_registry(path)
+
+
+def test_open_hitting_slots_must_be_a_list_of_tokens(tmp_path):
+    path = write_registry(tmp_path, _with_overrides("""\
+        settings_overrides:
+          open_hitting_slots: DH
+    """))
+    with pytest.raises(LeagueRegistryError, match="open_hitting_slots"):
+        load_registry(path)
+
+
+def test_committed_bsb_opens_dh_and_u_but_buns_does_not():
+    # Kyle, 2026-09-26: BSB's DH takes any hitter; Buns' DH needs eligibility.
+    # League rules, not platform rules.
+    assert get_league("cbs-bsb").settings_overrides == {"open_hitting_slots": ["U", "DH"]}
+    assert get_league("espn-main").settings_overrides == {}

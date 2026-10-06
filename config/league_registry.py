@@ -43,6 +43,16 @@ _REGISTRY_PATH = Path(__file__).resolve().parent / "leagues.yml"
 # rejected, but nothing implements them yet.
 _KNOWN_PLATFORMS = ("espn", "cbs", "yahoo", "fantrax")
 
+# League rules the pipeline cannot yet read from a platform's settings
+# payload, stated per league (never per platform) until it can. Each key is
+# validated; an unknown key fails at load rather than being ignored.
+#   open_hitting_slots -- the league's own slot tokens that take ANY hitter,
+#                         whatever the player's listed eligibility (BSB's DH
+#                         and U). Without it, a league's non-position hitting
+#                         slots (dim_lineup_slot.is_position_slot = false) are
+#                         the open ones.
+_KNOWN_SETTINGS_OVERRIDES = ("open_hitting_slots",)
+
 
 class LeagueRegistryError(Exception):
     """Raised for any registry problem: missing file, malformed YAML,
@@ -63,6 +73,7 @@ class League:
     first_season: Optional[int] = None
     final_season: Optional[int] = None
     sinks: Dict[str, object] = field(default_factory=dict)
+    settings_overrides: Dict[str, object] = field(default_factory=dict)
 
     def resolve_league_id(self) -> str:
         """The platform league id/slug. A literal `league_id` in the
@@ -152,6 +163,27 @@ def _build_league(key: str, entry: dict, path: Path) -> League:
             f"destination); got {type(sinks).__name__}."
         )
 
+    overrides = entry.get("settings_overrides") or {}
+    if not isinstance(overrides, dict):
+        raise LeagueRegistryError(
+            f"League '{key}' in {path}: settings_overrides must be a mapping; "
+            f"got {type(overrides).__name__}."
+        )
+    unknown = sorted(set(overrides) - set(_KNOWN_SETTINGS_OVERRIDES))
+    if unknown:
+        raise LeagueRegistryError(
+            f"League '{key}' in {path}: unknown settings_overrides key(s) "
+            f"{', '.join(unknown)}; known: {', '.join(_KNOWN_SETTINGS_OVERRIDES)}."
+        )
+    open_slots = overrides.get("open_hitting_slots")
+    if open_slots is not None and (
+        not isinstance(open_slots, list) or not all(isinstance(v, str) for v in open_slots)
+    ):
+        raise LeagueRegistryError(
+            f"League '{key}' in {path}: settings_overrides.open_hitting_slots "
+            f"must be a list of the league's slot tokens."
+        )
+
     return League(
         key=key,
         platform=platform,
@@ -162,6 +194,7 @@ def _build_league(key: str, entry: dict, path: Path) -> League:
         first_season=entry.get("first_season"),
         final_season=entry.get("final_season"),
         sinks=sinks,
+        settings_overrides=overrides,
     )
 
 

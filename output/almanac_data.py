@@ -203,6 +203,35 @@ def get_team_week_stat_specs():
     return sorted(rows, key=_team_week_stat_sort_key)
 
 
+def _relation_columns(relation):
+    """Lower-cased column names of one relation in the active schema.
+    information_schema is served by both engines, so this is the portable
+    way to ask "does this model carry that column"."""
+    rows = query_for_presentation("""
+        SELECT LOWER(column_name) AS column_name
+        FROM information_schema.columns
+        WHERE LOWER(table_name) = %s
+          AND LOWER(table_schema) = LOWER(CURRENT_SCHEMA())
+    """, (relation.lower(),))
+    return {r['column_name'] for r in rows}
+
+
+def carried_stat_specs(stat_specs, relation):
+    """The scored stat specs whose per-stat column `relation` carries.
+
+    A league can score a stat that no team-grain model breaks out: CBS
+    scores IRSTR (inherited runners stranded), which rides only inside
+    total_pitching_stat_pts because ESPN never scored it and the per-stat
+    column set was built from ESPN's vocabulary. The spec-driven SELECTs
+    below would ask for a column that does not exist ("invalid identifier
+    'IRSTR'" on Snowflake, a binder error on DuckDB). The stat's POINTS are
+    still in the calculated totals; only its count column is absent, so it
+    is left out of the per-stat columns rather than invented. ESPN is
+    unaffected: every stat it scores has a column."""
+    columns = _relation_columns(relation)
+    return [s for s in stat_specs
+            if _fact_stat_column_name(s['stat_name']) in columns]
+
 
 def get_team_weeks(stat_specs):
     """Fetch one row per team-week for the matchup archive tab.
@@ -214,6 +243,7 @@ def get_team_weeks(stat_specs):
     """
     if not stat_specs:
         raise RuntimeError("No scored team-week stat specs found.")
+    stat_specs = carried_stat_specs(stat_specs, 'mart_team_matchup')
 
     stat_columns = [_fact_stat_column_name(spec['stat_name']) for spec in stat_specs]
     for column in stat_columns:
@@ -1082,6 +1112,7 @@ def get_team_standings(season_year, stat_specs):
     """
     if not stat_specs:
         raise RuntimeError("No scored standings stat specs found.")
+    stat_specs = carried_stat_specs(stat_specs, 'mart_team_season_standings')
 
     stat_columns = [_fact_stat_column_name(spec['stat_name']) for spec in stat_specs]
     for column in stat_columns:
@@ -1290,6 +1321,7 @@ def get_team_standings_alltime(stat_specs):
     scoring days. Ordered by all-time win rate, points as tiebreak."""
     if not stat_specs:
         raise RuntimeError("No scored standings stat specs found.")
+    stat_specs = carried_stat_specs(stat_specs, 'mart_team_season_standings')
     stat_columns = [_fact_stat_column_name(spec['stat_name']) for spec in stat_specs]
     for column in stat_columns:
         if not re.match(r'^[a-z][a-z0-9_]*$', column):

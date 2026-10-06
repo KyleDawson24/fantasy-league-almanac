@@ -218,6 +218,84 @@ def test_co_owner_labels_follow_the_warehouse():
     assert co == {'Agnes, Wendell', 'Agnes & Wendell', 'Bert, Wendell', 'Bert & Wendell'}
 
 
+# --------------------------------------------------------------------------
+# Labels are mapped whole; single names keep the player-collision drop
+# --------------------------------------------------------------------------
+
+REAL_COOWNED = [_by_year(2010, 6, 'Wendell Quigg'), _by_year(2010, 6, 'Agnes Thorne')]
+TWIN_COOWNED = [_by_year(2010, 6, 'Walt Quill'), _by_year(2010, 6, 'Ava Tern')]
+# An (invented) MLB player who shares the first owner's first name.
+PLAYER = 'Wendell Rook'
+
+
+def test_combined_label_maps_to_the_twin_label_in_both_spellings():
+    tool = _tool()
+    pairs = tool.co_owner_label_pairs(_loader({tool.SEED_BY_YEAR: REAL_COOWNED}),
+                                      _loader({tool.SEED_BY_YEAR: TWIN_COOWNED}))
+    assert pairs == [('Agnes, Wendell', 'Ava, Walt', LEAGUE),
+                     ('Agnes & Wendell', 'Ava & Walt', LEAGUE)]
+
+
+def test_combined_label_is_replaced_in_one_step_despite_a_player_collision():
+    """The single first name collides with a player and is dropped, as
+    before; the label no longer depends on it."""
+    tool = _tool()
+    files = {tool.SEED_BY_YEAR: REAL_COOWNED}
+    labels = [(r, a) for r, a, _ in tool.co_owner_label_pairs(
+        _loader(files), _loader({tool.SEED_BY_YEAR: TWIN_COOWNED}))]
+    singles = [('Wendell', 'Walt'), ('Agnes', 'Ava')]
+    safe, dropped = tool.split_player_safe(labels + singles, {PLAYER})
+    assert dropped == [('Wendell', 'Walt')]
+
+    tabs = {'Season Records': ([['Holder'], ['Agnes & Wendell'], ['Agnes, Wendell'],
+                                [_link('Wendell+Rook', PLAYER)]], 1, 1)}
+    after = tool.simulate_scrub(tabs, tool.Replacer(safe))
+    assert [row[0] for row in after['Season Records'][0][1:3]] == ['Ava & Walt', 'Ava, Walt']
+
+    forms, _ = _inventory(tool, files)
+    spine = frozenset({tool._fold_name(PLAYER)})
+    result = tool.audit_tabs(after, forms, spine)
+    assert sum(result['residuals'].values()) == 0
+    assert result['excluded'][tool.CLS_OWNER_FIRST] == {PLAYER: 2}
+
+    # The old way -- first names one at a time -- left half a real label,
+    # and the inventory audit is what sees it.
+    half = tool.simulate_scrub(tabs, tool.Replacer([('Agnes', 'Ava')]))
+    assert half['Season Records'][0][1][0] == 'Ava & Wendell'
+    stale = tool.audit_tabs(half, forms, spine)
+    assert stale['residuals'][tool.CLS_OWNER_FIRST] == 2
+
+
+def test_first_name_only_label_left_by_the_drop_is_caught():
+    """An owner the history knows only by a first name renders as that bare
+    first name. If it collides with a player, the single-token drop leaves
+    it visible -- and the audit reports it rather than passing."""
+    tool = _tool()
+    files = {tool.SEED_BY_YEAR: [_by_year(2009, 4, 'Wendell')]}
+    forms, _ = _inventory(tool, files)
+    tabs = {'Home': ([['Owner'], ['Wendell'], [_link('Wendell+Rook', PLAYER)]], 1, 1)}
+    spine = frozenset({tool._fold_name(PLAYER)})
+
+    safe, dropped = tool.split_player_safe([('Wendell', 'Walt')], {PLAYER})
+    assert dropped and not safe
+    result = tool.audit_tabs(tool.simulate_scrub(tabs, tool.Replacer(safe)), forms, spine)
+    assert result['residuals'][tool.CLS_OWNER_FIRST] == 1
+    assert [w for w, _ in result['cells']] == ['Home!A2']
+
+    # With no player to collide with, the bare name is replaced and clean.
+    safe, _ = tool.split_player_safe([('Wendell', 'Walt')], set())
+    clean = tool.audit_tabs(tool.simulate_scrub(tabs, tool.Replacer(safe)), forms, spine)
+    assert sum(clean['residuals'].values()) == 0
+
+
+def test_multi_token_forms_are_never_dropped_as_player_collisions():
+    """A full name equal to a player's is still an owner identity in an
+    owner cell; player cells are protected by never being written."""
+    tool = _tool()
+    safe, dropped = tool.split_player_safe([(PLAYER, 'Walt Quill')], {PLAYER})
+    assert safe == [(PLAYER, 'Walt Quill')] and not dropped
+
+
 def test_simulate_scrub_suffixes_a_renamed_title_like_the_live_pass():
     tool = _tool()
     rep = tool.Replacer([('Wendell Quigg', 'Walt Quill')])

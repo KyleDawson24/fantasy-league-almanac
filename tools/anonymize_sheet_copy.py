@@ -101,15 +101,26 @@ PLAYER NAMES ARE NEVER TOUCHED
 
     So every real player name in the target is collected first -- the
     display text and search query of every baseball-reference HYPERLINK,
-    which is how the almanac renders players -- and any mapping pair whose
-    real form falls on a word boundary inside a player name is DROPPED. An
-    owner token that coincides with a player (a bare first name, mostly) is
-    simply not scrubbed; the owner is still hidden by their full name, the
-    "Last, First" form, and the team name, none of which collide with a
-    single player token. As belt-and-suspenders, a cell carrying a
-    baseball-reference link is never written at all. The count of dropped
-    tokens is printed, never silent -- privacy leans on what remains, so
-    the run says what it declined to touch and why.
+    which is how the almanac renders players -- and any SINGLE-TOKEN
+    mapping pair whose real form falls on a word boundary inside a player
+    name is DROPPED. An owner token that coincides with a player (a bare
+    first name, mostly) is simply not scrubbed; the owner is still hidden
+    by their full name, the "Last, First" form, the team name and -- since
+    MLB-323 -- the co-owner label, each mapped whole and never dropped. As
+    belt-and-suspenders, a cell carrying a baseball-reference link is
+    never written at all. The count of dropped tokens is printed, never
+    silent, and the inventory audit catches any real form a drop leaves
+    visible.
+
+CO-OWNER LABELS ARE MAPPED WHOLE (MLB-323)
+    A co-owned CBS franchise-season renders as its owners' first names,
+    "A, B" in the warehouse and "A & B" on most tabs. No config column
+    holds that string, so the label used to be reached one first name at a
+    time -- and with the colliding name dropped, half a real label stayed
+    on the page. Labels are now derived on both sides exactly as the
+    warehouse builds them and paired by franchise-season, "A & B" ->
+    "A' & B'" in both spellings; longest-first replaces the whole label in
+    one step, before any name inside it could match.
 
     The deliberately-kept team whose name is "14-30-8-24-5-15-13-20"
     (abbrev MATT) is left intact: its abbrev coincides with an owner's
@@ -561,6 +572,35 @@ def co_owner_labels(load):
             for key, oids in owners.items() if len(oids) > 1}
 
 
+def co_owner_label_pairs(real_load=None, twin_load=None):
+    """[(real label, twin label, league_key)] in BOTH spellings a reader
+    meets -- the warehouse's ', ' and the renderer's ' & '.
+
+    Paired by (league, season, franchise), never by position or by
+    re-pairing the first names one at a time: the twin's label is what
+    the twin's own config renders for the same franchise-season, ordered
+    by the twin's first names. A key co-owned on one side and not the
+    other raises; the tool does not invent a label.
+    """
+    real = co_owner_labels(real_load or _read_real)
+    twin = co_owner_labels(twin_load or _read_twin)
+    missing = sorted(set(real) - set(twin))
+    if missing:
+        raise RuntimeError(
+            f"{len(missing)} co-owned franchise-season(s) in {_REAL_DIR} are "
+            f"not co-owned in the published twin (first: {'/'.join(missing[0])}). "
+            f"Their labels have no twin to become; refusing to guess one."
+        )
+    out = []
+    for key in sorted(real):
+        anon = twin[key][0]
+        for label in real[key]:
+            out.append((label, anon, key[0]))
+            out.append((label.replace(CO_OWNER_JOIN, CO_OWNER_RENDER),
+                        anon.replace(CO_OWNER_JOIN, CO_OWNER_RENDER), key[0]))
+    return out
+
+
 # --------------------------------------------------------------------------
 # Mapping derivation
 # --------------------------------------------------------------------------
@@ -928,6 +968,16 @@ def build_mapping(verbose=True):
     for r, a in _pair_by_key(SEED_BY_YEAR, year_real, year_twin, _resolve_by_year):
         add(r.get('owner_name'), a.get('owner_name'), 'by_year.owner_name',
             (r.get('league_key') or '').strip() or None)
+
+    # Co-owner labels as WHOLE forms (MLB-323). The label is a string no
+    # config column holds, so it used to be reached only one first name at
+    # a time -- and a first name that collides with a player is dropped,
+    # which left "<real> & <twin>" half-scrubbed in every CBS records tab.
+    # Mapped whole, the label is longer than any name inside it, so the
+    # longest-first single pass replaces it in one step and no first name
+    # ever has to be mapped alone.
+    for real_label, anon_label, lg in co_owner_label_pairs():
+        add(real_label, anon_label, 'co_owner.label', lg)
 
     # cbs_franchises: team names (which carry surnames) and abbrevs.
     fr_real, fr_twin = _load_pair(SEED_FRANCHISES)
@@ -1572,15 +1622,18 @@ def build_player_oracle(tabs):
 def split_player_safe(pairs, player_names):
     """Partition pairs into (safe, dropped).
 
-    Dropped = the real form occurs, on word boundaries, inside some real
-    player name; replacing it would deface a player. Everything else is
-    safe to apply globally.
+    Dropped = a SINGLE-TOKEN real form (a bare first or last name) that
+    occurs, on word boundaries, inside some real player name; replacing it
+    would deface a player. A multi-token form -- a full name, a co-owner
+    label, a team name -- is never dropped: player cells are never written
+    at all, and dropping one would leave a whole owner identity visible.
+    Whatever a drop leaves visible, the inventory audit catches.
     """
     blob = '\n'.join(player_names)
     safe, dropped = [], []
     for real_value, anon_value in pairs:
         pattern = rf'(?<![0-9A-Za-z_]){re.escape(real_value)}(?![0-9A-Za-z_])'
-        if re.search(pattern, blob, re.IGNORECASE):
+        if len(real_value.split()) == 1 and re.search(pattern, blob, re.IGNORECASE):
             dropped.append((real_value, anon_value))
         else:
             safe.append((real_value, anon_value))

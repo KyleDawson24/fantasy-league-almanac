@@ -146,16 +146,30 @@ DOUBLE SAFETY LATCH (in this order, both before any write)
         prepend the ANON banner and carry on -- the copy has already
         proven it is not a real sheet.
 
+THE TOOL HIDES PEOPLE, NOT CONTENT (Kyle's ruling, 2026-10-06)
+    It hides owners and co-owners: their full names, and their first names
+    wherever a first name stands as an owner label. It never hides MLB
+    players, and it never hides fantasy team names or abbreviations --
+    public content, the 2026-08-10 ruling in tools/check_pii.py,
+    reaffirmed. A team name or abbreviation publishes verbatim unless the
+    scrub map (or the demo fixture's twin) has a row for it, and a visible
+    one is reported as information, never as a failure. The one exception:
+    a team name carrying a real owner's first AND last name is an owner
+    form -- a residual and a refusal; one carrying only a last name is
+    reported. When an abbreviation row applies, every team name kept
+    verbatim is an identity pair in the same single pass, so "I Paid BP
+    Writers for Advice" and "Intentional Walk to the Bar" stay as written
+    while a standalone BP or WALK still maps; the audit counts an
+    abbreviation inside a kept name as excused for that reason.
+
 NO TWIN, NO RUN (MLB-323)
-    Before the first write (latch (b)'s rename), check_twins reads the
-    target's team pages -- the renderer's own A1 "{team} ({abbrev})"
-    header -- and the config's teams, plus every owner full name in the
-    inventory, and refuses if any has no twin. Twins are reviewed rows
-    Kyle adds; the tool never invents one. A team is twinned through its
-    abbreviation; a team NAME without a row of its own is kept verbatim
-    and listed (fantasy team names are public content, Kyle's ruling of
-    2026-08-10 in tools/check_pii.py). The refusal names teams and gives
-    owners only as digests.
+    Before the first write (latch (b)'s rename), check_twins refuses if an
+    OWNER identity the book renders has no twin: an owner full name in the
+    inventory, or a team name (config, roster or the target's team pages,
+    read by the renderer's own A1 "{team} ({abbrev})" header) carrying an
+    owner's first and last name. Twins are reviewed rows Kyle adds; the
+    tool never invents one. Owners are refused by digest, never by name.
+    A team or abbreviation with no twin never refuses; it is listed.
 
 ACCEPTANCE (MLB-323)
     The audit does NOT rescan the tokens the mapping applied. That was the
@@ -1226,16 +1240,26 @@ def _assert_auditable(pairs):
 CLS_CO_OWNER = 'co-owner label'
 CLS_OWNER_FULL = 'owner full name'
 CLS_OWNER_FIRST = 'owner first name'
-CLS_TEAM = 'team name'
-CLS_ABBREV = 'team abbreviation'
+CLS_TEAM_OWNER = 'team name w/ owner'
 CLS_OWNER_ID = 'owner id'
 CLS_CONTACT = 'contact detail'
 CLS_SCRUB_MAP = 'scrub-map form'
+CLS_TEAM = 'team name'
+CLS_ABBREV = 'team abbreviation'
+CLS_SCRUB_TEAM = 'scrub-map team form'
 
 # Report order, and the class a hit is filed under when one string is
 # several kinds of form at once.
-FORM_CLASSES = (CLS_CO_OWNER, CLS_OWNER_FULL, CLS_OWNER_FIRST, CLS_TEAM,
-                CLS_ABBREV, CLS_OWNER_ID, CLS_CONTACT, CLS_SCRUB_MAP)
+FORM_CLASSES = (CLS_CO_OWNER, CLS_OWNER_FULL, CLS_OWNER_FIRST, CLS_TEAM_OWNER,
+                CLS_OWNER_ID, CLS_CONTACT, CLS_SCRUB_MAP,
+                CLS_TEAM, CLS_ABBREV, CLS_SCRUB_TEAM)
+
+# The tool hides PEOPLE (Kyle's ruling, 2026-10-06). Fantasy team names and
+# abbreviations are public content -- the 2026-08-10 ruling in
+# tools/check_pii.py, reaffirmed -- so a visible one is reported as
+# information and never fails a run. The exception is CLS_TEAM_OWNER: a
+# team name carrying a real owner's first AND last name is an owner form.
+INFO_CLASSES = frozenset({CLS_TEAM, CLS_ABBREV, CLS_SCRUB_TEAM})
 
 # Abbreviations render in capitals and nowhere else. Matched case-
 # sensitively, "CAL" is a team and "Cal" is Cal Raleigh; every other class
@@ -1269,6 +1293,43 @@ def _classify_private(real):
 
 def _form_key(cls, value):
     return value if cls in EXACT_CASE_CLASSES else value.lower()
+
+
+def _words(text):
+    return (text or '').replace('’', "'").casefold()
+
+
+def _has_word(text, word):
+    """`word` in `text` on word boundaries, both already _words()-folded.
+    "Fulton" is in "Fulton's Folly"; "Andy" is not in "Andys"."""
+    return bool(word) and re.search(
+        rf'(?<![0-9a-z_]){re.escape(word)}(?![0-9a-z_])', text) is not None
+
+
+def owner_names(full_names):
+    """{(first, last)} from owner full names of two or more tokens, folded."""
+    out = set()
+    for name in full_names:
+        tokens = _words(name).replace(',', ' ').split()
+        if len(tokens) >= 2:
+            out.add((tokens[0], tokens[-1]))
+    return out
+
+
+def scan_team_names(team_names, owners):
+    """(with_full_name, with_last_name): team names carrying some real
+    owner's first AND last name -- an owner form, which stays a residual
+    and refuses without a twin -- and those carrying only a last name,
+    which are reported and never refused."""
+    full, last_only = [], []
+    for team in sorted(set(t for t in team_names if t)):
+        t = _words(team)
+        holders = [(f, l) for f, l in owners if _has_word(t, l)]
+        if any(_has_word(t, f) for f, _ in holders):
+            full.append(team)
+        elif holders:
+            last_only.append(team)
+    return full, last_only
 
 
 def platform_roster(root=_SHARED_EXPORTS):
@@ -1382,12 +1443,47 @@ def build_form_inventory(league, kept, roster=(), load=_read_real,
         add(r.get('canonical_name'), CLS_TEAM, r.get('league_key'), 'lineage.canonical_name')
         add(r.get('canonical_abbrev'), CLS_ABBREV, r.get('league_key'), 'lineage.canonical_abbrev')
 
-    for real, _ in private():
-        add(real, _classify_private(real), None, 'scrub_map')
-
     for row in roster:
         add(row.get('owner_display'), CLS_OWNER_FULL, row.get('league_key'),
             'roster.owner_display')
+        add(row.get('team_name'), CLS_TEAM, row.get('league_key'), 'roster.team_name')
+        add(row.get('team_abbrev'), CLS_ABBREV, row.get('league_key'), 'roster.team_abbrev')
+
+    # Who the owners are, as (first, last): what classifies the private
+    # map's unlabelled rows and drives the owner-name-in-team-name scan.
+    # Initial and "Last, First" forms are left out (they re-spell the same
+    # people), and so are identities the twin keeps (Kyle's own name).
+    kept_values = {v.lower() for v, _, _ in kept}
+    named = [f for f in forms if f.cls == CLS_OWNER_FULL
+             and f.source not in ('nicknames.initial_last', 'nicknames.last_first')]
+    owners = {o for o in owner_names(f.value for f in named)
+              if f'{o[0]} {o[1]}' not in kept_values}
+    known_owners = {f.value.lower() for f in named}
+    team_league = {}
+    for f in forms:
+        if f.cls == CLS_TEAM:
+            team_league.setdefault(f.value, f.league)
+    teams_folded = [_words(t) for t in team_league]
+
+    # The private map has no category column. A row is an owner form when
+    # it is a known owner name or carries one owner's first and last name;
+    # team content when it is, or is part of, a known team name; anything
+    # else stays a residual class -- the strict default.
+    for real, _ in private():
+        cls = _classify_private(real)
+        if cls == CLS_SCRUB_MAP:
+            w = _words(real)
+            if real.lower() in known_owners or any(
+                    _has_word(w, f) and _has_word(w, l) for f, l in owners):
+                cls = CLS_OWNER_FULL
+            elif any(_has_word(t, w) for t in teams_folded):
+                cls = CLS_SCRUB_TEAM
+                team_league.setdefault(real, None)
+        add(real, cls, None, 'scrub_map')
+
+    with_owner, with_last = scan_team_names(team_league, owners)
+    for team in with_owner:
+        add(team, CLS_TEAM_OWNER, team_league.get(team), 'team name scan')
 
     def in_scope(lg):
         return league is None or lg is None or lg == league
@@ -1399,7 +1495,11 @@ def build_form_inventory(league, kept, roster=(), load=_read_real,
             kept_keys.setdefault(value.lower(), source)
 
     notes = {'kept': defaultdict(set), 'too_short': Counter(),
-             'out_of_scope': 0, 'forms': Counter()}
+             'out_of_scope': 0, 'forms': Counter(), 'owners': owners,
+             'team_scan': {'with_owner': [t for t in with_owner
+                                          if in_scope(team_league.get(t))],
+                           'with_last': [t for t in with_last
+                                         if in_scope(team_league.get(t))]}}
     audited, seen = [], set()
     for f in forms:
         if not in_scope(f.league):
@@ -1426,7 +1526,11 @@ class FormMatcher:
 
     def __init__(self, forms):
         self._exact, self._loose = {}, {}
-        for f in forms:
+        # One string can be several kinds of form at once (a team name that
+        # carries an owner's name); the hit is filed under the earliest
+        # class in FORM_CLASSES, so an owner form outranks team content.
+        for f in sorted(forms, key=lambda f: FORM_CLASSES.index(f.cls)
+                        if f.cls in FORM_CLASSES else len(FORM_CLASSES)):
             if f.cls in EXACT_CASE_CLASSES:
                 self._exact.setdefault(f.value, f)
             else:
@@ -1767,11 +1871,15 @@ def proven_players(cell, spine):
     return []
 
 
-def audit_tabs(tabs, forms, spine, spreadsheet_title=None):
+def audit_tabs(tabs, forms, spine, spreadsheet_title=None, kept_names=()):
     """Search every cell, formula and tab title for every audited form.
 
     tabs: {title: (grid, origin_row, origin_col)} as _read_tabs returns.
-    A hit is a residual unless it is positively identified as an MLB player:
+    A team name or abbreviation (INFO_CLASSES) is public content: counted
+    as information, never a residual -- and an abbreviation inside the
+    exact span of a team name kept verbatim (`kept_names`) is counted as
+    excused for that reason. Any other hit is a residual unless it is
+    positively identified as an MLB player:
 
       * 'player cell'  -- it lies inside a span proven_players proves (a
         renderer player link or contributor list); any class.
@@ -1783,46 +1891,59 @@ def audit_tabs(tabs, forms, spine, spreadsheet_title=None):
     Excusals are counted by (reason, class) and by player, so the report
     shows exactly what was let through and why.
     """
-    matcher = FormMatcher(forms)
+    kept = sorted({n for n in kept_names if n}, key=len, reverse=True)
+    # A kept name is recognised as a span, not searched as a form: matched
+    # as a form it would swallow the abbreviation inside it, and the
+    # excusal the ruling asks to be counted would never be seen.
+    matcher = FormMatcher([f for f in forms if not (
+        f.cls in (CLS_TEAM, CLS_SCRUB_TEAM) and f.value in set(kept))])
     spine = as_spine(spine)
+    kept_re = re.compile('(?<![0-9A-Za-z_])(?:' + '|'.join(map(re.escape, kept))
+                         + ')(?![0-9A-Za-z_])') if kept else None
     result = {'residuals': Counter(), 'cells': [], 'excused': Counter(),
-              'excluded': defaultdict(Counter), 'excluded_cells': 0}
+              'excluded': defaultdict(Counter), 'excluded_cells': 0,
+              'info': Counter(), 'kept_names_visible': 0}
 
-    def residual(where, form):
-        result['residuals'][form.cls] += 1
-        result['cells'].append((where, form))
+    def judge(where, text, hits, cell=None):
+        team_spans = [m.span() for m in kept_re.finditer(text)] if kept_re else []
+        result['kept_names_visible'] += len(team_spans)
+        if not hits:
+            return False
+        spans = proven_players(cell, spine) if cell is not None else []
+        excused = False
+        for start, end, form in hits:
+            if form.cls in INFO_CLASSES:
+                if form.cls == CLS_ABBREV and any(s <= start and end <= e
+                                                  for s, e in team_spans):
+                    result['excused'][('kept team name', form.cls)] += 1
+                else:
+                    result['info'][form.cls] += 1
+                continue
+            reason = 'player cell'
+            player = next((p for s, e, p in spans if s <= start and end <= e), None)
+            if player is None and form.cls == CLS_OWNER_FIRST and spine:
+                reason = 'player name'
+                player = whole_player_name(text, start, end, spine)
+            if player is None:
+                result['residuals'][form.cls] += 1
+                result['cells'].append((where, form))
+            else:
+                result['excused'][(reason, form.cls)] += 1
+                result['excluded'][form.cls][player] += 1
+                excused = True
+        return excused
 
-    for text, where in ([(spreadsheet_title, '[spreadsheet title]')]
-                        if spreadsheet_title else []):
-        for _, _, form in matcher.find(text):
-            residual(where, form)
+    if spreadsheet_title:
+        judge('[spreadsheet title]', spreadsheet_title, matcher.find(spreadsheet_title))
     for title, (grid, row0, col0) in tabs.items():
-        for _, _, form in matcher.find(title):
-            residual(f'{title} [tab title]', form)
+        judge(f'{title} [tab title]', title, matcher.find(title))
         for r, row in enumerate(grid):
             for c, cell in enumerate(row):
                 if cell is None or cell == '' or isinstance(cell, bool):
                     continue
                 text = cell if isinstance(cell, str) else str(cell)
-                hits = matcher.find(text)
-                if not hits:
-                    continue
-                spans = proven_players(cell, spine)
                 where = f'{title}!{_col_letters(col0 + c)}{row0 + r}'
-                excused = False
-                for start, end, form in hits:
-                    reason = 'player cell'
-                    player = next((p for s, e, p in spans if s <= start and end <= e), None)
-                    if player is None and form.cls == CLS_OWNER_FIRST and spine:
-                        reason = 'player name'
-                        player = whole_player_name(text, start, end, spine)
-                    if player is None:
-                        residual(where, form)
-                    else:
-                        result['excused'][(reason, form.cls)] += 1
-                        result['excluded'][form.cls][player] += 1
-                        excused = True
-                result['excluded_cells'] += excused
+                result['excluded_cells'] += judge(where, text, matcher.find(text), cell)
     return result
 
 
@@ -1832,30 +1953,42 @@ def print_audit(result, notes, spine, roster_sources, show=25):
     open. Excluded player names ARE printed: they are public MLB names, and
     the report has to show what the positive check let through."""
     total = sum(result['residuals'].values())
-    n_forms = sum(notes['forms'].values())
-    print(f'  residual audit: {n_forms} real form(s) in {len(notes["forms"])} '
-          f'class(es), searched in every cell, formula and tab title')
+    owner_classes = [c for c in FORM_CLASSES if c not in INFO_CLASSES]
+    n_forms = sum(notes['forms'][c] for c in owner_classes)
+    print(f'  residual audit: {n_forms} real owner form(s), searched in every '
+          f'cell, formula and tab title')
     print(f'    {"class":<20} {"forms":>6} {"residual hits":>14}')
-    for cls in FORM_CLASSES:
+    for cls in owner_classes:
         if notes['forms'][cls] or result['residuals'][cls]:
             flag = '   <-- RESIDUAL' if result['residuals'][cls] else ''
             print(f'    {cls:<20} {notes["forms"][cls]:>6} '
                   f'{result["residuals"][cls]:>14}{flag}')
     print(f'    {"TOTAL":<20} {n_forms:>6} {total:>14}')
+    info = result.get('info', {})
+    print('  information only (team names and abbreviations are public content, '
+          'never a failure): ' + ', '.join(
+              f'{cls} {notes["forms"][cls]} form(s) / {info.get(cls, 0)} visible'
+              for cls in FORM_CLASSES if cls in INFO_CLASSES))
+    scan = notes.get('team_scan') or {}
+    print(f'  owner-name-in-team-name scan: {len(scan.get("with_owner", []))} team '
+          f"name(s) carry an owner's first AND last name (owner forms, "
+          f'residual class); {len(scan.get("with_last", []))} carry only a last '
+          f'name (reported): '
+          + (', '.join(repr(t) for t in scan.get('with_last', [])) or 'none'))
     for where, form in result['cells'][:show]:
         print(f'      {where}: {form.cls}, len {len(form.value)}, '
               f'#{_ref(form.value)} ({form.source})')
     if len(result['cells']) > show:
         print(f'      ... and {len(result["cells"]) - show} more')
 
-    excluded = sum(sum(c.values()) for c in result['excluded'].values())
-    print(f'  excused as MLB players: {excluded} hit(s) in '
-          f'{result["excluded_cells"]} cell(s), each inside a whole player name '
-          f'on the MLB spine ({len(spine)} names) -- a renderer player link or '
-          f'contributor list (any class), or a whole name anywhere in a cell '
-          f'(owner first names only)')
-    for (reason, cls), n in sorted(result.get('excused', {}).items()):
-        print(f'    {reason:<12} {cls:<20} {n:>6}')
+    excused = result.get('excused', {})
+    print(f'  excused: {sum(excused.values())} hit(s) -- MLB players on the spine '
+          f'({len(spine)} names): a renderer player link or contributor list '
+          f'(any class), or a whole player name anywhere in a cell (owner first '
+          f'names only); and abbreviations inside a team name kept verbatim')
+    for (reason, cls), n in sorted(excused.items()):
+        print(f'    {reason:<15} {cls:<20} {n:>6}')
+    print(f'  team names kept verbatim, occurrences: {result.get("kept_names_visible", 0)}')
     for cls in FORM_CLASSES:
         players = result['excluded'].get(cls)
         if players:
@@ -1894,13 +2027,12 @@ def print_audit(result, notes, spine, roster_sources, show=25):
 # ESPN team renamed mid-season had no row, and the copy would have
 # published it unchanged.)
 #
-# A TEAM is twinned when its abbreviation is: that is the team's identity
-# on every tab title and nav link. A team NAME with no row of its own is
-# kept verbatim, not refused -- fantasy team names are public portfolio
-# content by Kyle's 2026-08-10 ruling (tools/check_pii.py), and the
-# reviewed public sample published them that way -- and the report lists
-# each one. A team with no twinned abbreviation and no twinned name is a
-# team with no twin at all, and stops the run.
+# Only an OWNER identity stops a run (Kyle's ruling, 2026-10-06): the tool
+# hides people, and fantasy team names and abbreviations are public content
+# (the 2026-08-10 ruling in tools/check_pii.py, reaffirmed). A team without
+# a twin is listed and published verbatim. The one team-shaped refusal is a
+# team name carrying a real owner's first AND last name, which is an owner
+# form; a team name carrying only a last name is reported.
 
 # The renderer's team-page header (almanac_logic.build_team_history_tabs):
 # A1 is "{team_name} ({team_abbrev})", or the bare name when the team has
@@ -1925,62 +2057,51 @@ def team_pages(tabs):
     return out
 
 
-def untwinned(teams, owner_forms, pairs, kept, league):
-    """(teams, owners, kept_names) the mapping has no twin for.
+def check_twins(tabs, forms, pairs, kept, league, owners=()):
+    """Refuse -- before a single write -- when the book renders an OWNER
+    identity with no twin: an owner full name, or a team name carrying an
+    owner's first and last name (from the inventory's scan, or a team page
+    the scan finds now). Owners are never named, only class, length and
+    digest. Team names and abbreviations never refuse: one without a twin
+    is listed and published verbatim.
 
-    teams: [(where, team name, abbreviation)]; owner_forms: inventory Forms.
-    A string is twinned when a pair maps it, the target league's twin keeps
-    it, or it already IS a twin form (a copy scrubbed once before). Returns
-    the untwinned teams as (where, name, abbrev, name_twinned), the
-    untwinned owner Forms, and the team names kept verbatim under the
-    franchise-name ruling.
+    Returns the team names kept verbatim -- every known team name no pair
+    rewrites and that is not an owner form -- for the replacer to protect
+    and the audit to recognise.
     """
     pairs = [_as_pair(p) for p in pairs]
     in_scope = [v for v, lg, _ in kept if league is None or lg is None or lg == league]
     exact = {p.real for p in pairs if p.exact} | {p.anon for p in pairs} | set(in_scope)
     loose = ({p.real.lower() for p in pairs if not p.exact}
              | {p.anon.lower() for p in pairs} | {v.lower() for v in in_scope})
+    rewritten = {p.real.lower() for p in pairs if not p.exact}
 
-    bad_teams, kept_names = [], []
-    for where, name, abbrev in teams:
-        name_ok = bool(name) and name.lower() in loose
-        if abbrev and abbrev in exact:
-            if name and not name_ok:
-                kept_names.append(name)
-            continue
-        if not abbrev and name_ok:
-            continue
-        bad_teams.append((where, name, abbrev, name_ok))
-    bad_owners = [f for f in owner_forms
-                  if f.cls == CLS_OWNER_FULL and f.value.lower() not in loose]
-    return bad_teams, bad_owners, sorted(set(kept_names))
+    pages = team_pages(tabs)
+    page_owner, _ = scan_team_names([n for _, n, _ in pages], owners)
+    owner_teams = {f.value for f in forms if f.cls == CLS_TEAM_OWNER} | set(page_owner)
+    bad = [f for f in forms if f.cls in (CLS_OWNER_FULL, CLS_TEAM_OWNER)
+           and f.value.lower() not in loose]
+    bad += [Form(n, CLS_TEAM_OWNER, league, 'team page') for n in page_owner
+            if n.lower() not in loose and all(n != f.value for f in bad)]
 
-
-def check_twins(tabs, forms, pairs, kept, league):
-    """Refuse -- before a single write -- when the book renders a real team
-    or owner that has no twin. Teams are named (franchise names are public
-    content); owners never are, only their class, length and digest."""
-    teams = [(f"team page '{t}'", n, a) for t, n, a in team_pages(tabs)]
-    teams += [(f'config {f.source}', '', f.value) for f in forms if f.cls == CLS_ABBREV]
-    bad_teams, bad_owners, kept_names = untwinned(teams, forms, pairs, kept, league)
-    if kept_names:
-        print(f'  team names kept verbatim (abbreviation twinned; franchise '
-              f'names are public content, ruling 2026-08-10): '
-              f'{", ".join(repr(n) for n in kept_names)}')
-    if not bad_teams and not bad_owners:
-        print('  twins: every team page and every owner name has a twin')
-        return
-    lines = []
-    for where, name, abbrev, name_ok in bad_teams:
-        what = [f'abbreviation {abbrev!r} has no twin'] if abbrev else []
-        if name:
-            what.append(f'team name {name!r} ' + ('is twinned' if name_ok else 'has no twin'))
-        lines.append(f'    {where}: {"; ".join(what)}')
-    for f in bad_owners:
-        lines.append(f'    owner full name, len {len(f.value)}, #{_ref(f.value)} '
-                     f'({f.source}, {f.league or "any league"}) has no twin')
+    candidates = {n for _, n, _ in pages} | {f.value for f in forms if f.cls == CLS_TEAM}
+    keep = sorted(n for n in candidates
+                  if len(n) >= _MIN_TOKEN_LEN and n.lower() not in rewritten
+                  and n not in owner_teams)
+    if keep:
+        print(f'  team names kept verbatim (public content; protected from '
+              f'abbreviation rewrites inside them): {", ".join(repr(n) for n in keep)}')
+    no_twin = sorted({a for _, _, a in pages if a and a not in exact})
+    if no_twin:
+        print(f'  team abbreviations with no twin, published verbatim: '
+              f'{", ".join(repr(a) for a in no_twin)}')
+    if not bad:
+        print('  twins: every owner identity the book renders has a twin')
+        return keep
+    lines = [f'    {f.cls}, len {len(f.value)}, #{_ref(f.value)} '
+             f'({f.source}, {f.league or "any league"}) has no twin' for f in bad]
     raise SystemExit(
-        'REFUSING before any write: the book renders real identities with no '
+        'REFUSING before any write: the book renders owner identities with no '
         'twin row. Twins are reviewed rows -- add them to '
         'archives/anonymization/name_map.csv (real,fake) or the demo fixture; '
         'this tool never invents one.\n' + '\n'.join(lines))
@@ -2088,18 +2209,26 @@ class Replacer:
     means every character of the input is consumed at most once, so an
     anonymized name written into the text can never be re-matched by a
     later rule.
+
+    `protect` holds team names kept verbatim (MLB-323). Each is an identity
+    pair, matched exactly and returned unchanged; being longer than any
+    abbreviation inside it, it is consumed first, so "I Paid BP Writers
+    for Advice" stays as written while a standalone "BP" still maps.
     """
 
-    def __init__(self, pairs):
+    def __init__(self, pairs, protect=()):
         self.pairs = [_as_pair(p) for p in pairs]
         self._exact = {p.real: p.anon for p in self.pairs if p.exact}
         self._by_key = {p.real.lower(): p.anon for p in self.pairs if not p.exact}
+        self._protect = {name for name in protect if name}
         # Sorted longest-first so "First Last" wins over a bare "First"; at
-        # equal length a case-sensitive abbreviation goes first, so "MATT"
-        # the team outranks "Matt" the name.
-        ordered = sorted(self.pairs, key=lambda p: (-len(p.real), not p.exact, p.real))
-        alternation = '|'.join(f'(?-i:{re.escape(p.real)})' if p.exact else re.escape(p.real)
-                               for p in ordered)
+        # equal length a kept name goes first, then a case-sensitive
+        # abbreviation, so "MATT" the team outranks "Matt" the name.
+        entries = ([(name, 0) for name in self._protect]
+                   + [(p.real, 1 if p.exact else 2) for p in self.pairs])
+        ordered = sorted(entries, key=lambda e: (-len(e[0]), e[1], e[0]))
+        alternation = '|'.join(re.escape(text) if kind == 2 else f'(?-i:{re.escape(text)})'
+                               for text, kind in ordered)
         # Lookarounds rather than \b: these forms can start or end with a
         # non-word character (initials like "J.", possessive-adjacent
         # surnames), where \b would silently fail to anchor.
@@ -2116,6 +2245,8 @@ class Replacer:
 
         def _repl(match):
             found = match.group(0)
+            if found in self._protect:
+                return found
             if found in self._exact:
                 count[0] += 1
                 return self._exact[found]
@@ -2133,7 +2264,7 @@ class Replacer:
         MLB-323."""
         if self._pattern is None or not text:
             return []
-        return self._pattern.findall(text)
+        return [f for f in self._pattern.findall(text) if f not in self._protect]
 
 
 def _match_case(found, replacement):
@@ -2421,7 +2552,7 @@ def _rename_tabs(spreadsheet, replacer, dry_run):
     return len(requests)
 
 
-def anonymize(spreadsheet, all_pairs, dry_run, tabs=None):
+def anonymize(spreadsheet, all_pairs, dry_run, tabs=None, protect=()):
     """Build the player oracle, drop colliding tokens, then rename tabs and
     rewrite every safe cell value and formula. Returns the player-safe
     replacer. `tabs` is the pre-write read, when the caller already has it."""
@@ -2434,7 +2565,7 @@ def anonymize(spreadsheet, all_pairs, dry_run, tabs=None):
     player_names = build_player_oracle(tabs)
     safe, dropped = split_player_safe(all_pairs, player_names)
     _assert_auditable(safe)
-    replacer = Replacer(safe)
+    replacer = Replacer(safe, protect=protect)
 
     print(f'  player-name oracle: {len(player_names)} names from baseball-'
           f'reference links')
@@ -2470,13 +2601,13 @@ def anonymize(spreadsheet, all_pairs, dry_run, tabs=None):
     return replacer
 
 
-def audit(spreadsheet, forms, notes, spine, roster_sources):
+def audit(spreadsheet, forms, notes, spine, roster_sources, kept_names=()):
     """Re-read the whole copy and search it for every inventoried real form
     -- not for the forms the mapping applied. Returns the residual count;
     zero is the pass condition."""
     titles = [ws.title for ws in _sheets_call('list tabs', spreadsheet.worksheets)]
     tabs = _read_tabs(spreadsheet, titles)
-    result = audit_tabs(tabs, forms, spine, spreadsheet.title)
+    result = audit_tabs(tabs, forms, spine, spreadsheet.title, kept_names)
     return print_audit(result, notes, spine, roster_sources)
 
 
@@ -2569,14 +2700,15 @@ def main():
         tabs = _read_tabs(spreadsheet, [ws.title for ws in
                                         _sheets_call('list tabs', spreadsheet.worksheets)])
         # Before latch (b): its rename is this run's first write.
-        check_twins(tabs, forms, pairs, report['kept'], args.league)
+        kept_names = check_twins(tabs, forms, pairs, report['kept'], args.league,
+                                 notes['owners'])
         latch_b_anon_title(spreadsheet, args.dry_run)
 
         # The player-safe replacer is derived per target from its own player
         # roster, so a sheet with different players drops the right tokens.
-        anonymize(spreadsheet, pairs, args.dry_run, tabs=tabs)
+        anonymize(spreadsheet, pairs, args.dry_run, tabs=tabs, protect=kept_names)
 
-        residuals = audit(spreadsheet, forms, notes, spine, roster_sources)
+        residuals = audit(spreadsheet, forms, notes, spine, roster_sources, kept_names)
         if residuals:
             print(f'  AUDIT FAILED: {residuals} real form(s) still visible.')
             failures.append((target_id, residuals))

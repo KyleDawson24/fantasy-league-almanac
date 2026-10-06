@@ -110,15 +110,29 @@ def test_a_form_the_twin_keeps_is_set_aside_and_reported():
 
 def test_abbreviations_match_case_sensitively():
     """'CAL' the team is not 'Cal' the player: an abbreviation that matched
-    case-insensitively would collide with every player first name."""
+    case-insensitively would collide with every player first name. (A
+    visible abbreviation is information, not a residual -- see below.)"""
     tool = _tool()
     files = {tool.SEED_FRANCHISES: [{'league_key': LEAGUE, 'franchise_id': '4',
                                      'abbrev': 'THAD', 'franchise_name': 'Quigg Quarry'}]}
     forms, _ = _inventory(tool, files)
     tabs = {'Records': ([['Thad Rook (THAD)'], ['Thad Rook']], 1, 1)}
     result = tool.audit_tabs(tabs, forms, frozenset())
-    assert result['residuals'][tool.CLS_ABBREV] == 1
-    assert [w for w, _ in result['cells']] == ['Records!A1']
+    assert result['info'][tool.CLS_ABBREV] == 1
+
+
+def test_team_names_and_abbreviations_are_information_not_residuals():
+    """Kyle's ruling (2026-10-06, reaffirming 2026-08-10): fantasy team
+    names and abbreviations are public content. Visible, they are counted;
+    they never fail a run."""
+    tool = _tool()
+    files = {tool.SEED_FRANCHISES: [{'league_key': LEAGUE, 'franchise_id': '4',
+                                     'abbrev': 'QQRY', 'franchise_name': 'Quigg Quarry'}]}
+    forms, _ = _inventory(tool, files)
+    tabs = {'Standings': ([['Quigg Quarry'], ['QQRY']], 1, 1)}
+    result = tool.audit_tabs(tabs, forms, frozenset())
+    assert sum(result['residuals'].values()) == 0
+    assert result['info'] == {tool.CLS_TEAM: 1, tool.CLS_ABBREV: 1}
 
 
 # --------------------------------------------------------------------------
@@ -422,29 +436,98 @@ def test_team_pages_are_read_from_the_renderers_header():
                                      ('Agnes Acres', 'Agnes Acres', '')]
 
 
-def test_a_renamed_team_with_no_twin_refuses_and_names_it():
-    """The MLB-321 case: a team renamed after the map was written has no
-    twin row. The tool stops and says which team, rather than publishing
-    it unchanged or inventing a twin."""
+def test_a_renamed_team_with_no_twin_never_stops_a_run(capsys):
+    """The MLB-321 case, under Kyle's 2026-10-06 ruling: a team renamed
+    after the map was written has no twin row. Team names and abbreviations
+    are content, so the run goes on, lists it, and publishes it verbatim."""
     tool = _tool()
     tabs = {'WQ': _team_page('Walt World', 'WQ'),
             'QQRY': _team_page("Quigg's Quarry", 'QQRY')}
-    pairs = [tool.Pair('WQ', 'TMWQ', True)]
-    with pytest.raises(SystemExit) as refusal:
-        tool.check_twins(tabs, [], pairs, [], LEAGUE)
-    message = str(refusal.value)
-    assert "'QQRY' has no twin" in message
-    assert '''"Quigg's Quarry" has no twin''' in message
-    assert 'WQ' not in message.replace('QQRY', '')
+    kept = tool.check_twins(tabs, [], [tool.Pair('WQ', 'TMWQ', True)], [], LEAGUE)
+    out = capsys.readouterr().out
+    assert "with no twin, published verbatim: 'QQRY'" in out
+    assert kept == ["Quigg's Quarry", 'Walt World']
 
 
-def test_a_twinned_abbreviation_keeps_its_team_name_verbatim(capsys):
-    """Team names are public content (Kyle's 2026-08-10 ruling); a team
-    whose abbreviation has a twin runs, and its kept name is listed."""
+def test_a_team_name_rewritten_by_a_pair_is_not_kept_verbatim():
     tool = _tool()
     tabs = {'QQRY': _team_page("Quigg's Quarry", 'QQRY')}
-    tool.check_twins(tabs, [], [tool.Pair('QQRY', 'TMQQ', True)], [], LEAGUE)
-    assert "\"Quigg's Quarry\"" in capsys.readouterr().out
+    kept = tool.check_twins(tabs, [], [tool.Pair('QQRY', 'TMQQ', True),
+                                       ("Quigg's Quarry", 'Walt World')], [], LEAGUE)
+    assert kept == []
+
+
+def test_a_kept_team_name_is_protected_from_abbreviation_rewrites():
+    """"I Paid BP Writers for Advice" stays as written while a standalone
+    BP still maps -- invented here as Quigg QQ Club / QQ."""
+    tool = _tool()
+    rep = tool.Replacer([tool.Pair('QQ', 'TMQQ', True)], protect=['Quigg QQ Club'])
+    assert rep.sub('Quigg QQ Club (QQ)') == ('Quigg QQ Club (TMQQ)', 1)
+    assert rep.sub('QQ') == ('TMQQ', 1)
+    assert tool.Replacer([tool.Pair('QQ', 'TMQQ', True)]).sub('Quigg QQ Club') == \
+        ('Quigg TMQQ Club', 1)
+
+
+def test_an_abbreviation_inside_a_kept_name_is_counted_as_excused():
+    tool = _tool()
+    forms, _ = _inventory(tool, {}, private=[('QQ', 'TMQQ')])
+    tabs = {'Standings': ([['Quigg QQ Club'], ['QQ']], 1, 1)}
+    result = tool.audit_tabs(tabs, forms, frozenset(), kept_names=['Quigg QQ Club'])
+    assert result['excused'] == {('kept team name', tool.CLS_ABBREV): 1}
+    assert result['info'] == {tool.CLS_ABBREV: 1}
+    assert result['kept_names_visible'] == 1
+
+
+def _owner_and_team(tool, team_name):
+    return {
+        tool.SEED_TEAM_OWNERS: [{'league_key': LEAGUE, 'franchise_id': '4',
+                                 'owner_id': 'cbs-wendell-quigg'}],
+        tool.SEED_NICKNAMES: [{'owner_id': 'cbs-wendell-quigg', 'first_name': 'Wendell',
+                               'last_name': 'Quigg', 'preferred_name': ''}],
+        tool.SEED_FRANCHISES: [{'league_key': LEAGUE, 'franchise_id': '4',
+                                'abbrev': 'WQ', 'franchise_name': team_name}],
+    }
+
+
+def test_a_team_name_with_an_owners_first_and_last_name_is_an_owner_form():
+    """The one team-shaped refusal: a team name carrying a real owner's
+    first AND last name names the person."""
+    tool = _tool()
+    team = "Wendell Quigg's Quarry"
+    forms, notes = _inventory(tool, _owner_and_team(tool, team))
+    assert [f.value for f in forms if f.cls == tool.CLS_TEAM_OWNER] == [team]
+    assert notes['team_scan']['with_owner'] == [team]
+    # The owner has a twin; the team name does not -- refuse, by digest.
+    pairs = [('Wendell Quigg', 'Walt Quill'), ('Wendell', 'Walt'), ('Quigg', 'Quill')]
+    with pytest.raises(SystemExit) as refusal:
+        tool.check_twins({}, forms, pairs, [], LEAGUE, notes['owners'])
+    assert tool._ref(team) in str(refusal.value) and 'Quarry' not in str(refusal.value)
+    result = tool.audit_tabs({'Standings': ([[team]], 1, 1)}, forms, frozenset())
+    assert result['residuals'][tool.CLS_TEAM_OWNER] == 1
+
+
+def test_a_team_name_with_only_a_last_name_is_reported_not_refused():
+    tool = _tool()
+    forms, notes = _inventory(tool, _owner_and_team(tool, "Quigg's Quarry"))
+    assert notes['team_scan'] == {'with_owner': [], 'with_last': ["Quigg's Quarry"]}
+    owner_twins = [('Wendell Quigg', 'Walt Quill'), ('Quigg, Wendell', 'Quill, Walt'),
+                   ('W. Quigg', 'W. Quill')]
+    tool.check_twins({}, forms, owner_twins, [], LEAGUE, notes['owners'])
+
+
+def test_scrub_map_rows_are_sorted_into_owners_and_team_content():
+    """The private map has no category column: a known owner name, or one
+    owner's first and last name, is an owner form; a known team name or a
+    piece of one is team content; anything else stays a residual class."""
+    tool = _tool()
+    files = _owner_and_team(tool, 'Quarry Kings')
+    private = [('Wendell P. Quigg', 'Walt P. Quill'), ('Quarry', 'Mine'),
+               ('Old Spelling Of Nothing', 'Fake')]
+    forms, _ = _inventory(tool, files, private=private)
+    by_value = {f.value: f.cls for f in forms if f.source == 'scrub_map'}
+    assert by_value == {'Wendell P. Quigg': tool.CLS_OWNER_FULL,
+                        'Quarry': tool.CLS_SCRUB_TEAM,
+                        'Old Spelling Of Nothing': tool.CLS_SCRUB_MAP}
 
 
 def test_a_copy_scrubbed_once_already_is_twinned():
@@ -482,30 +565,39 @@ class _NoWrites:
 
 
 def test_the_refusal_comes_before_any_write(monkeypatch):
-    """Driven through main(): a team with no twin stops the run before latch
-    (b)'s rename -- the first write -- or any cell is touched."""
+    """Driven through main(): an owner with no twin -- a member who left,
+    known only to the platform roster -- stops the run before latch (b)'s
+    rename, the first write, or any cell is touched."""
     tool = _tool()
+    league = sorted(tool.load_registry()['leagues'])[0]
     tabs = {'QQRY': _team_page("Quigg's Quarry", 'QQRY')}
+    roster = [{'league_key': league, 'team_name': "Quigg's Quarry", 'team_abbrev': 'QQRY',
+               'owner_display': 'Wendell Quigg'}]
     sheet = _NoWrites()
 
     class _Client:
         def open_by_key(self, key):
             return sheet
 
+    empty = lambda name: []  # noqa: E731
+    inventory = tool.build_form_inventory
     monkeypatch.setattr(tool, '_load_env', lambda: None)
     monkeypatch.setattr(tool, 'build_mapping', lambda **kw: ([], {'kept': []}))
-    monkeypatch.setattr(tool, 'platform_roster', lambda: ([], []))
+    monkeypatch.setattr(tool, 'platform_roster', lambda: (roster, []))
+    monkeypatch.setattr(tool, 'build_form_inventory',
+                        lambda lg, kept, rows: inventory(lg, kept, rows, load=empty,
+                                                         private=list))
     monkeypatch.setattr(tool, 'load_player_spine', lambda root: frozenset())
     monkeypatch.setattr(tool, '_protected_sheet_ids', lambda: {'real-dev-id': 'SHEETS_DEV_ID'})
     monkeypatch.setattr(tool, '_client', lambda: _Client())
     monkeypatch.setattr(tool, '_read_tabs', lambda spreadsheet, titles: tabs)
-    league = sorted(tool.load_registry()['leagues'])[0]
     monkeypatch.setattr('sys.argv', ['anonymize_sheet_copy.py', '--league', league,
                                      '--target', 'throwaway-copy-id'])
     with pytest.raises(SystemExit) as refusal:
         tool.main()
     assert 'REFUSING before any write' in str(refusal.value)
-    assert "'QQRY' has no twin" in str(refusal.value)
+    assert tool._ref('Wendell Quigg') in str(refusal.value)
+    assert 'QQRY' not in str(refusal.value)
 
 
 # --------------------------------------------------------------------------

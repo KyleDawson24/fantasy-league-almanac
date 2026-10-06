@@ -27,7 +27,10 @@ overwritten -- rerunning writes a new directory beside the old one):
                                 order, then the extension and raw_ groups
         rollup.parquet          season x phase x team x player sums
         dims/league.parquet     format, period vocabulary, horizon
-        dims/seasons.parquet    opener, last day, provenance mix per season
+        dims/seasons.parquet    opener, last day, provenance mix per season,
+                                and whether the season is complete (why)
+        dims/outfield_games.parquet  MLB games at LF / CF / RF per
+                                player-season, where the spine has them
         dims/periods.parquet    period key -> dates, label, completeness
         dims/calendar.parquet   day -> period key, bins, phase, day_state
         dims/teams.parquet      team-season names and standings, no contacts
@@ -994,6 +997,45 @@ class League:
         # ('1B' -> 'SINGLES', ...), which by design lives only in dim_stat.
         if "dim_stat" in self.rels:
             copy("stat_vocabulary", f"SELECT * FROM {src}.dim_stat ORDER BY stat_name")
+
+        # Games at each outfield spot per player-season (Kyle, 2026-09-28): a
+        # league whose lineups say only OF seats its outfielders on the
+        # diamond by these counts. One game per game_pk at a spot (a player
+        # moved LF to CF mid-game counts once at each), inside the horizon.
+        # Players reach MLB ids through the platform's identity crosswalk; an
+        # ambiguous identity is left out, so the page falls back to its fixed
+        # order rather than seating a player by someone else's games.
+        if {"stg_mlb__game_positions", "dim_player_identity"} <= self.rels:
+            copy("outfield_games", f"""
+                WITH players AS (SELECT DISTINCT season_year, player_key FROM read_parquet({atom})),
+                ident AS (
+                    SELECT CAST(season_year AS INTEGER) AS season_year,
+                           CAST(CAST(platform_player_id AS BIGINT) AS VARCHAR) AS player_key,
+                           MIN(CAST(mlbam_id AS BIGINT)) AS mlbam_id
+                    FROM {src}.dim_player_identity
+                    WHERE platform = {lit(self.platform)} AND NOT COALESCE(is_ambiguous, FALSE)
+                      AND mlbam_id IS NOT NULL
+                    GROUP BY 1, 2 HAVING COUNT(DISTINCT mlbam_id) = 1),
+                games AS (
+                    SELECT CAST(season_year AS INTEGER) AS season_year, CAST(mlbam_id AS BIGINT) AS mlbam_id,
+                           COUNT(DISTINCT game_pk) FILTER (WHERE position_raw = 'LF') AS lf_games,
+                           COUNT(DISTINCT game_pk) FILTER (WHERE position_raw = 'CF') AS cf_games,
+                           COUNT(DISTINCT game_pk) FILTER (WHERE position_raw = 'RF') AS rf_games
+                    FROM {src}.stg_mlb__game_positions
+                    WHERE position_raw IN ('LF', 'CF', 'RF') AND game_date <= DATE {lit(self.horizon)}
+                    GROUP BY 1, 2)
+                SELECT p.season_year, p.player_key, i.mlbam_id, g.lf_games, g.cf_games, g.rf_games
+                FROM players p
+                JOIN ident i USING (season_year, player_key)
+                JOIN games g USING (season_year, mlbam_id)
+                ORDER BY 1, 2""")
+            ofg = lit((dims / "outfield_games.parquet").as_posix())
+            self.validations["outfield_games"] = {
+                "source": "stg_mlb__game_positions (distinct game_pk per spot) via dim_player_identity",
+                "seasons": [r[0] for r in q(con, f"SELECT DISTINCT season_year FROM read_parquet({ofg}) ORDER BY 1")],
+                "players": q(con, f"SELECT COUNT(*) FROM read_parquet({ofg})")[0][0]}
+        else:
+            self.validations["outfield_games"] = "absent: needs stg_mlb__game_positions and dim_player_identity"
 
         # As-of team names: the label a team carried over each stretch of a
         # season, so a per-day view can show the name of that day while the

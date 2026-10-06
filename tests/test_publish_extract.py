@@ -288,3 +288,43 @@ def test_a_points_season_is_complete_once_its_declared_last_period_is_delivered(
     _build(none, rows, "points")
     league_dir, _ = _run(none, tmp_path / "none", "cbs-bsb")
     assert _seasons(league_dir) == [(2026, False, "in_progress", None, None, None)]
+
+
+def test_outfield_games_count_one_game_per_spot_for_the_leagues_players(tmp_path, out):
+    # Kyle, 2026-09-28: a league whose lineups say only OF seats its
+    # outfielders by this season's MLB games at LF, CF and RF.
+    opener = date(2026, 3, 25)
+    rows = [_fact_row("cbs-bsb", 2026, opener + timedelta(days=d), 1, p, "SS", "hitting", 1.0)
+            for d in range(10) for p in ("11", "12", "13")]
+    db = tmp_path / "ESPN_FANTASY.duckdb"
+    _build(db, rows, "points", extra_sql=[
+        """CREATE TABLE ANALYTICS.dim_player_identity AS SELECT * FROM (VALUES
+            ('cbs', 'a', 2026, 1011, NULL, 11, FALSE, 1),
+            ('cbs', 'b', 2026, 1012, NULL, 12, TRUE, 2),
+            ('cbs', 'b', 2026, 1112, NULL, 12, TRUE, 2),
+            ('cbs', 'c', 2026, 1013, NULL, 13, FALSE, 1),
+            ('cbs', 'd', 2026, 1014, NULL, 14, FALSE, 1),
+            ('espn', 'a', 2026, 9011, NULL, 11, FALSE, 1)
+        ) t(platform, name_key, season_year, mlbam_id, stat_group_scope, platform_player_id,
+            is_ambiguous, n_mlbam)""",
+        """CREATE TABLE ANALYTICS.stg_mlb__game_positions AS SELECT * FROM (VALUES
+            (1011, 2026, 'hitting', DATE '2026-03-26', 1, 1, 'LF'),
+            (1011, 2026, 'hitting', DATE '2026-03-27', 2, 1, 'LF'),
+            (1011, 2026, 'hitting', DATE '2026-03-28', 3, 1, 'CF'),
+            (1011, 2026, 'hitting', DATE '2026-03-29', 4, 1, 'LF'),
+            (1011, 2026, 'hitting', DATE '2026-03-29', 4, 1, 'CF'),
+            (1011, 2026, 'pitching', DATE '2026-03-29', 4, 1, 'LF'),
+            (1012, 2026, 'hitting', DATE '2026-03-26', 8, 1, 'RF'),
+            (1013, 2026, 'hitting', DATE '2026-03-26', 5, 1, 'RF'),
+            (1013, 2026, 'hitting', DATE '2026-03-27', 6, 1, '1B'),
+            (1013, 2026, 'hitting', DATE '2026-04-30', 7, 1, 'RF'),
+            (1014, 2026, 'hitting', DATE '2026-03-26', 9, 1, 'CF')
+        ) t(mlbam_id, season_year, stat_group, game_date, game_pk, game_index, position_raw)"""])
+    league_dir, manifest = _run(db, out, "cbs-bsb")
+    got = duckdb.connect().execute(f"""SELECT * FROM read_parquet(
+        '{(league_dir / 'dims' / 'outfield_games.parquet').as_posix()}') ORDER BY player_key""").fetchall()
+    # 11: LF in games 1, 2 and 4, CF in 3 and 4 (a mid-game move counts at
+    # both spots, a game twice in one spot once). 12's identity is ambiguous,
+    # 14 is not the league's player, 13's late game is past the horizon.
+    assert got == [(2026, "11", 1011, 3, 2, 0), (2026, "13", 1013, 0, 0, 1)]
+    assert manifest["validations"]["outfield_games"]["players"] == 2

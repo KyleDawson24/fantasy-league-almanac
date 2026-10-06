@@ -344,6 +344,111 @@ def test_pairs_are_scoped_and_the_targets_kept_form_wins():
     assert kept_over == [('QX', 'private_map')]
 
 
+# --------------------------------------------------------------------------
+# No twin, no run
+# --------------------------------------------------------------------------
+
+def _team_page(name, abbrev=None):
+    a1 = f'{name} ({abbrev})' if abbrev else name
+    return ([[a1, '', 'Points glossary'], ['Optimal Lineups, through 9/28/2026'],
+             ["Points are calculated according to current season's scoring."]], 1, 1)
+
+
+def test_team_pages_are_read_from_the_renderers_header():
+    tool = _tool()
+    tabs = {'QQRY': _team_page("Quigg's Quarry", 'QQRY'),
+            'Agnes Acres': _team_page('Agnes Acres'),
+            'Records': ([["Quigg's Quarry (QQRY)"], ['Best Team Points']], 1, 1)}
+    assert tool.team_pages(tabs) == [('QQRY', "Quigg's Quarry", 'QQRY'),
+                                     ('Agnes Acres', 'Agnes Acres', '')]
+
+
+def test_a_renamed_team_with_no_twin_refuses_and_names_it():
+    """The MLB-321 case: a team renamed after the map was written has no
+    twin row. The tool stops and says which team, rather than publishing
+    it unchanged or inventing a twin."""
+    tool = _tool()
+    tabs = {'WQ': _team_page('Walt World', 'WQ'),
+            'QQRY': _team_page("Quigg's Quarry", 'QQRY')}
+    pairs = [tool.Pair('WQ', 'TMWQ', True)]
+    with pytest.raises(SystemExit) as refusal:
+        tool.check_twins(tabs, [], pairs, [], LEAGUE)
+    message = str(refusal.value)
+    assert "'QQRY' has no twin" in message
+    assert '''"Quigg's Quarry" has no twin''' in message
+    assert 'WQ' not in message.replace('QQRY', '')
+
+
+def test_a_twinned_abbreviation_keeps_its_team_name_verbatim(capsys):
+    """Team names are public content (Kyle's 2026-08-10 ruling); a team
+    whose abbreviation has a twin runs, and its kept name is listed."""
+    tool = _tool()
+    tabs = {'QQRY': _team_page("Quigg's Quarry", 'QQRY')}
+    tool.check_twins(tabs, [], [tool.Pair('QQRY', 'TMQQ', True)], [], LEAGUE)
+    assert "\"Quigg's Quarry\"" in capsys.readouterr().out
+
+
+def test_a_copy_scrubbed_once_already_is_twinned():
+    tool = _tool()
+    tabs = {'TMQQ': _team_page('Walt World', 'TMQQ')}
+    tool.check_twins(tabs, [], [tool.Pair('QQRY', 'TMQQ', True),
+                                ("Quigg's Quarry", 'Walt World')], [], LEAGUE)
+
+
+def test_an_owner_with_no_twin_refuses_and_is_never_named():
+    """A platform-served owner the config never held (a member who left)
+    has no twin; the refusal carries a digest, not the name."""
+    tool = _tool()
+    roster = [{'league_key': LEAGUE, 'team_name': 'Walt World', 'team_abbrev': 'WQ',
+               'owner_display': 'Wendell Quigg'}]
+    forms, _ = _inventory(tool, {}, roster=roster)
+    with pytest.raises(SystemExit) as refusal:
+        tool.check_twins({}, forms, [], [], LEAGUE)
+    message = str(refusal.value)
+    assert tool._ref('Wendell Quigg') in message
+    assert 'Wendell' not in message and 'Quigg' not in message
+
+
+class _NoWrites:
+    """A spreadsheet whose every write fails the test."""
+    title = 'ANON copy'
+
+    def __getattr__(self, name):
+        if name in ('update_title', 'batch_update', 'values_batch_update'):
+            raise AssertionError(f'{name} was called before the refusal')
+        raise AttributeError(name)
+
+    def worksheets(self):
+        return []
+
+
+def test_the_refusal_comes_before_any_write(monkeypatch):
+    """Driven through main(): a team with no twin stops the run before latch
+    (b)'s rename -- the first write -- or any cell is touched."""
+    tool = _tool()
+    tabs = {'QQRY': _team_page("Quigg's Quarry", 'QQRY')}
+    sheet = _NoWrites()
+
+    class _Client:
+        def open_by_key(self, key):
+            return sheet
+
+    monkeypatch.setattr(tool, '_load_env', lambda: None)
+    monkeypatch.setattr(tool, 'build_mapping', lambda **kw: ([], {'kept': []}))
+    monkeypatch.setattr(tool, 'platform_roster', lambda: ([], []))
+    monkeypatch.setattr(tool, 'load_player_spine', lambda root: frozenset())
+    monkeypatch.setattr(tool, '_protected_sheet_ids', lambda: {'real-dev-id': 'SHEETS_DEV_ID'})
+    monkeypatch.setattr(tool, '_client', lambda: _Client())
+    monkeypatch.setattr(tool, '_read_tabs', lambda spreadsheet, titles: tabs)
+    league = sorted(tool.load_registry()['leagues'])[0]
+    monkeypatch.setattr('sys.argv', ['anonymize_sheet_copy.py', '--league', league,
+                                     '--target', 'throwaway-copy-id'])
+    with pytest.raises(SystemExit) as refusal:
+        tool.main()
+    assert 'REFUSING before any write' in str(refusal.value)
+    assert "'QQRY' has no twin" in str(refusal.value)
+
+
 def test_simulate_scrub_suffixes_a_renamed_title_like_the_live_pass():
     tool = _tool()
     rep = tool.Replacer([('Wendell Quigg', 'Walt Quill')])

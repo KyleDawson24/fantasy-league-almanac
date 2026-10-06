@@ -146,6 +146,17 @@ DOUBLE SAFETY LATCH (in this order, both before any write)
         prepend the ANON banner and carry on -- the copy has already
         proven it is not a real sheet.
 
+NO TWIN, NO RUN (MLB-323)
+    Before the first write (latch (b)'s rename), check_twins reads the
+    target's team pages -- the renderer's own A1 "{team} ({abbrev})"
+    header -- and the config's teams, plus every owner full name in the
+    inventory, and refuses if any has no twin. Twins are reviewed rows
+    Kyle adds; the tool never invents one. A team is twinned through its
+    abbreviation; a team NAME without a row of its own is kept verbatim
+    and listed (fantasy team names are public content, Kyle's ruling of
+    2026-08-10 in tools/check_pii.py). The refusal names teams and gives
+    owners only as digests.
+
 ACCEPTANCE (MLB-323)
     The audit does NOT rescan the tokens the mapping applied. That was the
     old design, and it could only ever confirm the scrub did what it set
@@ -1005,15 +1016,12 @@ def build_mapping(verbose=True, league=None):
     # Private map fills what the seeds cannot: ESPN team names, which only
     # ever existed in the live API. Add only real-forms the seeds did not
     # already cover, so owner names stay identical to the seed twins.
-    seed_reals = {_form_key(CLS_ABBREV if ex else CLS_OWNER_FULL, real)
-                  for real, _, _, _, ex in tagged}
+    # Every private-map row goes in; scope_pairs lets a seed-derived pair
+    # for the same string win, once it knows which seeds are in scope.
     for real_value, anon_value in _read_private_map():
-        if real_value == anon_value:
-            continue
-        exact = _classify_private(real_value) == CLS_ABBREV
-        key = _form_key(CLS_ABBREV if exact else CLS_OWNER_FULL, real_value)
-        if key not in seed_reals:
-            add(real_value, anon_value, 'private_map', exact=exact)
+        if real_value != anon_value:
+            add(real_value, anon_value, PRIVATE_SOURCE,
+                exact=_classify_private(real_value) == CLS_ABBREV)
 
     pairs, report['kept_over_pair'], report['sources'] = scope_pairs(
         tagged, report['kept'], league)
@@ -1040,6 +1048,9 @@ def build_mapping(verbose=True, league=None):
     return pairs, report
 
 
+PRIVATE_SOURCE = 'private_map'
+
+
 def scope_pairs(tagged, kept, league):
     """(pairs, kept_over_pair, sources) for one target league.
 
@@ -1047,17 +1058,25 @@ def scope_pairs(tagged, kept, league):
     them; kept: (value, league, source) identity pairs. A pair from another
     league's config is out of scope. Within scope, a real form the target
     league's twin keeps UNCHANGED beats any pair for the same string from
-    elsewhere -- the twin is what a stranger's clone renders for this book.
-    league=None keeps everything.
+    elsewhere, and a seed-derived pair beats the private map's -- the twin
+    is what a stranger's clone renders for this book. league=None keeps
+    everything.
     """
     def in_scope(lg):
         return league is None or lg is None or lg == league
 
+    def key(real_value, exact):
+        return real_value if exact else real_value.lower()
+
     kept_here = {value for value, lg, _ in kept if in_scope(lg)}
     kept_fold = {value.lower() for value in kept_here}
+    seeded = {key(r, ex) for r, _, src, lg, ex in tagged
+              if src != PRIVATE_SOURCE and in_scope(lg)}
     pairs, kept_over_pair, sources = [], [], Counter()
     for real_value, anon_value, source, lg, exact in tagged:
         if not in_scope(lg):
+            continue
+        if source == PRIVATE_SOURCE and key(real_value, exact) in seeded:
             continue
         if (real_value in kept_here) if exact else (real_value.lower() in kept_fold):
             kept_over_pair.append((real_value, source))
@@ -1621,6 +1640,109 @@ def print_audit(result, notes, spine, roster_sources, show=25):
     return total
 
 
+# --------------------------------------------------------------------------
+# No twin, no run (MLB-323)
+# --------------------------------------------------------------------------
+#
+# A twin is a reviewed row Kyle adds -- to the demo fixture or to the
+# private map. The tool never invents one, so a real team or owner the
+# mapping has no twin for cannot be anonymized, and the honest move is to
+# stop BEFORE the copy is touched and name what is missing. (MLB-321: an
+# ESPN team renamed mid-season had no row, and the copy would have
+# published it unchanged.)
+#
+# A TEAM is twinned when its abbreviation is: that is the team's identity
+# on every tab title and nav link. A team NAME with no row of its own is
+# kept verbatim, not refused -- fantasy team names are public portfolio
+# content by Kyle's 2026-08-10 ruling (tools/check_pii.py), and the
+# reviewed public sample published them that way -- and the report lists
+# each one. A team with no twinned abbreviation and no twinned name is a
+# team with no twin at all, and stops the run.
+
+# The renderer's team-page header (almanac_logic.build_team_history_tabs):
+# A1 is "{team_name} ({team_abbrev})", or the bare name when the team has
+# no abbreviation, and A2 starts with this.
+_TEAM_PAGE_A2 = 'Optimal Lineups'
+_TEAM_PAGE_A1 = re.compile(r'^(.*\S) \(([^()]+)\)$')
+
+
+def team_pages(tabs):
+    """[(tab title, team name, abbreviation or '')] for every team page."""
+    out = []
+    for title, (grid, row0, col0) in tabs.items():
+        if (row0, col0) != (1, 1) or len(grid) < 2 or not grid[0] or not grid[1]:
+            continue
+        a1, a2 = grid[0][0], grid[1][0]
+        if not (isinstance(a1, str) and isinstance(a2, str)
+                and a2.startswith(_TEAM_PAGE_A2)):
+            continue
+        m = _TEAM_PAGE_A1.match(a1.strip())
+        name, abbrev = (m.group(1), m.group(2)) if m else (a1.strip(), '')
+        out.append((title, name, abbrev))
+    return out
+
+
+def untwinned(teams, owner_forms, pairs, kept, league):
+    """(teams, owners, kept_names) the mapping has no twin for.
+
+    teams: [(where, team name, abbreviation)]; owner_forms: inventory Forms.
+    A string is twinned when a pair maps it, the target league's twin keeps
+    it, or it already IS a twin form (a copy scrubbed once before). Returns
+    the untwinned teams as (where, name, abbrev, name_twinned), the
+    untwinned owner Forms, and the team names kept verbatim under the
+    franchise-name ruling.
+    """
+    pairs = [_as_pair(p) for p in pairs]
+    in_scope = [v for v, lg, _ in kept if league is None or lg is None or lg == league]
+    exact = {p.real for p in pairs if p.exact} | {p.anon for p in pairs} | set(in_scope)
+    loose = ({p.real.lower() for p in pairs if not p.exact}
+             | {p.anon.lower() for p in pairs} | {v.lower() for v in in_scope})
+
+    bad_teams, kept_names = [], []
+    for where, name, abbrev in teams:
+        name_ok = bool(name) and name.lower() in loose
+        if abbrev and abbrev in exact:
+            if name and not name_ok:
+                kept_names.append(name)
+            continue
+        if not abbrev and name_ok:
+            continue
+        bad_teams.append((where, name, abbrev, name_ok))
+    bad_owners = [f for f in owner_forms
+                  if f.cls == CLS_OWNER_FULL and f.value.lower() not in loose]
+    return bad_teams, bad_owners, sorted(set(kept_names))
+
+
+def check_twins(tabs, forms, pairs, kept, league):
+    """Refuse -- before a single write -- when the book renders a real team
+    or owner that has no twin. Teams are named (franchise names are public
+    content); owners never are, only their class, length and digest."""
+    teams = [(f"team page '{t}'", n, a) for t, n, a in team_pages(tabs)]
+    teams += [(f'config {f.source}', '', f.value) for f in forms if f.cls == CLS_ABBREV]
+    bad_teams, bad_owners, kept_names = untwinned(teams, forms, pairs, kept, league)
+    if kept_names:
+        print(f'  team names kept verbatim (abbreviation twinned; franchise '
+              f'names are public content, ruling 2026-08-10): '
+              f'{", ".join(repr(n) for n in kept_names)}')
+    if not bad_teams and not bad_owners:
+        print('  twins: every team page and every owner name has a twin')
+        return
+    lines = []
+    for where, name, abbrev, name_ok in bad_teams:
+        what = [f'abbreviation {abbrev!r} has no twin'] if abbrev else []
+        if name:
+            what.append(f'team name {name!r} ' + ('is twinned' if name_ok else 'has no twin'))
+        lines.append(f'    {where}: {"; ".join(what)}')
+    for f in bad_owners:
+        lines.append(f'    owner full name, len {len(f.value)}, #{_ref(f.value)} '
+                     f'({f.source}, {f.league or "any league"}) has no twin')
+    raise SystemExit(
+        'REFUSING before any write: the book renders real identities with no '
+        'twin row. Twins are reviewed rows -- add them to '
+        'archives/anonymization/name_map.csv (real,fake) or the demo fixture; '
+        'this tool never invents one.\n' + '\n'.join(lines))
+
+
 def simulate_scrub(tabs, replacer):
     """What the live pass would leave behind, computed offline: tab titles
     and every non-player cell rewritten by `replacer`, duplicate titles
@@ -2056,15 +2178,17 @@ def _rename_tabs(spreadsheet, replacer, dry_run):
     return len(requests)
 
 
-def anonymize(spreadsheet, all_pairs, dry_run):
+def anonymize(spreadsheet, all_pairs, dry_run, tabs=None):
     """Build the player oracle, drop colliding tokens, then rename tabs and
-    rewrite every safe cell value and formula. Returns the (player-safe)
-    replacer so the audit rescans against exactly what was applied."""
+    rewrite every safe cell value and formula. Returns the player-safe
+    replacer. `tabs` is the pre-write read, when the caller already has it."""
     # The oracle must be built before renaming: renaming rewrites formula
     # references, but the player display text it reads is unaffected, so an
     # up-front read is the clean source.
-    titles0 = [ws.title for ws in _sheets_call('list tabs', spreadsheet.worksheets)]
-    player_names = build_player_oracle(_read_tabs(spreadsheet, titles0))
+    if tabs is None:
+        titles0 = [ws.title for ws in _sheets_call('list tabs', spreadsheet.worksheets)]
+        tabs = _read_tabs(spreadsheet, titles0)
+    player_names = build_player_oracle(tabs)
     safe, dropped = split_player_safe(all_pairs, player_names)
     _assert_auditable(safe)
     replacer = Replacer(safe)
@@ -2159,11 +2283,15 @@ def main():
         print('  latch (a): not a registered dev/prod sheet -- OK')
 
         spreadsheet = _sheets_call('open', lambda: gc.open_by_key(target_id))
+        tabs = _read_tabs(spreadsheet, [ws.title for ws in
+                                        _sheets_call('list tabs', spreadsheet.worksheets)])
+        # Before latch (b): its rename is this run's first write.
+        check_twins(tabs, forms, pairs, report['kept'], args.league)
         latch_b_anon_title(spreadsheet, args.dry_run)
 
         # The player-safe replacer is derived per target from its own player
         # roster, so a sheet with different players drops the right tokens.
-        replacer = anonymize(spreadsheet, pairs, args.dry_run)
+        anonymize(spreadsheet, pairs, args.dry_run, tabs=tabs)
 
         residuals = audit(spreadsheet, forms, notes, spine, roster_sources)
         if residuals:

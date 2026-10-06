@@ -180,6 +180,20 @@ ACCEPTANCE (MLB-323)
     those print too. Zero residuals is the pass condition; anything else
     exits non-zero.
 
+    PLAYERS ARE NEVER ANONYMIZED (Kyle's ruling, 2026-10-06). The tool
+    hides the PEOPLE in a league; MLB players are public figures. So player
+    names are matched generously (PlayerSpine): with generational suffixes
+    and middle initials folded, under the renderer's short form ('M
+    Trout'), with formal and short given names equated (Michael / Mike),
+    and with one edit of surname drift. An owner FIRST name is excused when
+    it sits inside such a whole player name anywhere in a cell -- prose
+    notes and runner-up strings included (whole_player_name). Never excused:
+    a first name outside a whole player name ("Chris", "Chris & Matt"),
+    because that is the shape a co-owner label leaks in. The spine is the
+    Stats API data under data/mlb_stats/season plus a supplement grown from
+    the Stats API's per-season player lists (--grow-spine FIRST-LAST),
+    which extract/mlb_load.py never loads.
+
     --league names the book being copied. Forms carry the league whose
     config they came from, and the inventory is that league's plus the
     private map's (which has no league column), so a first name in one
@@ -208,6 +222,7 @@ import sys
 import time
 import unicodedata
 import urllib.parse
+import urllib.request
 from collections import Counter, defaultdict
 from itertools import product
 from pathlib import Path
@@ -309,6 +324,14 @@ _MIN_TOKEN_LEN = 3
 # the sheet is never allowed to vouch for its own cells. Read-only, local,
 # no warehouse connection.
 _SPINE_DIR = REPO_ROOT / 'data' / 'mlb_stats' / 'season'
+
+# Players the spine directory lacks, grown from the same public source the
+# spine and the CBS crosswalk come from: the Stats API's per-season player
+# list. Beside the spine rather than in it, because extract/mlb_load.py
+# loads every season/*.json into RAW; this file feeds the anonymizer only.
+# Written by `--grow-spine`.
+_SPINE_SUPPLEMENT = REPO_ROOT / 'data' / 'mlb_stats' / 'people_supplement.json'
+_STATS_API = 'https://statsapi.mlb.com/api/v1'
 
 # The shared almanac export (MLB-301): per league, every team the platform
 # ever served, with its owner label. Platform-served owners never land in
@@ -1459,24 +1482,218 @@ def _fold_name(value):
     return ' '.join(value.replace('.', '').casefold().split())
 
 
-def load_player_spine(root=_SPINE_DIR):
-    """Folded MLB spine names (Stats API fullName), or an empty set when
-    the spine is not on disk -- in which case nothing can be proven and
-    every hit counts, which is the safe direction to fail."""
-    names = set()
-    if not Path(root).is_dir():
-        return frozenset()
-    for path in Path(root).glob('*.json'):
-        try:
-            doc = json.loads(path.read_text(encoding='utf-8'))
-        except (OSError, ValueError):
+# Kyle's ruling (2026-10-06): MLB players are public figures and are never
+# anonymized, so their names are matched GENEROUSLY -- the way a platform,
+# a renderer or a historian might spell the same person. What is never
+# excused is a first name that is not inside a whole player name: that is
+# exactly the shape a co-owner label leaks in ("Chris", "Chris & Matt").
+_NAME_SUFFIXES = frozenset({'jr', 'sr', 'ii', 'iii', 'iv', 'v'})
+_NAME_TOKEN = re.compile(r"[^\W\d_](?:[^\W\d_]|['’.\-])*")
+
+
+def _name_variants(name):
+    """The spellings one player goes by: as written, without a generational
+    suffix (Luis Robert / Luis Robert Jr.), without middle initials (Chris
+    Young / Chris B. Young), and both. Only two-or-more-token variants: a
+    single token is never a whole name."""
+    tokens = name.replace('’', "'").split()
+    out = set()
+    for drop_suffix in (False, True):
+        for drop_initials in (False, True):
+            t = list(tokens)
+            if drop_suffix and len(t) > 2 and t[-1].replace('.', '').lower() in _NAME_SUFFIXES:
+                t = t[:-1]
+            if drop_initials and len(t) > 2:
+                t = [t[0]] + [x for x in t[1:-1] if len(x.replace('.', '')) > 1] + [t[-1]]
+            if len(t) >= 2:
+                out.add(' '.join(t))
+    return out
+
+
+def _name_key(name):
+    return _fold_name(name.replace('-', ' ').replace("'", '').replace('’', ''))
+
+
+# Given names a platform writes formally and the Stats API informally, or the
+# other way round (CBS "Michael Burrows" is the Stats API's "Mike Burrows").
+# Applied only with the surname matching exactly, so a match is still one
+# player's whole name.
+_GIVEN_NAME_FORMS = (
+    'michael mike', 'matthew matt', 'christopher chris', 'james jim jimmy jamie',
+    'robert rob bob bobby robbie', 'daniel dan danny', 'david dave',
+    'thomas tom tommy', 'william will bill billy willie', 'jacob jake',
+    'joshua josh', 'alexander alex', 'nicholas nick', 'zachary zach zack',
+    'andrew andy drew', 'anthony tony', 'joseph joe joey', 'benjamin ben',
+    'samuel sam', 'steven stephen steve', 'gregory greg', 'edward ed eddie',
+    'richard rich rick ricky', 'timothy tim', 'kenneth ken kenny',
+    'patrick pat', 'peter pete', 'philip phillip phil', 'charles charlie',
+    'jeffrey jeff', 'jonathan jon', 'nathan nathaniel nate', 'douglas doug',
+    'gerald jerry', 'lawrence larry', 'raymond ray', 'ronald ron',
+    'donald don', 'frederick fred freddy', 'mitchell mitch', 'cameron cam',
+)
+_GIVEN_NAME = {form: group.split()[0] for group in _GIVEN_NAME_FORMS for form in group.split()}
+
+
+def _given_name_key(key):
+    first, _, rest = key.partition(' ')
+    return f'{_GIVEN_NAME.get(first, first)} {rest}' if rest else key
+
+
+def _within_one_edit(a, b):
+    """Levenshtein distance <= 1, without building the matrix."""
+    if a == b:
+        return True
+    if abs(len(a) - len(b)) > 1:
+        return False
+    if len(a) > len(b):
+        a, b = b, a
+    i = j = edits = 0
+    while i < len(a) and j < len(b):
+        if a[i] == b[j]:
+            i += 1
+            j += 1
             continue
-        for block in (doc.get('payload') or {}).get('stats') or []:
-            for split in block.get('splits') or []:
-                name = ((split.get('player') or {}).get('fullName') or '').strip()
-                if name:
-                    names.add(_fold_name(name))
-    return frozenset(names)
+        edits += 1
+        if edits > 1:
+            return False
+        if len(a) == len(b):
+            i += 1
+        j += 1
+    return edits + (len(b) - j) + (len(a) - i) <= 1
+
+
+class PlayerSpine:
+    """The independent record of who the players are, indexed for generous
+    WHOLE-name matching: every variant of every name (_name_variants), the
+    renderer's board short form of each ('M Trout', _draft_initial_text),
+    and, for spelling drift, the same surname under a formal or short form
+    of the given name (_GIVEN_NAME_FORMS) or the same first name with a
+    surname one edit away (five letters or longer). Built from Stats API
+    fullNames, never from anything the sheet says about itself."""
+
+    def __init__(self, names=()):
+        self.names = frozenset(n for n in names if n)
+        self._full, self._short, self._given = set(), set(), set()
+        self._surnames = defaultdict(set)
+        for name in self.names:
+            for variant in _name_variants(name):
+                key = _name_key(variant)
+                first, _, rest = key.partition(' ')
+                if not rest:
+                    continue
+                self._full.add(key)
+                self._given.add(_given_name_key(key))
+                self._surnames[first].add(rest)
+                self._short.add(_name_key(_draft_initial_text(variant)))
+
+    def __len__(self):
+        return len(self.names)
+
+    def __contains__(self, name):
+        return self.matches(name)
+
+    def matches(self, name):
+        """True when `name` is some spine player's whole name, in any of
+        the spellings above."""
+        for variant in _name_variants(name.replace('+', ' ')):
+            key = _name_key(variant)
+            if key in self._full or key in self._short or _given_name_key(key) in self._given:
+                return True
+            first, _, rest = key.partition(' ')
+            if len(rest) >= 5 and any(_within_one_edit(rest, known)
+                                      for known in self._surnames.get(first, ())
+                                      if abs(len(known) - len(rest)) <= 1):
+                return True
+        return False
+
+
+def as_spine(spine):
+    """A PlayerSpine from whatever the caller holds (a spine, or names)."""
+    return spine if isinstance(spine, PlayerSpine) else PlayerSpine(spine or ())
+
+
+def whole_player_name(text, start, end, spine):
+    """The whole MLB player name in `text` that covers [start, end), or None.
+
+    Tries every run of two to five consecutive name tokens around the hit
+    -- separated by spaces only (or '+', a URL's space), so "Chris & Matt"
+    and "Matt, Chris" never form a run -- longest first, and asks the spine
+    whether the run is a player's whole name. Any cell shape qualifies:
+    prose notes, runner-up strings, labels, URLs.
+    """
+    tokens = list(_NAME_TOKEN.finditer(text))
+    k = next((i for i, t in enumerate(tokens) if t.start() <= start < t.end()), None)
+    if k is None:
+        return None
+    for i in range(k, max(-1, k - 4), -1):
+        for j in range(min(len(tokens) - 1, i + 4), max(i, k) - 1, -1):
+            if j == i or tokens[i].start() > start or tokens[j].end() < end:
+                continue
+            if any(not re.fullmatch(r'[ +]+', text[tokens[m].end():tokens[m + 1].start()])
+                   for m in range(i, j)):
+                continue
+            run = text[tokens[i].start():tokens[j].end()]
+            if spine.matches(run):
+                return run
+    return None
+
+
+def load_player_spine(root=_SPINE_DIR, supplement=_SPINE_SUPPLEMENT):
+    """The MLB spine (Stats API fullNames) plus the grown supplement, as a
+    PlayerSpine; empty when neither is on disk -- in which case nothing can
+    be proven and every hit counts, which is the safe direction to fail."""
+    names = set()
+    if Path(root).is_dir():
+        for path in Path(root).glob('*.json'):
+            try:
+                doc = json.loads(path.read_text(encoding='utf-8'))
+            except (OSError, ValueError):
+                continue
+            for block in (doc.get('payload') or {}).get('stats') or []:
+                for split in block.get('splits') or []:
+                    name = ((split.get('player') or {}).get('fullName') or '').strip()
+                    if name:
+                        names.add(name)
+    if supplement and Path(supplement).is_file():
+        try:
+            doc = json.loads(Path(supplement).read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            doc = {}
+        names.update((p.get('fullName') or '').strip() for p in doc.get('people') or [])
+    return PlayerSpine(names)
+
+
+def _fetch_json(url):
+    req = urllib.request.Request(url, headers={'User-Agent': 'espn-league-manager/anonymizer-spine'})
+    with urllib.request.urlopen(req, timeout=45) as resp:
+        return json.loads(resp.read())
+
+
+def grow_player_spine(first_season, last_season, fetch=_fetch_json,
+                      path=_SPINE_SUPPLEMENT, root=_SPINE_DIR, pause=0.3):
+    """Write every MLB player of the given seasons that the spine directory
+    lacks to the supplement, from the Stats API's per-season player list
+    (/sports/1/players?season=YYYY -- the source extract/mlb_crosswalk.py
+    indexes). Public, read-only, no token; touches no sheet. Returns the
+    number of people written."""
+    have = load_player_spine(root, supplement=None)
+    people, seen = [], set()
+    for season in range(first_season, last_season + 1):
+        for p in fetch(f'{_STATS_API}/sports/1/players?season={season}').get('people') or []:
+            name = (p.get('fullName') or '').strip()
+            if name and p.get('id') not in seen and _name_key(name) not in have._full:
+                seen.add(p.get('id'))
+                people.append({'id': p.get('id'), 'fullName': name})
+        if pause:
+            time.sleep(pause)
+    Path(path).write_text(json.dumps({
+        'source': f'{_STATS_API}/sports/1/players?season=<{first_season}..{last_season}>',
+        'fetched_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+        'note': 'players absent from data/mlb_stats/season; read by '
+                'tools/anonymize_sheet_copy.py only, never loaded to RAW',
+        'people': sorted(people, key=lambda p: p['fullName']),
+    }, indent=1, ensure_ascii=False), encoding='utf-8')
+    return len(people)
 
 
 def _draft_initial_text(name):
@@ -1497,7 +1714,7 @@ def _draft_initial_text(name):
     return f'{(core[:1] or first[:1]).upper()} {rest}'
 
 
-_POINTS_LABEL = re.compile(r'^(.*) \(-?\d+\)$')
+_POINTS_LABEL = re.compile(r'^(.*) \(-?[\d,]+(?:\.\d+)?\)$')
 
 
 def _is_player_label(display, name):
@@ -1532,19 +1749,20 @@ def proven_players(cell, spine):
         proves nothing at all. The spans are the names, so a hit counts as
         excluded only if it sits inside one.
     """
+    spine = as_spine(spine)
     if not isinstance(cell, str) or not spine:
         return []
     m = _BREF_CELL.match(cell)
     if m:
         key = urllib.parse.unquote_plus(m.group(1))
         display = m.group(2).replace('""', '"')
-        if _fold_name(key) in spine and _is_player_label(display, key):
+        if spine.matches(key) and _is_player_label(display, key):
             return [(0, len(cell), key)]
         return []
     if _CONTRIB_CELL.match(cell):
         spans = [(it.start(1), it.end(1), it.group(1))
                  for it in _CONTRIB_ITEM.finditer(cell)]
-        if spans and all(_fold_name(name) in spine for _, _, name in spans):
+        if spans and all(spine.matches(name) for _, _, name in spans):
             return spans
     return []
 
@@ -1553,12 +1771,21 @@ def audit_tabs(tabs, forms, spine, spreadsheet_title=None):
     """Search every cell, formula and tab title for every audited form.
 
     tabs: {title: (grid, origin_row, origin_col)} as _read_tabs returns.
-    A hit is a residual unless it lies inside a span proven_players proves;
-    those are excluded and returned by player name, so the report can show
-    exactly what the positive check let through.
+    A hit is a residual unless it is positively identified as an MLB player:
+
+      * 'player cell'  -- it lies inside a span proven_players proves (a
+        renderer player link or contributor list); any class.
+      * 'player name'  -- it is an owner FIRST name and sits inside a whole
+        player name anywhere in the cell (whole_player_name). Only first
+        names: a full owner name or a co-owner label is never excused by
+        resembling a player.
+
+    Excusals are counted by (reason, class) and by player, so the report
+    shows exactly what was let through and why.
     """
     matcher = FormMatcher(forms)
-    result = {'residuals': Counter(), 'cells': [],
+    spine = as_spine(spine)
+    result = {'residuals': Counter(), 'cells': [], 'excused': Counter(),
               'excluded': defaultdict(Counter), 'excluded_cells': 0}
 
     def residual(where, form):
@@ -1584,10 +1811,15 @@ def audit_tabs(tabs, forms, spine, spreadsheet_title=None):
                 where = f'{title}!{_col_letters(col0 + c)}{row0 + r}'
                 excused = False
                 for start, end, form in hits:
+                    reason = 'player cell'
                     player = next((p for s, e, p in spans if s <= start and end <= e), None)
+                    if player is None and form.cls == CLS_OWNER_FIRST and spine:
+                        reason = 'player name'
+                        player = whole_player_name(text, start, end, spine)
                     if player is None:
                         residual(where, form)
                     else:
+                        result['excused'][(reason, form.cls)] += 1
                         result['excluded'][form.cls][player] += 1
                         excused = True
                 result['excluded_cells'] += excused
@@ -1617,12 +1849,13 @@ def print_audit(result, notes, spine, roster_sources, show=25):
         print(f'      ... and {len(result["cells"]) - show} more')
 
     excluded = sum(sum(c.values()) for c in result['excluded'].values())
-    print(f'  excluded by the positive player check: {excluded} hit(s) in '
-          f'{result["excluded_cells"]} cell(s), each hit inside a name the '
-          f'MLB spine ({len(spine)} names) proves is a player: a renderer '
-          f'player link labelled with its own search key (or the renderer\'s '
-          f'short form of it), or a contributor list whose every name is on '
-          f'the spine')
+    print(f'  excused as MLB players: {excluded} hit(s) in '
+          f'{result["excluded_cells"]} cell(s), each inside a whole player name '
+          f'on the MLB spine ({len(spine)} names) -- a renderer player link or '
+          f'contributor list (any class), or a whole name anywhere in a cell '
+          f'(owner first names only)')
+    for (reason, cls), n in sorted(result.get('excused', {}).items()):
+        print(f'    {reason:<12} {cls:<20} {n:>6}')
     for cls in FORM_CLASSES:
         players = result['excluded'].get(cls)
         if players:
@@ -2284,18 +2517,29 @@ def main():
         # print one must not crash the run halfway through a scrub.
         sys.stdout.reconfigure(errors='backslashreplace')
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument('--target', action='append', required=True,
+    ap.add_argument('--target', action='append',
                     help='spreadsheet id or url of a THROWAWAY copy; repeatable')
-    ap.add_argument('--league', required=True,
-                    choices=sorted(load_registry()['leagues']),
+    ap.add_argument('--league', choices=sorted(load_registry()['leagues']),
                     help="the league whose book the target(s) copy; the audit's "
                          "form inventory is that league's")
     ap.add_argument('--player-spine', default=str(_SPINE_DIR),
                     help='MLB Stats API season documents (the positive player '
                          'check); default: %(default)s')
+    ap.add_argument('--grow-spine', metavar='FIRST-LAST',
+                    help='instead of anonymizing: fetch the MLB player lists of '
+                         'seasons FIRST..LAST from the public Stats API and write '
+                         f'the players the spine lacks to {_SPINE_SUPPLEMENT.name}')
     ap.add_argument('--dry-run', action='store_true',
                     help='report what would change; write nothing')
     args = ap.parse_args()
+
+    if args.grow_spine:
+        first, _, last = args.grow_spine.partition('-')
+        n = grow_player_spine(int(first), int(last or first))
+        print(f'spine supplement: {n} player(s) the spine lacked -> {_SPINE_SUPPLEMENT}')
+        return 0
+    if not args.target or not args.league:
+        ap.error('--target and --league are required (unless --grow-spine)')
 
     _load_env()
 

@@ -155,20 +155,79 @@ def test_player_collision_is_excluded_by_proof_and_reported():
     assert set(result['excluded'][tool.CLS_OWNER_FIRST]) == {'Thaddeus Rook'}
 
 
-def test_unproven_player_shaped_cells_still_count():
-    """Proof is all-or-nothing and never comes from the sheet itself."""
+def test_a_first_name_inside_a_whole_player_name_is_excused_anywhere():
+    """Kyle's 2026-10-06 ruling: players are never anonymized, so an owner
+    first name inside a whole player name is excused in any cell shape --
+    prose notes, runner-up strings, a nickname-labelled link's URL, the
+    proven names of a list that also holds an unproven one."""
     tool = _tool()
     forms, spine = _thaddeus(tool)
     tabs = {'Records': ([
-        ['Thaddeus'],                                       # a bare name: 1
-        [_link('Thaddeus+Rook', 'Thad the Hammer')],         # nickname label: 1 (URL)
-        [_link('Thaddeus+Ruck', 'Thaddeus Ruck')],           # off the spine: 2
-        ['Thaddeus Rook: 41, Quentin Fogg: 12'],             # one name unproven: 1
-        ['including Thaddeus Rook and, worst of all...'],    # prose never qualifies: 1
+        ['including Thaddeus Rook and, worst of all...'],
+        ['T Rook (400.0)'],
+        [_link('Thaddeus+Rook', 'Thad the Hammer')],
+        ['Thaddeus Rook: 41, Quentin Fogg: 12'],
     ], 1, 1)}
     result = tool.audit_tabs(tabs, forms, spine)
-    assert result['residuals'][tool.CLS_OWNER_FIRST] == 6
-    assert result['excluded_cells'] == 0
+    assert sum(result['residuals'].values()) == 0
+    assert result['excused'][('player name', tool.CLS_OWNER_FIRST)] == 3
+
+
+def test_a_first_name_outside_a_whole_player_name_is_never_excused():
+    """The shapes a co-owner label leaks in: a bare first name, joined
+    first names, and a name the spine does not know."""
+    tool = _tool()
+    forms, spine = _thaddeus(tool)
+    tabs = {'Records': ([
+        ['Thaddeus'],                             # bare: 1
+        ['Thaddeus & Ozzie'],                     # a label shape: 1
+        ['Ozzie, Thaddeus'],                      # the warehouse spelling: 1
+        [_link('Thaddeus+Ruck', 'Thaddeus Ruck')],  # off the spine: 2
+    ], 1, 1)}
+    result = tool.audit_tabs(tabs, forms, spine)
+    assert result['residuals'][tool.CLS_OWNER_FIRST] == 5
+    assert not result['excused']
+
+
+def test_player_names_are_matched_generously():
+    """Suffixes, middle initials, formal vs short given names and a one-edit
+    surname all name the same player; the surname still has to be there."""
+    tool = _tool()
+    spine = tool.PlayerSpine(['Thaddeus Rook Jr.', 'Ozzie B. Plum', 'Mike Fenwick',
+                              'Quentin Fogarty'])
+    for name in ('Thaddeus Rook', 'Thaddeus Rook Jr.', 'Ozzie Plum', 'Ozzie B Plum',
+                 'Michael Fenwick', 'M Fenwick', 'Quentin Fogarthy', 'T Rook'):
+        assert spine.matches(name), name
+    for name in ('Thaddeus', 'Thaddeus Fenwick', 'Michael Rook', 'Quentin Fog', 'Ozzie'):
+        assert not spine.matches(name), name
+
+
+def test_the_spine_supplement_is_read_beside_the_spine(tmp_path):
+    tool = _tool()
+    (tmp_path / 'season').mkdir()
+    supplement = tmp_path / 'people_supplement.json'
+    supplement.write_text('{"people": [{"id": 1, "fullName": "Thaddeus Rook"}]}',
+                          encoding='utf-8')
+    assert not tool.load_player_spine(tmp_path / 'season', None).matches('Thaddeus Rook')
+    assert tool.load_player_spine(tmp_path / 'season', supplement).matches('Thaddeus Rook')
+
+
+def test_growing_the_spine_writes_only_the_players_it_lacks(tmp_path):
+    """From the Stats API's per-season player lists (faked here): a player
+    the spine already has is not written again."""
+    tool = _tool()
+    season = tmp_path / 'season'
+    season.mkdir()
+    (season / '1.json').write_text(
+        '{"payload": {"stats": [{"splits": [{"player": {"id": 1, "fullName": "Ozzie Plum"}}]}]}}',
+        encoding='utf-8')
+    lists = {2024: [{'id': 1, 'fullName': 'Ozzie Plum'}, {'id': 2, 'fullName': 'Thaddeus Rook'}],
+             2025: [{'id': 2, 'fullName': 'Thaddeus Rook'}]}
+    fetch = lambda url: {'people': lists[int(url.rsplit('=', 1)[1])]}  # noqa: E731
+    out = tmp_path / 'people_supplement.json'
+    assert tool.grow_player_spine(2024, 2025, fetch=fetch, path=out, root=season, pause=0) == 1
+    spine = tool.load_player_spine(season, out)
+    assert spine.matches('Thaddeus Rook') and spine.matches('Ozzie Plum')
 
 
 def test_no_spine_means_no_exclusions():

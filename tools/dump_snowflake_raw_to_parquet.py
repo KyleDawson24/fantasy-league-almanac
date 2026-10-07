@@ -33,6 +33,11 @@ scratch DuckDB gets the warehouse's exact modeled state without running
 dbt: the dashboard extract (MLB-319) reads models, and a model rebuilt
 on another engine is a second answer, not the same one. --exclude skips
 relations nothing downstream reads (STG_MLB__PLAYER_GAME is 42M rows).
+
+--out-dir writes the files and their manifest to a directory of the
+caller's choosing. A dashboard republish dumps into a fresh directory each
+time, so an earlier dump stays exactly as it was (the default path would
+SKIP its files, and --force would overwrite them).
 """
 
 import argparse
@@ -220,11 +225,16 @@ def main():
                     help="dump only the rows of TABLE matching PREDICATE (repeatable)")
     ap.add_argument("--keep-going", action="store_true",
                     help="record relations that fail to select and continue")
+    ap.add_argument("--out-dir",
+                    help="write here instead of data/parquet/<schema> (see module docstring)")
     args = ap.parse_args()
 
     global OUT_DIR, MANIFEST
     schema = args.schema.upper()
-    if schema != "RAW":
+    if args.out_dir:
+        OUT_DIR = Path(args.out_dir).resolve()
+        MANIFEST = OUT_DIR / "_manifest.json"
+    elif schema != "RAW":
         OUT_DIR = REPO_ROOT / "data" / "parquet" / schema.lower()
         MANIFEST = OUT_DIR / "_manifest.json"
     OUT_DIR.mkdir(parents=True, exist_ok=True)

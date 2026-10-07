@@ -251,11 +251,24 @@ def main(argv=None):
     team_by = {(int(t["season_year"]), t["team_id"]): t for t in teams}
     complete = {int(r["season_year"]): bool(r["done"]) for r in rows(con, """
         SELECT season_year, BOOL_AND(is_complete) AS done FROM dim_matchups GROUP BY 1""")} if has_matchups else {}
+    # A season is closed once the neutral layer says it is over
+    # (dims/seasons.is_season_complete: the last scheduled matchup ended, or
+    # a points league's last scoring period was delivered) and its matchups
+    # are all complete. Without that fact (an older extract), the current
+    # season of a head-to-head league is never closed: between bracket rounds
+    # every matchup played so far can be complete while the final is not.
+    season_cols = {r["column_name"] for r in rows(con, "SELECT column_name FROM (DESCRIBE dim_seasons)")}
+    season_done = ({int(r["season_year"]): bool(r["is_season_complete"]) for r in rows(
+        con, "SELECT season_year, is_season_complete FROM dim_seasons")}
+        if "is_season_complete" in season_cols else None)
     finishes = []
     for y in seasons:
         for r in by_season[y]:
             t = team_by.get((y, r["team_id"]), {})
-            closed = complete.get(y, False) and y != current or (complete.get(y, False) and points)
+            if season_done is not None:
+                closed = season_done.get(y, False) and complete.get(y, False)
+            else:
+                closed = complete.get(y, False) and y != current or (complete.get(y, False) and points)
             if points:
                 finish = r["standings_rank"] or (1 + sum(1 for o in by_season[y] if (o["calculated_points"] or 0) > (r["calculated_points"] or 0)))
                 final_rank = finish if closed else None

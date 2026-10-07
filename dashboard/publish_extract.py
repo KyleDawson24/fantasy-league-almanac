@@ -27,7 +27,10 @@ overwritten -- rerunning writes a new directory beside the old one):
                                 order, then the extension and raw_ groups
         rollup.parquet          season x phase x team x player sums
         dims/league.parquet     format, period vocabulary, horizon
-        dims/seasons.parquet    opener, last day, provenance mix per season
+        dims/seasons.parquet    opener, last day, provenance mix per season,
+                                and whether the season is complete (why)
+        dims/outfield_games.parquet  MLB games at LF / CF / RF per
+                                player-season, where the spine has them
         dims/periods.parquet    period key -> dates, label, completeness
         dims/calendar.parquet   day -> period key, bins, phase, day_state
         dims/teams.parquet      team-season names and standings, no contacts
@@ -323,6 +326,78 @@ class League:
         if dup:
             raise ExtractError(f"{self.key}: {dup} days fall in more than one period")
         self.validate_periods()
+        self.build_season_completion()
+
+    # Where a platform's own settings say how many scoring periods a points
+    # season has (CBS: league_details.scoring_periods). Read only when present.
+    DECLARED_PERIODS = "stg_cbs__league_settings"
+
+    def build_season_completion(self):
+        """Is each season OVER at the data horizon, and how do we know? One
+        computed fact per season, never a hand flag (Kyle, 2026-09-28: Home
+        goes to season mode when the season is complete).
+
+        A season a later season supersedes is over. Otherwise the answer
+        comes from the league's own schedule, read the way its format reads
+        periods: a head-to-head season is over once its LAST SCHEDULED
+        matchup period (the platform calendar, playoffs included) has ended
+        on or before the horizon; a points season is over once the platform
+        has DELIVERED standings for its declared last scoring period, and that
+        period's dates sit inside the horizon. Anything else is not over:
+        unproven means no, as in int_league_season_closure."""
+        con, src = self.con, self.src
+        if self.is_points:
+            declared = (f"""SELECT CAST(settings_season AS INTEGER) AS season_year,
+                                   CAST(scoring_periods AS INTEGER) AS scheduled_periods
+                            FROM {src}.{self.DECLARED_PERIODS} WHERE league_key = {lit(self.key)}"""
+                        if self.DECLARED_PERIODS in self.rels else
+                        "SELECT NULL::INTEGER AS season_year, NULL::INTEGER AS scheduled_periods WHERE FALSE")
+            delivered = (f"""SELECT CAST(ps.season_year AS INTEGER) AS season_year,
+                                    MAX(CAST(ps.period AS INTEGER)) AS delivered_periods
+                             FROM {src}.mart_period_standings ps
+                             JOIN periods_out p ON p.season_year = CAST(ps.season_year AS INTEGER)
+                              AND p.period_key = CAST(ps.period AS INTEGER)
+                              AND p.end_date <= DATE {lit(self.horizon)}
+                             WHERE ps.league_key = {lit(self.key)} GROUP BY 1"""
+                         if "mart_period_standings" in self.rels else
+                         "SELECT NULL::INTEGER AS season_year, NULL::INTEGER AS delivered_periods WHERE FALSE")
+            schedule = f"""
+                SELECT c.season_year, d.scheduled_periods, NULL::DATE AS last_scheduled_end,
+                       v.delivered_periods,
+                       COALESCE(v.delivered_periods >= d.scheduled_periods, FALSE) AS schedule_done,
+                       'last_scoring_period_delivered' AS done_evidence
+                FROM season_cal c
+                LEFT JOIN ({declared}) d USING (season_year)
+                LEFT JOIN ({delivered}) v USING (season_year)"""
+        else:
+            schedule = f"""
+                SELECT c.season_year, COUNT(p.period_key) AS scheduled_periods,
+                       arg_max(p.end_date, p.period_key) AS last_scheduled_end,
+                       NULL::INTEGER AS delivered_periods,
+                       COALESCE(arg_max(p.end_date, p.period_key) <= DATE {lit(self.horizon)}, FALSE)
+                           AS schedule_done,
+                       'last_scheduled_matchup_ended' AS done_evidence
+                FROM season_cal c LEFT JOIN periods p USING (season_year)
+                GROUP BY c.season_year"""
+        con.execute(f"""
+            CREATE OR REPLACE TEMP TABLE season_completion AS
+            SELECT x.season_year, x.scheduled_periods, x.last_scheduled_end, x.delivered_periods,
+                   (s.is_final OR x.schedule_done) AS is_season_complete,
+                   CASE WHEN s.is_final THEN 'superseded_season'
+                        WHEN x.schedule_done THEN x.done_evidence
+                        ELSE 'in_progress' END AS season_complete_evidence
+            FROM ({schedule}) x JOIN season_state s USING (season_year)""")
+        latest = q(con, """SELECT season_year, is_season_complete, season_complete_evidence,
+                                  scheduled_periods, last_scheduled_end, delivered_periods
+                           FROM season_completion ORDER BY season_year DESC LIMIT 1""")[0]
+        self.validations["season_completion"] = {
+            "rule": ("points: delivered period standings reach the platform's declared last scoring "
+                     "period, inside the horizon" if self.is_points else
+                     "h2h: the last scheduled matchup period ended on or before the horizon")
+                    + "; any season a later season supersedes is complete",
+            "latest_season": latest[0], "is_season_complete": latest[1], "evidence": latest[2],
+            "scheduled_periods": latest[3], "last_scheduled_end": str(latest[4]) if latest[4] else None,
+            "delivered_periods": latest[5]}
 
     def validate_periods(self):
         con, src = self.con, self.src
@@ -697,8 +772,11 @@ class League:
         copy("seasons", f"""
             SELECT c.season_year, c.opener, c.last_day, c.game_days, s.is_final,
                    (SELECT COUNT(*) FROM periods_out p WHERE p.season_year = c.season_year) AS period_count,
-                   m.rows, m.captured_rows, m.reconstructed_rows, m.estimated_rows, m.sentinel_rows
+                   m.rows, m.captured_rows, m.reconstructed_rows, m.estimated_rows, m.sentinel_rows,
+                   sc.is_season_complete, sc.season_complete_evidence, sc.scheduled_periods,
+                   sc.last_scheduled_end, sc.delivered_periods
             FROM season_cal c JOIN season_state s USING (season_year)
+            JOIN season_completion sc USING (season_year)
             JOIN (SELECT season_year, COUNT(*) AS rows,
                          COUNT(*) FILTER (WHERE provenance = 'captured') AS captured_rows,
                          COUNT(*) FILTER (WHERE provenance = 'reconstructed_day') AS reconstructed_rows,
@@ -850,9 +928,14 @@ class League:
                     FROM {src}.int_franchise_season_points
                     WHERE league_key = {lit(self.key)} AND is_season_complete
                     UNION ALL
+                    -- The delivered standings of a season still open in the
+                    -- warehouse's own closure; complete once the season is
+                    -- (season_completion: its last scoring period delivered).
                     SELECT CAST(ps.season_year AS INTEGER), CAST(ps.team_id AS INTEGER),
-                           CAST(ps.points AS DOUBLE), FALSE, 'delivered_period_standings'
+                           CAST(ps.points AS DOUBLE), COALESCE(sc.is_season_complete, FALSE),
+                           'delivered_period_standings'
                     FROM {src}.mart_period_standings ps
+                    LEFT JOIN season_completion sc ON sc.season_year = CAST(ps.season_year AS INTEGER)
                     WHERE ps.league_key = {lit(self.key)} AND ps.is_latest_period
                       AND CAST(ps.season_year AS INTEGER) NOT IN (
                           SELECT CAST(season_year AS INTEGER) FROM {src}.int_franchise_season_points
@@ -914,6 +997,46 @@ class League:
         # ('1B' -> 'SINGLES', ...), which by design lives only in dim_stat.
         if "dim_stat" in self.rels:
             copy("stat_vocabulary", f"SELECT * FROM {src}.dim_stat ORDER BY stat_name")
+
+        # Games at each outfield spot per player-season (Kyle, 2026-09-28): a
+        # league whose lineups say only OF seats its outfielders on the
+        # diamond by these counts. One game per game_pk at a spot (a player
+        # moved LF to CF mid-game counts once at each), inside the horizon.
+        # Players reach MLB ids through the platform's identity crosswalk (ids
+        # are text: CBS carries ui-only-<n> forms beside numeric ones); an
+        # ambiguous identity is left out, so the page falls back to its fixed
+        # order rather than seating a player by someone else's games.
+        if {"stg_mlb__game_positions", "dim_player_identity"} <= self.rels:
+            copy("outfield_games", f"""
+                WITH players AS (SELECT DISTINCT season_year, player_key FROM read_parquet({atom})),
+                ident AS (
+                    SELECT CAST(season_year AS INTEGER) AS season_year,
+                           CAST(platform_player_id AS VARCHAR) AS player_key,
+                           MIN(CAST(mlbam_id AS BIGINT)) AS mlbam_id
+                    FROM {src}.dim_player_identity
+                    WHERE platform = {lit(self.platform)} AND NOT COALESCE(is_ambiguous, FALSE)
+                      AND mlbam_id IS NOT NULL
+                    GROUP BY 1, 2 HAVING COUNT(DISTINCT mlbam_id) = 1),
+                games AS (
+                    SELECT CAST(season_year AS INTEGER) AS season_year, CAST(mlbam_id AS BIGINT) AS mlbam_id,
+                           COUNT(DISTINCT game_pk) FILTER (WHERE position_raw = 'LF') AS lf_games,
+                           COUNT(DISTINCT game_pk) FILTER (WHERE position_raw = 'CF') AS cf_games,
+                           COUNT(DISTINCT game_pk) FILTER (WHERE position_raw = 'RF') AS rf_games
+                    FROM {src}.stg_mlb__game_positions
+                    WHERE position_raw IN ('LF', 'CF', 'RF') AND game_date <= DATE {lit(self.horizon)}
+                    GROUP BY 1, 2)
+                SELECT p.season_year, p.player_key, i.mlbam_id, g.lf_games, g.cf_games, g.rf_games
+                FROM players p
+                JOIN ident i USING (season_year, player_key)
+                JOIN games g USING (season_year, mlbam_id)
+                ORDER BY 1, 2""")
+            ofg = lit((dims / "outfield_games.parquet").as_posix())
+            self.validations["outfield_games"] = {
+                "source": "stg_mlb__game_positions (distinct game_pk per spot) via dim_player_identity",
+                "seasons": [r[0] for r in q(con, f"SELECT DISTINCT season_year FROM read_parquet({ofg}) ORDER BY 1")],
+                "players": q(con, f"SELECT COUNT(*) FROM read_parquet({ofg})")[0][0]}
+        else:
+            self.validations["outfield_games"] = "absent: needs stg_mlb__game_positions and dim_player_identity"
 
         # As-of team names: the label a team carried over each stretch of a
         # season, so a per-day view can show the name of that day while the

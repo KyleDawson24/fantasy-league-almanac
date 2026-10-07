@@ -239,3 +239,93 @@ def test_platform_name_rides_beside_the_league_display_name(tmp_path, out):
         FROM read_parquet('{(league_dir / 'rollup.parquet').as_posix()}')""").fetchall()
     assert atom == rollup == [("Player 21", "P")]
     assert manifest["validations"]["inputs"]["platform_player_name"].startswith("fact player_name")
+
+
+def _seasons(league_dir):
+    return duckdb.connect().execute(f"""SELECT season_year, is_season_complete, season_complete_evidence,
+        scheduled_periods, last_scheduled_end, delivered_periods
+        FROM read_parquet('{(league_dir / 'dims' / 'seasons.parquet').as_posix()}')""").fetchall()
+
+
+def test_an_h2h_season_is_complete_once_its_last_scheduled_matchup_has_ended(tmp_path):
+    # Home's season mode reads this fact (Kyle, 2026-09-28). The schedule is
+    # the platform calendar, so an in-flight final matchup keeps it open.
+    days = [date(2026, 3, 25) + timedelta(days=d) for d in range(12)]
+    rows = [_fact_row("espn-main", 2026, d, 1, "21", "SS", "hitting", 1.0,
+                      matchup=1 if d < date(2026, 3, 30) else 2) for d in days]
+    db = tmp_path / "ESPN_FANTASY.duckdb"
+    _build(db, rows, "h2h", matchups=[
+        ("espn-main", 2026, 1, date(2026, 3, 25), date(2026, 3, 29), False),
+        ("espn-main", 2026, 2, date(2026, 3, 30), date(2026, 4, 5), True)])
+    league_dir, manifest = _run(db, tmp_path / "done", "espn-main")
+    assert _seasons(league_dir) == [(2026, True, "last_scheduled_matchup_ended", 2, date(2026, 4, 5), None)]
+    assert manifest["validations"]["season_completion"]["is_season_complete"] is True
+    root = pe.main(["--db", str(db), "--out", str(tmp_path / "open"), "--league", "espn-main",
+                    "--horizon", "2026-04-04"])
+    assert _seasons(root / "espn_main") == [(2026, False, "in_progress", 2, date(2026, 4, 5), None)]
+
+
+def test_a_points_season_is_complete_once_its_declared_last_period_is_delivered(tmp_path):
+    # A Wednesday opener and twelve days: period 1 ends on the first Sunday,
+    # period 2 is the next Monday-Sunday week. The platform declares two.
+    opener = date(2026, 3, 25)
+    rows = [_fact_row("cbs-bsb", 2026, opener + timedelta(days=d), 1, "11", "SS", "hitting", 1.0)
+            for d in range(12)]
+    settings = ("CREATE TABLE ANALYTICS.stg_cbs__league_settings AS "
+                "SELECT 'cbs-bsb' AS league_key, 2026 AS settings_season, 2 AS scoring_periods")
+    both = tmp_path / "both.duckdb"
+    _build(both, rows, "points", extra_sql=[settings, """INSERT INTO ANALYTICS.mart_period_standings
+        VALUES ('cbs-bsb', 2026, 1, '1', 10.0), ('cbs-bsb', 2026, 2, '1', 20.0)"""])
+    league_dir, _ = _run(both, tmp_path / "done", "cbs-bsb")
+    assert _seasons(league_dir) == [(2026, True, "last_scoring_period_delivered", 2, None, 2)]
+    one = tmp_path / "one.duckdb"
+    _build(one, rows, "points", extra_sql=[settings, """INSERT INTO ANALYTICS.mart_period_standings
+        VALUES ('cbs-bsb', 2026, 1, '1', 10.0)"""])
+    league_dir, _ = _run(one, tmp_path / "open", "cbs-bsb")
+    assert _seasons(league_dir) == [(2026, False, "in_progress", 2, None, 1)]
+    # No declared count: never called complete before a later season.
+    none = tmp_path / "none.duckdb"
+    _build(none, rows, "points")
+    league_dir, _ = _run(none, tmp_path / "none", "cbs-bsb")
+    assert _seasons(league_dir) == [(2026, False, "in_progress", None, None, None)]
+
+
+def test_outfield_games_count_one_game_per_spot_for_the_leagues_players(tmp_path, out):
+    # Kyle, 2026-09-28: a league whose lineups say only OF seats its
+    # outfielders by this season's MLB games at LF, CF and RF.
+    opener = date(2026, 3, 25)
+    rows = [_fact_row("cbs-bsb", 2026, opener + timedelta(days=d), 1, p, "SS", "hitting", 1.0)
+            for d in range(10) for p in ("11", "12", "13")]
+    db = tmp_path / "ESPN_FANTASY.duckdb"
+    _build(db, rows, "points", extra_sql=[
+        """CREATE TABLE ANALYTICS.dim_player_identity AS SELECT * FROM (VALUES
+            ('cbs', 'a', 2026, 1011, NULL, '11', FALSE, 1),
+            ('cbs', 'b', 2026, 1012, NULL, '12', TRUE, 2),
+            ('cbs', 'b', 2026, 1112, NULL, '12', TRUE, 2),
+            ('cbs', 'c', 2026, 1013, NULL, '13', FALSE, 1),
+            ('cbs', 'd', 2026, 1014, NULL, '14', FALSE, 1),
+            ('espn', 'a', 2026, 9011, NULL, '11', FALSE, 1),
+            ('cbs', 'e', 2026, 1015, NULL, 'ui-only-15', FALSE, 1)
+        ) t(platform, name_key, season_year, mlbam_id, stat_group_scope, platform_player_id,
+            is_ambiguous, n_mlbam)""",
+        """CREATE TABLE ANALYTICS.stg_mlb__game_positions AS SELECT * FROM (VALUES
+            (1011, 2026, 'hitting', DATE '2026-03-26', 1, 1, 'LF'),
+            (1011, 2026, 'hitting', DATE '2026-03-27', 2, 1, 'LF'),
+            (1011, 2026, 'hitting', DATE '2026-03-28', 3, 1, 'CF'),
+            (1011, 2026, 'hitting', DATE '2026-03-29', 4, 1, 'LF'),
+            (1011, 2026, 'hitting', DATE '2026-03-29', 4, 1, 'CF'),
+            (1011, 2026, 'pitching', DATE '2026-03-29', 4, 1, 'LF'),
+            (1012, 2026, 'hitting', DATE '2026-03-26', 8, 1, 'RF'),
+            (1013, 2026, 'hitting', DATE '2026-03-26', 5, 1, 'RF'),
+            (1013, 2026, 'hitting', DATE '2026-03-27', 6, 1, '1B'),
+            (1013, 2026, 'hitting', DATE '2026-04-30', 7, 1, 'RF'),
+            (1014, 2026, 'hitting', DATE '2026-03-26', 9, 1, 'CF')
+        ) t(mlbam_id, season_year, stat_group, game_date, game_pk, game_index, position_raw)"""])
+    league_dir, manifest = _run(db, out, "cbs-bsb")
+    got = duckdb.connect().execute(f"""SELECT * FROM read_parquet(
+        '{(league_dir / 'dims' / 'outfield_games.parquet').as_posix()}') ORDER BY player_key""").fetchall()
+    # 11: LF in games 1, 2 and 4, CF in 3 and 4 (a mid-game move counts at
+    # both spots, a game twice in one spot once). 12's identity is ambiguous,
+    # 14 is not the league's player, 13's late game is past the horizon.
+    assert got == [(2026, "11", 1011, 3, 2, 0), (2026, "13", 1013, 0, 0, 1)]
+    assert manifest["validations"]["outfield_games"]["players"] == 2

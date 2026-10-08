@@ -1,7 +1,7 @@
-# Archive
+# Code archive
 
 Frozen artifacts kept for posterity — historical reference only, not consumed
-by any active code path.
+by any active code path. Moved here from the repository root in v2.2.1.
 
 **Which "archive" is this?** This one holds *code exhaust* — retired scripts
 and scaffolding. `docs/archive/` holds *prose*: the phase documentation,

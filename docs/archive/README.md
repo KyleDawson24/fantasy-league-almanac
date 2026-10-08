@@ -2,8 +2,9 @@
 
 **Which "archive" is this?** The repo has three, and they hold different
 things: `docs/archive/` (here) is *prose* — the written record of how the
-project got here, published with the docs. `archive/` at the repo root is
-*code exhaust* — retired scripts and scaffolding, with its own index.
+project got here, published with the docs. `docs/archive/code/` is
+*code exhaust* — retired scripts and scaffolding, with its own index
+(moved from the repo root in v2.2.1).
 `archives/` is local-only safekeeping and is not in git at all.
 
 These files were written to hand work between sessions. They are kept

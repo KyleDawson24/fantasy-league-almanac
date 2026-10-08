@@ -242,7 +242,10 @@ Invoke-Robocopy -Label 'scratchpad' -Recurse `
     -Source (Join-Path $Checkout 'scratchpad') `
     -Dest   (Join-Path $DailyDir 'scratchpad') `
     -ExcludeFiles @('*.tar', '*.duckdb', '*.parquet') `
-    -ExcludeDirs  @('_to_delete', 'node_modules', '__pycache__') `
+    -ExcludeDirs  @('_to_delete', 'node_modules', '__pycache__',
+                    'buns-prototype',
+                    'Default', 'Profile *', 'Guest Profile',
+                    'System Profile', 'Crashpad', 'BrowserMetrics') `
     -MaxMB $MaxFileMB
 
 # The Fantrax capture harness lives OUTSIDE the repo; its corpus/ is
@@ -338,14 +341,41 @@ if ($NoPrivateSync) {
 }
 Write-Log "  private-sync: $SyncResult"
 
-# 6. Summary
+# 6. Summary, status file, and toast on failure
 $FreeAfter = Get-FreeGB
 $Elapsed   = [math]::Round(((Get-Date) - $Started).TotalMinutes, 1)
+$ExitCode  = if ($script:Failures.Count -gt 0) { 1 } else { 0 }
+$FailedLeg = if ($script:Failures.Count -gt 0) { ($script:Failures[0] -split ' -- ')[0] } else { '' }
 $Summary = ('SUMMARY {0} | bundle {1} MB | daily {2} MB, {3} files | weekly-raw {4} | push: {5} | private-sync: {6} | C: free {7} -> {8} GB | {9} min | failures: {10}' -f `
     $Date, $BundleMB, $DailyStats.MB, $DailyStats.Files, $RawMB, $PushResult, $SyncResult, $FreeBefore, $FreeAfter, $Elapsed, $script:Failures.Count)
 Write-Log "[6/6] $Summary"
 if ($script:Failures.Count -gt 0) {
     $script:Failures | ForEach-Object { Write-Log "  failure: $_" }
-    exit 1
 }
-exit 0
+
+# Status file: one line, machine-readable, always written.
+$StatusLine = if ($ExitCode -eq 0) {
+    "$Date exit=0"
+} else {
+    "$Date exit=$ExitCode failed=$FailedLeg"
+}
+$StatusFile = Join-Path $BackupRoot 'last_run_status.txt'
+Set-Content -LiteralPath $StatusFile -Value $StatusLine -Encoding UTF8
+
+# Toast on failure (best-effort; no dependency on BurntToast).
+if ($ExitCode -ne 0) {
+    try {
+        [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
+        $template = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent(
+            [Windows.UI.Notifications.ToastTemplateType]::ToastText02)
+        $texts = $template.GetElementsByTagName('text')
+        $texts.Item(0).AppendChild($template.CreateTextNode('Almanac backup failed')) | Out-Null
+        $texts.Item(1).AppendChild($template.CreateTextNode($StatusLine)) | Out-Null
+        $notifier = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('AlmanacBackup')
+        $notifier.Show([Windows.UI.Notifications.ToastNotification]::new($template))
+    } catch {
+        Write-Log "  toast failed (non-fatal): $($_.Exception.Message)"
+    }
+}
+
+exit $ExitCode

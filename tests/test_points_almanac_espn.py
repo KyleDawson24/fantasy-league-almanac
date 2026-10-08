@@ -717,6 +717,7 @@ def assembled(monkeypatch):
     return points_almanac
 
 
+@pytest.mark.warehouse
 def test_the_points_book_omits_matchup_history(assembled):
     """The tab is a week-by-week MATCHUP archive. This league has none, so
     it is absent rather than rendered as an empty H2H artifact."""
@@ -725,6 +726,7 @@ def test_the_points_book_omits_matchup_history(assembled):
     assert TEAM_WEEKS_TAB not in titles, f'Matchup History was built: {titles}'
 
 
+@pytest.mark.warehouse
 def test_an_in_flight_first_season_still_gets_home_records_and_standings(
         assembled):
     """No completed matchup, no completed season, a full book anyway."""
@@ -785,6 +787,7 @@ def test_the_h2h_record_book_language_is_untouched():
     assert 'Current Season records set last week are italicized.' in caption
 
 
+@pytest.mark.warehouse
 def test_home_is_first_so_the_preview_opens_on_it(assembled):
     tabs, _context, _titles = assembled.build_all_tabs(include_trades=False)
     assert tabs[0][0] == 'Home'

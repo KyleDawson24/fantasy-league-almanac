@@ -60,6 +60,28 @@ if str(_REPO_ROOT) not in sys.path:
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _snowflake_guard(request, monkeypatch):
+    """Block unmarked tests from opening a Snowflake connection.
+
+    Any test not decorated @pytest.mark.warehouse that calls
+    db._get_conn() fails immediately with a message naming the marker,
+    so a leaked warehouse path is caught on the maintainer's machine
+    instead of waiting for CI to error on missing credentials.
+    """
+    if 'warehouse' in {m.name for m in request.node.iter_markers()}:
+        return
+    import db
+
+    def _blocked():
+        raise RuntimeError(
+            f'{request.node.nodeid} opened a Snowflake connection without '
+            f'the @pytest.mark.warehouse marker. Mark the test or stub '
+            f'the query path.')
+
+    monkeypatch.setattr(db, '_get_conn', _blocked)
+
+
 @pytest.fixture(scope='session')
 def corpus_db():
     """Build the frozen corpus cache before any reader opens it (MLB-295)."""

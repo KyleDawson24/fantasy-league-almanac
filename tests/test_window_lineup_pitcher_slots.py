@@ -81,6 +81,7 @@ def stub_window(monkeypatch):
     return seen_sql
 
 
+@pytest.mark.warehouse
 def test_the_pool_prices_sp_and_rp_off_the_pitching_column(stub_window):
     """The regression itself, asserted on the emitted SQL.
 
@@ -102,6 +103,7 @@ def test_the_pool_prices_sp_and_rp_off_the_pitching_column(stub_window):
         not in pool_sql, "the single-slot 'P' test is back"
 
 
+@pytest.mark.warehouse
 def test_pitchers_fill_the_sp_and_rp_capacities(stub_window):
     """End to end: the board seats pitchers in the slots they occupy."""
     board = espn_points_data.window_lineup(1, 30)
@@ -123,6 +125,7 @@ def test_pitchers_fill_the_sp_and_rp_capacities(stub_window):
     assert by_slot['RP'][0]['position_pts'] == pytest.approx(150.0)
 
 
+@pytest.mark.warehouse
 def test_bench_and_il_stay_out_of_the_pool(stub_window):
     """The non-position guard is unrelated to the X-1 fix and must survive
     it -- the two clauses sit in the same SELECT."""

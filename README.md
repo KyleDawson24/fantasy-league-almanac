@@ -1,5 +1,7 @@
 # Fantasy League Almanac
 
+[Project website](https://kpdawson.com/fantasy-league-almanac/) · [Dashboard guide](https://kpdawson.com/fantasy-league-almanac/dashboard-guide.html) · [Quickstart](QUICKSTART.md)
+
 
 > Two fantasy baseball leagues, a quarter-century of history, one pipeline. It reconstructs seasons nobody recorded, re-prices more than a million individual player-game performances under one rulebook so eras can be compared honestly, and ships the result as a weekly recap and a browsable league almanac.
 
@@ -136,7 +138,7 @@ Logan Gilbert: 29.6, Nathan Eovaldi: 25.6, Rico Garcia: 20.7
 
 **An all-time records report**, and **a multi-tab league almanac in Google Sheets**: Home, Records, Advanced Standings, Draft Recap, a matchup history, a trade board, and one page per team. How to read it is documented in the [user guide](docs/user-guide/).
 
-Browse a real rendered almanac: the [H2H league sample](https://docs.google.com/spreadsheets/d/1gj4Lfp098asXtCRHmTzM6gWhzgfZiQ9urUMQ3oPqJzU) and the [points league sample](https://docs.google.com/spreadsheets/d/1mZeqeIQZeIFjs5Kj3LUwQcWU0pBh03sBep8RKwXJVo8), both read-only. These are copies of the real books with owner and franchise identities swapped for the same twins the demo fixture uses; the player names, the stat lines and every number in them are real.
+Browse a real rendered almanac: the [H2H league sample](https://docs.google.com/spreadsheets/d/1j-cEOvsuUrG2WJSx4dUgUdef6AG7MElcrirIMGhRyD0) and the [points league sample](https://docs.google.com/spreadsheets/d/127thm-errqshoGwZwtXaEcV8mkvMt2Y9GFoA5BXfiL4), both read-only. These are real league renders with the people anonymized: owner names and labels are swapped for fictional twins; team names stay as written unless they name a person. MLB player names, stat lines and every number are real.
 
 A few of its tabs:
 

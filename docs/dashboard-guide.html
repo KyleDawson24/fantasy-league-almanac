@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dashboard guide | Fantasy League Almanac</title>
+  <meta name="description" content="A page-by-page guide to the Fantasy League Almanac demo: team lineups, Superteams, filters, scoring views, and what is still being built.">
+  <link rel="canonical" href="https://kpdawson.com/fantasy-league-almanac/dashboard-guide.html">
+  <link rel="stylesheet" href="dashboard-guide.css?v=20260925-1">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to guide</a>
+  <header class="site-header">
+    <a class="brand" href="./">Fantasy League Almanac</a>
+    <nav aria-label="Main navigation">
+      <a href="./">Project website</a>
+      <a href="https://kpdawson.com/almanac/demo/">Open the demo</a>
+      <a href="https://github.com/KyleDawson24/fantasy-league-almanac/blob/main/QUICKSTART.md">Setup guide</a>
+    </nav>
+  </header>
+  <main id="main">
+    <div class="guide-hero">
+      <p class="eyebrow">Using the dashboard</p>
+      <h1>A guide to poking around your league’s history.</h1>
+      <p class="lede">Start with a team, a period, or a question about who actually produced. This guide explains the controls that are there now and the plans for pages still taking shape.</p>
+      <p>The dashboard and the Google Sheets workbook are two presentations of the same underlying data. <strong>The dashboard does not read the workbook.</strong> The downloadable project builds the Sheets almanac; the dashboard is a separate web layer.</p>
+      <p class="review-date">Guide reviewed September 25, 2026 · v2.2 preview · examples use the public demo</p>
+      <a class="button" href="https://kpdawson.com/almanac/demo/">Open the demo dashboard →</a>
+    </div>
+    <div class="guide-layout">
+      <aside class="contents">
+        <nav aria-label="On this page">
+          <p class="eyebrow">On this page</p>
+          <a href="#home">Home</a>
+          <a href="#team-pages">Team pages</a>
+          <a href="#superteams">Superteams</a>
+          <a href="#filters">Filters and the Filter Guide</a>
+          <a href="#scoring">Scoring views and column help</a>
+          <a href="#advanced-standings">Advanced Standings</a>
+          <a href="#record-book">Record Book</a>
+          <a href="#trades">Trades</a>
+          <a href="#draft">Draft Recap</a>
+          <a href="#club-records">Club Records</a>
+          <a href="#transactions">Transaction History</a>
+          <a href="#trophy-case">Trophy Case</a>
+          <a href="#rules">Rules &amp; Payouts</a>
+          <a href="#coverage">Coverage and freshness</a>
+          <a href="#limitations">Known limitations</a>
+          <a href="#definitions">Shared definitions</a>
+        </nav>
+      </aside>
+      <div class="guide-body">
+        <section id="home" data-source="demo-home design-v03">
+          <p class="status">Available now</p>
+          <h2>Home</h2>
+          <p>The Home page opens with a league Superteam: a computed lineup assembled from the selected period’s production. Use <strong>Period</strong> to switch between the displayed completed matchup, the season, and All-Time. The date label tells you what the published data covers.</p>
+          <p><strong>Explore Superteams</strong> opens the lineup builder with that view’s selections. This is where you can change clubs, dates, production type, or the stat used to choose the lineup.</p>
+          <p>The standings summary is a starting point; <strong>All standings views</strong> opens the Advanced Standings page, which is still in development. Farther down, <strong>Explore The Clubs</strong> provides links to each club’s page.</p>
+          <p><a href="https://kpdawson.com/almanac/demo/almanac.html?page=home">Open Home in the demo →</a></p>
+        </section>
+
+        <section id="team-pages" data-source="filter-guide handoff design-v04 demo-team">
+          <p class="status">Current views available · more tabs planned</p>
+          <h2>Team pages</h2>
+          <p>Choose a club from Home or Team Pages. <strong>Current Season</strong> and <strong>Club History</strong> are working views worth exploring now. These views are here to stay. Club Records, Transaction History, and Trophy Case are still to come.</p>
+          <h3>Current Season</h3>
+          <p>The opening view uses the latest saved roster, the current season’s captured production, Total production, Calculated Points, and current eligibility. “Current” means the latest saved observation, not a live call to ESPN.</p>
+          <p>Three choices are independent: <strong>who is in the player pool</strong>, <strong>which performances count</strong>, and <strong>where players may be placed</strong>. With Current Roster Only checked, moving the performance dates backward does not recreate an old roster or undo a player’s acquisition. To explore previous seasons, use Club History.</p>
+          <p>For example, open <a href="https://kpdawson.com/almanac/demo/almanac.html?page=clubs&amp;club=1&amp;club_view=season">Cedar Lynx in the demo</a>. <strong>All MLB Games</strong> includes captured production from before a current player joined the club; <strong>Cedar Lynx Tenure</strong> restricts it to the time that player belonged to the club. The roster selection itself is a separate choice.</p>
+          <h3>Club History</h3>
+          <p>Club History starts with the club’s all-time leading scorers, using historical Active club production. It includes former players and allows all captured seasons. Use it when the question is what someone contributed to this franchise, rather than what today’s roster has produced elsewhere.</p>
+          <h3>Diamond, Table, and All Players</h3>
+          <ul>
+            <li><strong>Diamond / Table</strong> changes the presentation of the same selected lineup and slots. It does not choose a different team.</li>
+            <li>The slot-shaped table separates starting hitters, starting pitchers, and reserves. Repeated slots remain separate, and empty slots remain visible. “Active” above the starters names that group; it does not override the Production Type selector.</li>
+            <li><strong>All Players</strong> is the separate sortable player-statistics table below the lineup. Use its column headings, position filter, and page controls to inspect the larger pool. Its All / Hitting / Pitching controls change the displayed stat groups.</li>
+            <li><strong>Fantasy / MLB</strong> changes stat columns, not player selection. In All Players, the All view stays a points summary. Click a player to open the available player detail.</li>
+          </ul>
+          <p>On Current Season with <strong>Current Roster Only</strong> checked, saved fantasy-IL occupants stay in the configured IL slots. This uses saved placements; it does not infer medical eligibility. Changing the performance dates does not move those saved occupants.</p>
+          <figure>
+            <a href="img/dashboard-team-page-lineup-diamond.png"><img src="img/dashboard-team-page-lineup-diamond.png" alt="Cedar Lynx in the public demo, with a lineup diamond, bench, and pitching staff" width="1440" height="1310" loading="lazy"></a>
+            <figcaption>The public demo’s team lineup. Open the image for a larger view; its displayed dates belong to the captured screenshot.</figcaption>
+          </figure>
+        </section>
+
+        <section id="superteams" data-source="filter-guide design-v03 demo-superteams">
+          <p class="status">Available now</p>
+          <h2>Superteams</h2>
+          <p>This is the lineup builder for one club, several clubs, or the whole captured league. Choose a <strong>Club</strong> selection and a <strong>Period</strong>, then use <strong>Production Type</strong> and <strong>Stat</strong> to decide what the lineup should maximize.</p>
+          <p>Calculated Points is one option; a stat such as Triples builds a different lineup around that stat. <strong>Positions</strong> controls which positional evidence is used. The resulting lineup still follows the league’s configured slots and restrictions.</p>
+          <p><strong>Split Production by Team</strong> separates a player’s included production by fantasy club. With it off, that production is combined. Neither choice changes the selected dates or production type.</p>
+          <p>The lineup, player detail, and All Players table work as described above. Read the lineup explanation and date labels after changing filters. The <a href="#filters">Filter Guide</a> explains the scope choices next to the controls.</p>
+          <p><a href="https://kpdawson.com/almanac/demo/almanac.html?page=superteam">Open Superteams in the demo →</a></p>
+        </section>
+
+        <section id="filters" data-source="filter-guide handoff">
+          <h2>Filters and the Filter Guide</h2>
+          <p>Open the collapsible <strong>Filter Guide</strong> on Team Pages or Superteams for help beside the controls. These filters change the view; they do not edit the underlying data.</p>
+          <dl class="controls">
+            <dt>Period / Custom Date Range</dt>
+            <dd>Period selects the league’s preset periods. An enabled Custom Date Range overrides those selections with one continuous timespan. Current Season stays within the current season’s captured dates; Club History allows all captured seasons. Superteams supports a matchup, season, multiple matchups, or All-Time.</dd>
+            <dt>Current Roster Only</dt>
+            <dd>On a Team Page, checked means the latest saved roster, even for dates before acquisition. Unchecked includes players who belonged to the club during the selected dates, including departed players.</dd>
+            <dt>Include Stats From</dt>
+            <dd>All MLB Games includes captured production regardless of fantasy ownership, including free-agent days. A club’s Tenure includes only production while rostered by that club. Superteams also offers the fantasy league’s owned production, excluding free-agent days, and Selected Clubs Tenure for the selected clubs. With Active selected, All MLB Games means active for any fantasy club; club Tenure means active for that club.</dd>
+            <dt>Production Type</dt>
+            <dd>Choose the Active, Total, or current Wasted view within the production scope above. Read <a href="#scoring">Scoring views</a> for the shared definitions and the dashboard’s current Wasted limitation. Changing production type does not change the saved roster.</dd>
+            <dt>Stat</dt>
+            <dd>Choose the measure the lineup maximizes. It changes the optimized lineup, not the league’s underlying scoring rules.</dd>
+            <dt>Positions</dt>
+            <dd><strong>Eligible (Retroactive)</strong> applies the latest observed eligibility to the selected dates. <strong>Eligible (At the Time)</strong> uses production earned while eligible at each position. <strong>Slotted</strong> uses actual fantasy lineup positions. These can produce different assignments.</dd>
+            <dt>MLB Status</dt>
+            <dd>This control is disabled in the current public demo because its snapshot does not include verified current organization observations. All players remain included. The displayed MLB labels come from dated game history; a missing label does not mean a player is retired.</dd>
+          </dl>
+        </section>
+
+        <section id="scoring" data-source="points-guide filter-guide handoff demo-column-help">
+          <h2>Scoring views and column help</h2>
+          <p>The shared definitions live in <a href="https://github.com/KyleDawson24/fantasy-league-almanac/blob/main/docs/user-guide/02-points-lenses.md">The points lenses</a>: Platform versus Calculated Points, Active versus Inactive, and the workbook’s lineup conventions. Use that reference rather than treating the browser as a second scoring system. The <strong>Stat</strong> selector offers Calculated Points and Platform Points explicitly.</p>
+          <aside class="note">
+            <h3>Wasted is not fully implemented in the dashboard yet</h3>
+            <p>The dashboard’s Wasted view currently uses the inactive share of saved production. It does not yet add negative completed Active days as described in the broader workbook definition. In All Players, Inactive Points is Total minus Active; it can differ from Wasted when MLB totals restore production excluded by fantasy-slot scoring.</p>
+          </aside>
+          <h3>PPG and +/-</h3>
+          <p><strong>ppg</strong> divides calculated points by games under the same date, ownership, and production filters. Hitting and pitching use their respective game counts. No games means the rate is unavailable.</p>
+          <p><strong>+/-</strong> is Active Points minus (full-window Points ÷ full-window Games × Active Games). Its baseline spans every captured club and free-agent day in the selected dates. It retains its Active comparison when you change Active / Total / Wasted, and uses calculated points unless Platform Points is selected. Zero baseline games makes the measure unavailable.</p>
+          <p>Games and roster days are different measures. Use the column help and the caption on the particular table or summary instead of treating every “per” figure as the same denominator.</p>
+          <p>For position eligibility, lineup-slot validity, and two-way players, see <a href="https://github.com/KyleDawson24/fantasy-league-almanac/blob/main/docs/user-guide/04-eligibility-lineups-two-way.md">Eligibility, lineups, and two-way players</a>. Switching Fantasy / MLB only changes displayed columns. A two-way reserve can appear in both statistical groups while occupying one roster slot.</p>
+        </section>
+
+        <section id="advanced-standings" data-source="design-v03 demo-standings">
+          <p class="status planned">In development</p>
+          <h2>Advanced Standings</h2>
+          <p>The plan is to bring six related views together: <strong>Standings, Rank History &amp; Finishes, Positions, Acquisition Channel, MLB Affinities, and Rivalries</strong>. Some are already visible in the preview; their layout and controls are still being worked through.</p>
+          <p>That includes comparing totals with the applicable per-matchup views, following season finishes, seeing production by position or acquisition channel, and exploring which MLB clubs and fantasy opponents feature in a league’s history. Read each view’s own labels: the existing tables do not all use the same denominator.</p>
+          <h3 id="expected-w">Expected winning percentage</h3>
+          <p>The all-play comparison uses completed regular-season platform scores. In each matchup period, a team’s score is compared with every other team’s score, excluding itself. Expected wins and losses account for the number of opponents in that period; ties stay separate. Playoffs and open periods are excluded.</p>
+          <p>This describes the competition already captured in the data. It is not a prediction of future results. The intended displays are Expected W-L in Totals and Expected W% in Per Matchup.</p>
+          <p><a href="https://kpdawson.com/almanac/demo/almanac.html?page=standings">Open Advanced Standings in the demo →</a></p>
+        </section>
+
+        <section id="record-book" data-source="design-v03">
+          <p class="status planned">In development</p>
+          <h2>Record Book</h2>
+          <p>The plan is a browsable home for the existing records, preserving their qualifications, ties, and incomplete or estimated labels. Navigation is still being designed around the record’s timespan, team or player scope, and statistical category. Specific controls will be documented here as they settle.</p>
+        </section>
+        <section id="trades" data-source="design-inventory design-v03">
+          <p class="status planned">In development</p>
+          <h2>Trades</h2>
+          <p>The plan brings the trading block and completed trade record into the browser. Any published trade view needs an “as of” date: the dashboard uses saved data, not the workbook’s live platform call. Its browsing layout is still taking shape.</p>
+        </section>
+        <section id="draft" data-source="design-inventory design-v03">
+          <p class="status planned">In development</p>
+          <h2>Draft Recap</h2>
+          <p>The plan covers best-value picks, biggest busts, season draft boards, and historical draft comparisons. The browser presentation is still in development; this guide will explain its specific controls once those are settled.</p>
+        </section>
+        <section id="club-records" class="placeholder" data-source="user-status handoff">
+          <p class="status planned">Planned tab</p><h2>Club Records</h2>
+          <p>A place for a club’s records; the Team Page tab is currently a placeholder.</p>
+        </section>
+        <section id="transactions" class="placeholder" data-source="user-status handoff">
+          <p class="status planned">Planned tab</p><h2>Transaction History</h2>
+          <p>A place for a club’s transaction history; the Team Page tab is currently a placeholder.</p>
+        </section>
+        <section id="trophy-case" class="placeholder" data-source="user-status handoff">
+          <p class="status planned">Planned tab</p><h2>Trophy Case</h2>
+          <p>A place for a club’s honors; the Team Page tab is currently a placeholder.</p>
+        </section>
+        <section id="rules" data-source="design-v03 demo-rules">
+          <p class="status planned">Reference page · still developing</p>
+          <h2>Rules &amp; Payouts</h2>
+          <p>The navigation includes a home for league rules and payout information. The design keeps extracted platform settings distinct from custom league policies; payout links can remain placeholders until supplied. Treat a placeholder as unfinished documentation, not a statement of your league’s rules.</p>
+        </section>
+
+        <section id="coverage" data-source="handoff filter-guide fidelity-guide demo-home">
+          <h2>Coverage and freshness</h2>
+          <p>The demo is a published snapshot. Changing a filter queries the captured data in your browser; it does not fetch a new roster or update the website from ESPN. A local data refresh does not change the website until a new snapshot is published.</p>
+          <p>Read the <strong>production data through</strong> date separately from roster and eligibility observation dates. Different sections can have different cutoffs. A workbook, a standings table, and a lineup view should not be assumed to share one update date.</p>
+          <p><strong>All-Time</strong> means all captured seasons in the selected view. <strong>All MLB Games</strong> means the captured production available to that view, not a guarantee of complete MLB career coverage.</p>
+          <p><a href="https://github.com/KyleDawson24/fantasy-league-almanac/blob/main/docs/user-guide/03-stat-sources-and-fidelity.md">Stat sources and fidelity</a> explains the reconstruction and its limits. That reference spans multiple workbook histories; its older eras should not be read as a list of seasons available in this demo.</p>
+        </section>
+        <section id="limitations" data-source="handoff filter-guide user-status demo-column-help">
+          <h2>Known limitations</h2>
+          <ul>
+            <li>The first load can take several seconds while the browser engine and data arrive. Performance work is planned for v2.3.</li>
+            <li>The Wasted view has the narrower implementation described <a href="#scoring">above</a>.</li>
+            <li>Current MLB Status filtering is unavailable in the demo snapshot.</li>
+            <li>Advanced Standings, Record Book, Trades, and Draft Recap remain in development. The three planned club tabs do not yet have their promised content.</li>
+            <li>Missing data and unavailable rates should not be treated as observed zero production. Some table cells use a dash for zero or unavailable values; consult their help text.</li>
+          </ul>
+        </section>
+        <section id="definitions" data-source="public-guides">
+          <h2>Shared definitions and next steps</h2>
+          <p>The browser uses the same underlying definitions as the workbook, subject to the dashboard limitations called out in this guide. The workbook guides remain the reference:</p>
+          <ul class="reference-links">
+            <li><a href="https://github.com/KyleDawson24/fantasy-league-almanac/blob/main/docs/user-guide/02-points-lenses.md">The points lenses</a></li>
+            <li><a href="https://github.com/KyleDawson24/fantasy-league-almanac/blob/main/docs/user-guide/03-stat-sources-and-fidelity.md">Stat sources and fidelity</a></li>
+            <li><a href="https://github.com/KyleDawson24/fantasy-league-almanac/blob/main/docs/user-guide/04-eligibility-lineups-two-way.md">Eligibility, lineups, and two-way players</a></li>
+          </ul>
+          <p>To build your own Sheets almanac, start with the <a href="https://github.com/KyleDawson24/fantasy-league-almanac/blob/main/QUICKSTART.md">quickstart guide</a>. For the project overview, examples, and download, visit the <a href="./">project website</a>.</p>
+        </section>
+      </div>
+    </div>
+  </main>
+  <footer><a href="./">Fantasy League Almanac</a><a href="https://kpdawson.com/">Kyle Dawson</a><a href="https://github.com/KyleDawson24/fantasy-league-almanac">GitHub</a><a href="#main">Back to top ↑</a></footer>
+</body>
+</html>

@@ -16,6 +16,45 @@ _Release notes are built from the commit range at each cut rather than
 accumulated here, so this section staying short is not a sign the
 repository is idle._
 
+## [2.2.1] - 2026-10-XX
+
+The dashboard's data layer comes home. One writer publishes any league's
+dashboard extract, deciding by league format rather than platform, with two
+new models for the full daily stat line and the roster ledger; both public
+sample workbooks are re-cut through the end of the 2026 season; and the
+anonymizer audits for every real form instead of re-checking its own
+replacements. The dashboard's site code is still not in this repository.
+Full story in [RELEASE NOTES v2.2.1.md](RELEASE%20NOTES%20v2.2.1.md).
+
+Patch rather than minor: the Sheets almanac a clone builds renders the same
+pages from the same configuration, no golden moved, and there is no
+migration; what is new serves the dashboard editions, which ship on their
+own cadence.
+
+### Added
+
+- `dashboard/publish_extract.py`, a platform-neutral dashboard extract writer: a day-grain atom plus dims (team-grain matchups for every format, rivalry ledgers, delivered period standings, stat vocabulary, franchise identity, owner labels, team names over time, per-season completeness, outfield games by spot), deciding by league format and never by platform name; a read-only warehouse attach, a new stamped directory per run, row-parity and uniqueness checks, a guard against email- or phone-shaped values, and a sha256 manifest (MLB-319).
+- `dashboard/shared_from_neutral.py` rebuilds the shared almanac tables from one league's extract through the export's own shapers; a season crowns a champion only once it is over (MLB-319).
+- `dashboard/convergence_check.py` recomputes Detailed Standings, Points by Lineup Slot and Season Finishes from the neutral layer at the warehouse's rounding grain; the ESPN league converges exactly on the 2026-09-20 horizon, 1,748 of 1,748 standings cells and 612 of 612 slot cells (MLB-319).
+- `fct_player_daily_production` and `fct_player_roster_day`: the full daily MLB stat line and the daily roster ledger in one shape for every league, reading CBS's 2026 daily roster capture where it exists (MLB-319).
+- An optional, validated `settings_overrides.open_hitting_slots` in the league registry, set to U and DH for the CBS league (MLB-319).
+- `tools/dump_snowflake_raw_to_parquet.py` dumps the modeled schema (`--schema ANALYTICS`), records views it cannot select and carries on (`--keep-going`), takes a row filter per relation (`--where`) and writes to a chosen directory (`--out-dir`), all read-only against Snowflake (MLB-319).
+- A dashboard guide and a setup page on the project site, and a homepage rebuilt around real workbook views (MLB-321).
+- Amendment 1 to the real-name publication exception: a second league's commissioner consented on 2026-09-27, on the same terms as the first (MLB-308).
+
+### Changed
+
+- CBS scoring periods derive as Monday-to-Sunday weeks after an opening stub, validated against the delivered periods by count and by content, and reported rather than adjusted (MLB-319).
+- The flex hitting slot is open to every hitter in dashboard eligibility, and eligible slots list in the slot dimension's order (MLB-319).
+- The anonymizer audits an inventory built from the real side alone, requires `--league`, maps co-owner labels whole, matches team abbreviations case-sensitively and per league, refuses before any write when a real owner has no twin, and prints the Drive revision-history steps after a clean run. It hides people, never MLB players or team names (MLB-323).
+- Both public sample workbooks are re-cut through the end of the 2026 season and re-linked from the README, the site, the dbt exposures and the regenerated dbt docs catalog; the README says what "anonymized" means there (MLB-321).
+- The homepage's "faster loads are planned for 2.3" caveat is retired by measurement: on the Chromebook proxy the demo's headline shows in about 0.4 s and its lineup diamond in about 1.1 s (MLB-309).
+
+### Fixed
+
+- The shared export no longer asks for stat columns a league scores but no mart carries, which stopped the CBS export at IRSTR; ESPN is unchanged (MLB-319).
+- A resumed Parquet dump keeps the manifest entries of files it skipped, so the loader no longer drops them silently (MLB-319).
+
 ## [2.2.0] - 2026-09-24
 
 The almanac gets a website. A live, anonymized demo dashboard reads the same
@@ -24,7 +63,7 @@ half is: one shared export for the Sheet writer and the browser, and all-play
 promoted into a tested mart. The ESPN and CBS byte-diff corpora render from a
 frozen fixture, and agents working in the maintainer's checkout are denied
 destructive commands. Full story in
-[RELEASE NOTES v2.2.0.md](RELEASE%20NOTES%20v2.2.0.md).
+[RELEASE NOTES v2.2.0.md](docs/releases/RELEASE%20NOTES%20v2.2.0.md).
 
 Minor rather than major: additive surfaces, no golden moved, and no migration
 step for an existing install. The guided Windows launcher and setup wizard

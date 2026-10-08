@@ -295,15 +295,21 @@ Most of that needs a warehouse to exercise, but not all of it: with no account a
 
 ## Status
 
-- **v2.2.0** -- current, 2026-09-24. The almanac gets a website. A live,
+- **v2.2.1** -- current, 2026-10-XX. The dashboard's data layer comes home.
+  One writer publishes any league's dashboard extract, deciding by league
+  format rather than platform, with two new models for the full daily stat
+  line and the roster ledger; both public sample workbooks are re-cut through
+  the end of the 2026 season; and the anonymizer audits for every real form
+  instead of re-checking its own replacements. Full notes:
+  [RELEASE NOTES v2.2.1.md](RELEASE%20NOTES%20v2.2.1.md).
+- **v2.2.0** -- 2026-09-24. The almanac gets a website. A live,
   anonymized [demo dashboard](https://kpdawson.com/almanac/demo/) reads the
   same data in the browser (its site code is not in this repository); the
   data half is: one shared export for the Sheet writer and the browser, and
   all-play promoted into a tested mart. The ESPN and CBS byte-diff corpora now
   render from a frozen fixture, so their goldens move only when logic moves.
-  The guided Windows
-  journey is unchanged. Full notes:
-  [RELEASE NOTES v2.2.0.md](RELEASE%20NOTES%20v2.2.0.md).
+  The guided Windows journey is unchanged. Full notes:
+  [RELEASE NOTES v2.2.0.md](docs/releases/RELEASE%20NOTES%20v2.2.0.md).
 - **v2.1.0** -- 2026-09-15. The season-long release. The redesigned
   Records book (Lifetime / Season / Matchup Records, one shared engine, format
   decides the tabs) and a roster-eligibility table on Advanced Standings land

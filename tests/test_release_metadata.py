@@ -1,4 +1,4 @@
-"""The local v2.2.0 cut stays aligned before the tag is created.
+"""The local v2.2.1 cut stays aligned before the tag is created.
 
 Re-pinned at every cut: the root carries exactly one notes file, the dbt
 project version and the CHANGELOG header agree with it, the README names
@@ -22,7 +22,8 @@ def _read(relative: str) -> str:
 def test_root_carries_exactly_the_current_release_notes():
     notes = sorted(path.name for path in ROOT.glob("RELEASE NOTES v*.md"))
 
-    assert notes == ["RELEASE NOTES v2.2.0.md"]
+    assert notes == ["RELEASE NOTES v2.2.1.md"]
+    assert (ROOT / "docs" / "releases" / "RELEASE NOTES v2.2.0.md").is_file()
     assert (ROOT / "docs" / "releases" / "RELEASE NOTES v2.1.0.md").is_file()
     assert (ROOT / "docs" / "releases" / "RELEASE NOTES v2.0.1.md").is_file()
     assert (ROOT / "docs" / "releases" / "RELEASE NOTES v2.0.0.md").is_file()
@@ -33,9 +34,11 @@ def test_dbt_and_changelog_versions_match_the_cut():
     project = _read("dbt_league/dbt_project.yml")
     changelog = _read("CHANGELOG.md")
 
-    assert re.search(r"^version: ['\"]2\.2\.0['\"]$", project, re.MULTILINE)
+    assert re.search(r"^version: ['\"]2\.2\.1['\"]$", project, re.MULTILINE)
+    assert "## [2.2.1] - 2026-10-" in changelog
+    assert "[RELEASE NOTES v2.2.1.md](RELEASE%20NOTES%20v2.2.1.md)" in changelog
     assert "## [2.2.0] - 2026-09-24" in changelog
-    assert "[RELEASE NOTES v2.2.0.md](RELEASE%20NOTES%20v2.2.0.md)" in changelog
+    assert "docs/releases/RELEASE%20NOTES%20v2.2.0.md" in changelog
     assert "## [2.1.0] - 2026-09-15" in changelog
     assert "docs/releases/RELEASE%20NOTES%20v2.1.0.md" in changelog
     assert "## [2.0.1] - 2026-08-20" in changelog
@@ -43,18 +46,23 @@ def test_dbt_and_changelog_versions_match_the_cut():
     assert "docs/releases/RELEASE%20NOTES%20v2.0.0.md" in changelog
     assert "docs/releases/RELEASE%20NOTES%20v1.9.1.md" in changelog
     # A cut section never promises a future version number (RELEASING.md).
-    cut = changelog[changelog.index("## [2.2.0]"):changelog.index("## [2.1.0]")]
-    assert not re.search(r"\b(?:v?2\.3|v?3\.0)\b", cut)
+    # Strip quoted strings first — a changelog entry that retires a "planned
+    # for 2.3" caveat is a historical reference, not a forward-looking promise.
+    cut = changelog[changelog.index("## [2.2.1]"):changelog.index("## [2.2.0]")]
+    cut_unquoted = re.sub(r'"[^"]*"', '', cut)
+    assert not re.search(r"\b(?:v?2\.3|v?3\.0)\b", cut_unquoted)
 
 
 def test_readme_names_the_release_as_current_before_prior_releases():
     readme = _read("README.md")
 
-    assert "**v2.2.0** -- current, 2026-09-24" in readme
+    assert "**v2.2.1** -- current, 2026-10-" in readme
+    assert readme.index("**v2.2.1**") < readme.index("**v2.2.0**")
     assert readme.index("**v2.2.0**") < readme.index("**v2.1.0**")
     assert readme.index("**v2.1.0**") < readme.index("**v2.0.1**")
     assert readme.index("**v2.0.1**") < readme.index("**v2.0.0**")
-    assert "[RELEASE NOTES v2.2.0.md](RELEASE%20NOTES%20v2.2.0.md)" in readme
+    assert "[RELEASE NOTES v2.2.1.md](RELEASE%20NOTES%20v2.2.1.md)" in readme
+    assert "docs/releases/RELEASE%20NOTES%20v2.2.0.md" in readme
     assert "docs/releases/RELEASE%20NOTES%20v2.1.0.md" in readme
     assert "docs/releases/RELEASE%20NOTES%20v2.0.1.md" in readme
     assert "docs/releases/RELEASE%20NOTES%20v2.0.0.md" in readme
@@ -62,12 +70,26 @@ def test_readme_names_the_release_as_current_before_prior_releases():
 
 
 def test_release_notes_state_their_boundaries():
-    lowered = _read("RELEASE NOTES v2.2.0.md").lower()
+    lowered = _read("RELEASE NOTES v2.2.1.md").lower()
+
+    for claim in (
+        "the dashboard's data layer comes home",
+        "its site code is not in this repository",
+        "no golden moved",
+        "nothing to migrate",
+        "clean-machine rehearsal",
+        "dashboard/publish_extract.py",
+    ):
+        assert claim in lowered
+    assert "{{counts}}" not in lowered
+
+
+def test_previous_release_notes_keep_their_claims_after_the_move():
+    lowered = _read("docs/releases/RELEASE NOTES v2.2.0.md").lower()
 
     for claim in (
         "the almanac gets a website",
         "its site code is not in this repository",
-        "https://kpdawson.com/almanac/demo/",
         "byte-identical to v2.1.0",
         "clean-machine rehearsal",
         "no golden moved",
@@ -78,22 +100,6 @@ def test_release_notes_state_their_boundaries():
     ):
         assert claim in lowered
     assert "{{counts}}" not in lowered
-
-
-def test_previous_release_notes_keep_their_claims_after_the_move():
-    lowered = _read("docs/releases/RELEASE NOTES v2.1.0.md").lower()
-
-    for claim in (
-        "the season-long release",
-        "byte-identical to v2.0.1",
-        "clean-machine rehearsal",
-        "one declared golden pass",
-        "explicitly not in 2.1",
-        "generate_records_book.py",
-        "nothing to run. there is no migration step",
-        "not a code change and not in the zip",
-    ):
-        assert claim in lowered
 
 
 def test_patch_notes_preserve_runtime_and_private_process_boundaries():
@@ -126,7 +132,8 @@ def test_quickstart_is_launcher_first_and_manual_second():
 def test_quickstart_examples_name_the_current_release_folder():
     quickstart = _read("QUICKSTART.md")
 
-    assert "fantasy-league-almanac-2.2.0" in quickstart
+    assert "fantasy-league-almanac-2.2.1" in quickstart
+    assert "fantasy-league-almanac-2.2.0" not in quickstart
     assert "fantasy-league-almanac-2.1.0" not in quickstart
     assert "fantasy-league-almanac-2.0.1" not in quickstart
     assert "fantasy-league-almanac-2.0.0" not in quickstart

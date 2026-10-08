@@ -1303,7 +1303,7 @@ def _words(text):
 
 def _has_word(text, word):
     """`word` in `text` on word boundaries, both already _words()-folded.
-    "Fulton" is in "Fulton's Folly"; "Andy" is not in "Andys"."""
+    "Grover" is in "Grover's Gambit"; "Tex" is not in "Texans"."""
     return bool(word) and re.search(
         rf'(?<![0-9a-z_]){re.escape(word)}(?![0-9a-z_])', text) is not None
 

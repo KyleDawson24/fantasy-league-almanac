@@ -1,12 +1,11 @@
 # Why `.claude/settings.json` carries a deny list (MLB-300, Tier 2)
 
 Git protects only what is committed and pushed. This project keeps its most
-valuable files OUT of git on purpose: `CLAUDE.md`, `Study Material.MD`,
-`BRAINTHOUGHTS.md`, the real `dbt_league/league_config/` (skip-worktree),
-`archives/anonymization/`, the byte-diff goldens under `tests/fixtures/`,
-everything under `scratchpad/` (handoffs, kickoffs, `RELEASING.md`), and
-`data/` (raw parquet, the DuckDB warehouse, the frozen fixture). A single
-`git clean -fd`, `git checkout -- .`, `git stash` gone wrong, or an
+valuable files OUT of git on purpose: private notes, the real league
+configuration (skip-worktree templates), the anonymization materials,
+byte-diff golden fixtures, operational scratchpad files, and the local data
+directory (raw parquet, the DuckDB warehouse, the frozen corpus fixture). A
+single `git clean -fd`, `git checkout -- .`, `git stash` gone wrong, or an
 `rm -rf` typed by an agent that misread a path would erase months of work
 that no remote holds.
 

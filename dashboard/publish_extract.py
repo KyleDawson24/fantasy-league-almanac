@@ -2,8 +2,9 @@
 """
 publish_extract.py -- the platform-neutral dashboard data layer (MLB-319).
 
-One extract for any league: the master-table contract's atom (v0.3,
-Appendix A of the MLB-297 kickoff) plus the converged dims, written per
+One extract for any league: the master-table contract's atom (identity,
+time/completeness, slot, production, and extension groups; see
+atom_columns() for the full list) plus the converged dims, written per
 league as Parquet. Every dashboard page is then a filter over the atom and
 the dims; nothing downstream needs to know which platform a league came
 from. BSB, its twin and a future Fantrax league are data-source swaps.
@@ -23,8 +24,8 @@ Output (a fresh stamped directory per run; nothing is ever deleted or
 overwritten -- rerunning writes a new directory beside the old one):
 
     <out>/<stamp>/<league_slug>/
-        atom/<season>.parquet   the day atom, contract columns in Appendix A
-                                order, then the extension and raw_ groups
+        atom/<season>.parquet   the day atom, contract columns (identity,
+                                time, slot, production), then extensions
         rollup.parquet          season x phase x team x player sums
         dims/league.parquet     format, period vocabulary, horizon
         dims/seasons.parquet    opener, last day, provenance mix per season,
@@ -1106,7 +1107,7 @@ def publish_league(con, src, league_key, horizon, out_root, generated_at, commit
     files += [file_entry(con, league_dir, p) for p in dims]
     manifest = {
         "schema_version": 1,
-        "contract": "MLB-285 master-table contract v0.3, Appendix A order; "
+        "contract": "master-table contract v0.3, atom_columns() order; "
                     "extension columns period_key, slot_provenance; raw_ group last",
         "league_key": league_key, "league_slug": league.slug, "platform": league.platform,
         "league_format": league.format, "period_kind": league.period_kind,

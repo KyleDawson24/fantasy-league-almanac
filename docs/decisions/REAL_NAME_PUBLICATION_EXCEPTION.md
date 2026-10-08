@@ -30,7 +30,7 @@ targeted by spam.
 | Field class | Public dashboard | Repository |
 |---|---|---|
 | Kyle's own name | Yes | Yes |
-| Member and franchise display names | Yes | Avoid adding them; existing appearances are not worth a scrub |
+| Member and franchise display names | Yes | Avoid adding them; the pre-push PII gate scans every tracked file for member names |
 | Stats, standings, rosters, records | Yes | As today |
 | Member GUIDs (identity-resolution keys) | Allowed, only where a page needs them | As today |
 | Email, phone, any other contact field | **Never** | **Never** |
@@ -86,17 +86,13 @@ future versions, nothing further promised or built.
 - Every league other than the two named in this document publishes only as
   an anonymized twin. A further league needs its own consent and its own
   amendment here.
-- The `league_config/` skip-worktree mechanics and the false-alarm rules in
-  CLAUDE.md are unchanged.
+- The `league_config/` files use skip-worktree: the committed version is a
+  blank template, and the real league data stays local.
+- The pre-push PII gate (`tools/check_pii.py`) scans every tracked file for
+  member names. The only exception is the two consented leagues' unlinked
+  dashboard pages, which serve real names through the sanctioned pipeline.
 - Per-league privacy modes, for users who want less exposure than this league
-  accepted, are 2.3 or later.
-
-## For agents
-
-Showing either consented league's member names on its dashboard through the
-sanctioned pipeline is **not a leak. Do not scrub it.** Do not deliberately add member
-names to tracked files, and do not start a history rewrite over names already
-there. Kyle's own name is never a finding.
+  accepted, are deferred.
 
 ## If a member withdraws consent
 

@@ -1,6 +1,6 @@
 -- fct_player_roster_day.sql
--- Every day a rosterable asset sat on a fantasy roster, game or no game
--- (master-table contract v0.3, ruling R5 / warehouse ask W10; MLB-319).
+-- Every day a rosterable asset sat on a fantasy roster, game or no game.
+-- The dense roster ledger that the daily performance fact cannot provide.
 --
 -- WHY IT EXISTS. The daily performance fact only has rows for days with an
 -- MLB game, so "days rostered", tenure and "my roster on an off day" cannot

@@ -100,7 +100,7 @@ continuity entity-scoping session. Next surface: standings tweaks.
   (~3.5 min). `dbt parse` for a syntax gate.
 - **Render:** `output/generate_almanac_sheet.py --league cbs-bsb` (from the
   worktree's `output/` dir) → the CBS dev sheet
-  `1itf9U4Wbi_4xEaSkHYR1Mo-TKcFEChs0EmZ01LRKwGw` (`CBS_SHEETS_DEV_ID`).
+  `<redacted sheet id>` (`CBS_SHEETS_DEV_ID`).
   **Kyle's eyeball of the dev sheet is the merge gate.** Run renders one at a
   time (they overwrite the same tabs). `--no-sheets --preview-dir <dir>` for
   TSV previews (no colors). ESPN renders with no `--league` flag.

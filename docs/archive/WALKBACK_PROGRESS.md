@@ -73,7 +73,7 @@ Kyle took a first pass at the sheet (3 lineage links, 3 owner-alias merges,
       (preview never touches Sheets). Reuses the almanac writers' cached OAuth
       token (spreadsheets scope — can't mint a sheet, so the target must
       pre-exist and be user-owned).
-- [x] **Rendered to Kyle's sheet** `1fMCSSRvpE-2HwEOf3OuSPsvsbootWq1bWI-2zVvLx94`
+- [x] **Rendered to Kyle's sheet** `<redacted sheet id>`
       (his Drive, his to share with the FIL). Four tabs: READ ME FIRST · Teams
       (34) · Owners (19) · Team-Owner by Year (411). Grey = read-only evidence
       (warning-only protected), yellow = fill/ignore.

@@ -158,7 +158,7 @@ def _add_draft_form(dest):
     instruction = (
         "You don't need to type anything here -- if you have ANY old draft "
         "records (emails, files, printouts, photos), just forward them to "
-        "kpdawson24@gmail.com and I'll do the rest. The questions below tell "
+        "kpdawson.github@gmail.com and I'll do the rest. The questions below tell "
         "me what to go looking for. And if typing a few picks IS easier for "
         "you, the optional grid at the bottom works too."
     )

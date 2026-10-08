@@ -611,7 +611,7 @@ State at end of Phase 6.3.3:
 - Worktree: `suspicious-pasteur-db8872` on branch `claude/suspicious-pasteur-db8872`. **Uncommitted at handoff** — the implementation work survived a chat-platform crash; this doc is being written as the recovery commit.
 - Backfill complete: 2025 (full + playoffs) and 2026 (MP1-5) re-extracted prior to Phase 6.3.3; chunk-1 brought all incremental fcts forward via `dbt build --full-refresh`.
 - All dbt tests green: 58 PASS / 0 ERROR / 0 WARN.
-- Live league Sheet at `1C_CJ-jAZ-7iE3bz_rR4DmRXARQFh4qb8O6MgjTMKDF0` populated with 17-col Phase 6.3.3 data (3 tabs, 1007 total rows). Pre-Phase-6.3.3 the sheet held 10-col data from Phase 6.3.2; this is a clean replacement.
+- Live league Sheet at `<redacted sheet id>` populated with 17-col Phase 6.3.3 data (3 tabs, 1007 total rows). Pre-Phase-6.3.3 the sheet held 10-col data from Phase 6.3.2; this is a clean replacement.
 - Memory updates:
   - `project_phase_plan.md`: Phase 5.0 / 6.2 / 6.3.1 / 6.3.2 / 6.3.3 marked shipped.
   - `project_conventions.md`: mart-vs-helper boundary, threshold-at-output, counts-not-points, polarity-aware effective polarity, INLINE_COLLAPSE_THRESHOLD pattern, format_week_label threading captured.

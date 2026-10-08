@@ -585,7 +585,7 @@ dbt deps                              # Install dbt_utils package (first
                                       # run only; idempotent)
 dbt seed                              # Load the 20 seed CSVs -- 6 reference
                                       # + 14 from league_config (section 7)
-dbt build                             # Build 104 models + run 786 tests
+dbt build                             # Build 106 models + run 797 tests
 
 cd ..
 python output/generate_summary.py     # Weekly recap BBCode
@@ -683,7 +683,7 @@ dbt deps --project-dir dbt_league
 pytest tests/
 ```
 
-Fresh-clone collection at this cut: **1915** pure tests, with **32**
+Fresh-clone collection at this cut: **1970** pure tests, with **38**
 warehouse-marked tests deselected by default via `pytest.ini`; no
 credentials are involved and nothing is written. `dbt deps` is required
 first: several DuckDB-backed test files build the project and will error

@@ -24,8 +24,8 @@ staging/    (35) stg_*   1:1 reshapes of RAW; no business logic
 intermediate/ (23) int_* business logic that isn't yet a contract:
    │                     the slot-validity filter + daily wide rollup
    ▼                          │
-marts/core/ (26) dim_*   the star-schema contract layer: 14 dims
-   │            fct_*    + 12 facts (daily / weekly / season grains,
+marts/core/ (28) dim_*   the star-schema contract layer: 14 dims
+   │            fct_*    + 14 facts (daily / weekly / season grains,
    │                     active / inactive lenses, position points)
    ▼
 marts/reporting/ (20) mart_*  consumer-facing report shapes:
@@ -35,7 +35,7 @@ exposures (5)            the Python output scripts, declared in
                          models/exposures.yml
 ```
 
-104 models in all. Counts here are regenerated at each release cut from
+106 models in all. Counts here are regenerated at each release cut from
 the parsed manifest; if you are reading them mid-cycle, `dbt parse` and
 the manifest are the truth.
 
@@ -284,13 +284,14 @@ dbt seed --full-refresh    # after a seed's columns change
 ```
 
 The weekly cadence is: extract (`python extract/extract.py`) → `dbt build`
-→ the three output scripts. See [HANDOFF.md](../docs/archive/HANDOFF.md) for
+→ the three output scripts. See [SETUP.md](../SETUP.md) for
 the full operational runbook.
 
 ## Exposures
 
-`models/exposures.yml` declares four downstream consumers (weekly recap,
-records report, legacy records sheet, league almanac) with their upstream
+`models/exposures.yml` declares five downstream consumers (weekly recap,
+records report, legacy records sheet, league almanac, shared almanac
+export) with their upstream
 dependency lists, so the docs-site lineage runs source → staging → core →
 reporting → deliverable. If a script gains or drops a warehouse read, the
 exposure entry changes in the same commit.

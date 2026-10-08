@@ -35,7 +35,7 @@ exposures:
       - ref('dim_matchup_period')
     owner:
       name: Kyle Dawson
-      email: kpdawson24@gmail.com
+      email: kpdawson.github@gmail.com
 
   - name: records_report
     label: All-Time Records Report (BBCode)
@@ -60,7 +60,7 @@ exposures:
       - ref('dim_matchup_period')
     owner:
       name: Kyle Dawson
-      email: kpdawson24@gmail.com
+      email: kpdawson.github@gmail.com
 
   - name: records_sheet
     label: Legacy Records Dump to Google Sheets
@@ -97,7 +97,7 @@ exposures:
       - ref('dim_matchup_period')
     owner:
       name: Kyle Dawson
-      email: kpdawson24@gmail.com
+      email: kpdawson.github@gmail.com
 
   - name: league_almanac
     label: League Almanac (Google Sheets)
@@ -146,7 +146,7 @@ exposures:
       - ref('dim_matchup_period')
     owner:
       name: Kyle Dawson
-      email: kpdawson24@gmail.com
+      email: kpdawson.github@gmail.com
 
   - name: shared_almanac_export
     label: Shared Almanac Export (MLB-301)
@@ -178,4 +178,4 @@ exposures:
       - ref('dim_franchise_identity')
     owner:
       name: Kyle Dawson
-      email: kpdawson24@gmail.com
+      email: kpdawson.github@gmail.com

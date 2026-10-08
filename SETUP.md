@@ -585,7 +585,7 @@ dbt deps                              # Install dbt_utils package (first
                                       # run only; idempotent)
 dbt seed                              # Load the 20 seed CSVs -- 6 reference
                                       # + 14 from league_config (section 7)
-dbt build                             # Build 106 models + run 797 tests
+dbt build                             # Build 106 models + run 810 tests
 
 cd ..
 python output/generate_summary.py     # Weekly recap BBCode

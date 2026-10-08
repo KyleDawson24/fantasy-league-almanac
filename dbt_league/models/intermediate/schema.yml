@@ -1126,3 +1126,80 @@ models:
                 values: ['schedule_capture', 'delivered_final_rank',
                          'parsed_final_standings', 'superseded_season',
                          'unproven']
+
+  - name: int_player_identity_candidates
+    description: >
+      The identity dimension's candidate layer: every (platform, name_key,
+      mlbam_id) assertion from id-bearing sources, variant expansion and the
+      alias seed, with the collapsed discipline scope. Season-blind; seasonality
+      enters downstream via MLB game presence or per-season evidence.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - platform
+              - name_key
+              - mlbam_id
+    columns:
+      - name: platform
+        tests:
+          - not_null
+      - name: name_key
+        tests:
+          - not_null
+      - name: mlbam_id
+        tests:
+          - not_null
+
+  - name: int_player_identity_context
+    description: >
+      Franchise-context identity resolution: for names the base identity
+      dimension leaves ambiguous, each franchise's own positional and club
+      paperwork is matched against the MLB spine to resolve to exactly one
+      mlbam_id -- or no resolution is made. A resolution is earned by evidence
+      or not made at all.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - platform
+              - league_key
+              - season_year
+              - franchise_id
+              - name_key
+    columns:
+      - name: platform
+        tests:
+          - not_null
+      - name: league_key
+        tests:
+          - not_null
+      - name: season_year
+        tests:
+          - not_null
+      - name: franchise_id
+        tests:
+          - not_null
+      - name: name_key
+        tests:
+          - not_null
+
+  - name: int_matchup_season_standard
+    description: >
+      One season's standard matchup length and where it came from: the
+      platform-derived standard from dim_matchup_period or a recomputed
+      fallback from gameplay days. Never a synthetic row; a league-season
+      with neither source simply has none.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - season_year
+    columns:
+      - name: league_key
+        tests:
+          - not_null
+      - name: season_year
+        tests:
+          - not_null

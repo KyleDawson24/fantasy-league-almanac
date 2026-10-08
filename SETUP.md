@@ -679,15 +679,23 @@ nothing in it should be a reflex.
 ### Tier 1: the pure suite
 
 ```bash
+dbt deps --project-dir dbt_league
 pytest tests/
 ```
 
 Fresh-clone collection at this cut: **1915** pure tests, with **32**
 warehouse-marked tests deselected by default via `pytest.ini`; no
-credentials are involved and nothing is written. Those are what pytest
+credentials are involved and nothing is written. `dbt deps` is required
+first: several DuckDB-backed test files build the project and will error
+at setup if dbt packages are not installed. Those counts are what pytest
 COLLECTS, not a pass tally -- how many pass or skip varies by machine and
 OS. These counts drift between releases -- `pytest tests/ -q` is the
 truth.
+
+The six warehouse-marked tests that need Snowflake credentials are in
+`test_points_almanac_espn` (3, via the CBS almanac slot path) and
+`test_window_lineup_pitcher_slots` (3, via `slot_catalog._load_catalog`).
+The default suite excludes them.
 
 ### Tier 2: the warehouse suite
 

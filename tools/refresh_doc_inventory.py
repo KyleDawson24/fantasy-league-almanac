@@ -303,7 +303,7 @@ ROOT_README_RULES = [
     # generator was never in a position to make, since it derives these
     # from `--collect-only`.
     ("pytest_pure",        r"collects \*\*(?P<n>\d+)\*\* tracked pure tests"),
-    ("pytest_warehouse",   r"with \*\*(?P<n>\d+)\*\* warehouse-marked goldens"),
+    ("pytest_warehouse",   r"with \*\*(?P<n>\d+)\*\* warehouse-marked tests"),
 ]
 
 SETUP_RULES = [

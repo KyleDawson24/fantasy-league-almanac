@@ -683,7 +683,7 @@ dbt deps --project-dir dbt_league
 pytest tests/
 ```
 
-Fresh-clone collection at this cut: **1970** pure tests, with **38**
+Fresh-clone collection at this cut: **1968** pure tests, with **38**
 warehouse-marked tests deselected by default via `pytest.ini`; no
 credentials are involved and nothing is written. `dbt deps` is required
 first: several DuckDB-backed test files build the project and will error
@@ -703,10 +703,10 @@ The default suite excludes them.
 pytest tests/ -m warehouse
 ```
 
-This collects **32 tests**. It reads your warehouse and subprocess-runs
+This collects **38 tests**. It reads your warehouse and subprocess-runs
 the output scripts, but does not write to the warehouse.
 
-**How many of the 32 actually run depends on corpora you do not have.**
+**How many of the 38 actually run depends on corpora you do not have.**
 See below.
 
 ### Which tests need what

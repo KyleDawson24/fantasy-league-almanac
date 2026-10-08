@@ -1,6 +1,6 @@
 # Fantasy League Almanac
 
-[Project website](https://kpdawson.com/fantasy-league-almanac/) · [Dashboard guide](https://kpdawson.com/fantasy-league-almanac/dashboard-guide.html) · [Quickstart](QUICKSTART.md)
+[Live demo](https://kpdawson.com/almanac/demo/) · Sample workbooks ([head-to-head](https://docs.google.com/spreadsheets/d/1j-cEOvsuUrG2WJSx4dUgUdef6AG7MElcrirIMGhRyD0), [points](https://docs.google.com/spreadsheets/d/127thm-errqshoGwZwtXaEcV8mkvMt2Y9GFoA5BXfiL4)) · [Project site](https://kpdawson.com/fantasy-league-almanac/) · [dbt catalog](https://kpdawson.com/fantasy-league-almanac/catalog/)
 
 
 > Two fantasy baseball leagues, a quarter-century of history, one pipeline. It reconstructs seasons nobody recorded, re-prices more than a million individual player-game performances under one rulebook so eras can be compared honestly, and ships the result as a weekly recap and a browsable league almanac.
@@ -11,6 +11,12 @@
 [![Snowflake](https://img.shields.io/badge/warehouse-Snowflake-29B5E8)](https://www.snowflake.com/)
 [![Python](https://img.shields.io/badge/python-3.13-blue)](https://www.python.org/)
 
+- **What it is.** A dbt + Python pipeline that turns ESPN and CBS fantasy baseball leagues into a Google Sheets record book and a browser-based dashboard.
+- **What it shows.** All-time standings and records, matchup and draft history, a trade board, team pages, and a weekly recap -- built around what actually counted in your league, not just the MLB stats your players accumulated.
+- **Run the tests.** `dbt deps --project-dir dbt_league && pytest tests/` -- no warehouse or credentials needed.
+
+No member data (names, emails, phone numbers) is stored in the repository. The sample workbooks are anonymized twins with fictional owner names; real MLB player names and stat lines are unchanged. See [docs/PRIVACY.md](docs/PRIVACY.md).
+
 Treats your fantasy league like it was a real league. Real product, real user base, real toy for real fantasy baseball nerds, and secondarily a deliberate analytics-engineering portfolio piece. Jump to [What this demonstrates](#what-this-demonstrates) if you are here to evaluate the engineering.
 
 ![The Advanced Standings tab: a 2026 rank-by-period chart above a 2001-2026 season-finish matrix](docs/img/cbs-advanced-standings.png)
@@ -19,15 +25,7 @@ Treats your fantasy league like it was a real league. Real product, real user ba
 
 Resolving that lineage is what lets a single row credit the Hardball Hackers with five titles and a 4.7 average finish over a quarter-century, instead of scattering them across three unrelated rows.
 
-The honesty note is the other half. Only 2026 was captured live. For our ESPN league, 2025 lineups and scoring still existed at full fidelity -- with one exception worth telling, because it is the kind of thing that hides, and because it is a defect this project found in its own work rather than one anybody reported: ESPN's *player record* carries only a player's current MLB club, so a season loaded after the fact cannot say from that field which club he was actually playing for. Measured against 2025, it was not small -- 22.25% of the roster-affinity chart's weight was filed under the wrong club, and a further 11.7% could not be placed at all. That is fixed. The club now comes from the game rather than from the person: each per-scoring-period split already carried the club the player was actually with, and the chart reads that, so the unplaceable band measures 0.0 across 2025, 2026 and all-time. The measurement and the fix both stay in [Known Data Issues](docs/known-data-issues.md) rather than being quietly deleted -- a closed defect is still part of the record. For CBS, we needed some clever reconstruction.
-
-2004-2020 is estimated from start-share rates, and it always runs under rather than over -- but the error is not uniform across that stretch, so it is worth stating as the ladder it actually is: roughly unbiased 2005-2010, undershooting about 8-13% from 2011, and around 20% for 2020, the short COVID season with the thinnest log. (Actual sit/start data is not available from that era, so it is estimated from site-wide numbers. It is a foreseeable selection bias that a league with 25 completed seasons behind it made, on average, better start/sit decisions than the average random CBS subscriber.)
-
-2021-2025 is reconstructed day by day from the transaction log (which for this era _does_ include sit/start transactions).
-
-2001-2003 is the weakest stretch in the book, and it gets said out loud rather than buried: there are no year-end roster pages to anchor the reconstruction, so a player who was drafted and simply held all season -- never added, dropped, or traded -- never touches the transaction log, and the walk-back has no way to place him on a roster at all. Those are disproportionately the stars. That's a coverage gap, not an accuracy one: team-level error for 2001 and 2002 actually runs about 12-15%, in the same range as the estimated era above -- the honest number is that roughly a quarter to a third of those two seasons' true production is currently unassigned, parked in a clearly-labelled placeholder franchise rather than being silently credited to somebody, with both years labelled directional wherever they appear until that gap closes. That error bar is on reconstructed *point totals* only -- season finishes come from the league's official published standings, so the finish matrix above does not inherit it.
-
-Every era's provenance ships as a visible disclosure, not a footnote; the Home tab's Stat Sources table and every team page state plainly which years are captured live, reconstructed day-by-day, or estimated, and what share of the record falls into each bucket.
+The era-by-era error ladder for the CBS league's reconstruction is detailed under [The Big Picture](#the-big-picture).
 
 ---
 
@@ -51,6 +49,20 @@ The same transform layer now serves **two leagues on two different platforms wit
 Neither platform's website will tell you what its own rosters looked like fifteen years ago. So the pipeline rebuilds them: a day-by-day reconstruction from **55,980 player-actions across roughly 25,700 transactions**, anchored on year-end roster snapshots, cross-checked against the league's official published standings, and **graded**. What the almanac prints on its own surfaces is each era's *provenance* -- how much of it was captured live, reconstructed day by day, or estimated. The measured error rates behind those labels come from the reconciliation contract, which grades every reconstructed season against the official standings, and they are stated per era rather than as one number.
 
 On top of that sits a record book that had to be built from scratch, showing individual performances and statistical outputs at a grain that is not visible on either platform's website.
+
+<details>
+<summary>Era-by-era error ladder (CBS league reconstruction)</summary>
+
+The honesty note is the other half. Only 2026 was captured live. For our ESPN league, 2025 lineups and scoring still existed at full fidelity -- with one exception worth telling, because it is the kind of thing that hides, and because it is a defect this project found in its own work rather than one anybody reported: ESPN's *player record* carries only a player's current MLB club, so a season loaded after the fact cannot say from that field which club he was actually playing for. Measured against 2025, it was not small -- 22.25% of the roster-affinity chart's weight was filed under the wrong club, and a further 11.7% could not be placed at all. That is fixed. The club now comes from the game rather than from the person: each per-scoring-period split already carried the club the player was actually with, and the chart reads that, so the unplaceable band measures 0.0 across 2025, 2026 and all-time. The measurement and the fix both stay in [Known Data Issues](docs/known-data-issues.md) rather than being quietly deleted -- a closed defect is still part of the record. For CBS, we needed some clever reconstruction.
+
+2004-2020 is estimated from start-share rates, and it always runs under rather than over -- but the error is not uniform across that stretch, so it is worth stating as the ladder it actually is: roughly unbiased 2005-2010, undershooting about 8-13% from 2011, and around 20% for 2020, the short COVID season with the thinnest log. (Actual sit/start data is not available from that era, so it is estimated from site-wide numbers. It is a foreseeable selection bias that a league with 25 completed seasons behind it made, on average, better start/sit decisions than the average random CBS subscriber.)
+
+2021-2025 is reconstructed day by day from the transaction log (which for this era _does_ include sit/start transactions).
+
+2001-2003 is the weakest stretch in the book, and it gets said out loud rather than buried: there are no year-end roster pages to anchor the reconstruction, so a player who was drafted and simply held all season -- never added, dropped, or traded -- never touches the transaction log, and the walk-back has no way to place him on a roster at all. Those are disproportionately the stars. That's a coverage gap, not an accuracy one: team-level error for 2001 and 2002 actually runs about 12-15%, in the same range as the estimated era above -- the honest number is that roughly a quarter to a third of those two seasons' true production is currently unassigned, parked in a clearly-labelled placeholder franchise rather than being silently credited to somebody, with both years labelled directional wherever they appear until that gap closes. That error bar is on reconstructed *point totals* only -- season finishes come from the league's official published standings, so the finish matrix above does not inherit it.
+
+Every era's provenance ships as a visible disclosure, not a footnote; the Home tab's Stat Sources table and every team page state plainly which years are captured live, reconstructed day-by-day, or estimated, and what share of the record falls into each bucket.
+</details>
 
 ---
 
@@ -277,6 +289,7 @@ Most of that needs a warehouse to exercise, but not all of it: with no account a
 - **[docs/archive/](docs/archive/)** -- the phase documentation (`Phase X.Y Documentation.md`), session handoffs and progress journals, each phase doc with an "options considered → chosen → rationale" section. These were all pre-release/exploratory; their only real purpose is archival.
 - **[docs/decisions/](docs/decisions/)** -- the short list of design documents still in force.
 - **[Hosted dbt catalog](https://kpdawson.com/fantasy-league-almanac/catalog/)** -- model lineage and column-level docs, regenerated manually (may lag a release or two behind local `main`).
+- **[.claude/](.claude/)** -- agent guard configuration (two tracked files: a deny list for destructive commands and a settings manifest).
 
 ---
 

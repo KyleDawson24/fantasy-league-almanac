@@ -1119,3 +1119,55 @@ def test_a_multipart_map_name_needs_no_resolution(cp, tmp_path, monkeypatch):
     tokens, census = cp.build_tokens()
     assert census["map_unresolved"] == []
     assert cp.main([]) == 1
+
+
+class TestAnonymizerSourceSelfCheck:
+    """The anonymizer tool's own source text must not contain real league names.
+
+    Unlike every other test in this file, this one reads the REAL twin-name
+    map and the REAL source file.  It does not need the warehouse, a git
+    repo fixture, or credentials -- just the map on disk.  A docstring
+    that reintroduces a real owner or franchise name fails the default suite
+    without waiting for the pre-push hook.
+    """
+
+    ANONYMIZER = os.path.join(REPO, "tools", "anonymize_sheet_copy.py")
+
+    @pytest.fixture
+    def real_cp(self):
+        spec = importlib.util.spec_from_file_location(
+            "check_pii_selfcheck",
+            os.path.join(REPO, "tools", "check_pii.py"))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def test_no_real_names_in_anonymizer_source(self, real_cp):
+        map_path = os.path.join(REPO, "archives", "anonymization",
+                                "name_map.csv")
+        if not os.path.exists(map_path):
+            pytest.skip("twin-name map not on this machine")
+        if not os.path.exists(self.ANONYMIZER):
+            pytest.skip("anonymizer source not found")
+
+        tokens, _census = real_cp.build_tokens(use_warehouse=False)
+        with open(self.ANONYMIZER, encoding="utf-8") as f:
+            text = f.read()
+        low = text.lower()
+
+        fatal_hits = []
+        for token in tokens:
+            sev = real_cp.severity(token)
+            if sev != real_cp.FATAL:
+                continue
+            for start, end, _matched in token.find_all(text, low, {}):
+                line_no = text.count("\n", 0, start) + 1
+                snippet = text[max(0, start - 30):end + 30].replace("\n", " ")
+                fatal_hits.append(
+                    f"  line {line_no}: {token.text!r} ({token.category}) "
+                    f"...{snippet.strip()}...")
+
+        assert not fatal_hits, (
+            f"Real-league names in tools/anonymize_sheet_copy.py "
+            f"({len(fatal_hits)} fatal hit(s)):\n" + "\n".join(fatal_hits)
+        )

@@ -16,7 +16,7 @@ _Release notes are built from the commit range at each cut rather than
 accumulated here, so this section staying short is not a sign the
 repository is idle._
 
-## [2.2.1] - 2026-10-XX
+## [2.2.1] - 2026-10-08
 
 The dashboard's data layer comes home. One writer publishes any league's
 dashboard extract, deciding by league format rather than platform, with two

@@ -239,7 +239,7 @@ The Sheets samples above are still the full almanac. The dashboard is an early p
 
 It is a failure-cost argument, not a feature list: bugs are certain in something this young, and someone who filled in a few fields and hit one stays interested, while someone who provisioned a cloud warehouse first leaves annoyed. So the upfront demand has to be near zero. Local extraction shipped in v1.8.0 (MLB-208), and the app-owned `drive.file` workbook path shipped in v1.9.0 (MLB-209). v2.0 joins those foundations with the double-click launcher, illustrated cookie guidance, validated and atomic local setup, explicit credential rotation, and the complete-history runner handoff. The Reddit launch is intentionally the first broad stranger-validation event, not a claim that every ESPN league shape has already been proved. The charter is MLB-210.
 
-Beyond that: the platform half -- Yahoo and Sleeper adapters, to prove the platform-agnostic design against a third and fourth vendor -- and a player-entity layer (`dim_player` / `fct_player_career`) with more analytics surfaces on data the pipeline already has. Full detail (including what's been explicitly decided against) is in [ROADMAP.md](ROADMAP.md).
+Beyond that: the platform half -- Yahoo and Fantrax adapters, to prove the platform-agnostic design against a third and fourth vendor -- and a player-entity layer (`dim_player` / `fct_player_career`) with more analytics surfaces on data the pipeline already has. Full detail (including what's been explicitly decided against) is in [ROADMAP.md](ROADMAP.md).
 
 ---
 
@@ -295,7 +295,7 @@ Most of that needs a warehouse to exercise, but not all of it: with no account a
 
 ## Status
 
-- **v2.2.1** -- current, 2026-10-XX. The dashboard's data layer comes home.
+- **v2.2.1** -- current, 2026-10-08. The dashboard's data layer comes home.
   One writer publishes any league's dashboard extract, deciding by league
   format rather than platform, with two new models for the full daily stat
   line and the roster ledger; both public sample workbooks are re-cut through

@@ -53,6 +53,56 @@ GATE_NEUTRAL_RULES = {
 }
 
 
+def champion_records(finishes, league_format, finals=None):
+    """One dict per finished season whose champion is known.
+
+    Args:
+        finishes: the list built by main()'s finish computation.
+        league_format: "h2h" or "points".
+        finals: for h2h only, list of dicts with season_year,
+                team_points, opponent_points, opponent_abbrev
+                for the champion's championship-round matchup.
+    Returns:
+        list of dicts, one per season that has exactly one champion.
+        Raises ValueError if any finished season has != 1 champion.
+    """
+    from collections import defaultdict as _dd
+    by_season = _dd(list)
+    for f in finishes:
+        by_season[f["season_year"]].append(f)
+    finals_by = {}
+    for m in (finals or []):
+        finals_by[m["season_year"]] = m
+    records = []
+    for year in sorted(by_season):
+        champs = [e for e in by_season[year] if e["is_champion"]]
+        finished = any(e.get("final_rank") is not None for e in by_season[year])
+        if not champs:
+            if finished:
+                raise ValueError(f"Season {year}: finished with 0 champions, expected 1")
+            continue
+        if len(champs) != 1:
+            raise ValueError(f"Season {year}: {len(champs)} champions, expected 1")
+        c = champs[0]
+        rec = {"season_year": year, "team_id": c["team_id"],
+               "team_abbrev": c["team_abbrev"], "owner_display": c["owner_display"]}
+        if league_format == "h2h":
+            rec["seed"] = c["finish"]
+            r_parts = [str(c["wins"]), str(c["losses"])]
+            if c["ties"]:
+                r_parts.append(str(c["ties"]))
+            rec["regular_season_record"] = "-".join(r_parts)
+            final = finals_by.get(year)
+            if final:
+                rec["finals_score"] = f"{final['team_points']}-{final['opponent_points']}"
+                rec["finals_opponent_abbrev"] = final["opponent_abbrev"]
+        else:
+            rec["final_standing"] = c["final_rank"]
+            rec["points"] = c.get("calculated_points")
+        records.append(rec)
+    return records
+
+
 def rows(con, sql):
     cur = con.execute(sql)
     cols = [d[0].lower() for d in cur.description]
@@ -280,12 +330,41 @@ def main(argv=None):
             finishes.append({"season_year": y, "team_id": r["team_id"], "team_abbrev": r["team_abbrev"],
                              "owner_display": r["owner_display"], "wins": r["wins"], "losses": r["losses"],
                              "ties": r["ties"], "finish": finish, "final_rank": final_rank,
-                             "is_champion": champion})
+                             "is_champion": champion,
+                             "calculated_points": r.get("calculated_points")})
     tables["season_finishes"] = write_table(out_dir, "season_finishes", ex.finish_rows(finishes, current), {
         "grain": "one row per (season_year, team_id)",
         "note": ("finish = official season finish; champion = first on points, closed seasons only"
                  if points else "finish = platform seed; champion = the platform's bracket result, closed seasons only"),
         "source": ["dims/teams", "dims/matchups"]})
+
+    # -- champion records: one per closed season, format-aware
+    finals_rows = []
+    if not points and has_matchups:
+        finals_rows = rows(con, """
+            WITH champ AS (
+                SELECT season_year, team_id FROM dim_teams WHERE is_champion
+            ),
+            last_round AS (
+                SELECT season_year, MAX(matchup_period) AS period
+                FROM dim_matchups WHERE is_playoff AND is_complete GROUP BY 1
+            )
+            SELECT m.season_year, m.team_points, m.opponent_points,
+                   t.team_abbrev AS opponent_abbrev
+            FROM dim_matchups m
+            JOIN champ c ON c.season_year = m.season_year AND c.team_id = m.team_id
+            JOIN last_round lr ON lr.season_year = m.season_year
+                              AND lr.period = m.matchup_period
+            JOIN dim_teams t ON t.team_id = m.opponent_id
+                            AND t.season_year = m.season_year""")
+    fmt = "points" if points else "h2h"
+    champ_recs = champion_records(finishes, fmt, finals_rows or None)
+    tables["champion"] = write_table(out_dir, "champion", champ_recs, {
+        "grain": "one row per closed season with a known champion",
+        "note": ("H2H: seed, regular-season record, finals result; "
+                 "points: final standing, total points" if not points
+                 else "Points league: final standing, total points"),
+        "source": ["season_finishes", "dims/teams", "dims/matchups"]})
 
     if points and "dim_period_standings" in {r["name"] for r in rows(con, "SELECT table_name AS name FROM information_schema.tables")}:
         rank_arc = rows(con, f"""SELECT CAST(team_id AS INTEGER) AS team_id, CAST(period AS INTEGER) AS period,

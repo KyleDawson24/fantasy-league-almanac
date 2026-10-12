@@ -32,29 +32,29 @@ def _pts_finish(season, team_id, abbrev, owner, wins, losses, ties,
 
 
 FINISHED_H2H = [
-    _h2h_finish(2025, 1, "AA", "Alice", 14, 8, 0, 3, final_rank=1, champion=True),
-    _h2h_finish(2025, 2, "BB", "Bob", 16, 6, 0, 1, final_rank=2),
-    _h2h_finish(2025, 3, "CC", "Carol", 12, 10, 0, 7, final_rank=3),
-    _h2h_finish(2026, 4, "DD", "Dave", 12, 10, 0, 7, final_rank=1, champion=True),
-    _h2h_finish(2026, 1, "AA", "Alice", 19, 3, 0, 1, final_rank=4),
-    _h2h_finish(2026, 2, "BB", "Bob", 15, 7, 0, 2, final_rank=2),
+    _h2h_finish(2025, 1, "AA", "Jonas", 14, 8, 0, 3, final_rank=1, champion=True),
+    _h2h_finish(2025, 2, "BB", "Seth", 16, 6, 0, 1, final_rank=2),
+    _h2h_finish(2025, 3, "CC", "Zeke", 12, 10, 0, 7, final_rank=3),
+    _h2h_finish(2026, 4, "DD", "Grant", 12, 10, 0, 7, final_rank=1, champion=True),
+    _h2h_finish(2026, 1, "AA", "Jonas", 19, 3, 0, 1, final_rank=4),
+    _h2h_finish(2026, 2, "BB", "Seth", 15, 7, 0, 2, final_rank=2),
 ]
 
 OPEN_H2H = [
-    _h2h_finish(2026, 1, "AA", "Alice", 10, 5, 0, 1),
-    _h2h_finish(2026, 2, "BB", "Bob", 8, 7, 0, 2),
+    _h2h_finish(2026, 1, "AA", "Jonas", 10, 5, 0, 1),
+    _h2h_finish(2026, 2, "BB", "Seth", 8, 7, 0, 2),
 ]
 
 FINISHED_POINTS = [
-    _pts_finish(2025, 10, "XX", "Xena", 0, 0, 0, 1, final_rank=1, champion=True, pts=5200.5),
-    _pts_finish(2025, 11, "YY", "Yara", 0, 0, 0, 2, final_rank=2, pts=4800.3),
-    _pts_finish(2026, 12, "ZZ", "Zara", 0, 0, 0, 1, final_rank=1, champion=True, pts=6100.0),
-    _pts_finish(2026, 10, "XX", "Xena", 0, 0, 0, 2, final_rank=2, pts=5900.0),
+    _pts_finish(2025, 10, "XX", "Jasper", 0, 0, 0, 1, final_rank=1, champion=True, pts=5200.5),
+    _pts_finish(2025, 11, "YY", "Dorian", 0, 0, 0, 2, final_rank=2, pts=4800.3),
+    _pts_finish(2026, 12, "ZZ", "Silas", 0, 0, 0, 1, final_rank=1, champion=True, pts=6100.0),
+    _pts_finish(2026, 10, "XX", "Jasper", 0, 0, 0, 2, final_rank=2, pts=5900.0),
 ]
 
 OPEN_POINTS = [
-    _pts_finish(2026, 10, "XX", "Xena", 0, 0, 0, 1, pts=3200.0),
-    _pts_finish(2026, 11, "YY", "Yara", 0, 0, 0, 2, pts=3100.0),
+    _pts_finish(2026, 10, "XX", "Jasper", 0, 0, 0, 1, pts=3200.0),
+    _pts_finish(2026, 11, "YY", "Dorian", 0, 0, 0, 2, pts=3100.0),
 ]
 
 FINALS_H2H = [
@@ -171,9 +171,9 @@ class TestChampionGuard:
 
     def test_two_champions_raises(self):
         bad = [
-            _h2h_finish(2025, 1, "AA", "Alice", 14, 8, 0, 3,
+            _h2h_finish(2025, 1, "AA", "Jonas", 14, 8, 0, 3,
                         final_rank=1, champion=True),
-            _h2h_finish(2025, 2, "BB", "Bob", 16, 6, 0, 1,
+            _h2h_finish(2025, 2, "BB", "Seth", 16, 6, 0, 1,
                         final_rank=1, champion=True),
         ]
         with pytest.raises(ValueError, match="2 champions"):
@@ -181,16 +181,16 @@ class TestChampionGuard:
 
     def test_zero_champions_no_final_rank_means_open(self):
         no_champ = [
-            _h2h_finish(2025, 1, "AA", "Alice", 14, 8, 0, 3),
-            _h2h_finish(2025, 2, "BB", "Bob", 16, 6, 0, 1),
+            _h2h_finish(2025, 1, "AA", "Jonas", 14, 8, 0, 3),
+            _h2h_finish(2025, 2, "BB", "Seth", 16, 6, 0, 1),
         ]
         recs = champion_records(no_champ, "h2h")
         assert recs == []
 
     def test_zero_champions_with_final_rank_raises(self):
         bad = [
-            _h2h_finish(2025, 1, "AA", "Alice", 14, 8, 0, 3, final_rank=2),
-            _h2h_finish(2025, 2, "BB", "Bob", 16, 6, 0, 1, final_rank=1),
+            _h2h_finish(2025, 1, "AA", "Jonas", 14, 8, 0, 3, final_rank=2),
+            _h2h_finish(2025, 2, "BB", "Seth", 16, 6, 0, 1, final_rank=1),
         ]
         with pytest.raises(ValueError, match="0 champions"):
             champion_records(bad, "h2h")
@@ -202,9 +202,9 @@ class TestTiesInRecord:
 
     def test_h2h_record_with_ties(self):
         with_ties = [
-            _h2h_finish(2025, 1, "AA", "Alice", 10, 8, 4, 3,
+            _h2h_finish(2025, 1, "AA", "Jonas", 10, 8, 4, 3,
                         final_rank=1, champion=True),
-            _h2h_finish(2025, 2, "BB", "Bob", 12, 10, 0, 1),
+            _h2h_finish(2025, 2, "BB", "Seth", 12, 10, 0, 1),
         ]
         recs = champion_records(with_ties, "h2h")
         assert recs[0]["regular_season_record"] == "10-8-4"

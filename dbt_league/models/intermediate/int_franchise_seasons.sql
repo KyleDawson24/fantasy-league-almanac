@@ -18,7 +18,7 @@
 -- ==========================================================================
 -- GRAIN: one row per (league_key, franchise_id, season_year).
 -- ==========================================================================
-{{ config(materialized='view') }}
+{{ config(materialized='view', meta={'dag_layer': 'identity'}) }}
 
 select
     league_key,

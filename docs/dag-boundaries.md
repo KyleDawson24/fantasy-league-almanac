@@ -1,6 +1,6 @@
 # DAG boundaries and model homes
 
-Status: target design for the next implementation phase. The SQL models remain at their current paths in this phase. The exposure declarations describe current production reads.
+Status: Phase B1 implemented 2026-10-16 (section 7): the eleven moves, layer metadata and the seed join are in place. B2 (identity input projections) and Phase C (enforcement) are pending. The exposure declarations describe current production reads.
 
 ## 1. Layer contract
 
@@ -27,25 +27,25 @@ The physical layout keeps the four existing directory buckets. Identity, reconst
 
 ## 3. All current models and their target homes
 
-Measured from a successful parse: 106 models and 287 unique dependencies (225 model, 31 seed, 31 source). Current counts are 35 staging, 23 intermediate, 28 core and 20 reporting. Target counts are 34 staging, 14 identity, 12 reconstruction, 4 convergence, 24 core and 18 reporting. "Moves" means crossing an existing directory bucket; "stays" does not mean unchanged semantic classification.
+Measured from a successful parse at Phase A: 106 models and 287 unique dependencies (225 model, 31 seed, 31 source). After B1 the seed join turns one model edge into a seed edge: 224 model, 32 seed, 31 source. Directory counts were 35 staging, 23 intermediate, 28 core and 20 reporting before B1 and are 34, 30, 24 and 18 after it. Layer counts, read from `meta.dag_layer`, are 34 staging, 14 identity, 12 reconstruction, 4 convergence, 24 core and 18 reporting. "Moved in B1" means the file crossed an existing directory bucket; "stays" does not mean unchanged semantic classification.
 
 | Model | Current directory | Target layer | Action |
 |---|---|---|---|
-| `dim_franchise` | `models/marts/core` | identity | moves |
-| `dim_franchise_identity` | `models/marts/core` | identity | moves |
-| `dim_franchise_season` | `models/marts/core` | identity | moves |
+| `dim_franchise` | `models/intermediate` | identity | moved in B1 |
+| `dim_franchise_identity` | `models/intermediate` | identity | moved in B1 |
+| `dim_franchise_season` | `models/intermediate` | identity | moved in B1 |
 | `dim_league_format` | `models/marts/core` | core | stays |
 | `dim_league_scoring_rule` | `models/marts/core` | core | stays |
 | `dim_lineup_slot` | `models/marts/core` | core | stays |
 | `dim_matchup_period` | `models/marts/core` | core | stays |
 | `dim_mlb_team` | `models/marts/core` | core | stays |
-| `dim_owner` | `models/marts/core` | identity | moves |
-| `dim_player_identity` | `models/marts/core` | identity | moves |
+| `dim_owner` | `models/intermediate` | identity | moved in B1 |
+| `dim_player_identity` | `models/intermediate` | identity | moved in B1 |
 | `dim_roster_slot_counts` | `models/marts/core` | core | stays |
 | `dim_stat` | `models/marts/core` | core | stays |
-| `dim_team_owner` | `models/marts/core` | identity | moves |
+| `dim_team_owner` | `models/intermediate` | identity | moved in B1 |
 | `dim_team_season_standing` | `models/marts/core` | core | stays |
-| `fct_cbs_player_game_attribution` | `models/marts/core` | reconstruction | moves |
+| `fct_cbs_player_game_attribution` | `models/intermediate` | reconstruction | moved in B1 |
 | `fct_player_daily_performance` | `models/marts/core` | core | stays |
 | `fct_player_daily_production` | `models/marts/core` | core | stays |
 | `fct_player_position_pts` | `models/marts/core` | core | stays |
@@ -78,18 +78,18 @@ Measured from a successful parse: 106 models and 287 unique dependencies (225 mo
 | `int_matchup_period_membership` | `models/intermediate` | reconstruction | stays |
 | `int_matchup_period_shape` | `models/intermediate` | reconstruction | stays |
 | `int_matchup_season_derivation` | `models/intermediate` | reconstruction | stays |
-| `int_matchup_season_standard` | `models/intermediate` | core | moves |
+| `int_matchup_season_standard` | `models/marts/core` | core | moved in B1 |
 | `int_player_daily` | `models/intermediate` | convergence | stays |
 | `int_player_identity_candidates` | `models/intermediate` | identity | stays |
 | `int_player_identity_context` | `models/intermediate` | identity | stays |
 | `mart_cbs_draft_recap` | `models/marts/reporting` | reporting | stays |
 | `mart_cbs_draft_zip_fill` | `models/marts/reporting` | reporting | stays |
-| `mart_daily_roster_snapshot` | `models/marts/reporting` | core | moves |
+| `mart_daily_roster_snapshot` | `models/marts/core` | core | moved in B1 |
 | `mart_draft_board` | `models/marts/reporting` | reporting | stays |
 | `mart_franchise_rivalry` | `models/marts/reporting` | reporting | stays |
 | `mart_franchise_rivalry_axes` | `models/marts/reporting` | reporting | stays |
 | `mart_league_weekly_benchmarks` | `models/marts/reporting` | reporting | stays |
-| `mart_period_standings` | `models/marts/reporting` | core | moves |
+| `mart_period_standings` | `models/marts/core` | core | moved in B1 |
 | `mart_player_career_records` | `models/marts/reporting` | reporting | stays |
 | `mart_player_fpts_reconciliation` | `models/marts/reporting` | reporting | stays |
 | `mart_player_season_records` | `models/marts/reporting` | reporting | stays |
@@ -115,7 +115,7 @@ Measured from a successful parse: 106 models and 287 unique dependencies (225 mo
 | `stg_cbs__rosters__teams` | `models/staging` | staging | stays |
 | `stg_cbs__scoring_settings` | `models/staging` | staging | stays |
 | `stg_cbs__standings` | `models/staging` | staging | stays |
-| `stg_cbs__team_owners` | `models/staging` | identity | moves |
+| `stg_cbs__team_owners` | `models/intermediate` | identity | moved in B1 |
 | `stg_cbs__ui_rosters` | `models/staging` | staging | stays |
 | `stg_cbs__ui_standings` | `models/staging` | staging | stays |
 | `stg_cbs__ui_transactions` | `models/staging` | staging | stays |
@@ -239,5 +239,7 @@ There are nine exposures, up from five, and 60 distinct declared models, up from
 Identity-first processing also needs semantic work beyond file movement. The current roster walk-back resolves identity after computing stints, and attribution and lineup code contain their own fallback expressions. Factor the existing event and anchor identity-selection projections into two identity-owned input models, preserving source-row multiplicity, scoped precedence, unresolved fallback keys and provenance. Reconstruction then consumes the resolved event/anchor inputs before deriving intervals. These proposed input models are additions, not renames of any existing model. The 106-row table describes existing models; adding both projections would produce 108 models and 16 identity models. Native MLBAM game keys and source-ID label lookups do not require an additional resolver. Do not silently merge formerly distinct event streams merely because they resolve to the same person. Any golden change stops implementation for review.
 
 Build from the immutable local fixture into an empty analytics schema in a new clone-local database. A successful comparison against a database containing old relations is insufficient. Use the frozen ESPN and CBS byte-diff suites, the separate ESPN-points rehearsal corpus when available, the BBCode golden tests with their required data backend, and dbt data tests. Goldens and fixture contents remain immutable.
+
+**B1 status, 2026-10-16.** The eleven moves landed with `git mv`, each with its schema.yml block relocated unchanged; no model, column, relation or file was renamed, and every moved model kept its materialization. `meta.dag_layer` is set: each directory carries a default in `dbt_project.yml` (staging, reconstruction for intermediate, core, reporting), and the fourteen identity and four convergence models override it in their own `config()`. R1 is done: `stg_cbs__player_season_stats` joins the `stat_classification` seed instead of `dim_stat`. Under the section 1 rule the parsed manifest has zero backward edges and exactly the eight kind-d edges in the section 4 register. Section 4's evidence column records the Phase A file paths. R2 and R3, the two identity input projections, remain pending as B2; the manifest enforcement test remains Phase C.
 
 **Phase C:** add a CI-only manifest test requiring complete, valid layer metadata; reject every backward model edge; reject reporting-to-staging edges except the eight exact documented pairs; permit same-layer edges and other forward skips. dbt checks actual cycles. A separate consumer-read contract check can compare traced read sets with exposures, including supported dynamic-table choices and direct seeds/sources. Do not implement these enforcement tests before Phase B stabilizes the graph.

@@ -54,7 +54,7 @@
 -- exactly where ESPN's staging does. No cycle: neither dim reads the
 -- daily chain.
 
-{{ config(materialized='table') }}
+{{ config(materialized='table', meta={'dag_layer': 'convergence'}) }}
 
 with attr as (
     select * from {{ ref('fct_cbs_player_game_attribution') }}

@@ -1184,22 +1184,439 @@ models:
         tests:
           - not_null
 
-  - name: int_matchup_season_standard
+  - name: stg_cbs__team_owners
     description: >
-      One season's standard matchup length and where it came from: the
-      platform-derived standard from dim_matchup_period or a recomputed
-      fallback from gameplay days. Never a synthetic row; a league-season
-      with neither source simply has none.
+      The CBS team -> owner bridge in stg_team_owners' exact grain, so the
+      shared owner dimension chain (dim_owner -> dim_team_owner) serves
+      both platforms. Seed-curated identity (CBS serves no owner ids;
+      'cbs-' slugs minted in cbs_team_owners, names on the shared
+      owner_nicknames seed). CURRENT-ERA ONLY: rows stamp the latest
+      captured season -- historical custody is MLB-64's chain-of-custody
+      work, which grows this staging per-season with no shape change.
     tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns:
               - league_key
               - season_year
+              - team_id
+              - owner_id
+    columns:
+      - name: team_id
+        description: 'CBS franchise_id (the facts'' team_id).'
+        tests:
+          - not_null
+      - name: owner_id
+        description: 'Minted ''cbs-'' slug; FK into owner_nicknames via dim_owner.'
+        tests:
+          - not_null
+
+  - name: dim_player_identity
+    description: >
+      PLATFORM-GENERAL player identity resolver (MLB-81): every name form a
+      fantasy platform writes -> the universal MLBAM id, so the historic
+      walk-back attributes id-first instead of by fragile name equality.
+      Grain (platform, name_key, season_year); season-scoped because
+      disambiguation is inherently seasonal (the 1989-2007 reliever "Mike
+      Stanton" vs now-Giancarlo, one name, two mlbams, split by which one
+      played that year). One identity map for every platform (only the
+      candidate block is platform-specific), doubling as a shareable
+      cross-platform name/id <-> MLBAM artifact. Resolvable-to-one ->
+      mlbam_id set, is_ambiguous=false; overlapping homonyms -> mlbam_id
+      NULL + is_ambiguous=true (the seam keeps its name-join tie-break, never
+      guesses); none-that-season -> no row (seam name-fallback). scope rides
+      from the source name's crosswalk scope; a unified two-way entry that
+      pulls both disciplines collapses to NULL = "either" (Ohtani + any
+      future two-way, data-driven, no per-player literal).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - platform
+              - name_key
+              - season_year
+    columns:
+      - name: platform
+        description: 'Fantasy platform namespace (''cbs'' today; ''yahoo''/''espn''/... as they land).'
+        tests:
+          - not_null
+      - name: name_key
+        description: 'cbs_name_key()-normalized name form (+ middle-initial / parenthetical variants) this row resolves.'
+        tests:
+          - not_null
+      - name: season_year
+        description: 'The season this resolution holds for (disambiguation is seasonal).'
+        tests:
+          - not_null
+      - name: mlbam_id
+        description: 'Resolved MLBAM id when exactly one candidate played that season; NULL when the name is ambiguous that season (seam falls back to the name-join).'
+      - name: stat_group_scope
+        description: 'hitting | pitching | NULL. NULL = matches either discipline (a unified two-way entry, or a single-discipline player -- both safe at the seam guard).'
+      - name: platform_player_id
+        description: 'Representative platform player id for the resolved mlbam (cbs_player_id for CBS rows); artifact metadata, not a seam key.'
+      - name: is_ambiguous
+        description: 'True when >1 mlbam maps to this name and played this season (genuine homonyms) -- the seam name-fallback + discipline tie-break resolve these, flagged not guessed.'
+      - name: n_mlbam
+        description: 'Distinct mlbams mapping to this (name_key, season) that played that year; 1 = resolved, >1 = ambiguous.'
+
+  - name: dim_franchise
+    description: >
+      Canonical franchise identity (MLB-64), platform-general. Collapses a
+      platform's re-minted team ids into one continuous franchise via the
+      curated franchise_lineage seed (harvested from the historian's continuity
+      sheet), resolved onto the observed int_franchise_registry seam:
+      franchise_id -> canonical_franchise_id (the earliest id in a
+      lineage) plus the canonical display name/abbrev. Unlinked franchises and
+      the #### sentinel map to themselves. The join every team-grain surface
+      uses to tell a franchise's story across renames and re-mints.
+      Two anchors, deliberately (MLB-113): identity anchors on the earliest id
+      in a lineage, display on the latest-seen one, so a franchise that left and
+      came back shows its most recent name rather than its oldest era's.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - franchise_id
+    columns:
+      - name: franchise_id
+        description: 'Platform team id (per league). Part of the grain.'
+        tests:
+          - not_null
+      - name: canonical_franchise_id
+        description: >
+          The franchise's anchor id (earliest id in its lineage); equals
+          franchise_id for a standalone franchise.
+        tests:
+          - not_null
+      - name: canonical_name
+        description: >
+          Display name of the canonical franchise: the franchise_lineage seed's
+          override when one is given, else the name worn by the lineage's
+          most-recently-seen member (Kyle's rule, 2026-07-22).
+
+          A COALESCE, so it cannot tell a configured name from an observed one
+          -- read configured_name when that difference matters, and never GROUP
+          BY this column to decide identity.
+        tests:
+          - not_null
+      - name: configured_name
+        description: >
+          The name the league EXPLICITLY configured for this franchise in the
+          franchise_lineage seed, or NULL where it configured none (MLB-229).
+          NULL is the whole signal, not a missing value: a configured name is a
+          statement of identity, an observed one is a coincidence, and
+          dim_franchise_identity keys on exactly that difference.
+
+          LINEAGE-WIDE, unlike canonical_name's per-id override: every member
+          of a lineage reports the same configured name, so a name written
+          against a re-minted id names the whole franchise.
+      - name: configured_abbrev
+        description: 'The explicitly configured abbreviation, or NULL. Same lineage-wide resolution as configured_name.'
+      - name: has_configured_name
+        description: 'Non-null convenience flag: true where the league configured a canonical name for this franchise.'
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [true, false]
+
+  - name: dim_franchise_season
+    description: >
+      Canonical franchise identity AT A SEASON (MLB-115) -- the season-grain
+      twin of dim_franchise, and the only place a season-scoped lineage row is
+      honoured. dim_franchise answers "which franchise is this id?" with one
+      answer for all time, which cannot express a platform reusing a LIVE id for
+      a new team (an abandoned slot taken over by a new manager is the same id
+      and genuinely different franchises either side of the handover). Applying
+      such a row at franchise grain would rewrite the franchise across its whole
+      history, so those rows are read here and ignored there. Precedence per
+      franchise-season: a season-scoped lineage row, else dim_franchise's
+      franchise-level answer. Display always resolves from the CANONICAL
+      franchise, so a season parked on the holding pen shows the pen's label
+      rather than the team that later inherited the id. Most surfaces should
+      keep joining dim_franchise; reach for this one when the surface is
+      season-grain AND attribution matters.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - franchise_id
+              - season_year
+    columns:
+      - name: league_key
+        description: 'League registry key. Part of the grain.'
+        tests:
+          - not_null
+      - name: franchise_id
+        description: 'Platform team id (per league). Part of the grain.'
+        tests:
+          - not_null
+      - name: season_year
+        description: 'The season this row speaks about. Part of the grain.'
+        tests:
+          - not_null
+      - name: canonical_franchise_id
+        description: >
+          The franchise this id belonged to IN THIS SEASON, which can differ
+          from dim_franchise's all-time answer when a season-scoped row splits
+          a reused id.
+        tests:
+          - not_null
+      - name: is_season_override
+        description: >
+          True when a season-scoped lineage row decided this row, rather than
+          the franchise-level fallback. The audit handle for "why does this
+          season resolve differently from the franchise?"
+      - name: canonical_name
+        description: 'Display name of the canonical franchise for this season.'
+        tests:
+          - not_null
+      - name: configured_name
+        description: >
+          The name the league explicitly configured for this season's canonical
+          franchise, or NULL (MLB-229). Carried from dim_franchise so a
+          season-grain consumer can tell a configured identity from an observed
+          label without a second join.
+      - name: configured_abbrev
+        description: 'The explicitly configured abbreviation for this season''s canonical franchise, or NULL.'
+      - name: has_configured_name
+        description: 'Non-null convenience flag: true where a canonical name was configured.'
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [true, false]
+
+  - name: dim_franchise_identity
+    description: >
+      The AGGREGATION identity of a franchise-season (MLB-229): which team, for
+      the purpose of adding things up, is this platform id in this season?
+
+      NOT dim_franchise_season. That model stops at the lineage seed's re-mint
+      links, which is right for provenance and wrong for a rivalry ledger -- a
+      league can hold ONE team across ids the lineage never linked. Kyle's
+      ruling: an explicitly configured canonical name IS the identity, so two
+      franchises carrying the same configured name are one team here even when
+      their canonical_franchise_ids differ, and historical names and re-minted
+      ids roll into it.
+
+      THE FALLBACK IS AN ID, NEVER A NAME. With no configured name the identity
+      is the canonical franchise id and the best observed name is a label hung
+      on it, so two unconfigured teams whose observed names happen to match stay
+      separate. The key is prefix-tagged (name: / fid:) so the two kinds share a
+      column and can never collide.
+
+      Matching is exact after trimming -- no case folding, no punctuation
+      smoothing. A league that wrote two different strings meant two different
+      things. Accidental collisions still aggregate, and
+      assert_configured_name_has_no_active_collision warns so the seed can be
+      corrected.
+
+      Activity is not here: see mart_franchise_rivalry_axes.
+
+      Grain: one row per (league_key, franchise_id, season_year).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - franchise_id
+              - season_year
+    columns:
+      - name: league_key
+        description: 'League registry key. Part of the grain; identities never span leagues.'
+        tests:
+          - not_null
+      - name: franchise_id
+        description: 'Platform team id. Part of the grain, and never rewritten -- it identifies source records.'
+        tests:
+          - not_null
+      - name: season_year
+        description: 'The season this row speaks about. Part of the grain, because a season-scoped lineage row can move a single season to a different identity.'
+        tests:
+          - not_null
+      - name: canonical_franchise_id
+        description: 'The franchise this id belonged to in this season, carried from dim_franchise_season for provenance and for holding-pen filtering.'
+        tests:
+          - not_null
+      - name: identity_key
+        description: >
+          The aggregation key: 'name:' + the trimmed configured canonical name
+          where one exists, else 'fid:' + canonical_franchise_id. The prefix is
+          load-bearing -- it stops a league that names a team '13' from
+          colliding with franchise 13.
+        tests:
+          - not_null
+      - name: identity_source
+        description: 'configured_name | franchise_id -- which rule produced identity_key.'
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['configured_name', 'franchise_id']
+      - name: identity_name
+        description: 'Display label for the identity, resolved once per key: the configured name, else the canonical franchise''s best observed name.'
+        tests:
+          - not_null
+      - name: identity_abbrev
+        description: 'Short display label for the identity.'
+      - name: canonical_name
+        description: 'What dim_franchise_season says, kept alongside so the identity rule''s input is visible next to its output.'
+      - name: configured_name
+        description: 'The explicit name, or NULL. Provenance for identity_source.'
+
+  - name: dim_owner
+    description: >
+      Owner dimension. One row per (league_key, owner_id), spined off
+      stg_team_owners (every owner ever seen) LEFT JOIN the
+      owner_nicknames seed for an optional preferred_name override.
+      owner_display = preferred_name when set, else "First Last".
+      Owner ids are platform-issued and league-scoped; cross-league
+      identity stitching is MLB-8's job, not this dim's.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - owner_id
+    columns:
+      - name: league_key
+        description: 'League registry key. Part of the grain.'
+        tests:
+          - not_null
+      - name: owner_id
+        description: 'Platform-stable owner key (ESPN member GUID). Grain key together with league_key.'
+        tests:
+          - not_null
+      - name: owner_display
+        description: 'Nickname if set, else proper-cased "First Last".'
+        tests:
+          - not_null
+      - name: is_name_withheld
+        description: >
+          TRUE when the platform withheld every name field and owner_display
+          is the owner_unavailable_label placeholder rather than a name
+          (MLB-263, ledger S-43). The identity is still real and keyed on
+          owner_id; only the label is unavailable. Consumers that used to
+          compare the label against the var's wording read this instead.
+        tests:
+          - not_null
+
+  - name: dim_team_owner
+    description: >
+      (league, season, team) -> owner_display label. Collapses co-owned
+      teams to "Name / Name". Single join point consumers/marts use to
+      attach owner_display alongside owner_name.
+
+      Born as int_team_owner_display; renamed when it moved to core.
+      Four marts and the almanac's Matchup History tab all join through
+      it, which makes it a contract-layer dimension rather than a
+      transient join surface.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - season_year
+              - team_id
     columns:
       - name: league_key
         tests:
           - not_null
+      - name: owner_display
+        tests:
+          - not_null
+
+  - name: fct_cbs_player_game_attribution
+    description: >
+      THE HISTORIC ACTIVE LENS (MLB-63): every priced player-game
+      (int_cbs__player_game_points) attributed to the franchise that
+      rostered the player that day, with the day's active-state weight and
+      a PER-ROW provenance flag saying how we know -- captured (2026 daily
+      roster captures), reconstructed_day (walk-back membership AND
+      lineup-log state, 2001-2003 / 2021-2025), estimated_startshare
+      (2004-2020: membership from the walk-back, weight from the player's
+      global Start%/Own% conditional estimator off ANY of that season's
+      year-end anchors -- the rates are player-season stats, not franchise
+      stats, so a mid-season stint borrows the ratio the player finished
+      the season with elsewhere), or estimated_membership (membership
+      confirmed, activity unknowable -- the player sits on NO year-end
+      anchor that season, the dropped-and-gone / season-ending-injury
+      class -- weight NULL). The interactive surface filters on provenance; the
+      Sheets almanac uses everything and explains. FA games don't exist
+      here by construction; ambiguity and inferred ends ride as flags,
+      never silent guesses. One attribution per game row is guaranteed:
+      an ambiguous name matching two teams' stints resolves
+      position-aware (anchored position vs the game's discipline), then
+      most-recent-stint, with losers surfaced via attribution_contested.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - cbs_player_id
+              - stat_group
+              - game_pk
+              - game_date
+              - game_index
+    columns:
+      - name: league_key
+        tests:
+          - not_null
+      - name: cbs_player_id
+        description: "CBS player id; synthetic 'ui-only-<mlbam>' ids carry the UI-history population (players the archive universe never held -- no real CBS id exists anywhere; the prefix marks identity provenance, not data source -- ALL historic rows use UI-captured data)."
+        tests:
+          - not_null
+      - name: cbs_player_name
+        description: 'Display name; the walk-back join keys on its cbs_name_key().'
+      - name: mlbam_id
+        description: 'MLBAM id from the crosswalk -- the universal stats spine key.'
       - name: season_year
         tests:
           - not_null
+      - name: stat_group
+        description: 'hitting | pitching -- the engine grain leg (two-way players carry both).'
+      - name: game_date
+        tests:
+          - not_null
+      - name: game_pk
+        description: 'MLB Stats API game id.'
+      - name: game_index
+        description: 'Disambiguates doubleheader legs sharing a date.'
+      - name: franchise_id
+        description: 'The attributed franchise (per-season name map for reconstructed rows; team_id for captured rows).'
+        tests:
+          - not_null
+      - name: team_name
+        description: 'Captured-era team name; NULL on reconstructed rows (join dim at read time).'
+      - name: provenance
+        description: "Kyle's per-row fidelity rule: captured | reconstructed_day | estimated_startshare | estimated_membership."
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['captured', 'reconstructed_day', 'estimated_startshare', 'estimated_adjacent', 'estimated_membership', 'sentinel']
+      - name: state_source
+        description: 'Which mechanism produced the active state: captured | lineup_event | prior_inverse | prior_direct (a first slot_move''s from_slot, observed not inferred) | anchor_hold | startshare; NULL when unknowable (estimated_membership).'
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['captured', 'lineup_event', 'prior_inverse', 'prior_direct', 'anchor_hold', 'startshare', 'adjacent', 'sentinel']
+      - name: is_active
+        description: 'Boolean where the day''s state is KNOWN; NULL where estimated or unknowable.'
+      - name: active_weight
+        description: 'The scoring weight: 1/0 where known, the start-share estimator in 2004-2020, NULL where unknowable. Team-season sums of fpts x weight are what the reconciliation mart grades.'
+      - name: is_ambiguous_name
+        description: 'The name maps to multiple CBS ids -- attribution resolved position-aware, flagged not guessed.'
+      - name: membership_end_inferred
+        description: 'The stint end was truncated (next acquisition) or the departure record is missing -- membership beyond the log''s word.'
+      - name: attribution_contested
+        description: 'Multiple stints matched this game before the tie-break.'
+      - name: calculated_fpts
+        description: 'The game''s priced value under current CBS rules (calculated_ lens).'
+      - name: calculated_hitting_pts
+        description: 'Hitting-side split of calculated_fpts.'
+      - name: calculated_pitching_pts
+        description: 'Pitching-side split of calculated_fpts.'

@@ -1111,7 +1111,7 @@ def test_a_configured_canonical_name_still_wins_over_the_observed_one():
     franchise for good. The identity repair happens upstream, in the
     observed branch, precisely so this coalesce is untouched.
     """
-    sql = (_MODELS / 'marts' / 'core' / 'dim_franchise.sql').read_text(
+    sql = (_MODELS / 'intermediate' / 'dim_franchise.sql').read_text(
         encoding='utf-8')
     assert 'coalesce(r.override_name, anchor.franchise_name)' in sql
     assert 'coalesce(r.override_abbrev, anchor.abbrev)' in sql
@@ -1124,7 +1124,7 @@ def test_a_withheld_owner_name_is_labelled_not_invented():
     label = project['vars']['owner_unavailable_label']
     assert label == 'Owner unavailable'
 
-    sql = (_MODELS / 'marts' / 'core' / 'dim_owner.sql').read_text(
+    sql = (_MODELS / 'intermediate' / 'dim_owner.sql').read_text(
         encoding='utf-8')
     assert "var(\"owner_unavailable_label\")" in sql
     # The fallback is LAST in the coalesce: any real name the platform or

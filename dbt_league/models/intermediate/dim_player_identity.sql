@@ -35,7 +35,7 @@
 --   disciplines collapses to NULL = "matches either" (Ohtani, and any future
 --   two-way -- driven by data, never a per-player literal).
 
-{{ config(materialized='table') }}
+{{ config(materialized='table', meta={'dag_layer': 'identity'}) }}
 
 with
 

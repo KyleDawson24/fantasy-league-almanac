@@ -17,7 +17,7 @@
 --   Co-owned teams yield multiple rows per (league, season, team).
 -- ==========================================================================
 
-{{ config(materialized='view') }}
+{{ config(materialized='view', meta={'dag_layer': 'identity'}) }}
 
 select
     league_key,

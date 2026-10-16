@@ -58,7 +58,7 @@
 --
 -- So do not reach for materialization here again. The lever, if this is
 -- ever worth spending on, is the 42M-row aggregation's own shape.
-{{ config(materialized='view') }}
+{{ config(materialized='view', meta={'dag_layer': 'convergence'}) }}
 
 with archive_floor as (
     -- The league era the book covers. The UI-history standings carry the

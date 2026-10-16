@@ -47,7 +47,7 @@
 -- the CBS abbrev(s) for that club, era variants included: TB/TBD, FLA/MIA,
 -- MON/WAS, ANA/LAA, CHW/CWS, LA/LAD, OAK/ATH).
 
-{{ config(materialized='table') }}
+{{ config(materialized='table', meta={'dag_layer': 'identity'}) }}
 
 with
 

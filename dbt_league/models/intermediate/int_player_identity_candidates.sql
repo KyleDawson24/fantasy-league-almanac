@@ -12,7 +12,7 @@
 -- Everything here is season-BLIND; seasonality enters downstream via MLB
 -- game presence (the dim) or per-season evidence (the context resolver).
 
-{{ config(materialized='table') }}
+{{ config(materialized='table', meta={'dag_layer': 'identity'}) }}
 
 with
 

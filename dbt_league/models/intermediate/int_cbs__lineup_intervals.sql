@@ -27,12 +27,25 @@
 
 {{ config(materialized='view') }}
 
-with raw_events as (
+-- MLB-81: the interval timeline is derived at PLAYER (mlbam) grain, not
+-- name-form grain -- two era name-forms of one player (K-Rod's 'francisco
+-- rodriguez' + 'francisco j rodriguez') merge into ONE coherent A/RS
+-- timeline instead of two overlapping ones. NULL mlbam (ambiguous /
+-- uncandidated) falls back to the name key; scope_key keeps a two-way
+-- player's two disciplines as separate streams. Who each event's player IS
+-- is decided upstream in int_cbs__resolved_identity_events (MLB-158 B2);
+-- this model reads its SEASON-ONLY policy columns, the policy it has always
+-- used (no franchise context).
+with lineup_events as (
     select
         league_key,
         season_year,
         franchise_id,
-        {{ cbs_name_key('player_name_raw') }}       as name_key,
+        name_key,
+        season_mlbam_id                             as mlbam_id,
+        season_stat_group_scope                     as stat_group_scope,
+        season_ident                                as ident,
+        season_scope_key                            as scope_key,
         coalesce(effective_date, txn_date)          as event_date,
         row_seq,
         entry_seq,
@@ -54,30 +67,10 @@ with raw_events as (
             else 'A'
         end as prior_state,
         {{ iff("move_type = 'slot_move'", "'prior_direct'", "'prior_inverse'") }} as prior_source
-    from {{ ref('stg_cbs__ui_transactions') }}
+    from {{ ref('int_cbs__resolved_identity_events') }}
     where move_type in ('activate', 'reserve', 'slot_move')
         and franchise_id is not null
         and season_year between 2001 and 2025
-),
-
--- MLB-81: resolve each event's mlbam so the interval timeline is derived at
--- PLAYER (mlbam) grain, not name-form grain -- two era name-forms of one
--- player (K-Rod's 'francisco rodriguez' + 'francisco j rodriguez') merge into
--- ONE coherent A/RS timeline instead of two overlapping ones. NULL mlbam
--- (ambiguous / uncandidated) falls back to the name key = today's behaviour;
--- scope_key keeps a two-way player's two disciplines as separate streams.
-lineup_events as (
-    select
-        e.*,
-        pid.mlbam_id,
-        pid.stat_group_scope,
-        coalesce({{ to_varchar('pid.mlbam_id') }}, 'name:' || e.name_key) as ident,
-        coalesce(pid.stat_group_scope, '')                        as scope_key
-    from raw_events e
-    left join {{ ref('dim_player_identity') }} pid
-        on pid.platform = 'cbs'
-        and pid.name_key = e.name_key
-        and pid.season_year = e.season_year
 ),
 
 with_next as (

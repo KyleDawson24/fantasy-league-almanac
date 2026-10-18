@@ -1184,6 +1184,95 @@ models:
         tests:
           - not_null
 
+  - name: int_cbs__resolved_identity_events
+    description: >
+      Identity decided once for every captured CBS transaction row (MLB-158
+      B2): one row per stg_cbs__ui_transactions row, same source key and
+      multiplicity, every move type and season, no filtering. Carries the
+      event fields reconstruction replays, the raw name as an audit label,
+      and the resolved keys as named columns, one set per policy the
+      consumers use. season_* is the season-only policy
+      (dim_player_identity at name_key + season_year; the lineup
+      intervals). context_* is franchise-context first
+      (int_player_identity_context at the acting franchise, else the
+      season answer; the roster walk-back). counterparty_context_* is the
+      same policy at a trade_in row's sending franchise, the side whose
+      trade_out the walk-back derives. dictionary_cbs_player_id is the
+      league name dictionary's CBS id where unambiguous. The policies are
+      kept apart so no consumer changes its answer by changing columns.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - season_year
+              - row_seq
+              - entry_seq
+    columns:
+      - name: league_key
+        tests:
+          - not_null
+      - name: season_year
+        tests:
+          - not_null
+      - name: row_seq
+        description: 'Source row order (newest-first across the report), carried unchanged from stg_cbs__ui_transactions.'
+        tests:
+          - not_null
+      - name: entry_seq
+        description: 'Line within one multi-line report row, carried unchanged.'
+        tests:
+          - not_null
+      - name: franchise_id
+        description: 'The acting franchise, as staged (NULL where the name map misses); the scope of the context_* resolution.'
+      - name: counterparty_franchise_id
+        description: 'The sending franchise of a trade_in row, as staged; the scope of the counterparty_context_* resolution.'
+      - name: player_name_raw
+        description: 'The name as CBS printed it. An audit label only; identity is the resolved columns.'
+      - name: name_key
+        description: 'cbs_name_key(player_name_raw): the one CBS normalization, applied here instead of in each consumer.'
+        tests:
+          - not_null
+      - name: season_mlbam_id
+        description: 'Season-only policy: dim_player_identity.mlbam_id for (cbs, name_key, season_year). NULL when the name is ambiguous that season or has no candidate who played.'
+        tests:
+          - relationships:
+              arguments:
+                to: ref('dim_player_identity')
+                field: mlbam_id
+      - name: season_stat_group_scope
+        description: 'Season-only policy: hitting | pitching | NULL (NULL matches either discipline).'
+      - name: season_is_ambiguous
+        description: 'dim_player_identity.is_ambiguous for the name-season, false where the dim has no row.'
+        tests:
+          - not_null
+      - name: season_ident
+        description: 'Season-only join key: the mlbam as text where resolved, else ''name:'' || name_key (the MLB-81 unresolved fallback).'
+        tests:
+          - not_null
+      - name: season_scope_key
+        description: 'season_stat_group_scope with NULL folded to an empty string, the partner of season_ident.'
+        tests:
+          - not_null
+      - name: context_mlbam_id
+        description: 'Franchise-context policy at franchise_id: coalesce(context resolution, season resolution). Not tested against dim_player_identity: a hand-assigned context row may name an mlbam the season dim never resolves on its own.'
+      - name: context_stat_group_scope
+        description: 'Franchise-context policy scope: coalesce(context scope, season scope).'
+      - name: context_is_ambiguous
+        description: 'The name is ambiguous that season and the acting franchise earned no resolution.'
+        tests:
+          - not_null
+      - name: counterparty_context_mlbam_id
+        description: 'Franchise-context policy at counterparty_franchise_id (the derived trade_out side).'
+      - name: counterparty_context_stat_group_scope
+        description: 'Scope of the counterparty_context resolution.'
+      - name: counterparty_context_is_ambiguous
+        description: 'Ambiguous that season with no earned resolution at the counterparty franchise.'
+        tests:
+          - not_null
+      - name: dictionary_cbs_player_id
+        description: 'int_cbs__player_name_ids.any_id where that league name maps to exactly one CBS id; NULL otherwise.'
+
   - name: stg_cbs__team_owners
     description: >
       The CBS team -> owner bridge in stg_team_owners' exact grain, so the

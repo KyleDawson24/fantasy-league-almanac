@@ -64,6 +64,13 @@
 -- no ids, so names are the join spine; resolved_cbs_player_id rides
 -- where the league's own dictionary is unambiguous, and is_ambiguous_name
 -- flags the Will Smith / Luis Garcia class for downstream provenance.
+-- Event rows arrive from int_cbs__resolved_identity_events with name_key
+-- already normalized (MLB-158 B2). The walk-back still runs at NAME grain
+-- on purpose: keying it on the resolved id would merge a player's era
+-- name-forms into one stream and change the stints. The stint-level
+-- resolution at the end still joins the identity models here because
+-- anchor-only stints have no event row to take it from; it moves upstream
+-- with the anchor projection (R3).
 -- 2026 is EXCLUDED: the daily captures own the live season.
 
 {{ config(materialized='table') }}
@@ -78,14 +85,16 @@ with season_bounds as (
     group by season_year
 ),
 
--- Move edges, identity-normalized. Trade-outs are derived rows: the
--- counterparty of a trade_in loses the player at the same moment.
+-- Move edges, identity-normalized upstream (the event rows come from
+-- int_cbs__resolved_identity_events, which owns the name normalization).
+-- Trade-outs are derived rows: the counterparty of a trade_in loses the
+-- player at the same moment.
 moves_raw as (
     select
         league_key,
         season_year,
         franchise_id,
-        {{ cbs_name_key('player_name_raw') }}        as name_key,
+        name_key,
         coalesce(effective_date, txn_date)           as event_date,
         -- MLB-118: the EXECUTION instant, deliberately distinct from
         -- event_date (the STATE date). A manager can queue a move days
@@ -98,7 +107,7 @@ moves_raw as (
              then 'acquisition' else 'departure' end as event_kind,
         move_type                                    as event_detail,
         counterparty_franchise_id
-    from {{ ref('stg_cbs__ui_transactions') }}
+    from {{ ref('int_cbs__resolved_identity_events') }}
     where season_year between 2001 and 2025
         and move_type in ('add', 'trade_in', 'drop')
         and franchise_id is not null
@@ -109,7 +118,7 @@ moves_raw as (
         league_key,
         season_year,
         counterparty_franchise_id,
-        {{ cbs_name_key('player_name_raw') }},
+        name_key,
         coalesce(effective_date, txn_date),
         coalesce(txn_ts, txn_date::timestamp),
         row_seq,
@@ -117,7 +126,7 @@ moves_raw as (
         'departure',
         'trade_out',
         franchise_id
-    from {{ ref('stg_cbs__ui_transactions') }}
+    from {{ ref('int_cbs__resolved_identity_events') }}
     where season_year between 2001 and 2025
         and move_type = 'trade_in'
         and counterparty_franchise_id is not null
@@ -184,12 +193,12 @@ lineup_events as (
         league_key,
         season_year,
         franchise_id,
-        {{ cbs_name_key('player_name_raw') }}        as name_key,
+        name_key,
         coalesce(effective_date, txn_date)           as event_date,
         coalesce(txn_ts, txn_date::timestamp)        as exec_ts,
         row_seq,
         entry_seq
-    from {{ ref('stg_cbs__ui_transactions') }}
+    from {{ ref('int_cbs__resolved_identity_events') }}
     where season_year between 2001 and 2025
         and move_type in ('activate', 'reserve', 'slot_move')
         and franchise_id is not null

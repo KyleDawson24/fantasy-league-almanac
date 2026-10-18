@@ -56,12 +56,13 @@ engine -- 25-80s per test as views, 0.04-0.05s as tables. The reasoning
 lives in `dbt_project.yml` next to the config.
 
 > **Naming caveat.** Directory and prefix names here describe the
-> *intended* topological order, and there are known edges that violate
-> it -- staging models that read dims, intermediates that read core.
-> They are catalogued with file:line evidence in
-> [docs/dag-boundaries-DRAFT.md](../docs/dag-boundaries-DRAFT.md)
-> (MLB-158 Phase A). Until that redraw lands, do not infer a model's
-> dependencies from its prefix; read its `ref()`s.
+> *intended* topological order. The enforced order is six layers
+> (staging, identity, reconstruction, convergence, core, reporting) in
+> each model's `meta.dag_layer`, and measured from the manifest there are
+> zero backward edges, eight registered reporting-to-staging skips,
+> catalogued in [docs/dag-boundaries.md](../docs/dag-boundaries.md)
+> (MLB-158). Do not infer a model's layer from its prefix; read its
+> metadata and its `ref()`s.
 
 One deliberate exception to "consumers read core," declared on the
 `league_almanac` exposure rather than hidden: `stg_scoring_settings`
@@ -111,6 +112,13 @@ stat breakdowns, which drops rostered players who did nothing that day
 upstream of that filter and consumes the staging grain wholesale (every
 rostered player-day), joining only slot metadata and owner display. An
 intermediate pass-through here would add a node with no logic in it.
+
+**Four names that contradict their layer.** `int_matchup_season_standard`,
+`mart_period_standings` and `mart_daily_roster_snapshot` live in core and
+`stg_cbs__team_owners` in identity: a model's layer is its
+`meta.dag_layer` metadata, not its prefix, because names are interfaces
+(SQL callers, Python consumers, tests, exposures) and these four were kept
+on purpose ([docs/dag-boundaries.md](../docs/dag-boundaries.md), section 2).
 
 ## The two scoring lenses
 

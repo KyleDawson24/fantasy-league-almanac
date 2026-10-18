@@ -103,32 +103,23 @@ stints as (
 -- attribution_contested). Two-way splits (Ohtani 2025: batter + pitcher
 -- anchor rows) stay separate via scope_key.
 anchors_resolved as (
-    -- MLB-120: ctx supplies the per-franchise resolution where the season-
-    -- grain dim stays ambiguous -- an anchor row is franchise paperwork, so
-    -- the franchise-context id applies to it by construction.
+    -- Identity is decided upstream in int_cbs__resolved_identity_anchors
+    -- (MLB-158 B2), one row per year-end anchor row. MLB-120: its
+    -- context-first columns carry the per-franchise resolution where the
+    -- season-grain dim stays ambiguous -- an anchor row is franchise
+    -- paperwork, so the franchise-context id applies to it by construction.
     select
-        r.league_key,
-        r.season_year,
-        r.franchise_id,
-        {{ cbs_name_key('r.player_name_raw') }}                    as name_key,
-        r.est_start_share,
-        r.primary_pos,
-        r.roster_status,
-        coalesce(ctx.mlbam_id, pid.mlbam_id)                      as mlbam_id,
-        coalesce({{ to_varchar('coalesce(ctx.mlbam_id, pid.mlbam_id)') }},
-                 'name:' || {{ cbs_name_key('r.player_name_raw') }}) as ident,
-        coalesce(coalesce(ctx.stat_group_scope, pid.stat_group_scope), '') as scope_key
-    from {{ ref('stg_cbs__ui_rosters') }} r
-    left join {{ ref('dim_player_identity') }} pid
-        on pid.platform = 'cbs'
-        and pid.name_key = {{ cbs_name_key('r.player_name_raw') }}
-        and pid.season_year = r.season_year
-    left join {{ ref('int_player_identity_context') }} ctx
-        on ctx.platform = 'cbs'
-        and ctx.league_key = r.league_key
-        and ctx.season_year = r.season_year
-        and ctx.franchise_id = r.franchise_id
-        and ctx.name_key = {{ cbs_name_key('r.player_name_raw') }}
+        league_key,
+        season_year,
+        franchise_id,
+        name_key,
+        est_start_share,
+        primary_pos,
+        roster_status,
+        context_mlbam_id                                          as mlbam_id,
+        context_ident                                             as ident,
+        context_scope_key                                         as scope_key
+    from {{ ref('int_cbs__resolved_identity_anchors') }}
 ),
 
 anchors_est as (

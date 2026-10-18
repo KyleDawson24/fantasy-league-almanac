@@ -64,13 +64,14 @@
 -- no ids, so names are the join spine; resolved_cbs_player_id rides
 -- where the league's own dictionary is unambiguous, and is_ambiguous_name
 -- flags the Will Smith / Luis Garcia class for downstream provenance.
--- Event rows arrive from int_cbs__resolved_identity_events with name_key
--- already normalized (MLB-158 B2). The walk-back still runs at NAME grain
--- on purpose: keying it on the resolved id would merge a player's era
--- name-forms into one stream and change the stints. The stint-level
--- resolution at the end still joins the identity models here because
--- anchor-only stints have no event row to take it from; it moves upstream
--- with the anchor projection (R3).
+-- Who each row's player IS is decided upstream (MLB-158 B2): event rows
+-- come from int_cbs__resolved_identity_events and anchors from
+-- int_cbs__resolved_identity_anchors, with name_key already normalized and
+-- the franchise-context-first resolution already made. The walk-back still
+-- runs at NAME grain on purpose: keying it on the resolved id would merge a
+-- player's era name-forms into one stream and change the stints. Each
+-- stint then takes the identity its own (season, franchise, name) key was
+-- given upstream (stint_identity below).
 -- 2026 is EXCLUDED: the daily captures own the live season.
 
 {{ config(materialized='table') }}
@@ -137,8 +138,8 @@ anchors as (
         league_key,
         season_year,
         franchise_id,
-        {{ cbs_name_key('player_name_raw') }} as name_key
-    from {{ ref('stg_cbs__ui_rosters') }}
+        name_key
+    from {{ ref('int_cbs__resolved_identity_anchors') }}
     group by 1, 2, 3, 4
 ),
 
@@ -579,6 +580,39 @@ flags as (
         {{ boolor_agg("close_type = 'season_end'") }} as ends_on_roster
     from stints
     group by 1, 2, 3, 4
+),
+
+-- THE STINT'S IDENTITY, decided upstream. Every stint key (season,
+-- franchise, name_key) comes from an event row on its acting franchise, the
+-- counterparty of a trade_in whose derived trade_out it is, or a year-end
+-- anchor row -- and the franchise-context-first answer is a function of that
+-- key alone. So the projections' rows collapse (UNION, not UNION ALL) to one
+-- decision per key, the same one the walk-back used to make here.
+stint_identity as (
+    select
+        league_key, season_year, franchise_id, name_key,
+        context_mlbam_id, context_stat_group_scope, context_is_ambiguous,
+        dictionary_cbs_player_id
+    from {{ ref('int_cbs__resolved_identity_events') }}
+    where franchise_id is not null
+
+    union
+
+    select
+        league_key, season_year, counterparty_franchise_id, name_key,
+        counterparty_context_mlbam_id, counterparty_context_stat_group_scope,
+        counterparty_context_is_ambiguous, dictionary_cbs_player_id
+    from {{ ref('int_cbs__resolved_identity_events') }}
+    where move_type = 'trade_in'
+        and counterparty_franchise_id is not null
+
+    union
+
+    select
+        league_key, season_year, franchise_id, name_key,
+        context_mlbam_id, context_stat_group_scope, context_is_ambiguous,
+        dictionary_cbs_player_id
+    from {{ ref('int_cbs__resolved_identity_anchors') }}
 )
 
 select
@@ -599,31 +633,25 @@ select
     (s.season_year < 2003)                             as no_anchor_era,
     -- MLB-81 identity: mlbam is the join spine downstream (name equality
     -- silently broke K-Rod's Angels peak, the middle-initial class, etc.).
-    -- pid resolves the season's name form to its mlbam; NULL where the name
-    -- is ambiguous that season or has no candidate -- the attribution fact
+    -- The season's name form resolves to its mlbam; NULL where the name is
+    -- ambiguous that season or has no candidate -- the attribution fact
     -- falls back to the name-join for exactly those rows.
-    -- MLB-120: where the season-grain dim stays ambiguous, ctx may still have
-    -- EARNED a per-franchise resolution from this franchise's own pos/club
-    -- paperwork (the two Will Smiths each resolve on their own franchise).
-    -- A stint is franchise-scoped, so the context id applies exactly here.
-    coalesce(ctx.mlbam_id, pid.mlbam_id)               as mlbam_id,
-    coalesce(ctx.stat_group_scope, pid.stat_group_scope) as stat_group_scope,
-    coalesce(pid.is_ambiguous, false)
-        and ctx.mlbam_id is null                       as is_ambiguous_name,
-    case when d.n_ids = 1 then d.any_id end            as resolved_cbs_player_id
+    -- MLB-120: where the season-grain dim stays ambiguous, the franchise's
+    -- own pos/club paperwork may still have EARNED a per-franchise
+    -- resolution (the two Will Smiths each resolve on their own franchise).
+    -- A stint is franchise-scoped, so the context-first columns apply
+    -- exactly here. resolved_cbs_player_id is the league name dictionary's
+    -- id where the name maps to one CBS id.
+    i.context_mlbam_id                                 as mlbam_id,
+    i.context_stat_group_scope                         as stat_group_scope,
+    i.context_is_ambiguous                             as is_ambiguous_name,
+    i.dictionary_cbs_player_id                         as resolved_cbs_player_id
 from stints s
 inner join flags f
     on s.league_key = f.league_key and s.season_year = f.season_year
     and s.franchise_id = f.franchise_id and s.name_key = f.name_key
-left join {{ ref('int_cbs__player_name_ids') }} d
-    on s.league_key = d.league_key and s.name_key = d.name_key
-left join {{ ref('dim_player_identity') }} pid
-    on pid.platform = 'cbs'
-    and pid.name_key = s.name_key
-    and pid.season_year = s.season_year
-left join {{ ref('int_player_identity_context') }} ctx
-    on ctx.platform = 'cbs'
-    and ctx.league_key = s.league_key
-    and ctx.season_year = s.season_year
-    and ctx.franchise_id = s.franchise_id
-    and ctx.name_key = s.name_key
+left join stint_identity i
+    on i.league_key = s.league_key
+    and i.season_year = s.season_year
+    and i.franchise_id = s.franchise_id
+    and i.name_key = s.name_key

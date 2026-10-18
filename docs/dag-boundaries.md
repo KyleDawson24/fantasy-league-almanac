@@ -1,6 +1,6 @@
 # DAG boundaries and model homes
 
-Status: Phase B1 implemented 2026-10-16 (section 7): the eleven moves, layer metadata and the seed join are in place. B2 (identity input projections) and Phase C (enforcement) are pending. The exposure declarations describe current production reads.
+Status: Phase B1 implemented 2026-10-16 and B2 implemented 2026-10-18 (section 7): the eleven moves, layer metadata, the seed join and the two identity input projections are in place. Measured from the manifest: zero backward edges, eight registered reporting-to-staging skips. B3, B4 and Phase C (enforcement) are pending. The exposure declarations describe current production reads.
 
 ## 1. Layer contract
 
@@ -23,11 +23,13 @@ The staging shorthand "sources and seeds" does not prohibit same-layer fan-outs.
 
 **Keep every existing model name.** Names are interfaces for SQL readers, Python consumers, tests, exposures and documentation. A dimension remains a dimension when it moves into identity. Moving a file does not require changing its relation name or its ref() calls. All 106 existing names stay; changing a prefix would add consumer churn without improving the graph.
 
+**Ruling, 2026-10-18.** The August rename riders are dead, not parked: names are interfaces. Four names now contradict their layer by prefix (`int_matchup_season_standard`, `mart_period_standings` and `mart_daily_roster_snapshot` in core; `stg_cbs__team_owners` in identity). The layer is `meta.dag_layer`, not the prefix, and the [dbt README](../dbt_league/README.md#reading-the-dag-the-edges-that-look-odd) says so in one sentence. No model, column, relation or file is renamed; the two B2 models are new names, not renames.
+
 The physical layout keeps the four existing directory buckets. Identity, reconstruction and convergence are explicit semantic layers within intermediate. Phase B will set `meta.dag_layer` through dbt project model configuration, with per-model overrides for identity and convergence. Existing intermediate files stay in place; eight other models move into intermediate and three move into core. Layer metadata, this table and parsed dependencies agree on the six-layer order. A later six-folder reorganization would be separate work, not hidden inside these eleven moves.
 
 ## 3. All current models and their target homes
 
-Measured from a successful parse at Phase A: 106 models and 287 unique dependencies (225 model, 31 seed, 31 source). After B1 the seed join turns one model edge into a seed edge: 224 model, 32 seed, 31 source. Directory counts were 35 staging, 23 intermediate, 28 core and 20 reporting before B1 and are 34, 30, 24 and 18 after it. Layer counts, read from `meta.dag_layer`, are 34 staging, 14 identity, 12 reconstruction, 4 convergence, 24 core and 18 reporting. "Moved in B1" means the file crossed an existing directory bucket; "stays" does not mean unchanged semantic classification.
+Measured from a successful parse at Phase A: 106 models and 287 unique dependencies (225 model, 31 seed, 31 source). After B1 the seed join turns one model edge into a seed edge: 224 model, 32 seed, 31 source. B2 adds the two identity input projections, both in `models/intermediate`: `int_cbs__resolved_identity_events.sql` and `int_cbs__resolved_identity_anchors.sql`. That makes 108 models and 289 unique dependencies (226 model, 32 seed, 31 source). Directory counts were 35 staging, 23 intermediate, 28 core and 20 reporting before B1, 34, 30, 24 and 18 after it, and are 34, 32, 24 and 18 after B2. Layer counts, read from `meta.dag_layer`, are 34 staging, 16 identity, 12 reconstruction, 4 convergence, 24 core and 18 reporting. "Moved in B1" means the file crossed an existing directory bucket; "stays" does not mean unchanged semantic classification; "added in B2" marks the two new models.
 
 | Model | Current directory | Target layer | Action |
 |---|---|---|---|
@@ -66,6 +68,8 @@ Measured from a successful parse at Phase A: 106 models and 287 unique dependenc
 | `int_cbs__player_game_points` | `models/intermediate` | reconstruction | stays |
 | `int_cbs__player_name_ids` | `models/intermediate` | identity | stays |
 | `int_cbs__player_season_stats` | `models/intermediate` | convergence | stays |
+| `int_cbs__resolved_identity_anchors` | `models/intermediate` | identity | added in B2 (R3) |
+| `int_cbs__resolved_identity_events` | `models/intermediate` | identity | added in B2 (R2) |
 | `int_cbs__roster_stints` | `models/intermediate` | reconstruction | stays |
 | `int_cbs__roster_stints_effective` | `models/intermediate` | reconstruction | stays |
 | `int_cbs__team_owner_season` | `models/intermediate` | identity | stays |
@@ -142,7 +146,7 @@ Measured from a successful parse at Phase A: 106 models and 287 unique dependenc
 
 Under the current four-bucket order there are 12 backward edges: 2 staging reads of later buckets, 7 intermediate reads of core, and 3 core reads of reporting. Ten reporting-to-staging edges bring the clarified-rule total to **22**. An earlier review counted 27 by additionally counting five forward core-to-intermediate edges whose transitive dependencies include core; its strict variant counted 33 by adding six ordinary forward edges. Those eleven forward edges do not independently violate the clarified rule. The table below preserves all 33 review cases and states each disposition.
 
-After the target assignment, there is **one backward edge and eight kind-d reporting-to-staging edges**, nine raw violations. The eight exact edges below are documented exceptions. After the remaining backward edge is rewired in Phase B, the intended enforcement result is zero unapproved violations and eight registered exceptions. This is not a claim that all direct staging reads disappear.
+After the target assignment, there is **one backward edge and eight kind-d reporting-to-staging edges**, nine raw violations. The eight exact edges below are documented exceptions. B1 rewired the remaining backward edge, and the measured result since then is **zero backward edges, eight registered reporting-to-staging skips**. The eight are long forward skips from reporting straight to staging, registered because they bypass identity and convergence on purpose; nobody reads a later layer. This is not a claim that all direct staging reads disappear.
 
 | Reader | Reads | Current evidence | Phase B disposition |
 |---|---|---|---|
@@ -182,16 +186,27 @@ After the target assignment, there is **one backward edge and eight kind-d repor
 
 ### Exact-edge kind-d exception register
 
+The eight entries are of two kinds.
+
+**Audits, permanent.** An audit must read its control independently; these four never expire.
+
 | Reader | Staging input | Reason to retain this direct input |
 |---|---|---|
-| `mart_cbs_draft_zip_fill` | `stg_cbs__draft` | The fill audit compares assembled picks with the original draft capture to distinguish an absent recording from an assembled pick. Substituting the reconstruction being audited would hide that distinction. |
-| `mart_draft_board` | `stg_draft` | Draft picks, keeper status and purchase values are source observations joined to performance for draft-value analysis. No core performance fact preserves the complete draft-pick population. |
-| `mart_draft_board` | `stg_draft_settings` | The board needs the captured draft format and settings, including auction context. A performance fact does not carry this source-specific configuration. |
-| `mart_player_fpts_reconciliation` | `stg_cbs__scoring_settings` | An independent comparison of reconstructed scoring with the platform rule feed must retain the original scoring weights, rather than obtain them from the output being checked. |
-| `mart_player_fpts_reconciliation` | `stg_cbs__player_season_stats` | Platform-delivered season totals are the independent control for reconstructed player points. Reading reconstructed totals on both sides would make the reconciliation circular. |
-| `mart_team_points_reconciliation` | `stg_cbs__ui_standings` | Captured team totals are an independent control for attributed player-game totals. The audit must retain that independently observed side. |
-| `mart_team_position_eligibility` | `stg_cbs__rosters` | Current roster eligibility includes rostered players without a scored game. Going through performance facts would lose those players and the delivered eligibility array. |
-| `mart_team_position_eligibility` | `stg_cbs__mlbam_crosswalk` | The roster-eligibility path needs the platform-ID to MLBAM bridge alongside raw roster arrays. This ID lookup retains zero-game players; it is not a second ambiguous-name resolver. Replacing it requires an identity contract with the same platform-ID coverage. |
+| `mart_player_fpts_reconciliation` | `stg_cbs__scoring_settings` | The reconciliation re-prices players against the platform's own rule feed, its control. Scoring rules are a universal concept the project already converges (`dim_league_scoring_rule`), but an audit that read the modeled rules it is checking would be circular, so it reads the captured weights independently. |
+| `mart_player_fpts_reconciliation` | `stg_cbs__player_season_stats` | Platform-delivered season totals are the control for reconstructed player points. An audit that read modeled totals on both sides would be circular. |
+| `mart_team_points_reconciliation` | `stg_cbs__ui_standings` | Captured team totals are the control for attributed player-game totals. The audit reads that observed side independently; reading the modeled standings it checks would be circular. |
+| `mart_cbs_draft_zip_fill` | `stg_cbs__draft` | The fill audit compares assembled picks with the original draft capture, its control, to tell an absent recording from an assembled pick. An audit that read the assembly it is checking would be circular. |
+
+**Modeling gaps, expiring.** Each row is an exception until the named model exists; then the reader moves onto it and the row is retired.
+
+| Reader | Staging input | Reason to retain this direct input |
+|---|---|---|
+| `mart_draft_board` | `stg_draft` | Exception until a core draft-pick fact exists. The board joins draft picks, keeper status and purchase values to performance for draft-value analysis, and no core fact yet preserves the complete draft-pick population. The fact is a half-session item for 2.5 or 2.6. |
+| `mart_draft_board` | `stg_draft_settings` | Exception until draft format and auction settings live in `dim_league_format` (or a draft-settings dimension). Draft settings are league settings like scoring and roster shape, which the project already converges (`dim_league_format`, `dim_league_scoring_rule`, `dim_roster_slot_counts`, `dim_lineup_slot`); these two have not been converged yet. |
+| `mart_team_position_eligibility` | `stg_cbs__rosters` | Exception until the dense rostered atom exists in core: rostered player-days with eligibility as of the day, zero-game days included (the data-interface contract's R5/W10). Until then, going through performance facts would lose rostered players without a scored game and the delivered eligibility array. |
+| `mart_team_position_eligibility` | `stg_cbs__mlbam_crosswalk` | Exception until the same dense rostered atom exists in core. The roster-eligibility path needs the platform-ID to MLBAM bridge for current roster rows, zero-game players included; it is an ID lookup, not a second ambiguous-name resolver. B2's anchor projection does not carry that bridge: it covers the 2003-2025 year-end rows, keyed by name with no platform id, and resolves an MLBAM id only for players with MLB games that season, so zero-game players stay unresolved there (56 of 10,449 rows in the frozen corpus). |
+
+Phase C's test will flag the four expiring rows on every run, so they are retired rather than forgotten.
 
 The two other current kind-d edges are resolved by moves. `mart_daily_roster_snapshot` becomes core: its read of `stg_box_scores` preserves rostered player-days with no performance, as explained in the [dbt README](../dbt_league/README.md#reading-the-dag-the-edges-that-look-odd). A pass-through fact would lose that purpose or merely add a redundant node. `mart_period_standings` also becomes core, where its captured period-standing input is permitted. Neither needs a reporting exception after its move.
 
@@ -240,6 +255,8 @@ Identity-first processing also needs semantic work beyond file movement. The cur
 
 Build from the immutable local fixture into an empty analytics schema in a new clone-local database. A successful comparison against a database containing old relations is insufficient. Use the frozen ESPN and CBS byte-diff suites, the separate ESPN-points rehearsal corpus when available, the BBCode golden tests with their required data backend, and dbt data tests. Goldens and fixture contents remain immutable.
 
-**B1 status, 2026-10-16.** The eleven moves landed with `git mv`, each with its schema.yml block relocated unchanged; no model, column, relation or file was renamed, and every moved model kept its materialization. `meta.dag_layer` is set: each directory carries a default in `dbt_project.yml` (staging, reconstruction for intermediate, core, reporting), and the fourteen identity and four convergence models override it in their own `config()`. R1 is done: `stg_cbs__player_season_stats` joins the `stat_classification` seed instead of `dim_stat`. Under the section 1 rule the parsed manifest has zero backward edges and exactly the eight kind-d edges in the section 4 register. Section 4's evidence column records the Phase A file paths. R2 and R3, the two identity input projections, remain pending as B2; the manifest enforcement test remains Phase C.
+**B1 status, 2026-10-16.** The eleven moves landed with `git mv`, each with its schema.yml block relocated unchanged; no model, column, relation or file was renamed, and every moved model kept its materialization. `meta.dag_layer` is set: each directory carries a default in `dbt_project.yml` (staging, reconstruction for intermediate, core, reporting), and the fourteen identity and four convergence models override it in their own `config()`. R1 is done: `stg_cbs__player_season_stats` joins the `stat_classification` seed instead of `dim_stat`. Under the section 1 rule the parsed manifest has zero backward edges, eight registered reporting-to-staging skips (exactly the section 4 register). Section 4's evidence column records the Phase A file paths. R2 and R3, the two identity input projections, remain pending as B2; the manifest enforcement test remains Phase C.
+
+**B2 status, 2026-10-18.** R2 and R3 landed as two commits. `int_cbs__resolved_identity_events` (one row per captured transaction row) and `int_cbs__resolved_identity_anchors` (one row per captured year-end roster row) are identity models that own the CBS name normalization and the resolution policies. Each policy is a separate named column set: season-only for the lineup intervals, franchise-context first for the roster walk-back and the attribution fact, plus the league name dictionary's CBS id. `int_cbs__lineup_intervals`, `int_cbs__roster_stints` and `fct_cbs_player_game_attribution` read those columns and no longer read `dim_player_identity` or `int_player_identity_context` themselves. The walk-back still runs at name grain, and the attribution fact still re-aggregates anchors to its own grain. Output columns and grain are unchanged, the byte-diffs pass, and row counts, key counts, unresolved populations and content hashes match the pre-B2 build. The parsed manifest has 108 models, 16 identity, and zero backward edges, eight registered reporting-to-staging skips. Pending: B3, the final fresh build, the remaining documentation and the README diagram. B4, folders that match the six layers. Phase C, the CI manifest test below.
 
 **Phase C:** add a CI-only manifest test requiring complete, valid layer metadata; reject every backward model edge; reject reporting-to-staging edges except the eight exact documented pairs; permit same-layer edges and other forward skips. dbt checks actual cycles. A separate consumer-read contract check can compare traced read sets with exposures, including supported dynamic-table choices and direct seeds/sources. Do not implement these enforcement tests before Phase B stabilizes the graph.

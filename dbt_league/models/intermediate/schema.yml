@@ -1273,6 +1273,69 @@ models:
       - name: dictionary_cbs_player_id
         description: 'int_cbs__player_name_ids.any_id where that league name maps to exactly one CBS id; NULL otherwise.'
 
+  - name: int_cbs__resolved_identity_anchors
+    description: >
+      Identity decided once for every captured CBS year-end roster row
+      (MLB-158 B2): one row per stg_cbs__ui_rosters row, same source key and
+      multiplicity, no filtering and no re-aggregation. Carries the anchor
+      fields reconstruction reads (primary_pos, roster_status,
+      est_start_share), the raw name as an audit label, and the
+      franchise-context-first resolution the roster walk-back and the
+      attribution fact both use: int_player_identity_context at the anchored
+      franchise, else dim_player_identity at name_key + season_year.
+      context_ident / context_scope_key are the MLB-81 join keys
+      (unresolved -> 'name:' || name_key). Anchors carry no platform ids, and
+      the season resolver counts only candidates with MLB games that season,
+      so a rostered player who never played stays unresolved here; no
+      crosswalk hop is made.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - league_key
+              - season_year
+              - franchise_id
+              - player_name_raw
+    columns:
+      - name: league_key
+        tests:
+          - not_null
+      - name: season_year
+        tests:
+          - not_null
+      - name: franchise_id
+        description: 'The anchored franchise, as staged; the scope of the context_* resolution.'
+        tests:
+          - not_null
+      - name: player_name_raw
+        description: 'The name as the year-end roster page printed it. An audit label and, with the three columns above, the source row identity.'
+        tests:
+          - not_null
+      - name: name_key
+        description: 'cbs_name_key(player_name_raw): the one CBS normalization, applied here instead of in each consumer.'
+        tests:
+          - not_null
+      - name: est_start_share
+        description: 'Carried unchanged from stg_cbs__ui_rosters (start_pct / own_pct, capped at 1; NULL when own_pct is 0 or NULL). An estimate.'
+      - name: context_mlbam_id
+        description: 'Franchise-context policy: coalesce(context resolution, season resolution). NULL when ambiguous with no earned resolution, or no candidate played that season. Not tested against dim_player_identity: a hand-assigned context row may name an mlbam the season dim never resolves on its own.'
+      - name: context_stat_group_scope
+        description: 'hitting | pitching | NULL: coalesce(context scope, season scope).'
+      - name: context_is_ambiguous
+        description: 'The name is ambiguous that season and the anchored franchise earned no resolution.'
+        tests:
+          - not_null
+      - name: context_ident
+        description: 'Join key: context_mlbam_id as text where resolved, else ''name:'' || name_key.'
+        tests:
+          - not_null
+      - name: context_scope_key
+        description: 'context_stat_group_scope with NULL folded to an empty string, the partner of context_ident.'
+        tests:
+          - not_null
+      - name: dictionary_cbs_player_id
+        description: 'int_cbs__player_name_ids.any_id where that league name maps to exactly one CBS id; NULL otherwise.'
+
   - name: stg_cbs__team_owners
     description: >
       The CBS team -> owner bridge in stg_team_owners' exact grain, so the

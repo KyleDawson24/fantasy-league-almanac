@@ -271,7 +271,7 @@ The portability spike that sized the transform-layer port, including the traps i
 
 ## What this demonstrates
 
-The current shape of the transform layer: **106 dbt models** (53 views, 50 tables, 3 incremental), **20 seeds**, **810 data tests**, **30 sources**, and **5 declared exposures**. These counts are regenerated from the parsed manifest at each release cut; if you are reading them mid-cycle, `dbt parse` and the manifest are the truth.
+The current shape of the transform layer: **108 dbt models** (53 views, 52 tables, 3 incremental), **20 seeds**, **831 data tests**, **30 sources**, and **9 declared exposures**. These counts are regenerated from the parsed manifest at each release cut; if you are reading them mid-cycle, `dbt parse` and the manifest are the truth.
 
 Most of that needs a warehouse to exercise, but not all of it: with no account and no credentials, `dbt deps --project-dir dbt_league` installs the packages, `dbt parse` compiles the project, and `pytest tests/` passes. At this cut a fresh clone collects **1968** tracked pure tests, with **38** warehouse-marked tests deselected by default -- collection counts, not a pass tally, since the tests wanting private regression corpora skip rather than fail. Six of the deselected tests need Snowflake credentials (three in `test_points_almanac_espn`, three in `test_window_lineup_pitcher_slots`); the rest are golden-corpus tests. Your own checkout will print different totals: some tests need a POSIX shell and skip on Windows, and any untracked work of your own is collected too. Counts drift between releases; `pytest tests/ -q` on your machine is the truth.
 

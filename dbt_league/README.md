@@ -202,10 +202,10 @@ round every displayed value at source.
 
 ## Testing
 
-810 dbt data tests (776 generic + 34 singular) plus source-freshness
+831 dbt data tests (797 generic + 34 singular) plus source-freshness
 contracts:
 
-- **Generic tests** (776) -- every model carries a
+- **Generic tests** (797) -- every model carries a
   `dbt_utils.unique_combination_of_columns` grain test; keys and
   partitions carry `not_null` / `accepted_values`; staging FKs into the
   seed catalog carry `relationships`.

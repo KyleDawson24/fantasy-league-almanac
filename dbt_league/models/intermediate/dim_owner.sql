@@ -25,7 +25,7 @@
 -- Materialization: view. Tiny; changes only when settings are
 -- re-extracted or the seed is edited.
 
-{{ config(materialized='view') }}
+{{ config(materialized='view', meta={'dag_layer': 'identity'}) }}
 
 with owners as (
     select

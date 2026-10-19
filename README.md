@@ -97,18 +97,28 @@ The payoff is measurable: both leagues' team pages render through the *same* bui
 
 ## Architecture
 
-Four layers, one warehouse, two platforms:
+Six layers, one warehouse, two platforms; 108 dbt models in all:
 
-```
-ESPN + CBS extract  ->  RAW (append-only, platform-native shape) --
-                        Snowflake, or parquet on disk loaded into DuckDB
-                    ->  dbt staging (canonicalized to one vocabulary)
-                    ->  dbt intermediate (identity resolution, walk-backs)
-                    ->  dbt marts (core contracts + reporting)
-                    ->  weekly recap · records report · Google Sheets almanac
+```mermaid
+flowchart TD
+    staging["staging: 34 models<br/>RAW extracts in, one vocabulary out"]
+    identity["identity: 16 models<br/>who each row describes"]
+    reconstruction["reconstruction: 12 models<br/>rebuild what happened, day by day"]
+    convergence["convergence: 4 models<br/>ESPN and CBS in one contract"]
+    core["core: 24 models<br/>dimensions and facts"]
+    reporting["reporting: 18 models<br/>consumer shapes and audits"]
+    exposures["9 dbt exposures<br/>espn_almanac, cbs_almanac, season_report,<br/>records_book, dashboard_extract, weekly_recap,<br/>records_report, records_sheet, shared_almanac_export"]
+    staging --> identity
+    identity --> reconstruction
+    reconstruction --> convergence
+    convergence --> core
+    core --> reporting
+    reporting --> exposures
 ```
 
-Built on dbt + Python over Snowflake or DuckDB: extract scripts land raw JSON, dbt owns everything from staging through marts, and the Python output layer reads the marts to produce the recap, the records report, and the almanac. Five of those consumers are formally declared as dbt exposures, so the lineage graph runs source → deliverable; the declared set is hand-maintained and stated plainly in [dbt_league/README.md](dbt_league/README.md#exposures). The [hosted dbt catalog](https://kpdawson.com/fantasy-league-almanac/catalog/) has the lineage and column-level docs, regenerated at each release.
+Edges point one way: every model reads only its own layer or an earlier one. Eight registered edges run from reporting straight to staging by design (four audits reading their controls, four gaps that expire when the model they wait for exists), and CI enforces both: `tests/test_dag_boundaries.py` checks the manifest against the register in `dbt_league/dag_exceptions.yml` on every run. The contract and the register's prose are in [docs/dag-boundaries.md](docs/dag-boundaries.md); the four model names that contradict their layer are explained in the dbt README's [edges that look odd](dbt_league/README.md#reading-the-dag-the-edges-that-look-odd).
+
+Built on dbt + Python over Snowflake or DuckDB: extract scripts land raw JSON, dbt owns everything from staging through marts, and the Python output layer reads the marts to produce the recap, the records report, and the almanac. Nine of those consumers are formally declared as dbt exposures, so the lineage graph runs source → deliverable; the declared set is hand-maintained and stated plainly in [dbt_league/README.md](dbt_league/README.md#exposures). The [hosted dbt catalog](https://kpdawson.com/fantasy-league-almanac/catalog/) has the lineage and column-level docs, regenerated at each release.
 
 ---
 

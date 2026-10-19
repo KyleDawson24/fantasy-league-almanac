@@ -62,3 +62,5 @@ jobs:
         run: |
           dbt deps --project-dir dbt_league
           dbt parse --project-dir dbt_league --no-partial-parse
+      - name: Layer contract on the parsed manifest (MLB-158 Phase C)
+        run: python tools/dag_boundaries.py --manifest dbt_league/target/manifest.json --register dbt_league/dag_exceptions.yml --readme README.md

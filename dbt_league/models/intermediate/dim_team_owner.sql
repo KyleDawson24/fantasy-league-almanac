@@ -15,7 +15,7 @@
 --
 -- Materialization: view. Small per-league-season-team lookup.
 
-{{ config(materialized='view') }}
+{{ config(materialized='view', meta={'dag_layer': 'identity'}) }}
 
 select
     cast(sto.league_key as varchar) as league_key,

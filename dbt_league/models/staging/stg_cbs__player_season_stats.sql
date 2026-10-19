@@ -9,10 +9,15 @@
 --
 -- The bridge in action: each player object's native CBS stat keys are
 -- unpivoted, mapped cbs_key -> canonical_key (cbs_stat_map) -> stat_name
--- (dim_stat), so CBS emits the SAME stat_name vocabulary the ESPN DAG speaks
--- and the shared dim_stat metadata (polarity, display, record-candidacy)
--- applies downstream. Unmapped keys (metadata, derived composites, unbridged
--- vocabulary) drop out at the INNER JOINs -- intended.
+-- (stat_classification), so CBS emits the SAME stat_name vocabulary the ESPN
+-- DAG speaks and the shared dim_stat metadata (polarity, display,
+-- record-candidacy) applies downstream. Unmapped keys (metadata, derived
+-- composites, unbridged vocabulary) drop out at the INNER JOINs -- intended.
+--
+-- The stat_name join reads the stat_classification SEED, not dim_stat
+-- (MLB-158 R1). Staging may read seeds but not a core model, and dim_stat
+-- is an unfiltered pass-through of that seed for the three columns used here
+-- (stat_name, stat_category, canonical_key), so the join yields the same rows.
 --
 -- Two universes share this model, distinguished at source by params.position:
 -- the hitter universe (no position param) carries hitting stats + hitting
@@ -85,6 +90,6 @@ from stat_values sv
 inner join {{ ref('cbs_stat_map') }} m
     on sv.cbs_key = m.cbs_key
     and m.disposition = 'mapped'
-inner join {{ ref('dim_stat') }} d
+inner join {{ ref('stat_classification') }} d
     on m.canonical_key = d.canonical_key
 where sv.stat_value is not null

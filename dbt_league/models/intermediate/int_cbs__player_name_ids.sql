@@ -19,7 +19,7 @@
 -- trailing POS + MLB-team tokens, 'Last, First' flips, case folds, and
 -- periods drop ('Sanchez, Jonathan O.' == 'jonathan o sanchez').
 
-{{ config(materialized='view') }}
+{{ config(materialized='view', meta={'dag_layer': 'identity'}) }}
 
 with pairs as (
 

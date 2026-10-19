@@ -64,7 +64,7 @@
 -- live; the table cost is at the weekly layer one level up. View at daily,
 -- table at weekly is the right split.
 
-{{ config(materialized='view') }}
+{{ config(materialized='view', meta={'dag_layer': 'convergence'}) }}
 
 with daily_long as (
     -- Long-form per-stat join chain: INNER JOIN classification

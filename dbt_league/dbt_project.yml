@@ -63,14 +63,32 @@ clean-targets:
 # cost belongs one layer up at the weekly grain). It is here so a new
 # intermediate model added without a pin lands as a table rather than
 # inheriting a view by accident.
+#
+# THE SEMANTIC LAYER IS METADATA, NOT A FOLDER (MLB-158). The DAG has six
+# layers in a fixed order -- staging -> identity -> reconstruction ->
+# convergence -> core -> reporting (docs/dag-boundaries.md) -- inside these
+# four directories. Each directory sets a default `meta.dag_layer`;
+# intermediate/ holds three layers, so its identity and convergence models
+# override the default in their own config(). The manifest's dag_layer is
+# the claim, not the path: lineage tooling and the layer check read it.
 models:
   dbt_league:
     staging:
       +materialized: table
+      +meta:
+        dag_layer: staging
     intermediate:
       +materialized: table
+      +meta:
+        dag_layer: reconstruction
     marts:
       +materialized: table
+      core:
+        +meta:
+          dag_layer: core
+      reporting:
+        +meta:
+          dag_layer: reporting
 
 # Project-level vars
 vars:

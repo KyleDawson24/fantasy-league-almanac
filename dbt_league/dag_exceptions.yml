@@ -1,0 +1,107 @@
+# dag_exceptions.yml -- the layer contract's exception register, as data (MLB-158 Phase C).
+#
+# The contract (docs/dag-boundaries.md section 1): a model reads only its own
+# layer or an earlier one, in the order staging -> identity -> reconstruction
+# -> convergence -> core -> reporting, with the layer read from each model's
+# meta.dag_layer in the parsed manifest. The one forward skip that needs
+# permission is reporting reading staging directly; every such edge in the
+# project is one row here, and no other edge may skip that way.
+#
+# Two kinds of row:
+#   audit  permanent. An audit must read its control independently; reading
+#          the modeled output it is checking would be circular.
+#   gap    temporary: an exception until the model named in
+#          expires_when_model_exists is built. The boundary test warns on
+#          every run while the row is active and FAILS the day that model
+#          appears in the manifest, so the row is retired, not forgotten.
+#
+# docs/dag-boundaries.md section 4 ("Exact-edge kind-d exception register") is
+# the prose twin of this file. tests/test_dag_boundaries.py fails if the two
+# name different pairs or different kinds, if a row here has no matching edge
+# in the manifest (retire the row), or if the manifest has a reporting-to-
+# staging edge with no row here. Checker: tools/dag_boundaries.py.
+#
+# This file sits at the dbt project root, outside every configured resource
+# path (models, seeds, macros, tests, analyses, snapshots), so dbt never
+# parses it as a resource.
+
+exceptions:
+
+  # ---------------------------------------------------------------- audits
+
+  - reader: mart_player_fpts_reconciliation
+    input: stg_cbs__scoring_settings
+    kind: audit
+    reason: >-
+      The reconciliation re-prices players against the platform's own rule
+      feed, its control; an audit that read the modeled rules it is checking
+      would be circular, so it reads the captured weights independently.
+
+  - reader: mart_player_fpts_reconciliation
+    input: stg_cbs__player_season_stats
+    kind: audit
+    reason: >-
+      Platform-delivered season totals are the control for reconstructed
+      player points; an audit that read modeled totals on both sides would be
+      circular.
+
+  - reader: mart_team_points_reconciliation
+    input: stg_cbs__ui_standings
+    kind: audit
+    reason: >-
+      Captured team totals are the control for attributed player-game totals;
+      reading the modeled standings it checks would be circular.
+
+  - reader: mart_cbs_draft_zip_fill
+    input: stg_cbs__draft
+    kind: audit
+    reason: >-
+      The fill audit compares assembled picks with the original draft
+      capture, its control, to tell an absent recording from an assembled
+      pick; reading the assembly it is checking would be circular.
+
+  # ------------------------------------------------------------------ gaps
+  #
+  # The expiry model names below are PROVISIONAL: neither model has been
+  # designed yet. Whoever builds one either gives it this name or edits the
+  # name here in the same commit; either way the row then expires.
+
+  - reader: mart_draft_board
+    input: stg_draft
+    kind: gap
+    expires_when_model_exists: fct_draft_pick   # provisional: the core draft-pick fact, not yet designed
+    reason: >-
+      Exception until a core draft-pick fact exists; no core fact yet
+      preserves the complete draft-pick population the board joins to
+      performance for draft-value analysis.
+
+  - reader: mart_draft_board
+    input: stg_draft_settings
+    kind: gap
+    expires_when_model_exists: fct_draft_pick   # provisional, as above
+    reason: >-
+      Exception until the core draft-pick fact exists and draft format and
+      auction settings live in dim_league_format (or a draft-settings
+      dimension); these two settings have not been converged yet.
+
+  - reader: mart_team_position_eligibility
+    input: stg_cbs__rosters
+    kind: gap
+    expires_when_model_exists: fct_player_roster_day_eligibility   # provisional: the dense rostered atom (data-interface contract R5/W10), not yet designed
+    reason: >-
+      Exception until the dense rostered atom exists in core (rostered
+      player-days with eligibility as of the day, zero-game days included);
+      until then performance facts would lose rostered players without a
+      scored game and the delivered eligibility array.
+
+  - reader: mart_team_position_eligibility
+    input: stg_cbs__mlbam_crosswalk
+    kind: gap
+    expires_when_model_exists: fct_player_roster_day_eligibility   # provisional, as above
+    reason: >-
+      Exception until the same dense rostered atom exists in core; the path
+      needs the platform-ID to MLBAM bridge for current roster rows,
+      zero-game players included. B2's anchor projection does not carry that
+      bridge: it covers the 2003-2025 year-end rows, keyed by name with no
+      platform id, and resolves an MLBAM id only for players with MLB games
+      that season (56 of 10,449 rows stay unresolved in the frozen corpus).

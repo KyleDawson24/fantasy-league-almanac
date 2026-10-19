@@ -18,35 +18,40 @@ Browse the compiled catalog (lineage + column-level docs) at the
 RAW.* sources (30)         seeds (20)
    │                          │
    ▼                          │
-staging/    (35) stg_*   1:1 reshapes of RAW; no business logic
+staging/    (34) stg_*   1:1 reshapes of RAW; no business logic
    │                          │
    ▼                          │
-intermediate/ (23) int_* business logic that isn't yet a contract:
-   │                     the slot-validity filter + daily wide rollup
+intermediate/ (32) int_* three layers by meta.dag_layer: identity (16),
+   │                     reconstruction (12), convergence (4)
    ▼                          │
-marts/core/ (28) dim_*   the star-schema contract layer: 14 dims
-   │            fct_*    + 14 facts (daily / weekly / season grains,
+marts/core/ (24) dim_*   the star-schema contract layer: 8 dims
+   │            fct_*    + 13 facts (daily / weekly / season grains,
    │                     active / inactive lenses, position points)
+   │                     + 3 core models with older prefixes
    ▼
-marts/reporting/ (20) mart_*  consumer-facing report shapes:
+marts/reporting/ (18) mart_*  consumer-facing report shapes:
    │                     leaderboard, benchmarks, matchup view,
-   ▼                     roster snapshot, draft board, records
-exposures (5)            the Python output scripts, declared in
+   ▼                     draft board, records, reconciliation audits
+exposures (9)            the Python output scripts, declared in
                          models/exposures.yml
 ```
 
-106 models in all. Counts here are regenerated at each release cut from
-the parsed manifest; if you are reading them mid-cycle, `dbt parse` and
-the manifest are the truth.
+108 models in all, in four directories and six layers (staging 34,
+identity 16, reconstruction 12, convergence 4, core 24, reporting 18).
+The directories are where files live; the layer is each model's
+`meta.dag_layer`, and `tests/test_dag_boundaries.py` enforces the
+order on the parsed manifest. Counts here are regenerated at each
+release cut from the parsed manifest; if you are reading them
+mid-cycle, `dbt parse` and the manifest are the truth.
 
-Layer conventions:
+Directory conventions:
 
-| Layer | Prefix | Default materialization | What belongs here |
+| Directory | Prefix | Default materialization | What belongs here |
 |---|---|---|---|
-| `staging/` | `stg_` | **table** (15 of 35 pin `view` themselves) | One model per raw-table *grain* (a multi-grain source like box_scores feeds several single-grain reshapes). Pure reshape: flatten VARIANT, type, rename. The only layer that reads `source()`. |
-| `intermediate/` | `int_` | **table** (all 23 pin their own; 18 are views) | Business logic that isn't yet a consumer contract: the slot-validity filter and the wide daily point rollup. |
-| `marts/core/` | `dim_` / `fct_` | table (3 weekly facts override to incremental; 14 thin dims/facts to view) | The contract layer. Grain-documented dimensions and facts that reporting marts and the Python output layer rely on. |
-| `marts/reporting/` | `mart_` | table (6 of 20 override to view) | Report-shaped derivations over core: rankings, league aggregates, matchup context, snapshot joins. |
+| `staging/` | `stg_` | **table** (14 of 34 pin `view` themselves) | One model per raw-table *grain* (a multi-grain source like box_scores feeds several single-grain reshapes). Pure reshape: flatten VARIANT, type, rename. The only layer that reads `source()`. |
+| `intermediate/` | `int_` | **table** (all 32 pin their own; 23 are views) | The identity, reconstruction and convergence layers: who a row describes, the rebuilt history, and the two platforms in one contract. Business logic that isn't yet a consumer contract, such as the slot-validity filter and the wide daily point rollup. |
+| `marts/core/` | `dim_` / `fct_` | table (3 weekly facts override to incremental; 11 thin models, 8 of them dims, to view) | The contract layer. Grain-documented dimensions and facts that reporting marts and the Python output layer rely on. |
+| `marts/reporting/` | `mart_` | table (5 of 18 override to view) | Report-shaped derivations over core: rankings, league aggregates, matchup context, and the reconciliation audits. |
 
 The staging/intermediate `table` defaults are deliberate and recent
 (MLB-134): a view over fat JSON re-runs the whole reshape for every
@@ -297,18 +302,17 @@ the full operational runbook.
 
 ## Exposures
 
-`models/exposures.yml` declares five downstream consumers (weekly recap,
-records report, legacy records sheet, league almanac, shared almanac
-export) with their upstream
-dependency lists, so the docs-site lineage runs source → staging → core →
-reporting → deliverable. If a script gains or drops a warehouse read, the
-exposure entry changes in the same commit.
+`models/exposures.yml` declares nine downstream consumers (`weekly_recap`,
+`records_report`, `records_sheet`, `espn_almanac`, `cbs_almanac`,
+`shared_almanac_export`, `season_report`, `records_book`,
+`dashboard_extract`) with their upstream dependency lists, 60 distinct
+models in all, so the docs-site lineage runs source → the six layers →
+deliverable. If a script gains or drops a warehouse read, the exposure
+entry changes in the same commit.
 
-> **Known gap, not yet fixed.** The declared set is incomplete:
-> `output/generate_season_report.py` is a production consumer with no
-> exposure entry, and the `league_almanac` exposure predates the CBS
-> book, so it does not enumerate the CBS-side reads. The declarations are
-> hand-maintained and nothing currently tests them against the code --
-> that contract test is deliberately deferred until the graph stops
-> moving (MLB-158 Phase C). Treat the lineage site as indicative, not
-> authoritative, until then.
+> **Known gap, not yet fixed.** The read sets were traced from the code
+> in MLB-158 Phase A ([docs/dag-boundaries.md](../docs/dag-boundaries.md),
+> section 6), but the declarations are hand-maintained and nothing tests
+> them against the code: `tests/test_dag_boundaries.py` enforces the layer
+> contract, not the consumer read sets. Treat the lineage site as
+> indicative, not authoritative, for what each script reads.
